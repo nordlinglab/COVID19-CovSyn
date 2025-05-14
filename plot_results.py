@@ -6,14 +6,13 @@ import os
 from lifelines import KaplanMeierFitter
 
 
-def load_synthetic_data(data_path, monte_carlo_number=10, return_len='all', memory_limit=1e9, min_case_num=0):
+def load_synthetic_data(data_path, return_len=10, memory_limit=1e9, min_case_num=0):
     '''
     Load all the saved synthetic data. Each file represent one simulation.
 
     Parameters
     ----------
     data_path : str, Path to data
-    monte_carlo_number : int
     return_len : int or 'all', default 'all'
     memory_limit : int, default 1e9 (1 GB), maximum memory usage in bytes
     min_case_num: int, default 0, minimum number of cases required for user
@@ -36,7 +35,7 @@ def load_synthetic_data(data_path, monte_carlo_number=10, return_len='all', memo
 
     total_memory_usage = 0
 
-    while len(demographic_data_list_all) < monte_carlo_number:
+    while len(demographic_data_list_all) < return_len:
         print(
             f"seed: {seed}, loaded data length: {len(demographic_data_list_all)}")
         demographic_data = np.load(
@@ -69,7 +68,7 @@ def load_synthetic_data(data_path, monte_carlo_number=10, return_len='all', memo
         seed += 1
     print(f'Loaded data length: {len(demographic_data_list_all)}')
     print(f"Total memory usage: {total_memory_usage / 1e9} GB.")
-    if len(demographic_data_list_all) < monte_carlo_number:
+    if len(demographic_data_list_all) < return_len:
         print(
             f"Warning: Only {len(demographic_data_list_all)} simulations loaded. Too few number of cases simulated.")
 
@@ -758,7 +757,8 @@ def plot_cheng2020_fig2(course_of_disease_data_list, contact_data_list, monte_ca
 
     print('Synthetic contact number: ', sum(mean_contact_number))
 
-    return (ax1, ax2)
+    return (ax1, ax2, (mean_contact_number, contact_lb, contact_ub, mean_infection_case, infection_lb, infection_ub, mean_attack_rate, attack_lb, attack_ub))
+
 
 
 def correct_contact_time_ge2021(duration_array, first_contact_day_array, incubation_period_array):
@@ -985,7 +985,7 @@ def plot_cheng2020_bar_chart(layer='All', save_fig=False):
 
     # Attack rate
     ax2.errorbar(np.arange(6)+0.25, attack_rate, yerr=[attack_rate-lower_bound, upper_bound-attack_rate],
-                 color=current_palette[2], fmt='.--', capsize=5, markeredgewidth=2)
+                 color=current_palette[2], fmt='.--', capsize=5, markeredgewidth=1)
     ax2.set_ylabel('Clinical attack rate, %')
     ax2.spines['right'].set_color(current_palette[2])
     ax2.yaxis.label.set_color(current_palette[2])
@@ -996,4 +996,4 @@ def plot_cheng2020_bar_chart(layer='All', save_fig=False):
 
     print('Taiwan contact number: ', sum(contacts))
 
-    return (ax1, ax2)
+    return (ax1, ax2, (contacts, infected_contacts, attack_rate, lower_bound, upper_bound))

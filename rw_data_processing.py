@@ -379,7 +379,7 @@ def write_cytoscape_file(edge_list, filename):
 def extract_state_data(data, start_state, end_state, exclude_state=None):
     """
     Extract data from a pandas dataframe for a given state and calculate transition days.
-    
+
     Parameters
     ----------
     data: pandas DataFrame
@@ -391,7 +391,7 @@ def extract_state_data(data, start_state, end_state, exclude_state=None):
     exclude_state: str, optional (default=None)
         String header of state, such as 'icu', such that the cases with this state
         should be excluded.
-    
+
     Returns
     -------
     pandas.Series
@@ -401,27 +401,28 @@ def extract_state_data(data, start_state, end_state, exclude_state=None):
     required_columns = [start_state, end_state]
     if exclude_state is not None:
         required_columns.append(exclude_state)
-    
+
     if not all(col in data.columns for col in required_columns):
-        missing_cols = [col for col in required_columns if col not in data.columns]
+        missing_cols = [
+            col for col in required_columns if col not in data.columns]
         raise ValueError(f"Missing columns in dataframe: {missing_cols}")
 
     # Create boolean mask for valid entries
     valid_start = data[start_state].notna()
     valid_end = data[end_state].notna()
-    
+
     if exclude_state is not None:
         # Exclude cases where exclude_state is not NaN
         exclude_mask = data[exclude_state].isna()
         row_mask = valid_start & valid_end & exclude_mask
     else:
         row_mask = valid_start & valid_end
-    
+
     # Calculate transition days for valid cases
-    start_dates = data.loc[row_mask, start_state]
-    end_dates = data.loc[row_mask, end_state]
+    start_dates = pd.to_datetime(data.loc[row_mask, start_state])
+    end_dates = pd.to_datetime(data.loc[row_mask, end_state])
     transition_days = end_dates - start_dates
-    
+
     return transition_days
 
 
@@ -1034,7 +1035,7 @@ def generate_serial_interval(course_of_disease_data_list, case_edge_list):
 ###############################################################################
 # Other functions
 ###############################################################################
-def state_transition_plot(state_transition_days, source_state, target_state, save_fig=False):
+def state_transition_plot(state_transition_days, source_state, target_state, xlim=81, save_fig=False):
     start_time = min(0, state_transition_days.min().days)
     end_time = state_transition_days.max().days
     cumulative_states_transition = np.ones((end_time-start_time)+2) *\
@@ -1049,9 +1050,9 @@ def state_transition_plot(state_transition_days, source_state, target_state, sav
     fig = kmf.plot(label='%s to %s (%s)' % (
         source_state, target_state, int(cumulative_states_transition[0])))
     plt.legend(prop={'size': 20})
-    plt.xlim(start_time-1, 81)
+    plt.xlim(start_time-1, xlim)
     plt.xlabel('Day', fontsize=22)
-    plt.xticks(np.arange(start_time, 81, 10), fontsize=22)
+    plt.xticks(np.arange(start_time, xlim, 10), fontsize=22)
     plt.ylabel('Proportion of cases', fontsize=22)
     plt.yticks(np.arange(0, 1+0.2, 0.2), fontsize=22)
     plt.grid()

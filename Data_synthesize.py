@@ -802,13 +802,6 @@ class Draw_contact_data:
         return (previously_infection_status)
 
     def draw_vaccination_status(self):
-        success_rate = self.vaccine_efficacy*self.vaccination_rate
-        vaccination_status = random.choices(
-            [True, False], weights=[success_rate, 1-success_rate])[0]
-
-        return (vaccination_status)
-
-    def determine_overdispersion_state(self):
         overdispersion_state = random.choices(
             [True, False], weights=[self.overdispersion_rate, 1-self.overdispersion_rate])[0]
 

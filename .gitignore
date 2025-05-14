@@ -163,3 +163,5 @@ cython_debug/
 
 synthetic_data_results_cheng2020/*
 synthetic_data_results_spread_Taiwan_weight/*
+synthetic_data_results_spread_Taiwan/*
+synthetic_data_results_taiwan_first_outbreak/*

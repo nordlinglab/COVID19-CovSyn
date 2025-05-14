@@ -103,9 +103,48 @@ Each contact layer (household, workplace, school, healthcare, municipality) incl
 - `secondary_contact_ages`: Ages of contacted individuals
 - `previously_infected_index_list`: Previous infection records of contacts
 
-### Contact Network Structure
+### 5. Contact Network Structure
 The case edge list contains:
 - Source case index
 - Target case index
 - Infection timestamp
 - Contact type/infection setting
+
+### 6. Firefly results
+### 6. Firefly results
+The firefly result contains 198 parameters in the following order:
+
+1. Contact behavior parameters (index 0 to 34):
+   These parameters define contact patterns across five social settings (Household, School, Workgroup, Health care, and Municipality), with 7 parameters per setting:
+   - Probability of contact
+   - Consecutive daily contact probability
+   - Contact probability when healthy
+   - Contact probability when symptomatic
+   - Steepness of logistic contact probability function
+   - Phase relative to symptom onset for symptomatic
+   - Phase relative to symptom onset for resuming normal social context
+2. Overdispersion rate and overdispersion weight (index 35 and 36).
+3. Latent period gamma distribution parameters [shape, scale] (index 37 to 38).
+4. Infectious period gamma distribution parameters [shape, scale] (index 39 to 40).
+5. Incubation period gamma distribution parameters [shape, scale] (index 41 to 42).
+6. Period from symptom onset to monitored isolation gamma distribution parameters [shape, scale, location] (index 43 to 45).
+7. Period from asymptomatic to recovered gamma distribution parameters [shape, scale, location] (index 46 to 48).
+8. Period from symptom onset to critically ill gamma distribution parameters [shape, scale, location] (index 49 to 51).
+9. Period from symptom to recovered gamma distribution parameters [shape, scale, location] (index 52 to 54).
+10. Period from critically ill to recovered gamma distribution parameters [shape, scale, location] (index 55 to 57).
+11. Period from asymptomatic to death gamma distribution parameters [shape, scale] (index 58 to 59).
+12. Period from negative COVID-19 test to confirmed gamma distribution parameters [shape, scale, location] (index 60 to 62).
+13. Age-related risk ratio vector of the secondary attack rate (4 values repeated across age groups: 0-19, 20-39, 40-59, and 60 above) (index 63 to 66).
+14. Natural immunity rate (index 67).
+15. Vaccination rate (index 68).
+16. Vaccine efficacy (index 69).
+17. Daily secondary attack rate vector:
+    - Daily secondary attack rate vector for household layer (25 parameters, index 70 to 94)
+    - Daily secondary attack rate vector for school layer (25 parameters, index 95 to 119)
+    - Daily secondary attack rate vector for workplace layer (25 parameters, index 120 to 144)
+    - Daily secondary attack rate vector for health care layer (25 parameters, index 145 to 169)
+    - Daily secondary attack rate vector for municipality layer (25 parameters, index 170 to 194)
+18. Transition probabilities:
+    - Asymptomatic to recovered transition probability (index 195)
+    - Symptom onset to recovered transition probability (index 196)
+    - Critically ill to recovered transition probability (index 197)

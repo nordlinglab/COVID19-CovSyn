@@ -9,6 +9,8 @@ statsmodels>=0.14.0
 networkx>=3.0
 
 # Data analysis and statistics
+bidict==0.22.1
+xlrd==2.0.1
 lifelines>=0.27.4
 powerlaw>=1.5
 
