@@ -23,7 +23,8 @@ from rw_data_processing import convert_synthetic_data_to_test_matrix
 from sklearn.metrics.pairwise import *
 from sklearn.utils._mask import _get_mask
 from sklearn.utils.validation import _deprecate_positional_args
-
+from warnings import simplefilter
+simplefilter(action='ignore', category=FutureWarning)
 # Multivariate test
 
 # This code is modified based on sklearn.metrics.pairwise nan_euclidean_distances function
@@ -225,12 +226,12 @@ def generate_contact_result(results, layer, case_number):
         course_of_disease_data_list = np.append(
             course_of_disease_data_list, result.result()[2])
         contact_data_list = np.append(contact_data_list, result.result()[3])
-
+    
     # Set number of source cases
     number_source_cases = case_number
     course_of_disease_data_list = course_of_disease_data_list[0:number_source_cases]
     contact_data_list = contact_data_list[0:number_source_cases]
-
+    
     # Transform the data to contact bars as Cheng2020
     if (layer == 'Household') | (layer == 'Health care'):
         _, contact_array, _, infection_array = create_array_cheng2020_fig2(
@@ -330,7 +331,7 @@ def generate_contact_result(results, layer, case_number):
 #     # print('cost: ', cost)
 #     return (cost)
 
-def cost_function(P, demographic_parameters, max_workers):
+def cost_function(P, demographic_parameters, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights):
     source_case_number = 100
     repeat_number = 1
     seeds = range(source_case_number * repeat_number)
@@ -353,15 +354,9 @@ def cost_function(P, demographic_parameters, max_workers):
     #     results.append(result)
 
     # Constants
-    Cheng_contact_array = np.array([[100, 39, 6, 4, 2, 0],
-                                   [236, 150, 38, 17, 110, 146],
-                                   [399, 678, 172, 98, 337, 138]])
     max_Cheng_contact = np.max(Cheng_contact_array)
     norm_Cheng_contact_array = Cheng_contact_array/max_Cheng_contact
 
-    Cheng_attack_rate = np.array([[4, 5.1, 16.7, 0, 0, 0],
-                                 [0.8, 2, 2.6, 0, 0, 0],
-                                 [0, 0, 0.6, 0, 0, 0]])/100
     max_Cheng_attack_rate = np.max(Cheng_attack_rate)
     norm_Cheng_attack_rate = Cheng_attack_rate/max_Cheng_attack_rate
 
@@ -372,9 +367,6 @@ def cost_function(P, demographic_parameters, max_workers):
     # max_weights = np.max(weights)
     # norm_weights = weights/max_weights
     # weights can be found in plot_compare_previous_studies.ipynb
-    norm_weights = np.array([[1, 0.53246753, 0.15355805, 0.16734694, 0.12480974, 0.082],
-                             [0.92857143, 0.52, 0.2, 0.14130435, 0.78787879, 1],
-                             [0.6, 1, 0.1875, 0.14285714, 0.54545455, 0.18181818]])
 
     layers = ['Household', 'Health care', 'Cheng others']
 
@@ -447,13 +439,13 @@ class Firefly:
         self.gamma = gamma
         self.rng = default_rng(seed)
 
-    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers):
+    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights):
         normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
         # fireflies = self.rng.uniform(lb, ub, (self.pop_size, dim))
         # inverse of min-max normalization
         fireflies = normalized_fireflies*(ub-lb) + lb
         intensities = np.apply_along_axis(
-            function, 1, fireflies, demographic_parameters, max_workers)
+            function, 1, fireflies, demographic_parameters, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights)
         best_fireflies = np.zeros(np.shape(fireflies))
         best_intensities = np.ones(np.shape(intensities))*10e10
         best_iteration = np.zeros(np.shape(intensities))
@@ -490,7 +482,7 @@ class Firefly:
                         fireflies[i] = normalized_fireflies[i]*(ub-lb) + lb
                         # print(fireflies[i])
                         intensities[i] = function(
-                            fireflies[i], demographic_parameters, max_workers)
+                            fireflies[i], demographic_parameters, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights)
                         evaluations += 1
                         print(
                             f'generation {generation}, evaluation {evaluations}')
@@ -598,13 +590,24 @@ if __name__ == "__main__":
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
         demographic_parameters = pickle.load(f)
 
+    # Load Cheng2020 data
+    with open('./variable/processed_contact_tracing_data.pkl', 'rb') as f:
+        processed_contact_tracing_data = pickle.load(f)
+
+    Cheng_contact_array = processed_contact_tracing_data['Cheng_contact_array']
+    Cheng_attack_rate = processed_contact_tracing_data['Cheng_attack_rate']
+    norm_weights = processed_contact_tracing_data['norm_weights']
+
     # Optimization
     if mode == 'profile':
         # Cprofile
         with cProfile.Profile() as pr:
             fa.firefly(function=cost_function, dim=198, lb=lower_bound, ub=upper_bound,
                        demographic_parameters=demographic_parameters,
-                       max_generations=max_generations)
+                       max_generations=max_generations, 
+                       Cheng_contact_array=Cheng_contact_array,
+                       Cheng_attack_rate=Cheng_attack_rate,
+                       norm_weights=norm_weights)
         print("--- Done %s seconds ---" % (time.time() - start_time))
         stats = pstats.Stats(pr)
         stats.sort_stats(pstats.SortKey.TIME)
@@ -616,7 +619,8 @@ if __name__ == "__main__":
         best_fireflies, best_intensities, best_iteration, worst_firefly, worst_intensities, worst_iteration, \
             fireflies, intensities = fa.firefly(
                 function=cost_function, dim=198, lb=lower_bound, ub=upper_bound,
-                demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=4)
+                demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=4,Cheng_contact_array=Cheng_contact_array,
+                Cheng_attack_rate=Cheng_attack_rate, norm_weights=norm_weights)
         fireflies_result = np.hstack((fireflies, np.matrix(intensities).T))
         best_result = np.hstack(
             (np.matrix(best_iteration).T, best_fireflies, np.matrix(best_intensities).T))

@@ -895,14 +895,14 @@ def extract_state_transition_days_synthetic(course_of_disease_data_list):
             critically_ill_to_confirmed_days)
 
 
-def transform_synthetic_data_to_graph(contact_data, case_edge_list):
+def transform_synthetic_data_to_graph(contact_data, transmission_digraph):
     """
     Transform the Taiwan COVID-19 synthetic data to networkx graph data structure
 
     Parameters
     ----------
     contact_data : List of Data_synthesize.Draw_contact_data objects
-    case_edge_list : List of case edges
+    transmission_digraph : List of case edges
 
     Returns
     -------
@@ -912,9 +912,9 @@ def transform_synthetic_data_to_graph(contact_data, case_edge_list):
     """
     G = nx.DiGraph()
     uninfected_node_id = 1
-    for i in range(len(case_edge_list)):
-        source_node = case_edge_list[i, 0]
-        target_node = case_edge_list[i, 1]
+    for i in range(len(transmission_digraph)):
+        source_node = transmission_digraph[i, 0]
+        target_node = transmission_digraph[i, 1]
         if source_node == 'nan':
             G.add_node('I'+target_node)
         else:
@@ -944,14 +944,14 @@ def transform_synthetic_data_to_graph(contact_data, case_edge_list):
     return (G)
 
 
-def generate_generation_time(course_of_disease_data_list, case_edge_list):
+def generate_generation_time(course_of_disease_data_list, transmission_digraph):
     """
     Generate generation time array
 
     Parameters
     ----------
     course_of_disease_data_list : List of course_of_disease_data objects
-    case_edge_list : List of branching process information such as [source_case_id, case_id, infection_day, contact_type]
+    transmission_digraph : List of branching process information such as [source_case_id, case_id, infection_day, contact_type]
 
     Returns
     -------
@@ -960,22 +960,22 @@ def generate_generation_time(course_of_disease_data_list, case_edge_list):
     generation_time_array = np.ones(len(course_of_disease_data_list)-1)*np.nan
 
     for i in range(len(generation_time_array)):
-        if type(case_edge_list[i, 0]) == np.str_:
-            if case_edge_list[i, 0] != 'nan':
-                source_case_id = case_edge_list[i, 0]
+        if type(transmission_digraph[i, 0]) == np.str_:
+            if transmission_digraph[i, 0] != 'nan':
+                source_case_id = transmission_digraph[i, 0]
                 source_case_infection_day = course_of_disease_data_list[int(
                     source_case_id)-1]['infection_day']
-                target_case_id = case_edge_list[i, 1]
+                target_case_id = transmission_digraph[i, 1]
                 target_case_infection_day = course_of_disease_data_list[int(
                     target_case_id)-1]['infection_day']
                 generation_time_array[i] = target_case_infection_day - \
                     source_case_infection_day
         else:
-            if not np.isnan(case_edge_list[i, 0]):
-                source_case_id = case_edge_list[i, 0]
+            if not np.isnan(transmission_digraph[i, 0]):
+                source_case_id = transmission_digraph[i, 0]
                 source_case_infection_day = course_of_disease_data_list[int(
                     source_case_id)-1]['infection_day']
-                target_case_id = case_edge_list[i, 1]
+                target_case_id = transmission_digraph[i, 1]
                 target_case_infection_day = course_of_disease_data_list[int(
                     target_case_id)-1]['infection_day']
                 generation_time_array[i] = target_case_infection_day - \
@@ -986,14 +986,14 @@ def generate_generation_time(course_of_disease_data_list, case_edge_list):
     return (generation_time_array)
 
 
-def generate_serial_interval(course_of_disease_data_list, case_edge_list):
+def generate_serial_interval(course_of_disease_data_list, transmission_digraph):
     """
     Generate serial interval array
 
     Parameters
     ----------
     course_of_disease_data_list : List of course_of_disease_data objects
-    case_edge_list : List of branching process information such as [source_case_id, case_id, infection_day, contact_type]
+    transmission_digraph : List of branching process information such as [source_case_id, case_id, infection_day, contact_type]
 
     Returns
     -------
@@ -1002,25 +1002,25 @@ def generate_serial_interval(course_of_disease_data_list, case_edge_list):
     serial_interval_array = np.ones(len(course_of_disease_data_list)-1)*np.nan
 
     for i in range(len(serial_interval_array)):
-        if type(case_edge_list[i, 0]) == np.str_:
-            if case_edge_list[i, 0] != 'nan':
-                source_case_id = case_edge_list[i, 0]
+        if type(transmission_digraph[i, 0]) == np.str_:
+            if transmission_digraph[i, 0] != 'nan':
+                source_case_id = transmission_digraph[i, 0]
                 source_case_symptom_onset_day = course_of_disease_data_list[int(source_case_id)-1]['infection_day'] + \
                     course_of_disease_data_list[int(
                         source_case_id)-1]['incubation_period']
-                target_case_id = case_edge_list[i, 1]
+                target_case_id = transmission_digraph[i, 1]
                 target_case_symptom_onset_day = course_of_disease_data_list[int(target_case_id)-1]['infection_day'] + \
                     course_of_disease_data_list[int(
                         target_case_id)-1]['incubation_period']
                 serial_interval_array[i] = target_case_symptom_onset_day - \
                     source_case_symptom_onset_day
         else:
-            if not np.isnan(case_edge_list[i, 0]):
-                source_case_id = case_edge_list[i, 0]
+            if not np.isnan(transmission_digraph[i, 0]):
+                source_case_id = transmission_digraph[i, 0]
                 source_case_symptom_onset_day = course_of_disease_data_list[int(source_case_id)-1]['infection_day'] + \
                     course_of_disease_data_list[int(
                         source_case_id)-1]['incubation_period']
-                target_case_id = case_edge_list[i, 1]
+                target_case_id = transmission_digraph[i, 1]
                 target_case_symptom_onset_day = course_of_disease_data_list[int(target_case_id)-1]['infection_day'] + \
                     course_of_disease_data_list[int(
                         target_case_id)-1]['incubation_period']

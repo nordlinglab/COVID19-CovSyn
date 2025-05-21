@@ -23,7 +23,7 @@ def load_synthetic_data(data_path, return_len=10, memory_limit=1e9, min_case_num
     social_data_list_all : list
     course_of_disease_data_list_all : list
     contact_data_list_all : list
-    case_edge_list_list : list
+    transmission_digraph_list : list
     '''
     seed = 0
 
@@ -31,7 +31,7 @@ def load_synthetic_data(data_path, return_len=10, memory_limit=1e9, min_case_num
     social_data_list_all = []
     course_of_disease_data_list_all = []
     contact_data_list_all = []
-    case_edge_list_all = []
+    transmission_digraph_all = []
 
     total_memory_usage = 0
 
@@ -49,12 +49,12 @@ def load_synthetic_data(data_path, return_len=10, memory_limit=1e9, min_case_num
             data_path / f'course_of_disease_data_{seed}.npy', allow_pickle=True)
         contact_data = np.load(
             data_path / f'contact_data_{seed}.npy', allow_pickle=True)
-        case_edge_list = np.load(
-            data_path / f'case_edge_list_{seed}.npy', allow_pickle=True)
+        transmission_digraph = np.load(
+            data_path / f'transmission_digraph_{seed}.npy', allow_pickle=True)
 
         total_memory_usage += (demographic_data.nbytes + social_data.nbytes +
                                course_of_disease_data.nbytes + contact_data.nbytes +
-                               case_edge_list.nbytes)
+                               transmission_digraph.nbytes)
         if total_memory_usage > memory_limit:
             print(
                 f"Memory limit exceeded: {total_memory_usage} bytes. Stopping data loading.")
@@ -64,7 +64,7 @@ def load_synthetic_data(data_path, return_len=10, memory_limit=1e9, min_case_num
         social_data_list_all.append(social_data)
         course_of_disease_data_list_all.append(course_of_disease_data)
         contact_data_list_all.append(contact_data)
-        case_edge_list_all.append(case_edge_list)
+        transmission_digraph_all.append(transmission_digraph)
         seed += 1
     print(f'Loaded data length: {len(demographic_data_list_all)}')
     print(f"Total memory usage: {total_memory_usage / 1e9} GB.")
@@ -72,7 +72,7 @@ def load_synthetic_data(data_path, return_len=10, memory_limit=1e9, min_case_num
         print(
             f"Warning: Only {len(demographic_data_list_all)} simulations loaded. Too few number of cases simulated.")
 
-    return (demographic_data_list_all, social_data_list_all, course_of_disease_data_list_all, contact_data_list_all, case_edge_list_all)
+    return (demographic_data_list_all, social_data_list_all, course_of_disease_data_list_all, contact_data_list_all, transmission_digraph_all)
 
 ####################################################################################################
 # Course data
@@ -451,7 +451,7 @@ def plot_contact_day_vs_infection_day(course_of_disease_data_list, contact_data_
     ----------
     course_of_disease_data_list: List of course_of_disease_data object
     contact_data_list: List of contact_data object
-    monte_carlo_number: Number of Monte-Carlo simulations. If the monte_carlo_number is 100, then there should be 100 files (index from 0 to 99) in the synthetic data folder (e.g. synthetic_data_results_cheng2020) for each data types (case_edge_list, demographic_data, contact_data, course_of_disease_data, and social_data).
+    monte_carlo_number: Number of Monte-Carlo simulations. If the monte_carlo_number is 100, then there should be 100 files (index from 0 to 99) in the synthetic data folder (e.g. synthetic_data_results_cheng2020) for each data types (transmission_digraph, demographic_data, contact_data, course_of_disease_data, and social_data).
     num_source_cases: Number of source cases. This is preseted in the Data_synthesis_main.py.
     layer: Contact type layer. 'All', 'Household', 'School', 'Workplace', 'Health care', 'Municipality'
     save_fig: True for saving the pdf figure
@@ -591,10 +591,10 @@ def plot_contact_day_vs_infection_day(course_of_disease_data_list, contact_data_
 
 
 def create_array_cheng2020_fig2(course_of_disease_data_list, contact_data_list, layer='All'):
-
     duration_array, infection_day_array, first_contact_day_array, incubation_period_array = \
         generate_course_and_contact_combine_data(
             course_of_disease_data_list, contact_data_list, layer=layer)
+    
     if len(duration_array) == 0:  # No contacts
         adjust_first_contact_day_array = np.empty((0, 6))
         contact_array = np.empty((0, 6))
@@ -636,7 +636,7 @@ def plot_cheng2020_fig2(course_of_disease_data_list, contact_data_list, monte_ca
     ----------
     course_of_disease_data_list: List of course_of_disease_data object
     contact_data_list: List of contact_data object
-    monte_carlo_number: Number of Monte-Carlo simulations. If the monte_carlo_number is 100, then there should be 100 files (index from 0 to 99) in the synthetic data folder (e.g. synthetic_data_results_cheng2020) for each data types (case_edge_list, demographic_data, contact_data, course_of_disease_data, and social_data).
+    monte_carlo_number: Number of Monte-Carlo simulations. If the monte_carlo_number is 100, then there should be 100 files (index from 0 to 99) in the synthetic data folder (e.g. synthetic_data_results_cheng2020) for each data types (transmission_digraph, demographic_data, contact_data, course_of_disease_data, and social_data).
     num_source_cases: Number of source cases. This is preseted in the Data_synthesis_main.py.
     layer: Contact type layer. 'All', 'Household', 'School', 'Workplace', 'Health care', 'Municipality'
     save_fig: True for saving the pdf figure

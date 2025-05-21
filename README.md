@@ -30,7 +30,8 @@ The simulation pipeline consists of three main stages:
 
 ### 1. Initial Parameter Setting
 
-Run `All_parameters_for_data_synthesis.ipynb` to generate the required initial parameters and search boundaries for the Taiwan main island simulation.
+Run `parameters_for_initialization.py` to generate the required initial parameters and search boundaries for the Taiwan main island simulation.
+Run `parameters_for_training.py` to generate the required training data for firefly optimization.
 
 ### 2. Parameter Optimization (Optional)
 

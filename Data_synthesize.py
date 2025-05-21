@@ -806,6 +806,12 @@ class Draw_contact_data:
             [True, False], weights=[self.overdispersion_rate, 1-self.overdispersion_rate])[0]
 
         return (overdispersion_state)
+    
+    def determine_overdispersion_state(self):
+        overdispersion_state = random.choices(
+            [True, False], weights=[self.overdispersion_rate, 1-self.overdispersion_rate])[0]
+
+        return (overdispersion_state)
 
     def calculate_daily_secondary_attack_rate(self):
         infectious_period = self.course_of_disease_data_object.infectious_period

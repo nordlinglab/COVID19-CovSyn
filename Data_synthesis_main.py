@@ -157,14 +157,14 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         population_size = 23008366 - number_source_cases
         natural_immunity_rate = 1
     if mode == 'spread_Taiwan_weight':
-        time_limit = 7*52
+        time_limit = 7*12
         number_source_cases = 1
         # infection_days = np.arange(number_source_cases)  # One case each day
         infection_days = np.zeros(number_source_cases)  # All happened in the first day.
         infection_days[0] = 0
         population_size = 23008366 - number_source_cases
         natural_immunity_rate = 1
-        contact_weight = 3
+        contact_weight = 9
         # Household
         input_P[0] = min(input_P[0]*contact_weight, 1)
         # School
@@ -257,7 +257,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     previously_infected_index = np.nan
     age = np.nan
     contact_type = np.nan
-    case_edge_list = []
+    transmission_digraph = []
     confirmed_count_per_day = {}  # Dictionary to store confirmed case count per day
     total_infections = 0  # Variable to store the total number of infections
     threshold_confirmed_day = np.nan
@@ -277,7 +277,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 block=False)
             if infection_day <= time_limit:
                 # Save contact network
-                case_edge_list = case_edge_list + \
+                transmission_digraph = transmission_digraph + \
                     [(source_case_id, case_id, infection_day, contact_type)]
                 # Preciously infected or not
                 if np.isnan(previously_infected_index):  # Not previously infected
@@ -442,7 +442,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         demographic_data_list = [demographic_data_list[i]
                                  for i in indices_to_keep]
         contact_data_list = [contact_data_list[i] for i in indices_to_keep]
-        case_edge_list = [case_edge_list[i] for i in indices_to_keep]
+        transmission_digraph = [transmission_digraph[i] for i in indices_to_keep]
 
     if save_file == True:
         with open(result_path / f'demographic_data_{seed}.npy', 'wb') as f:
@@ -453,8 +453,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
             np.save(f, course_of_disease_data_list)
         with open(result_path / f'contact_data_{seed}.npy', 'wb') as f:
             np.save(f, contact_data_list)
-        with open(result_path / f'case_edge_list_{seed}.npy', 'wb') as f:
-            np.save(f, case_edge_list)
+        with open(result_path / f'transmission_digraph_{seed}.npy', 'wb') as f:
+            np.save(f, transmission_digraph)
 
     return (demographic_data_list, social_data_list, course_of_disease_data_list, contact_data_list)
 
