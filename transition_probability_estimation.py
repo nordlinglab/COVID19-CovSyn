@@ -1,12 +1,5 @@
-from dataclasses import replace
-import enum
-from turtle import position
-import powerlaw
-import seaborn
 import copy
 import numpy as np
-import scipy.stats as stats
-import matplotlib.pyplot as plt
 
 
 def course_data_to_state_data(course_of_disease: np.array):

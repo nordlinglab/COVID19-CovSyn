@@ -14,13 +14,13 @@ To run our code, we recommend you follow the following steps:
 2. Install Miniconda
 3. Create and activate the conda environment:
    ```bash
-   conda create -n "covsyn" python=3.10.11
+   conda create -n "covsyn" python=3.10.16
    conda activate covsyn
    ```
 4. Navigate to the project directory and install dependencies:
    ```bash
-   cd CovSyn
-   pip install -r requirements.txt
+   cd to CovSyn folder
+   pip install -r requirements.txt --use-deprecated=legacy-resolver
    ```
     
 

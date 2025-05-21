@@ -1,27 +1,11 @@
-# Core data science packages
-numpy>=1.24.2
-pandas>=1.5.3
-scipy>=1.10.1
-matplotlib>=3.7.1
-seaborn>=0.12.2
-scikit-learn>=1.2.2
-statsmodels>=0.14.0
-networkx>=3.0
-
-# Data analysis and statistics
-bidict==0.22.1
-xlrd==2.0.1
-lifelines>=0.27.4
-powerlaw>=1.5
-
-# Data formats and parsing
-openpyxl>=3.1.2  # For reading Excel files
-PyYAML>=6.0.1
-
-# Development and debugging tools
-tqdm>=4.65.0  # Progress bars
-ipython>=8.12.3  # Interactive development
-ipykernel>=6.22.0  # Jupyter notebook support
-
-# Optional visualization tools
-plotly>=5.14.1  # Optional interactive plots
+bidict==0.23.1
+lifelines==0.30.0
+matplotlib==3.10.3
+networkx==3.4.2
+numpy==2.2.6
+pandas==2.2.3
+scikit_learn==1.6.1
+scipy==1.15.3
+seaborn==0.13.2
+tqdm==4.67.1
+openpyxl==3.1.5
