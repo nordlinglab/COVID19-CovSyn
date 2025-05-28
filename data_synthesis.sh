@@ -1,8 +1,8 @@
 #!/bin/bash
 
 cpu_cores=16
-# modes=('spread_Taiwan_weight' 'cheng2020', 'taiwan_first_outbreak')
-modes=('spread_Taiwan_weight')
+modes=('spread_Taiwan_weight' 'cheng2020' 'taiwan_first_outbreak')
+# modes=('taiwan_first_outbreak')
 
 parameter_path='./firefly_result/Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200'
 monte_carlo_number=1100
