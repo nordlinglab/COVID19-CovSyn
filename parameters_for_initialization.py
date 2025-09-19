@@ -689,7 +689,7 @@ def get_state_transition_gamma_p(course_of_disease_data_path, course_parameters,
         symptomatic_to_confirmed_days = symptomatic_to_confirmed_days.apply(lambda x: x.days).to_numpy()
 
     CI = 0.68
-    print('Fitting gamma distribution for symptomatic to confirmed days')
+    print(f'Fitting gamma distribution for symptomatic to confirmed days (data points: {len(symptomatic_to_confirmed_days)})')
     alpha, alpha_lb, alpha_ub, loc, loc_lb, loc_ub, scale, scale_lb, scale_ub = gamma_fit_bootstrap(symptomatic_to_confirmed_days, CI)
     course_parameters = np.append(course_parameters, (alpha, scale, loc))
     course_parameters_lb = np.append(course_parameters_lb, (alpha_lb, scale_lb, loc_lb))
@@ -701,7 +701,7 @@ def get_state_transition_gamma_p(course_of_disease_data_path, course_parameters,
     if type(asymptomatic_to_recover_days) != np.ndarray:
         asymptomatic_to_recover_days = asymptomatic_to_recover_days.apply(lambda x: x.days).to_numpy()
     
-    print('Fitting gamma distribution for asymptomatic to recover days')
+    print('Fitting gamma distribution for asymptomatic to recover days (data points: {})'.format(len(asymptomatic_to_recover_days)))
     alpha, loc, scale = stats.gamma.fit(asymptomatic_to_recover_days, floc=0)
     alpha_lb = alpha*0.8
     alpha_ub = alpha*1.2
@@ -717,7 +717,7 @@ def get_state_transition_gamma_p(course_of_disease_data_path, course_parameters,
     if type(symptom_to_icu_days) != np.ndarray:
         symptom_to_icu_days = symptom_to_icu_days.apply(lambda x: x.days).to_numpy()
 
-    print('Fitting gamma distribution for symptomatic to critically ill days')
+    print('Fitting gamma distribution for symptomatic to critically ill days (data points: {})'.format(len(symptom_to_icu_days)))
     alpha, alpha_lb, alpha_ub, loc, loc_lb, loc_ub, scale, scale_lb, scale_ub = gamma_fit_bootstrap(symptom_to_icu_days, CI, allow_negative=True)
     course_parameters = np.append(course_parameters, (alpha, scale, loc))
     course_parameters_lb = np.append(course_parameters_lb, (alpha_lb, scale_lb, loc_lb))
@@ -726,7 +726,7 @@ def get_state_transition_gamma_p(course_of_disease_data_path, course_parameters,
     # Symptomatic to recovered
     if type(symptom_to_recover_days) != np.ndarray:
         symptom_to_recover_days = symptom_to_recover_days.apply(lambda x: x.days).to_numpy()
-    print('Fitting gamma distribution for symptomatic to recovered days')
+    print('Fitting gamma distribution for symptomatic to recovered days (data points: {})'.format(len(symptom_to_recover_days)))
     alpha, loc, scale = stats.gamma.fit(symptom_to_recover_days)
     alpha_lb = alpha*0.8
     alpha_ub = alpha*1.2
@@ -741,7 +741,7 @@ def get_state_transition_gamma_p(course_of_disease_data_path, course_parameters,
     # Critically ill to recovered
     if type(icu_to_recover_days) != np.ndarray:
         icu_to_recover_days = icu_to_recover_days.apply(lambda x: x.days).to_numpy()
-    print('Fitting gamma distribution for critically ill to recovered days')
+    print('Fitting gamma distribution for critically ill to recovered days (data points: {})'.format(len(icu_to_recover_days)))
     alpha, loc, scale = stats.gamma.fit(icu_to_recover_days)
     # alpha, alpha_lb, alpha_ub, loc, loc_lb, loc_ub, scale, scale_lb, scale_ub = gamma_fit_bootstrap(icu_to_recover_days, CI)
     alpha_lb = alpha*0.8
@@ -778,7 +778,7 @@ def get_state_transition_gamma_p(course_of_disease_data_path, course_parameters,
 
     negative_test_date_array = np.hstack([negative_test_date_1.dt.days.to_numpy(), negative_test_date_2.dt.days.to_numpy(
     ), negative_test_date_3.dt.days.to_numpy(), negative_test_date_4.dt.days.to_numpy()])
-    print('Fitting gamma distribution for negative test to positive test days')
+    print('Fitting gamma distribution for negative test to positive test days (data points: {})'.format(len(negative_test_date_array)))
     alpha, alpha_lb, alpha_ub, loc, loc_lb, loc_ub, scale, scale_lb, scale_ub = gamma_fit_bootstrap(-negative_test_date_array, CI)
     course_parameters = np.append(course_parameters, (alpha, scale, loc))
     course_parameters_lb = np.append(course_parameters_lb, (alpha_lb, scale_lb, loc_lb))
@@ -936,6 +936,7 @@ def get_epidemiolocial_parameters(course_of_disease_data_path, save_path):
     shift_percentage = 0.3
     infection_to_recovered_transition_p = 0.09 # Cheng et al.
     symptom_to_recovered_transition_p = 1-0.18 # https://www.cna.com.tw/news/ahel/202210285003.aspx, https://www.thenewslens.com/article/154421, Taiwan_critically_ill_rate.png
+    print('Number of critically_ill_to_recovered_transition_p data points: {}'.format(len(icu_to_recover_days)+len(icu_to_dead_days)))
     critically_ill_to_recovered_transition_p = len(icu_to_recover_days)/(
         len(icu_to_recover_days)+len(icu_to_dead_days))
 
