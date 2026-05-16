@@ -235,7 +235,7 @@ class Draw_course_of_disease_data:
         incubation_period_tmp = self.draw_incubation_period()
         symptom_to_isolation = round(np.random.gamma(
             shape=self.symptom_to_isolation_shape, scale=self.symptom_to_isolation_scale)
-            + self.symptom_to_isolation_scale)
+            + self.symptom_to_isolation_loc)
         time_from_infection_to_monitored_isolation = incubation_period_tmp + symptom_to_isolation
 
         return (time_from_infection_to_monitored_isolation)
