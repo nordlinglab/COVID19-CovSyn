@@ -165,3 +165,33 @@ synthetic_data_results_cheng2020/*
 synthetic_data_results_spread_Taiwan_weight/*
 synthetic_data_results_spread_Taiwan/*
 synthetic_data_results_taiwan_first_outbreak/*
+# ---- Phase D (2026-09) ------------------------------------------------------
+# Run outputs and archives are regenerable and large; they stay out of git.
+ARCHIVE_*/
+Firefly_result_pop_size_*/
+synthetic_data_results_*/
+validation_figures*/
+diagnostic_figures/
+constraint_check/
+report_run10_todolist923/
+phaseD_*.txt
+phaseD_*.log
+firefly_phaseD*.log
+*.log
+*.bak
+*.bak_*
+firefly_best_NEW.txt
+firefly_result/PHASED_RUN2/
+validation_reference/phaseD_checks*.json
+validation_reference/age_rr*.json
+/*.png
+# Superseded code kept on disk for reference only.
+old/
+old_covsyn/
+# Machine-specific agent files: they hold the remote host, user and key path.
+HANDOVER.md
+CLAUDE.md
+.claude/
+.codex-tools/
+# Literature tooling, not part of CovSyn.
+tools/

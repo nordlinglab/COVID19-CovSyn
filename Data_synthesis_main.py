@@ -30,6 +30,7 @@ def get_saveable_data(data, data_type):
             'household_size': getattr(data, 'household_size', None),
             'school_class_size': getattr(data, 'school_class_size', None),
             'work_group_size': getattr(data, 'work_group_size', None),
+            'enterprise_size': getattr(data, 'enterprise_size', None),
             'clinic_size': getattr(data, 'clinic_size', None),
         }
     elif data_type == 'course_of_disease':
@@ -39,6 +40,8 @@ def get_saveable_data(data, data_type):
             'incubation_period': getattr(data, 'incubation_period', None),
             'infectious_period': getattr(data, 'infectious_period', None),
             'monitor_isolation_period': getattr(data, 'monitor_isolation_period', None),
+            'pre_onset_window': getattr(data, 'pre_onset_window', None),
+            'isolation_route': getattr(data, 'isolation_route', None),
             'date_of_critically_ill': getattr(data, 'date_of_critically_ill', None),
             'date_of_death': getattr(data, 'date_of_death', None),
             'date_of_recovery': getattr(data, 'date_of_recovery', None),
@@ -54,30 +57,35 @@ def get_saveable_data(data, data_type):
             'household_effective_contacts': getattr(data, 'household_effective_contacts', None),
             'household_effective_contacts_infection_time': getattr(data, 'household_effective_contacts_infection_time', None),
             'household_secondary_contact_ages': getattr(data, 'household_secondary_contact_ages', None),
+            'household_contact_ages': getattr(data, 'household_contact_ages', None),
             'household_previously_infected_index_list': getattr(data, 'household_previously_infected_index_list', None),
 
             'workplace_contacts_matrix': getattr(data, 'workplace_contacts_matrix', None),
             'workplace_effective_contacts': getattr(data, 'workplace_effective_contacts', None),
             'workplace_effective_contacts_infection_time': getattr(data, 'workplace_effective_contacts_infection_time', None),
             'workplace_secondary_contact_ages': getattr(data, 'workplace_secondary_contact_ages', None),
+            'workplace_contact_ages': getattr(data, 'workplace_contact_ages', None),
             'workplace_previously_infected_index_list': getattr(data, 'workplace_previously_infected_index_list', None),
 
             'school_class_contacts_matrix': getattr(data, 'school_class_contacts_matrix', None),
             'school_effective_contacts': getattr(data, 'school_effective_contacts', None),
             'school_effective_contacts_infection_time': getattr(data, 'school_effective_contacts_infection_time', None),
             'school_secondary_contact_ages': getattr(data, 'school_secondary_contact_ages', None),
-            'school_previously_infected_index_list': getattr(data, 'school_previousl', None),
+            'school_contact_ages': getattr(data, 'school_contact_ages', None),
+            'school_previously_infected_index_list': getattr(data, 'school_previously_infected_index_list', None),
 
             'health_care_contacts_matrix': getattr(data, 'health_care_contacts_matrix', None),
             'health_care_effective_contacts': getattr(data, 'health_care_effective_contacts', None),
             'health_care_effective_contacts_infection_time': getattr(data, 'health_care_effective_contacts_infection_time', None),
             'health_care_secondary_contact_ages': getattr(data, 'health_care_secondary_contact_ages', None),
+            'health_care_contact_ages': getattr(data, 'health_care_contact_ages', None),
             'health_care_previously_infected_index_list': getattr(data, 'health_care_previously_infected_index_list', None),
 
             'municipality_contacts_matrix': getattr(data, 'municipality_contacts_matrix', None),
             'municipality_effective_contacts': getattr(data, 'municipality_effective_contacts', None),
             'municipality_effective_contacts_infection_time': getattr(data, 'municipality_effective_contacts_infection_time', None),
             'municipality_secondary_contact_ages': getattr(data, 'municipality_secondary_contact_ages', None),
+            'municipality_contact_ages': getattr(data, 'municipality_contact_ages', None),
             'municipality_previously_infected_index_list': getattr(data, 'municipality_previously_infected_index_list', None)
         }
 
@@ -102,8 +110,17 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     hospital_size_p = demographic_parameters[10]
     hospital_sizes = demographic_parameters[11]
     population_size = demographic_parameters[12]
+    # B29 / B30 / B31: an infected person is a person, not a household, a class or a
+    # company, so every social-context size distribution is person-weighted. Doing it here
+    # rather than in the saved pickle keeps the raw census distributions untouched.
+    family_size_dict, school_p, workplace_p = apply_person_weighting(
+        family_size_dict, school_p, workplace_p)
     overdispersion_rate = input_P[35]
     overdispersion_weight = input_P[36]
+    # P[198] (E35): dispersion of the community contact COUNT, drawn independently of the
+    # infectiousness multiplier. Appended at the end of the vector so every existing index
+    # keeps its meaning; older 198-long vectors simply fall back to the shared draw.
+    community_dispersion = input_P[198] if len(input_P) > 198 else None
     latent_period_gamma = {
         'latent_period_shape': input_P[37], 'latent_period_scale': input_P[38]}
     infectious_period_gamma = {
@@ -125,6 +142,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     negative_to_confirmed_gamma = {
         'negative_to_confirmed_shape': input_P[60], 'negative_to_confirmed_scale': input_P[61], 'negative_to_confirmed_loc': input_P[62]}
     age_risk_ratios = input_P[63:67]
+    # Contact age distribution per social layer (school/workplace are re-weighted by
+    # student / employment probability instead of using the population distribution).
+    layer_age_p = build_layer_age_distributions(age_p, gender_p, student_p, employment_p)
     age_risk_ratios = np.repeat(age_risk_ratios, [20, 20, 20, 41])
     natural_immunity_rate = input_P[67]
     vaccination_rate = input_P[68]
@@ -146,8 +166,15 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         time_limit = 365
         with open('./variable/infection_days_list.pkl', 'rb') as file:
             infection_days_list = pickle.load(file)
-        population_size = 23008366 - len(infection_days_list)
+        # The seeds are the 28 local index cases of the first wave (finding E29); the old
+        # line subtracted len(infection_days_list), which is the number of SIMULATIONS
+        # (1,100), not the number of seeds.
+        population_size = 23008366 - len(infection_days_list[0])
         natural_immunity_rate = 1
+        # B34: seed the Taiwan scenario with the age distribution of the real cases instead
+        # of the general population, because the observed cases were not a random sample of
+        # Taiwan (mostly returning travellers and their households).
+        seed_age_p = np.load('./variable/taiwan_case_age_p.npy')
     if mode == 'spread_Taiwan':
         time_limit = 7*52
         number_source_cases = 1
@@ -164,7 +191,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         infection_days[0] = 0
         population_size = 23008366 - number_source_cases
         natural_immunity_rate = 1
-        contact_weight = 9
+        contact_weight = 1
         # Household
         input_P[0] = min(input_P[0]*contact_weight, 1)
         # School
@@ -173,8 +200,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         input_P[14] = min(input_P[14]*contact_weight, 1)
         # Health Care
         input_P[21] = min(input_P[21]*contact_weight, 1)
-        # Municipality
-        input_P[28] = min(input_P[28]*contact_weight, 1)
+        # Municipality: P[28] is a COUNT since B27 (mean community contacts per case), not
+        # a probability, so it must not be capped at 1 -- doing so would silently cut the
+        # community layer down to a single contact per case.
+        input_P[28] = input_P[28]*contact_weight
         # print(input_P[0], input_P[7], input_P[14], input_P[21], input_P[28])
 
     if mode == 'spread_Taitung':
@@ -201,8 +230,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         input_P[14] = min(input_P[14]*contact_weight, 1)
         # Health Care
         input_P[21] = min(input_P[21]*contact_weight, 1)
-        # Municipality
-        input_P[28] = min(input_P[28]*contact_weight, 1)
+        # Municipality: P[28] is a COUNT since B27 (mean community contacts per case), not
+        # a probability, so it must not be capped at 1 -- doing so would silently cut the
+        # community layer down to a single contact per case.
+        input_P[28] = input_P[28]*contact_weight
     if mode == 'spread_Lienchiang':
         time_limit = 365*3
         number_source_cases = 1000
@@ -264,11 +295,14 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     # for infection_day in tqdm(infection_days):
     if mode == 'taiwan_first_outbreak':
         infection_days = infection_days_list[seed]
-        # print('seed: ', seed)
-        # print('infection_days: ', infection_days)
-    for infection_day in infection_days:
-        infection_queue.put((source_case_id, infection_day,
-                            previously_infected_index, age, contact_type))
+        for infection_day in infection_days:
+            seed_age = random.choices(np.arange(100+1), weights=seed_age_p)[0]
+            infection_queue.put((source_case_id, infection_day,
+                                previously_infected_index, seed_age, contact_type))
+    else:
+        for infection_day in infection_days:
+            infection_queue.put((source_case_id, infection_day,
+                                previously_infected_index, age, contact_type))
 
     # Simulation
     try:  # Stop if empty queue
@@ -305,9 +339,21 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 # Draw course of disease data
                 # course_of_disease_data = False
                 # while not course_of_disease_data:
+                # B20 / B26: the course of disease now needs the case's age (severity is age
+                # dependent) and the confirmation date of its infector (contact tracing
+                # isolates this case shortly after, instead of everybody being isolated on a
+                # symptom date that asymptomatic cases never have).
+                case_age = demographic_tmp.get('age', None)
+                case_age = np.nan if case_age is None else case_age
+                if np.isnan(source_case_id):
+                    source_confirmed_day = np.nan
+                else:
+                    source_confirmed_day = course_of_disease_data_list[
+                        int(source_case_id) - 1]['positive_test_date']
                 course_of_disease_data = Draw_course_of_disease_data(infection_day, latent_period_gamma, infectious_period_gamma, incubation_period_gamma, symptom_to_isolation_gamma,
                                                                      asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
-                                                                     critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma, natural_immunity_rate, transition_p)
+                                                                     critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma, natural_immunity_rate, transition_p,
+                                                                     age=case_age, source_confirmed_day=source_confirmed_day, age_p=age_p)
                 # print('Infection day: ', infection_day)
                 course_of_disease_data.draw_course_of_disease()
                 natural_immunity_status_list.append(
@@ -316,18 +362,22 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                     course_of_disease_data, 'course_of_disease')
                 course_of_disease_data_list.append(course_of_disease_data_tmp)
 
-                # Append recovered cases to previously infected set
-                if ~np.isnan(course_of_disease_data.date_of_recovery):
-                    if ~np.isnan(previously_infected_index):
-                        previously_infected_list.remove(
-                            previously_infected_index)
-                    previously_infected_list.append(case_id)
+                # Append the case to the previously-infected set (B32, finding E5).
+                # This used to require a recovery date, so a case that died was never added.
+                # Combined with the contact loop skipping every layer while the set was
+                # empty, the first case of a simulation produced no contacts at all whenever
+                # it died -- about 8% of the runs. The set means "has been infected", which
+                # is true whether the case recovers or dies.
+                if ~np.isnan(previously_infected_index):
+                    previously_infected_list.remove(previously_infected_index)
+                previously_infected_list.append(case_id)
 
                 # Draw contact data
                 contact_data = Draw_contact_data(attack_rate, social_data, course_of_disease_data,
                                                  previously_infected_list, population_size, vaccine_efficacy,
                                                  vaccination_rate, natural_immunity_status_list,
-                                                 overdispersion_rate, overdispersion_weight, age_risk_ratios, age_p)
+                                                 overdispersion_rate, overdispersion_weight, age_risk_ratios, age_p,
+                                                 layer_age_p, community_dispersion)
 
                 _, population_size = contact_data.draw_contact_data(input_P)
                 contact_data_tmp = get_saveable_data(contact_data, 'contact')
@@ -422,8 +472,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
             else:
                 # Drop the case
                 pass
-    except:
-        # raise
+    except queue.Empty:
+        # The loop ends when the queue runs dry. This used to be a bare `except:`, which
+        # also swallowed real errors and returned a silently empty simulation -- exactly how
+        # finding E5 stayed hidden. Anything other than an empty queue is now raised.
         infection_queue.task_done()
 
     # Remove individual data if the confirmed day surpass the time of the daily confirmed cases threshold
@@ -462,7 +514,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
 if __name__ == "__main__":
     start_time = time.time()
     parser = argparse.ArgumentParser(description='Data synthesis')
-    parser.add_argument('--mode', type=str, default='result', choices=['spread_Taiwan', 'spread_Taiwan_weight', 'spread_Taitung', 'profile', 'result', 'cheng2020', 'test', 'ge2021',
+    parser.add_argument('--mode', type=str, default='spread_Taiwan_weight', choices=['spread_Taiwan', 'spread_Taiwan_weight', 'spread_Taitung', 'profile', 'result', 'cheng2020', 'test', 'ge2021',
                         'spread_Taitung_outbreak_weight', 'spread_Lienchiang', 'taiwan_first_outbreak'],
                         help='Mode options include: spread, spread_demo, profile, ICIDMID, result, cheng2020, test, ge2021, Boonpatcharanon2022')
     parser.add_argument('--parameter_path', type=str,

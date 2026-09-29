@@ -16,7 +16,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from Data_synthesis_main import run_covid
-from sar_anchors import LAYER_CUMULATIVE_SAR, LAYER_INFECTIONS_PER_INDEX
+from sar_anchors import LAYER_CUMULATIVE_SAR
 from Data_synthesize import *
 from plot_results import *
 from rw_data_processing import convert_synthetic_data_to_test_matrix
@@ -220,61 +220,21 @@ def energy(x, y, method='log'):
 #     return distances
 
 
-# How many simulations one pool task carries. One simulation is only ~0.8 ms of compute,
-# so submitting 300 of them as 300 separate tasks spends almost all of its time in
-# multiprocessing overhead: measured on the remote M3 Ultra with 32 workers, the pool round
-# trip was 0.100 s of a 0.121 s evaluation, i.e. a parallel efficiency of 6%. Batching the
-# same 300 simulations into tasks of this size cut that to 0.020 s (4.9x); 5 per task gave
-# 0.024 s and 20 per task 0.031 s, so the optimum is flat around 10. Changing it cannot
-# change any result: every simulation still runs run_covid with its own seed and the results
-# are flattened back in seed order.
-SIMULATIONS_PER_TASK = 10
-
-
-class _CompletedSimulation:
-    """Gives an already-computed simulation result the .result() interface.
-
-    generate_contact_result(), convert_synthetic_data_to_test_matrix() and the index-case
-    loop in _cost_function() all expect the Future objects the pool used to hand back one
-    per simulation. Batching means the pool now returns a LIST of results per task, so each
-    one is wrapped here and every consumer keeps working unchanged.
-    """
-
-    __slots__ = ('_value',)
-
-    def __init__(self, value):
-        self._value = value
-
-    def result(self):
-        return self._value
-
-
-def _run_simulation_batch(seeds, P, demographic_parameters):
-    """Run several simulations inside one pool task. See SIMULATIONS_PER_TASK."""
-    return [run_covid(seed, P, demographic_parameters, save_file=False) for seed in seeds]
-
-
-def extract_course_and_contact(results, case_number):
-    """Pull the course-of-disease and contact records out of the simulation results once.
-
-    This used to sit inside generate_contact_result(), which _cost_function() calls once per
-    Cheng layer, so the same 300 results were walked three times, every record was fetched
-    twice per walk (result.result()[2] and result.result()[3]), and np.append on a growing
-    object array made each walk quadratic. Doing it once per evaluation instead of three
-    times is the second half of the speed-up recorded at SIMULATIONS_PER_TASK; the arrays
-    produced are identical to what the np.append loop produced.
-    """
-    course_of_disease_data_list = []
-    contact_data_list = []
+def generate_contact_result(results, layer, case_number):
+    # Input multiprocess object
+    # Load data
+    course_of_disease_data_list = np.array([])
+    contact_data_list = np.array([])
     for result in results:
-        value = result.result()
-        course_of_disease_data_list.extend(value[2])
-        contact_data_list.extend(value[3])
-    return (np.array(course_of_disease_data_list[0:case_number], dtype=object),
-            np.array(contact_data_list[0:case_number], dtype=object))
-
-
-def generate_contact_result(course_of_disease_data_list, contact_data_list, layer):
+        course_of_disease_data_list = np.append(
+            course_of_disease_data_list, result.result()[2])
+        contact_data_list = np.append(contact_data_list, result.result()[3])
+    
+    # Set number of source cases
+    number_source_cases = case_number
+    course_of_disease_data_list = course_of_disease_data_list[0:number_source_cases]
+    contact_data_list = contact_data_list[0:number_source_cases]
+    
     # Transform the data to contact bars as Cheng2020
     if (layer == 'Household') | (layer == 'Health care'):
         _, contact_array, _, infection_array = create_array_cheng2020_fig2(
@@ -386,15 +346,7 @@ ATTACK_RATE_WEIGHT = 10.0
 
 # Filled in by cost_function() on every evaluation so the firefly loop can log which part
 # of the objective is driving the fit (see progress_metrics.csv).
-#
-# E71: this dict lives in its own module, not here. This file is run as a script, so while it
-# executes it is `__main__`; when fast_cost imports `firefly_optimizer` Python loads a SECOND
-# copy under the real name, with its own globals. Every constant is identical in both copies, so
-# the fit is unaffected -- but a dict is not, and run 7 filled the imported copy's dict while the
-# running __main__ read its own empty one, losing every cost_* and measured_* column from
-# progress_metrics.csv (34 columns instead of 73). cost_parts is only ever imported under its own
-# name, so both copies bind the same object. Mutate it in place; never rebind it.
-from cost_parts import LAST as LAST_COST_PARTS
+LAST_COST_PARTS = {}
 
 
 def physiology_penalty(P, weight=PHYSIOLOGY_PENALTY_WEIGHT):
@@ -453,24 +405,7 @@ def physiology_penalty(P, weight=PHYSIOLOGY_PENALTY_WEIGHT):
 # are measured on the index case of every simulation, which is the only case whose whole
 # course and whole contact record is inside the evaluation window.
 # ---------------------------------------------------------------------------------------
-# E66, 2026-09-27: raised 2.0 -> 6.0, calibrated on run 6's own measured values rather than
-# chosen. Run 6's objective decomposed as cost_contact 1.6956, cost_attack_rate 0.3092,
-# cost_outcome 0.0419: every decision B17-B42 encoded as a measured target was competing for
-# 2.0% of the objective, which is why six substantive fixes moved the checklist so little.
-# Capping the miss scale (MAX_INTERVAL_WIDTH_OVER_CENTRE) multiplies the raw penalty by 3.9 on
-# those same values, and this weight takes the block to about 20% of contact + attack + outcome
-# -- enough to move the search, not enough to abandon the Cheng contact fit that is the
-# published model's objective.
-#
-# WATCH THIS ON RUN 7: the risk of a heavier outcome block is that the optimizer pays for it out
-# of the Cheng fit. cost_contact was 1.6956 on run 6; if it climbs a long way while the outcome
-# targets improve, this weight is too high, not the targets wrong. The other failure mode is
-# E23/E34 -- a target that cannot be reached inside the bounds gets traded away and drags the
-# decision backwards -- so every per-index target was checked reachable before raising this:
-# medical needs 0.06 per index over 2.244 candidate contacts = 2.7% per contact against a
-# ceiling of 3.9% cumulative, household 0.10 over 2.601 = 3.8% against 12.0%, community 0.01
-# over 5.773 = 0.17% against a range of 0.08-1.93%.
-OUTCOME_PENALTY_WEIGHT = 6.0
+OUTCOME_PENALTY_WEIGHT = 2.0
 
 # Each entry is (low, high, weight). Inside the interval the term costs nothing. The
 # intervals are widened to about two standard errors of ONE evaluation (100 index cases),
@@ -506,18 +441,7 @@ OUTCOME_TARGETS = {
     # only overfit those seeds (that particular block happens to hold 1 ICU case). They are
     # constrained by narrow bounds in apply_phaseD_parameters.py instead, and checked for
     # real on the 1000-run Monte Carlo afterwards.
-    # E58, 2026-09-27: the asymptomatic share is now CHARGED, at the same [20, 28] the
-    # checklist uses. Leaving it at weight 0 rested on two claims that run 5 disproved.
-    # (1) "P[195] IS the asymptomatic share, so its narrow bounds are enough" -- they are not:
-    # the age normalisation sits on top, so with P[195] pegged at its ceiling of 0.28 the
-    # realised share came out 29.2%, outside the band the bounds were meant to guarantee.
-    # (2) "charging it would only overfit the 100 fixed seeds" -- the objective has run on 300
-    # simulations with the expected-infection estimator since E38, so that risk is much
-    # smaller now. The optimizer had a clear reason to push it up: an asymptomatic case is
-    # never isolated by its own symptoms (B26), so raising this share is the cheapest way to
-    # buy the transmission run 5 was short of. The other three stay measured-only, where the
-    # "one parameter already says it" argument does hold.
-    'asymptomatic_share':     (0.20, 0.28, 1.0),
+    'asymptomatic_share':     (0.17, 0.31, 0.0),
     'icu_share_of_symptom':   (0.06, 0.20, 0.0),
     'death_share_of_icu':     (0.08, 0.18, 0.0),
     'case_fatality':          (0.008, 0.018, 0.0),
@@ -541,16 +465,6 @@ OUTCOME_TARGETS = {
     # meeting staff. Lengthening the contact window alone does not deliver it -- the
     # optimizer simply moves the symptomatic contact peak earlier -- so it is charged here.
     'medical_late_share':     (0.25, 0.50, 1.0),
-    # E59, 2026-09-27: charging ONLY the late tail was a one-sided target and the optimizer
-    # answered it one-sidedly. Cheng's medical contacts sit mostly EARLY -- his six bins
-    # (<0, 0-3, 4-5, 6-7, 8-9, >9 days from onset) are 33.9 / 21.5 / 5.5 / 2.4 / 15.8 / 20.9%,
-    # so 55.4% of them start before day 4 -- while run 5 put 4.4 / 4.6 / 10.4 / 31.0 / 45.5 /
-    # 4.2% there, i.e. 9.0% early. The shape came out reversed, the late share overshot its
-    # own ceiling (50.7% against [25, 50]), and no acceptance item could see it because only
-    # the tail was described. Charging both ends pins the distribution instead of one side of
-    # it. The interval is wide because CovSyn's denominator is its own candidate contacts
-    # while Cheng's is the contacts Taiwan's tracers chose to record.
-    'medical_early_share':    (0.40, 0.70, 1.0),
     # B27: the shape of the community contact distribution. The Taiwan tracing records have a
     # median of 7 contacts per index case but a p90 of 172 and a maximum of 850; the second
     # Phase D run reproduced the median (9) and nothing else (p90 18, max 33), because
@@ -564,58 +478,12 @@ OUTCOME_TARGETS = {
     # the ratio is only reported. The intervals are wide because these are single order
     # statistics of a heavy-tailed count measured on a few hundred index cases, and because
     # the tracing p90 of 172 counts every named contact whereas CovSyn counts candidates.
-    # E73: over EVERY index case, zeros included -- the population verify_phaseD.py checks and
-    # the one Taiwan's median of 7.5 is taken over. Until now the objective used the non-zero
-    # cases only, so on run 6 it saw 6 while the checklist saw 0 and called it a failure. This
-    # also prices the zero-inflation of E67 directly: every case with no community contact now
-    # pulls the charged median down.
     'community_median':       (3.0, 15.0, 1.0),
-    # E72: reported, not charged. The interval's centre is 110 while CovSyn's candidate-contact
-    # scale reaches 16-44, so even B43's capped scale is 55 and missing the lower bound by 4 cost
-    # 0.03 of a 1.82 objective -- the optimizer ignored it, correctly. An interval whose centre
-    # the model cannot reach is not an acceptance test. The SHAPE is charged instead, below.
-    'community_p90':          (20.0, 200.0, 0.0),
-    # E72: charged again, which is only safe now. E50 removed it because the optimizer reached a
-    # ratio of 3.0 by pressing the median from 9 down to 2; with the all-case median charged at
-    # [3, 15] that move now costs about 2.7 under B43's scaling, far more than growing the tail,
-    # so the hole is shut. The interval is NOT the old [3, 25]: run 7's ratio of 4.0 sat inside
-    # that, so charging it unchanged would have changed nothing. Taiwan's tracing gives
-    # 172 / 7 = 24.6; a p90/median ratio is a shape statistic and travels between the tracing's
-    # named-contact denominator and CovSyn's candidate-contact denominator better than either
-    # order statistic does on its own, but it is still measured on 81 traced cases, so the
-    # interval is set to roughly a factor of three either side of that: [8, 40]. Run 6 reached
-    # 7.35 while holding a non-zero median of 6, so 8 is within reach.
-    #
-    # B50 (E76 / E77), 2026-09-28: [8, 40] was a judgement, and it was NOT reachable: around the
-    # Cheng-fitted region no point held the median at 3 with a ratio of 8 (best 6.32), because
-    # raising the community contact mean to hold the median costs the Cheng contact fit
-    # (probe_tail_price_detail.py). The band is now the data's own uncertainty: the bootstrap
-    # 95% CI of p90 / median over the 38 non-zero 2020 first-wave cases with a known uninfected
-    # count, [5.5, 93.1] around 26.0 (the old "n = 81" counted those 38 twice, E77). Its miss is
-    # scaled by the lower bound (OUTCOME_SCALE_BY_LOWER_BOUND), otherwise B43's half-centre cap
-    # (24.7) would make a miss from 4 to 5.5 cost 0.02 and the target would not bite at all.
-    'community_tail_ratio':   (5.5, 93.1, 1.0),
-    # E67, 2026-09-27: run 6 finally grew the community tail (p90 13 -> 44.1, max 48 ->
-    # 196) and paid for it with the centre -- the median fell 3 -> 0, i.e. more than half
-    # the index cases stopped having any community contact at all. With the attack rate
-    # capped by B38 the only remaining source of a heavy tail is the contact COUNT
-    # dispersion P[198], and the cheapest way to raise that is to zero most cases out.
-    # community_median is charged and should now bite (E66 rescaling), so this is
-    # reported rather than charged: it is the number that says whether the median moved
-    # because the distribution improved or because the zeros were merely reshuffled.
-    'community_zero_share':   (0.0, 0.30, 0.0),
+    'community_p90':          (20.0, 200.0, 1.0),
+    'community_tail_ratio':   (3.0, 25.0, 0.0),   # reported, no longer charged
     # B22: incubation back to the literature reported-mean range now that it is built as
     # latent + window rather than drawn and truncated.
     'incubation_mean':        (3.9, 8.0, 1.0),
-    # E60, 2026-09-27: the pre-onset infectious window is charged on what the SIMULATION
-    # produced, not on the parameter product. physiology_penalty() charges P[41] * P[42], the
-    # MEAN of the Gamma, and run 5 satisfied it completely (1.041 in [1, 3], penalty 0.0000)
-    # while the realised window averaged 0.990 and 23.9% of cases got a window of zero days --
-    # a Gamma with a mean near one day puts a quarter of its mass below a day. Constraining a
-    # parameter that used to imply the quantity instead of the quantity itself is the same
-    # mistake as E23 and E34; both bands here are the ones verify_phaseD.py already checks.
-    'pre_onset_window_mean':  (1.0, 3.0, 1.0),
-    'pre_onset_zero_share':   (0.0, 0.12, 1.0),
     # B28: date_of_recovery is the day the case is CLOSED (released from isolation), which
     # Taiwan's records put at about 25 days from onset, not a clinical recovery at 14-20.
     'closure_symptomatic':    (20.0, 32.0, 1.0),
@@ -647,32 +515,6 @@ OUTCOME_TARGETS = {
 # never reached variable/course_parameters_*.npy.
 for _layer, (_anchor_lo, _anchor_centre, _anchor_hi) in LAYER_CUMULATIVE_SAR.items():
     OUTCOME_TARGETS['sar_' + _layer] = (_anchor_lo, _anchor_hi, 1.0)
-
-# E56, 2026-09-27: for the three layers Cheng reports, what is CHARGED is the number of people
-# one index case infects in that layer, and the per-contact rate is only reported.
-#
-# The per-contact version divided Cheng's infection count by CovSyn's own candidate-contact
-# count, which made the target a ratio whose denominator the search controls. Run 5 is the
-# demonstration: E55 raised the health care anchor 2.5x to get medical transmission up, the
-# optimizer cut health care candidate contacts by 37% (daily medical contacts 0.25 -> 0.09),
-# and medical infections per index case FELL from 0.0160 to 0.0140 against Cheng's 0.06. The
-# per-contact rate was satisfied; the thing it stood for got worse. Charging the product
-# removes the lever, and it also takes the anchors off the treadmill of being re-derived from
-# the previous run's contact counts (the circularity admitted in sar_anchors.py) -- Cheng's
-# 10, 6 and 1 infections per 100 index cases do not move when CovSyn's contact counts do.
-#
-# school and workplace keep their per-contact targets: Cheng has no category for either, so
-# there is no infections-per-index-case figure to charge. State that asymmetry in the thesis.
-for _layer, (_lo, _centre, _hi) in LAYER_INFECTIONS_PER_INDEX.items():
-    OUTCOME_TARGETS['infections_per_index_' + _layer] = (_lo, _hi, 1.0)
-    OUTCOME_TARGETS['sar_' + _layer] = (OUTCOME_TARGETS['sar_' + _layer][0],
-                                        OUTCOME_TARGETS['sar_' + _layer][1], 0.0)
-# school and workplace are reported at weight 0 rather than left out, because these five
-# numbers are what made E56 legible: run 5's school infections per index case halved (0.088 ->
-# 0.042) as a side effect of the contact count collapsing, and nothing in the progress CSV
-# showed it. Anything that can move this much unnoticed belongs in the log.
-for _layer in ('school', 'workplace'):
-    OUTCOME_TARGETS['infections_per_index_' + _layer] = (0.0, np.inf, 0.0)
 
 
 def measure_outcomes(index_cases):
@@ -721,19 +563,9 @@ def measure_outcomes(index_cases):
             effective += sum(1 for x in eff if x == 1)
         if candidate:
             measured[f'sar_{layer}'] = effective / candidate
-        # E56: the charged quantity for the three layers Cheng reports. Not divided by the
-        # candidate contacts, so the optimizer cannot satisfy it by removing contacts -- which
-        # is exactly what it did with the per-contact version on run 5. Also recorded for
-        # school and workplace, where it is reported but not charged (Cheng has no category).
-        key = f'infections_per_index_{layer}'
-        if key in measured:
-            measured[key] = effective / len(index_cases)
 
-    # B23 / B27: the two distribution-shape targets. Both ends of the medical contact timing
-    # are charged since E59 -- "early" is Cheng's first two bins (<0 and 0-3 days from onset),
-    # "late" his last two (8-9 and >9), using the same bin edges as
-    # compare_healthcare_municipality.py so the figure and the objective cannot disagree.
-    early = late = total = 0
+    # B23 / B27: the two distribution-shape targets.
+    late = total = 0
     for course, contact, _ in index_cases:
         onset = course['incubation_period']
         if onset is None or np.isnan(onset):
@@ -743,23 +575,16 @@ def measure_outcomes(index_cases):
             continue
         first = np.argmax(matrix > 0, axis=1) - onset
         total += len(first)
-        early += int((first < 4).sum())
         late += int((first >= 8).sum())
     if total:
         measured['medical_late_share'] = late / total
-        measured['medical_early_share'] = early / total
 
     community = np.array([len(contact['municipality_effective_contacts'] or [])
                           for _, contact, _ in index_cases], dtype=float)
-    measured['community_zero_share'] = float(np.mean(community == 0))
-    # E73: the charged median is over every index case, matching verify_phaseD.py and the
-    # tracing reference. The tail statistics stay on the non-zero cases, which is also what
-    # verify_phaseD.py reports, because a p90 over a sample that is a quarter zeros mostly
-    # measures the zeros.
-    measured['community_median'] = float(np.median(community))
-    nonzero = community[community > 0]
-    if len(nonzero) > 20:
-        median, p90 = float(np.median(nonzero)), float(np.percentile(nonzero, 90))
+    community = community[community > 0]
+    if len(community) > 20:
+        median, p90 = float(np.median(community)), float(np.percentile(community, 90))
+        measured['community_median'] = median
         measured['community_p90'] = p90
         if median > 0:
             measured['community_tail_ratio'] = p90 / median
@@ -769,13 +594,6 @@ def measure_outcomes(index_cases):
     measured['asymptomatic_share'] = float(np.mean(~symptomatic))
     if symptomatic.any():
         measured['incubation_mean'] = float(np.nanmean(incubation))
-
-    # E60: the realised pre-onset infectious window, not the Gamma mean physiology_penalty()
-    # charges. Same field and same two statistics verify_phaseD.py checks under B22.
-    pre_onset = np.array([c['pre_onset_window'] for c, _, _ in index_cases], dtype=float)
-    if np.isfinite(pre_onset).any():
-        measured['pre_onset_window_mean'] = float(np.nanmean(pre_onset))
-        measured['pre_onset_zero_share'] = float(np.nanmean(pre_onset == 0))
 
     # Onset -> confirmation, realised rather than read off the parameters. It is negative for
     # a case isolated before its own onset; an index case has no tracing source so that is
@@ -804,59 +622,27 @@ def measure_outcomes(index_cases):
     return measured
 
 
-# E66, 2026-09-27: how wide an interval is allowed to be before it stops setting the scale of
-# the miss, as a fraction of its own centre. Measuring the miss in units of the interval width
-# means the widest intervals produce the weakest gradients -- and the widest intervals are the
-# ones derived from small Poisson counts, i.e. exactly the quantities the calibration is about.
-# On run 6 the medical layer sat at 0.015 infections per index case against Cheng's 0.06, a
-# factor of four out, and cost 0.0041 of an objective of 1.87, because its interval
-# [0.022, 0.131] is 1.8 times as wide as its centre.
-MAX_INTERVAL_WIDTH_OVER_CENTRE = 0.5
-
-
-# B50: targets whose band is a wide data CI (lower bound far below the centre) have their miss
-# measured in units of the lower bound instead of B43's capped width, so the target still bites
-# near its lower end. Kept to the one target that needs it.
-OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio'}
-
-
-def outcome_scale(name, lo, hi):
-    """Unit a target's miss is measured in; None when the band is empty. Shared with
-    calibrate_outcome_weight.py so the two cannot drift apart (lesson 4)."""
-    width = hi - lo
-    if width <= 0:
-        return None
-    if name in OUTCOME_SCALE_BY_LOWER_BOUND and lo > 0:
-        return lo
-    centre = abs(lo + hi) / 2.0
-    scale = min(width, MAX_INTERVAL_WIDTH_OVER_CENTRE * centre) if centre > 0 else width
-    return scale if scale > 0 else width
-
-
 def outcome_penalty(measured, weight=OUTCOME_PENALTY_WEIGHT):
     """Relative distance outside the acceptance interval, summed over targets.
 
-    The miss is measured in units of the acceptance interval's width, CAPPED at
-    MAX_INTERVAL_WIDTH_OVER_CENTRE of the interval's centre, so that widening an interval can
-    no longer make a large relative error cheap (E66). It stays quadratic while the miss is
-    below one unit and linear beyond, so a badly-placed quantity points the search in the right
-    direction without outweighing the whole Cheng contact fit.
+    The miss is measured in units of the acceptance interval's own width, so one unit means
+    "one interval width outside" whatever the quantity is. It is quadratic while the miss is
+    smaller than that width and linear beyond, so a badly-placed quantity still points the
+    search in the right direction without outweighing the whole Cheng contact fit.
 
-    What is NOT restored here is the original ratio form, max(0, lo/x - 1): that is the one
-    that blew up as a quantity approached zero, charging 249 units for a late-medical-contact
-    share of 0.001 against a lower bound of 0.25, which alone was 80% of the objective. The
-    cap below is bounded -- the worst a vanishing quantity can score is lo divided by the
-    capped scale -- so it does not bring that behaviour back.
-    """
+    The earlier version measured the miss relative to the BOUND rather than to the width, and
+    that blows up whenever a quantity can approach zero: with the share of late medical
+    contacts at 0.001 against a lower bound of 0.25 it charged 249 units, which alone was 80%
+    of the whole objective."""
     pen = 0.0
     for name, (lo, hi, w) in OUTCOME_TARGETS.items():
         x = measured.get(name, np.nan)
         if w <= 0 or not np.isfinite(x):
             continue
-        scale = outcome_scale(name, lo, hi)
-        if scale is None:
+        width = hi - lo
+        if width <= 0:
             continue
-        miss = max(0.0, lo - x, x - hi) / scale
+        miss = max(0.0, lo - x, x - hi) / width
         pen += w * (miss ** 2 if miss <= 1.0 else 2.0 * miss - 1.0)
     return weight * pen
 
@@ -902,17 +688,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     # future.result(), which blocks until each simulation finishes, so no explicit wait
     # is needed here. Reusing one pool avoids re-spawning/re-importing all workers on
     # every evaluation (the dominant cost on macOS 'spawn').
-    # Batched into tasks of SIMULATIONS_PER_TASK simulations each: one simulation is only
-    # ~0.8 ms, so one task per simulation left the pool 94% idle on dispatch overhead.
-    seeds_copy = list(seeds)
+    seeds_copy = copy.deepcopy(seeds)
     P_copy = copy.deepcopy(P)
     demographic_parameters_copy = copy.deepcopy(demographic_parameters)
-    batches = [seeds_copy[i:i + SIMULATIONS_PER_TASK]
-               for i in range(0, len(seeds_copy), SIMULATIONS_PER_TASK)]
-    futures = [executor.submit(_run_simulation_batch, batch, P_copy, demographic_parameters_copy)
-               for batch in batches]
-    # Flattened back in seed order, so every consumer sees the same sequence as before.
-    results = [_CompletedSimulation(value) for future in futures for value in future.result()]
+    results = [executor.submit(run_covid, seeds_copy[i], P_copy, demographic_parameters_copy, save_file=False)
+               for i in seeds_copy]
 
     # print('len results', len(results))
     # results = []
@@ -940,14 +720,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
 
     contact_costs = []
     attack_rate_costs = []
-    # Walk the simulation results ONCE, not once per layer (see extract_course_and_contact).
-    course_of_disease_data_list, contact_data_list = extract_course_and_contact(
-        results, source_case_number * repeat_number)
     # print('Time spend before loop: ', time.time() - start_t)
     # start_t = time.time()
     for i, layer in enumerate(layers):
         contact_array, infection_array = generate_contact_result(
-            course_of_disease_data_list, contact_data_list, layer=layer)
+            results, layer=layer, case_number=source_case_number * repeat_number)
         contact_array = contact_array.astype(float)
         norm_contact_array = contact_array/max_Cheng_contact
         infection_array = infection_array.astype(float)
@@ -1079,7 +856,7 @@ class Firefly:
         self.gamma = gamma
         self.rng = default_rng(seed)
 
-    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None, warm_start_vectors=()):
+    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None):
         normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
         # fireflies = self.rng.uniform(lb, ub, (self.pop_size, dim))
         # inverse of min-max normalization
@@ -1090,28 +867,10 @@ class Firefly:
             span = np.where((ub - lb) > 0, ub - lb, 1.0)
             normalized_fireflies[0] = np.clip((np.clip(seed_vector, lb, ub) - lb) / span, 0, 1)
             fireflies[0] = normalized_fireflies[0]*(ub-lb) + lb
-        # B49 (E75): fireflies 1.. start at the best vectors of earlier runs. Every run used to
-        # restart from the literature seed, and run 8 finished at 3.80 while run 7's best vector
-        # scores 2.75 on run 8's own objective -- a known better point the search never found.
-        span = np.where((ub - lb) > 0, ub - lb, 1.0)
-        for k, vector in enumerate(warm_start_vectors, start=1):
-            if k >= self.pop_size:
-                break
-            normalized_fireflies[k] = np.clip((np.clip(vector, lb, ub) - lb) / span, 0, 1)
-            fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
-            print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
         # Create ONE persistent process pool reused for every evaluation in this run.
         # (Previously each evaluation created and tore down its own pool, re-spawning
         # 24 workers thousands of times.)
-        #
-        # The initializer hands each worker the read-only data once instead of once per task,
-        # which is what fast_cost's worker-side reduction needs (E65). It sets globals the
-        # plain cost_function() below never reads, so a run using that instead is unaffected.
-        from fast_cost import init_worker as _init_reduction_worker
-        _columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
-        executor = concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_workers, initializer=_init_reduction_worker,
-            initargs=(demographic_parameters, _columns))
+        executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
         print(f'evaluating initial population: {self.pop_size} fireflies '
               f'(100 simulations each)...', flush=True)
         intensities = np.empty(self.pop_size)
@@ -1123,13 +882,9 @@ class Firefly:
             cost_parts[k] = dict(LAST_COST_PARTS)
             print(f'  initial firefly {k+1}/{self.pop_size}: cost={intensities[k]:.4f}', flush=True)
         print(f'initial population evaluated: best_cost={np.min(intensities):.4f}', flush=True)
-        # B49 / E78: the initial population counts. It used to start from 10e10 and was only
-        # updated after a firefly MOVED, so an initial point -- a warm start of 2.49 in the test
-        # of run 9 -- was never recorded as the best.
-        best_fireflies = np.array(fireflies, dtype=float)
-        best_intensities = np.array(intensities, dtype=float)
-        best_iteration = np.arange(1, self.pop_size + 1, dtype=float)
-        best_parts = [dict(parts) for parts in cost_parts]
+        best_fireflies = np.zeros(np.shape(fireflies))
+        best_intensities = np.ones(np.shape(intensities))*10e10
+        best_iteration = np.zeros(np.shape(intensities))
         worst_fireflies = np.zeros(np.shape(fireflies))
         worst_intensities = np.zeros(np.shape(intensities))
         worst_iteration = np.zeros(np.shape(intensities))
@@ -1148,13 +903,6 @@ class Firefly:
                 if i % 10 == 0:
                     print(f'  gen {generation} | firefly {i}/{self.pop_size} | '
                           f'evals {evaluations} | best {np.min(intensities):.4f}', flush=True)
-                # B49 / E78: the brightest firefly stays where it is. The move condition below
-                # is >=, which includes j == i, so every firefly -- the best one too -- took a
-                # random step of up to new_alpha / 2 of the whole range every generation and the
-                # population never kept its best point. Only the current best is exempt; every
-                # other firefly moves exactly as before.
-                if i == int(np.argmin(intensities)):
-                    continue
                 for j in range(self.pop_size):
                     # print('i, j: ', i, j)
                     if intensities[i] >= intensities[j]:
@@ -1217,8 +965,6 @@ if __name__ == "__main__":
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
     parser.add_argument('--max_workers', type=int,
                         default=multiprocessing.cpu_count())
-    # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
-    parser.add_argument('--warm_start', type=str, nargs='*', default=[])
     args = parser.parse_args()
 
     max_workers = args.max_workers
@@ -1233,12 +979,7 @@ if __name__ == "__main__":
         pop_size = 100
         alpha = 1
         betamin = 1
-        # B51 (E79): gamma was 0.131, but r below is the SQUARED distance over all 199
-        # normalised dimensions, whose expectation between two uniform points is d/6 = 33; at
-        # the median r of 29.7 that gave beta = 0.02, i.e. no attraction -- run 9 never moved
-        # off its warm start in 120 generations. gamma = 6/d makes beta = 1/e = 0.37 at the
-        # typical distance and lets it approach 1 as fireflies close in.
-        gamma = 0.03
+        gamma = 0.131
         max_generations = 120
         # max_generations = 100
     elif mode == 'test':
@@ -1306,15 +1047,6 @@ if __name__ == "__main__":
     # estimate stored).
     seed_vector = np.hstack(((lower_bound[:37] + upper_bound[:37]) / 2, course_parameters))
 
-    warm_start_vectors = []
-    for path in args.warm_start:
-        earlier = np.atleast_2d(np.loadtxt(path))
-        vector = earlier[int(np.argmin(earlier[:, -1])), 1:-1]
-        if vector.shape != lower_bound.shape:
-            sys.exit(f'warm start {path}: {vector.size} parameters, expected {lower_bound.size}')
-        warm_start_vectors.append(vector)
-        print(f'warm start from {path}: recorded cost {earlier[:, -1].min():.4f}', flush=True)
-
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
         demographic_parameters = pickle.load(f)
@@ -1345,19 +1077,12 @@ if __name__ == "__main__":
     else:
         np.savetxt(result_path/'bound.txt',
                    np.vstack((lower_bound, upper_bound)))
-        # E65: fast_cost.cost_function reduces inside the workers -- 1.63x on the steady-state
-        # benchmark, on top of the 2.46x the batching gave (run 5 0.1284 s -> run 6 0.0523 s
-        # per evaluation). It is verified bit-identical to cost_function() below on nine
-        # parameter vectors from two runs; cost_function() stays as the reference the
-        # verification compares against, so keep both and re-run verify_fast_cost.py after any
-        # change to either.
-        from fast_cost import cost_function as reducing_cost_function
         best_fireflies, best_intensities, best_iteration, worst_firefly, worst_intensities, worst_iteration, \
             fireflies, intensities = fa.firefly(
-                function=reducing_cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
+                function=cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
                 demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=max_workers, Cheng_contact_array=Cheng_contact_array,
                 Cheng_attack_rate=Cheng_attack_rate, norm_weights=norm_weights,
-                seed_vector=seed_vector, warm_start_vectors=warm_start_vectors)
+                seed_vector=seed_vector)
         fireflies_result = np.hstack((fireflies, np.matrix(intensities).T))
         best_result = np.hstack(
             (np.matrix(best_iteration).T, best_fireflies, np.matrix(best_intensities).T))
