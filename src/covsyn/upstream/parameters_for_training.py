@@ -5,8 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from rw_data_processing import *
-from Data_synthesize import *
+from covsyn.data_processing.rw_data_processing import *
+from covsyn.model.data_synthesize import *
 from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
 

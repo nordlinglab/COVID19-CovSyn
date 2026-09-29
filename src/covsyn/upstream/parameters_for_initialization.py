@@ -7,8 +7,8 @@ import seaborn as sns
 import scipy.stats as stats
 from pathlib import Path
 from scipy.optimize import lsq_linear
-from rw_data_processing import *
-from Data_synthesize import *
+from covsyn.data_processing.rw_data_processing import *
+from covsyn.model.data_synthesize import *
 from tqdm import tqdm
 from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
@@ -588,6 +588,10 @@ def get_demographic_data(demographic_data_path, save_path):
     student_p = get_student_rate(elementary_school_data, junior_high_school_data, senior_high_school_data, university_data, age_male_data, age_female_data)
     employment_p, job_p = get_employment_rate(demographic_data_path)
     
+    # NOTE: the census distributions are saved RAW. The person-weighting of household,
+    # class and enterprise sizes (B29, B30, B31) is applied at load time by
+    # apply_person_weighting() in Data_synthesis_main.py, so that this file keeps the
+    # original published distributions and the weighting stays visible in one place.
     print('Saving demographic data')
     population_size = 23008366
     demographic_parameters = [age_p, gender_p, student_p, employment_p, job_p, family_size_dict, municipality_data,
@@ -598,29 +602,55 @@ def get_demographic_data(demographic_data_path, save_path):
 
 
 def get_contact_p(save_path):
+    """Search bounds of the contact block. Rewritten for Phase D -- the reasoning for every
+    entry is in apply_phaseD_parameters.py, which applies the same values to an existing
+    variable/ directory without regenerating the census data."""
     contact_parameters = {
-        'household_lower_bound': [0.95, 0.4, 0.05, 0.01, 1, 0, 0],
-        'household_upper_bound': [1, 1, 0.5, 0.1, 20, 10, 10],
+        # [contact gate, contact-again-tomorrow, healthy daily p, symptomatic daily p,
+        #  logistic steepness, symptom phase, width]
 
+        # Household: the target is 1.86 close contacts per day (B25) against 2.8 other
+        # members, which needs a daily probability near 0.66; the old ceiling was 0.5. The
+        # symptomatic probability stays free because B19 exempts the household -- a sick
+        # person really does stay home with the family.
+        'household_lower_bound': [0.95, 0.4, 0.20, 0.01, 1, 0, 0],
+        'household_upper_bound': [1, 1, 0.95, 0.90, 20, 10, 10],
+
+        # School: symptomatic contact probability (index 3) is held at or below the healthy
+        # one (index 2); B19 (a) also clamps it in the model itself.
         'school_lower_bound': [0.1, 0.5, 0.01, 0.001, 1, 0, 0],
-        'school_upper_bound': [1, 1, 0.5, 0.05, 10, 10, 10],
+        'school_upper_bound': [1, 1, 0.5, 0.01, 10, 10, 10],
 
+        # Workplace: 1.49 contacts/day over the whole population is about 3/day for an
+        # employed case, against a work group of about 10 people (B31).
         'workplace_lower_bound': [0.1, 0.5, 0.01, 0.001, 1, 0, 0],
-        'workplace_upper_bound': [1, 1, 0.5, 0.05, 10, 10, 10],
+        'workplace_upper_bound': [1, 1, 0.70, 0.05, 10, 10, 10],
 
-        'health_care_lower_bound': [0.005, 0.5, 0.001, 0.6, 1, 0, 0],
+        # Health care: floors lowered. The layer was generating 2.5 contacts per day for a
+        # person who is not ill yet (finding E26); the clinic is meant to be visited after
+        # symptoms start, which is what the symptomatic probability is for.
+        'health_care_lower_bound': [0.0005, 0.5, 0.0002, 0.6, 1, 0, 0],
         'health_care_upper_bound': [0.008, 1, 0.006, 1, 10, 10, 10],
 
-        'municipality_lower_bound': [0.000002, 0.5, 0.01, 0.001, 1, 0, 0],
-        'municipality_upper_bound': [0.00001, 1, 0.1, 0.05, 10, 10, 10],
+        # Municipality: index 0 is no longer a probability. The community layer draws
+        # Poisson(nu * lambda) contacts (B27), so index 0 is lambda, the mean number of
+        # distinct community contacts per case, and the city population no longer enters the
+        # contact count (finding E4). The Taiwan tracing records give a median of 7.5 and a
+        # mean of 87 friend/other contacts per index case; the heavy tail comes from nu.
+        'municipality_lower_bound': [1.0, 0.5, 0.01, 0.001, 1, 0, 0],
+        'municipality_upper_bound': [40.0, 1, 0.50, 0.50, 10, 10, 10],
 
-        'overdispersion_lower_bound': [0, 1],
-        'overdispersion_upper_bound': [0.2, 20]
+        # Case-level infectiousness multiplier nu ~ Gamma(k, 1/k), capped (B17):
+        # [k, cap]. k below 1 is where superspreading lives; Taiwan's own offspring
+        # dispersion is k = 0.29.
+        'overdispersion_lower_bound': [0.05, 3.0],
+        'overdispersion_upper_bound': [2.0, 60.0]
     }
     print('Saving contact data')
     with open(save_path/Path('contact_parameters.pkl'), 'wb') as f:
         pickle.dump(contact_parameters, f)
-   
+
+
 def gamma_fit_bootstrap(days_data, CI=0.68, allow_negative=False):
     n_bootstrap = 1000
     bootstrap_alphas = np.zeros(n_bootstrap)
@@ -788,6 +818,27 @@ def get_state_transition_gamma_p(course_of_disease_data_path, course_parameters,
     return(course_parameters, course_parameters_lb, course_parameters_ub, icu_to_recover_days, icu_to_dead_days)
 
 def get_daily_secondary_attack_rate(course_parameters, course_parameters_lb, course_parameters_ub):
+    """Append the five layers' 25 daily attack rates and their bounds.
+
+    The anchors, the Ge 2021 profile and the cumulative-to-daily conversion all live in
+    sar_anchors.py so that this file and apply_phaseD_parameters.py cannot disagree; they
+    used to carry two different sets of contact-day constants for the same quantity, and
+    only the second of them ever reached variable/course_parameters_*.npy.
+    """
+    from covsyn.calibration.sar_anchors import LAYERS, attack_rate_block
+    for layer in LAYERS:
+        rate, rate_lb, rate_ub = attack_rate_block(layer)
+        course_parameters = np.append(course_parameters, rate)
+        course_parameters_lb = np.append(course_parameters_lb, rate_lb)
+        course_parameters_ub = np.append(course_parameters_ub, rate_ub)
+    return (course_parameters, course_parameters_lb, course_parameters_ub)
+
+
+def _get_daily_secondary_attack_rate_published(course_parameters, course_parameters_lb, course_parameters_ub):
+    """The pre-Phase-D version, kept for reference only. See finding E52 for what is wrong
+    with it: the layer rates below are CUMULATIVE per contact but were applied once per
+    contact DAY, the household bounds were never rescaled with the centre, and three of the
+    five central values appear in neither of the two cited papers."""
     # Cheng, Hao-Yuan, et al. "Contact tracing assessment of COVID-19 transmission dynamics in Taiwan and risk at different exposure periods before and after symptom onset." JAMA internal medicine 180.9 (2020): 1156-1163.
     # Ge, Yang, et al. "COVID-19 transmission dynamics among close contacts of index patients with COVID-19: a population-based cohort study in Zhejiang Province, China." JAMA Internal Medicine 181.10 (2021): 1343-1350.
     attack_rate = np.array([0.86, 0.98, 1.09, 1.16, 1.16, 1.07, 0.95, 0.84, 0.78, 0.78, 0.86,
@@ -800,40 +851,51 @@ def get_daily_secondary_attack_rate(course_parameters, course_parameters_lb, cou
                             1.15, 1.34, 1.49, 1.54, 1.49, 1.4, 1.32, 1.26, 1.2, 1.14, 1.11, 1.15, 1.27, 1.43]) - shift
 
 
-    household_attack_rate = attack_rate*0.101
-    household_attack_rate_lb = attack_rate_lb*0.101
-    household_attack_rate_ub = attack_rate_ub*0.101
+    # The literature secondary attack rates below are CUMULATIVE per close contact over the
+    # whole exposure window, but this vector is applied once per contact DAY inside
+    # Draw_contact_data. Using a cumulative SAR as a daily probability overestimates
+    # transmission by roughly the number of contact days; measured on the previous run
+    # (cheng2020 mode, 10,000 index cases) the mean number of contact days per contact is
+    # household 2.00, school 2.95, workplace 4.02, health care 1.99, municipality 3.91.
+    # Convert with p_daily = 1 - (1 - SAR)**(1/n_days).
+    contact_days = {'household': 2.00, 'school': 2.95, 'workplace': 4.02,
+                    'health_care': 1.99, 'municipality': 3.91}
 
-    school_attack_rate = attack_rate*0.024
-    school_attack_rate_lb = attack_rate_lb*0.024
-    school_attack_rate_lb = school_attack_rate_lb * (0.01 / np.mean(school_attack_rate_lb))
-    school_attack_rate_ub = attack_rate_ub*0.024
-    school_attack_rate_ub = school_attack_rate_ub * (0.04 / np.mean(school_attack_rate_ub))
+    def to_daily(cumulative_sar, layer):
+        return 1 - (1 - cumulative_sar) ** (1 / contact_days[layer])
 
-    workplace_attack_rate = attack_rate*0.034
-    workplace_attack_rate_lb = attack_rate_lb*0.034
-    workplace_attack_rate_lb = workplace_attack_rate_lb * (0.01 / np.mean(workplace_attack_rate_lb))
-    workplace_attack_rate_ub = attack_rate_ub*0.034
-    workplace_attack_rate_ub = workplace_attack_rate_ub * (0.15 / np.mean(workplace_attack_rate_ub))
+    # (lower bound, central estimate, upper bound) CUMULATIVE secondary attack rate.
+    #   household   : Cheng 2020 all-infection 10/151 = 6.6%; lb = Cheng clinical
+    #                 (10-3)/151 = 4.6%, ub = Huang 2021 pooled Taiwan 10.1%. The
+    #                 all-infection figure is used because CovSyn counts every infection.
+    #   health care : Cheng 2020 all-infection 6/698 = 0.86%.
+    #   school / workplace / municipality: layer-specific literature, because Cheng's
+    #                 "Others" category (1836 contacts, 1 case) pools casual community
+    #                 contacts and is not comparable to repeated school/workplace contact.
+    # workplace: the upper bound used to be 15%, more than four times the literature
+    # estimate of 3.4%, and the optimizer duly pushed the workplace attack rate to ~7.6%
+    # cumulative. Because workplace contacts are concentrated in ages 20-59 (44% / 49%),
+    # that inflated the 20-39 reference group and dragged the POOLED 60+ age risk ratio
+    # down to 0.81 against an input of 1.32 (a Simpson effect: the within-layer ratios were
+    # reproduced correctly). The bound is tightened to 5%, ~1.5x the literature estimate,
+    # matching the relative width used for the household layer.
+    layer_sar = {'household':    (0.046, 0.0662, 0.101),
+                 'school':       (0.010, 0.023,  0.040),
+                 'workplace':    (0.015, 0.034,  0.050),
+                 'health_care':  (0.001, 0.0086, 0.016),
+                 'municipality': (0.001, 0.002,  0.010)}
 
-    health_care_attack_rate = attack_rate*0.004
-    health_care_attack_rate_lb = attack_rate_lb*0.004
-    health_care_attack_rate_lb = health_care_attack_rate_lb * (0.001 / np.mean(health_care_attack_rate_lb))
-    health_care_attack_rate_ub = attack_rate_ub*0.004
-    health_care_attack_rate_ub = health_care_attack_rate_ub * (0.016 / np.mean(health_care_attack_rate_ub))
-
-    municipality_attack_rate = (attack_rate/np.mean(attack_rate))*0.002
-    municipality_attack_rate_lb = (attack_rate_lb/np.mean(attack_rate))*0.002
-    municipality_attack_rate_lb = municipality_attack_rate_lb * (0.001 / np.mean(municipality_attack_rate_lb))
-    municipality_attack_rate_ub = (attack_rate_ub/np.mean(attack_rate))*0.002
-    municipality_attack_rate_ub = municipality_attack_rate_ub * (0.01 / np.mean(municipality_attack_rate_ub))
-
-    course_parameters = np.append(course_parameters, (household_attack_rate, school_attack_rate, workplace_attack_rate, 
-                                                    health_care_attack_rate, municipality_attack_rate))
-    course_parameters_lb = np.append(course_parameters_lb, (household_attack_rate_lb, school_attack_rate_lb, workplace_attack_rate_lb, 
-                                                            health_care_attack_rate_lb, municipality_attack_rate_lb))
-    course_parameters_ub = np.append(course_parameters_ub, (household_attack_rate_ub, school_attack_rate_ub, workplace_attack_rate_ub, 
-                                                            health_care_attack_rate_ub, municipality_attack_rate_ub))
+    for layer in ('household', 'school', 'workplace', 'health_care', 'municipality'):
+        sar_lb, sar, sar_ub = layer_sar[layer]
+        rate    = attack_rate    * (to_daily(sar,    layer) / np.mean(attack_rate))
+        rate_lb = attack_rate_lb * (to_daily(sar_lb, layer) / np.mean(attack_rate_lb))
+        rate_ub = attack_rate_ub * (to_daily(sar_ub, layer) / np.mean(attack_rate_ub))
+        # The Ge et al. lower/upper profiles have a different shape from the central one,
+        # so clip the centre into the box to keep the initial guess feasible.
+        rate = np.clip(rate, rate_lb, rate_ub)
+        course_parameters = np.append(course_parameters, rate)
+        course_parameters_lb = np.append(course_parameters_lb, rate_lb)
+        course_parameters_ub = np.append(course_parameters_ub, rate_ub)
 
     return(course_parameters, course_parameters_lb, course_parameters_ub)
 
@@ -860,12 +922,22 @@ def get_epidemiolocial_parameters(course_of_disease_data_path, save_path):
 
     # Latent period
     # Xin, Hualei, et al. "Estimating the latent period of coronavirus disease 2019 (COVID-19)." Clinical Infectious Diseases 74.9 (2022): 1678-1681.
-    latent_period_shape = 4.05
-    latent_period_shape_lb = 3.32
-    latent_period_shape_ub = 5.13
-    latent_period_scale = 1.35
-    latent_period_scale_lb = 1.06
-    latent_period_scale_ub = 1.67
+    # Latent period targeted at the LOWER edge of the literature reported-mean range
+    # (4.1-5.5 d, Xin et al. 2022) -- decision D1 / option A: latent is brought inside the
+    # reported range and the generation time is allowed to sit above its reported range,
+    # because the model enforces infection >= latent so E[generation] >= E[latent] and the
+    # two literature ranges (latent >= 4.1, generation <= 5.2) cannot both be satisfied.
+    # Shape is fixed so realised mean = shape*scale stays within bounds, and latent
+    # mean_ub (4.5) < incubation mean_lb (5.2).
+    latent_period_shape = 4
+    latent_period_shape_lb = latent_period_shape
+    latent_period_shape_ub = latent_period_shape
+    latent_period_mean = 4.3
+    latent_period_mean_lb = 4.1
+    latent_period_mean_ub = 4.5
+    latent_period_scale = latent_period_mean/latent_period_shape
+    latent_period_scale_lb = latent_period_mean_lb/latent_period_shape
+    latent_period_scale_ub = latent_period_mean_ub/latent_period_shape
     course_parameters = np.append(course_parameters, (latent_period_shape, latent_period_scale))
     course_parameters_lb = np.append(course_parameters_lb, (latent_period_shape_lb, latent_period_scale_lb))
     course_parameters_ub = np.append(course_parameters_ub, (latent_period_shape_ub, latent_period_scale_ub))
@@ -873,9 +945,14 @@ def get_epidemiolocial_parameters(course_of_disease_data_path, save_path):
     # Infectious period
     # Sanche, Steven, et al. "High contagiousness and rapid spread of severe acute respiratory syndrome coronavirus 2." Emerging infectious diseases 26.7 (2020): 1470.
     infectious_period_shape = 4
-    infectious_period_shape_lb = 2
-    infectious_period_shape_ub = 6
-    infectious_period_mean = 10
+    # Fix the shape so that the scale bounds (which are derived from a fixed shape)
+    # are consistent with the shape actually used during optimization. Otherwise the
+    # optimizer can pick shape_ub * scale_ub = 6 * 3.5 = 21 days, far above the
+    # intended mean upper bound of 14 days. With the shape fixed, the realised mean
+    # equals shape * scale and stays within [mean_lb, mean_ub] = [4, 14].
+    infectious_period_shape_lb = infectious_period_shape
+    infectious_period_shape_ub = infectious_period_shape
+    infectious_period_mean = 8
     infectious_period_mean_lb = 4
     infectious_period_mean_ub = 14
     infectious_period_scale = infectious_period_mean/infectious_period_shape
@@ -887,12 +964,20 @@ def get_epidemiolocial_parameters(course_of_disease_data_path, save_path):
 
     # Incubation period
     # Cheng, Hao-Yuan, et al. "Contact tracing assessment of COVID-19 transmission dynamics in Taiwan and risk at different exposure periods before and after symptom onset." JAMA internal medicine 180.9 (2020): 1156-1163.
-    incubation_period_shape = 1.55
-    incubation_period_shape_lb = 0.73
-    incubation_period_shape_ub = 2.93
-    incubation_period_scale = 3.32
-    incubation_period_scale_lb = 1.6
-    incubation_period_scale_ub = 8.79
+    # Incubation held inside the literature reported-mean range (3.9-8.0 d over 17 studies)
+    # with the lower bound (5.2) above the latent mean upper bound (4.5), so incubation >
+    # latent and a positive presymptomatic window survives the incubation>=latent
+    # truncation in draw_incubation_period().
+    # Shape is fixed so realised mean = shape * scale stays within [mean_lb, mean_ub].
+    incubation_period_shape = 2
+    incubation_period_shape_lb = incubation_period_shape
+    incubation_period_shape_ub = incubation_period_shape
+    incubation_period_mean = 5.6    # > latent mean_ub (4.5)
+    incubation_period_mean_lb = 5.2
+    incubation_period_mean_ub = 8.0
+    incubation_period_scale = incubation_period_mean/incubation_period_shape
+    incubation_period_scale_lb = incubation_period_mean_lb/incubation_period_shape
+    incubation_period_scale_ub = incubation_period_mean_ub/incubation_period_shape
     course_parameters = np.append(course_parameters, (incubation_period_shape, incubation_period_scale))
     course_parameters_lb = np.append(course_parameters_lb, (incubation_period_shape_lb, incubation_period_scale_lb))
     course_parameters_ub = np.append(course_parameters_ub, (incubation_period_shape_ub, incubation_period_scale_ub))
@@ -902,9 +987,29 @@ def get_epidemiolocial_parameters(course_of_disease_data_path, save_path):
 
     # Age dependent risk ratio
     # Cheng, Hao-Yuan, et al. "Contact tracing assessment of COVID-19 transmission dynamics in Taiwan and risk at different exposure periods before and after symptom onset." JAMA internal medicine 180.9 (2020): 1156-1163.
-    age_risk_ratios = np.array([0.3, 1, 2.19, 1.75]) # For age 0-19, 20-39, 40-59, and 60 above. Note that for age 0-19, I set it to be 0.3 by 1/281
-    age_risk_ratios_lb = np.array([0, 0, 0.78, 0.44])
-    age_risk_ratios_ub = np.array([1, 2, 6.14, 6.97])
+    # Age-related risk ratio of the secondary attack rate, for age 0-19, 20-39, 40-59, 60+.
+    # LOCKED (lb == ub): set by hand and swept by trial and error, not optimized.
+    # Cheng et al. report a CLINICAL attack-rate ratio (asymptomatic secondary cases are
+    # excluded from their numerator), but CovSyn counts every infection and its
+    # asymptomatic fraction is age independent, so the comparable target is Cheng's
+    # ALL-INFECTION ratio recomputed from his own counts:
+    #     0-19   1/281  = 0.356%  -> 0.52
+    #     20-39  8/1161 = 0.689%  -> 1     (reference)
+    #     40-59 10/794  = 1.259%  -> 1.83
+    #     60+    3/331  = 0.906%  -> 1.32
+    # The 0-19 value 0.5 is independently corroborated by the susceptibility literature
+    # (Zhang 0.34, Davies 0.40, Viner 0.56, Uthman wild-type 0.58, Madewell 0.59);
+    # see covsyn_age_weight_litreview.md. 20-39 stays at 1 as the readability anchor --
+    # after the per-layer /Z normalisation in Data_synthesize.py the vector only fixes the
+    # relative shape, so one group must be pinned to remove the scale degeneracy.
+    # Phase D uses the B14 trial value: the input vector is not the target vector, because
+    # the per-layer normalisation and the different age composition of each layer shift the
+    # measured ratios. [0.39, 1, 1.90, 1.44] measured [0.557, 1, 1.817, 1.313] against the
+    # target [0.52, 1, 1.83, 1.32]. The layers changed again in Phase D, so this has to be
+    # re-measured with rr_exact.py after the rerun and re-tuned if it has drifted.
+    age_risk_ratios = np.array([0.39, 1, 1.90, 1.44])
+    age_risk_ratios_lb = age_risk_ratios.copy()
+    age_risk_ratios_ub = age_risk_ratios.copy()
     course_parameters = np.append(course_parameters, age_risk_ratios)
     course_parameters_lb = np.append(course_parameters_lb, age_risk_ratios_lb)
     course_parameters_ub = np.append(course_parameters_ub, age_risk_ratios_ub)
@@ -934,8 +1039,16 @@ def get_epidemiolocial_parameters(course_of_disease_data_path, save_path):
 
     # Transition probability
     shift_percentage = 0.3
-    infection_to_recovered_transition_p = 0.09 # Cheng et al.
-    symptom_to_recovered_transition_p = 1-0.18 # https://www.cna.com.tw/news/ahel/202210285003.aspx, https://www.thenewslens.com/article/154421, Taiwan_critically_ill_rate.png
+    # B33: the whole severity cascade now comes from the Taiwan contact-tracing file itself
+    # (579 cases), so the three transition probabilities are consistent with each other and
+    # their product reproduces the observed case fatality of 1.2%:
+    #   asymptomatic 23.7% (137/579 with no onset date)   -> infection_to_recovered
+    #   symptomatic -> ICU 12.7% (56/442)                 -> 1 - symptom_to_recovered
+    #   ICU -> death 12.5% (7/56)                         -> 1 - critically_ill_to_recovered
+    # The previous asymptomatic share (9%, Cheng) and ICU share (18%, a news report with no
+    # traceable denominator, finding E28) are replaced.
+    infection_to_recovered_transition_p = 0.237
+    symptom_to_recovered_transition_p = 1-0.127
     print('Number of critically_ill_to_recovered_transition_p data points: {}'.format(len(icu_to_recover_days)+len(icu_to_dead_days)))
     critically_ill_to_recovered_transition_p = len(icu_to_recover_days)/(
         len(icu_to_recover_days)+len(icu_to_dead_days))
