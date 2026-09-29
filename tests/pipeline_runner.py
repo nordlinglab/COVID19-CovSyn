@@ -30,7 +30,9 @@ MODES = ("spread_Taiwan_weight", "taiwan_first_outbreak")
 
 
 def _run(args: list[str], workdir: Path) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, MPLBACKEND="Agg", PYTHONHASHSEED="0")
+    env = dict(os.environ, MPLBACKEND="Agg", PYTHONHASHSEED="0",
+               PYTHONPATH=os.pathsep.join(filter(None, [str(REPO_ROOT / "src"),
+                                                      os.environ.get("PYTHONPATH")])))
     return subprocess.run([sys.executable, *args], cwd=REPO_ROOT, env=env, text=True,
                           capture_output=True, check=False, timeout=1800)
 
@@ -48,7 +50,7 @@ def build_dataset(workdir: Path) -> dict[str, str]:
     for mode in MODES:
         out = workdir / mode
         out.mkdir(parents=True, exist_ok=True)
-        done = _run(["Data_synthesis_main.py", "--mode", mode, "--monte_carlo_number",
+        done = _run(["-m", "covsyn.model.data_synthesis_main", "--mode", mode, "--monte_carlo_number",
                      str(MONTE_CARLO), "--result_path", str(out), "--cpu_cores", "4",
                      "--parameter_path", RUN_DIR], workdir)
         if done.returncode:
@@ -65,16 +67,16 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
     # Order matters and follows phaseD_chain.sh: measure_age_rr.py writes
     # validation_reference/age_rr.json, which verify_phaseD.py reads.
     return {
-        "measure_age_rr": ["measure_age_rr.py", COMPAT_DIR, "400"],
-        "verify_phaseD": ["verify_phaseD.py", spread, first, checks],
-        "check_constraints": ["check_constraints.py", spread, first, "--out",
+        "measure_age_rr": ["-m", "covsyn.validation.measure_age_rr", COMPAT_DIR, "400"],
+        "verify_phaseD": ["-m", "covsyn.validation.verify_phase_d", spread, first, checks],
+        "check_constraints": ["-m", "covsyn.validation.check_constraints", spread, first, "--out",
                               str(workdir / "constraint_check")],
-        "rr_exact": ["rr_exact.py", spread],
-        "tw_check": ["tw_check.py", first],
-        "measure_days": ["measure_days.py", spread],
-        "show_final": ["show_final.py"],
-        "check_gap": ["check_gap.py"],
-        "show_bounds": ["show_bounds.py"],
+        "rr_exact": ["-m", "covsyn.validation.rr_exact", spread],
+        "tw_check": ["-m", "covsyn.validation.tw_check", first],
+        "measure_days": ["-m", "covsyn.validation.measure_days", spread],
+        "show_final": ["-m", "covsyn.validation.show_final"],
+        "check_gap": ["-m", "covsyn.validation.check_gap"],
+        "show_bounds": ["-m", "covsyn.validation.show_bounds"],
     }
 
 
@@ -84,18 +86,18 @@ def figure_steps(workdir: Path) -> dict[str, list[str]]:
     figs = str(workdir / "figures")
     checks = str(workdir / "phaseD_checks.json")
     return {
-        "validate_layers": ["validate_layers.py", spread, figs],
-        "validate_infection": ["validate_infection.py", spread, figs],
-        "plot_diagnostics": ["plot_diagnostics.py", spread, figs],
-        "plot_10panel": ["plot_10panel.py", spread, figs],
-        "plot_cheng_attackrate": ["plot_cheng_attackrate.py", spread, figs],
-        "plot_vs_notebook_literature": ["plot_vs_notebook_literature.py", spread, figs],
-        "plot_validation": ["plot_validation.py", COMPAT_DIR, figs],
-        "workplace_sampling_options": ["workplace_sampling_options.py", spread, figs, COMPAT_DIR],
-        "plot_reality_vs_covsyn": ["plot_reality_vs_covsyn.py", spread, first, figs],
-        "plot_violin_reality_vs_covsyn": ["plot_violin_reality_vs_covsyn.py", spread, figs],
-        "compare_healthcare_municipality": ["compare_healthcare_municipality.py", spread, figs],
-        "plot_todolist923": ["plot_todolist923.py", spread, RUN_DIR, checks, figs + "/todolist923"],
+        "validate_layers": ["-m", "covsyn.figures.validate_layers", spread, figs],
+        "validate_infection": ["-m", "covsyn.figures.validate_infection", spread, figs],
+        "plot_diagnostics": ["-m", "covsyn.figures.plot_diagnostics", spread, figs],
+        "plot_10panel": ["-m", "covsyn.figures.plot_10panel", spread, figs],
+        "plot_cheng_attackrate": ["-m", "covsyn.figures.plot_cheng_attackrate", spread, figs],
+        "plot_vs_notebook_literature": ["-m", "covsyn.figures.plot_vs_notebook_literature", spread, figs],
+        "plot_validation": ["-m", "covsyn.figures.plot_validation", COMPAT_DIR, figs],
+        "workplace_sampling_options": ["-m", "covsyn.figures.workplace_sampling_options", spread, figs, COMPAT_DIR],
+        "plot_reality_vs_covsyn": ["-m", "covsyn.figures.plot_reality_vs_covsyn", spread, first, figs],
+        "plot_violin_reality_vs_covsyn": ["-m", "covsyn.figures.plot_violin_reality_vs_covsyn", spread, figs],
+        "compare_healthcare_municipality": ["-m", "covsyn.figures.compare_healthcare_municipality", spread, figs],
+        "plot_todolist923": ["-m", "covsyn.figures.plot_todolist923", spread, RUN_DIR, checks, figs + "/todolist923"],
     }
 
 

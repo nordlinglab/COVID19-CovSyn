@@ -27,7 +27,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent
-sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(HERE))
 
 import regression_digest as rd  # noqa: E402
@@ -40,10 +40,10 @@ MODES = ["result", "spread_Taiwan_weight", "taiwan_first_outbreak"]
 def main() -> None:
     """Compute and write ``tests/fixtures/regression_run10.json``."""
     os.chdir(REPO_ROOT)
-    import fast_cost
+    from covsyn.calibration import fast_cost
     from conftest import best_vector
-    from Data_synthesis_main import run_covid
-    from cost_parts import LAST
+    from covsyn.model.data_synthesis_main import run_covid
+    from covsyn.calibration.cost_parts import LAST
 
     with open("variable/demographic_parameters.pkl", "rb") as f:
         demo = pickle.load(f)

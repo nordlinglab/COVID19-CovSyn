@@ -3,8 +3,8 @@
 """Shared fixtures for the CovSyn test suite.
 
 The CovSyn modules read their inputs through paths relative to the repository root
-(``./variable/...``) and import each other as top-level modules, so every test runs with the
-repository root as both the working directory and the first entry of ``sys.path``.
+(``./variable/...``), so every test runs with the repository root as its working directory,
+and ``src/`` is put on ``sys.path`` so the ``covsyn`` package imports without installation.
 """
 
 from __future__ import annotations
@@ -24,8 +24,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RUN10_BEST = REPO_ROOT / "firefly_result" / "phaseD_run10" / "firefly_best.txt"
 
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+for entry in (REPO_ROOT / "src", REPO_ROOT):
+    if str(entry) not in sys.path:
+        sys.path.insert(0, str(entry))
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -67,8 +68,7 @@ def cheng_data() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 @pytest.fixture(scope="session")
 def cost_pool(demographic_parameters: Any) -> Iterator[concurrent.futures.ProcessPoolExecutor]:
     """A worker pool initialised the way the optimizer initialises it (finding E65)."""
-    import fast_cost
-
+    from covsyn.calibration import fast_cost
     columns = np.load(REPO_ROOT / "variable" / "Taiwan_data_matrix.npy").shape[1]
     workers = min(8, os.cpu_count() or 1)
     pool = concurrent.futures.ProcessPoolExecutor(

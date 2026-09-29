@@ -37,8 +37,8 @@ def test_cost_function_reproduces_run10(
     cost_pool: concurrent.futures.ProcessPoolExecutor,
 ) -> None:
     """The objective returns the recorded total and every recorded cost part, bit for bit."""
-    import fast_cost
-    from cost_parts import LAST
+    from covsyn.calibration import fast_cost
+    from covsyn.calibration.cost_parts import LAST
 
     total = fast_cost.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data)
     parts = dict(LAST)
@@ -57,9 +57,9 @@ def test_fast_cost_equals_reference_cost_function(
     cost_pool: concurrent.futures.ProcessPoolExecutor,
 ) -> None:
     """Gate 1 of CLAUDE.md: fast_cost and firefly_optimizer.cost_function agree exactly (E65)."""
-    import fast_cost
-    import firefly_optimizer as fo
-    from cost_parts import LAST
+    from covsyn.calibration import fast_cost
+    from covsyn.calibration import firefly_optimizer as fo
+    from covsyn.calibration.cost_parts import LAST
 
     reference_pool = concurrent.futures.ProcessPoolExecutor(max_workers=4)
     try:
@@ -80,7 +80,7 @@ def test_simulation_output_reproduces_run10(
     case: str, run10_vector: np.ndarray, demographic_parameters: Any
 ) -> None:
     """One simulation per seed and mode produces exactly the recorded output."""
-    from Data_synthesis_main import run_covid
+    from covsyn.model.data_synthesis_main import run_covid
 
     mode, seed = case.split("/")
     output = run_covid(int(seed), run10_vector.copy(), copy.deepcopy(demographic_parameters),
