@@ -1049,6 +1049,10 @@ def decode_metrics(P):
     if len(P) > 198:
         # E35: dispersion of the community contact count, independent of infectiousness.
         m['community_dispersion_k'] = P[198]
+    if len(P) > 203:
+        # B54: the two searched mass-event parameters.
+        m['community_event_probability'] = P[199]
+        m['community_event_risk_ratio'] = P[203]
     m['age_risk_0_19'] = P[63]
     m['age_risk_20_39'] = P[64]
     m['age_risk_40_59'] = P[65]
@@ -1310,6 +1314,12 @@ if __name__ == "__main__":
     for path in args.warm_start:
         earlier = np.atleast_2d(np.loadtxt(path))
         vector = earlier[int(np.argmin(earlier[:, -1])), 1:-1]
+        if vector.size < lower_bound.size:
+            # B54: a vector from before parameters were appended (run 10 has 199) keeps its
+            # values and takes the seed values for the appended ones.
+            print(f'warm start {path}: {vector.size} parameters, P[{vector.size}:] '
+                  f'taken from the seed vector', flush=True)
+            vector = np.concatenate([vector, seed_vector[vector.size:]])
         if vector.shape != lower_bound.shape:
             sys.exit(f'warm start {path}: {vector.size} parameters, expected {lower_bound.size}')
         warm_start_vectors.append(vector)
