@@ -177,3 +177,52 @@ def test_search_bounds_hold_valid_event_parameters() -> None:
         assert ds.community_event_parameters(_vector(*values)) is not None
     for seed, lower, upper in apply.COMMUNITY_EVENT:
         assert lower <= seed <= upper
+
+
+# --- whole simulation -----------------------------------------------------------------
+
+def _index_contacts(vector: np.ndarray, demographic_parameters: object, seed: int) -> dict:
+    import copy
+
+    from covsyn.model.data_synthesis_main import run_covid
+
+    _, _, _, contacts = run_covid(seed, vector.copy(), copy.deepcopy(demographic_parameters),
+                                  save_file=False, mode='result')
+    return contacts[0]
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_event_contacts_follow_the_ordinary_ones_and_carry_the_risk_ratio(
+        seed: int, run10_vector: np.ndarray, demographic_parameters: object) -> None:
+    """Every case attends an event; with risk ratio 0 no event contact is infected."""
+    vector = np.concatenate([run10_vector, [1.0, 1.49, 21, 1000, 0.0]])
+    contact = _index_contacts(vector, demographic_parameters, seed)
+    mask = contact['municipality_event_mask']
+    matrix = contact['municipality_contacts_matrix']
+    effective = np.asarray(contact['municipality_effective_contacts'] or [], dtype=float)
+    assert len(mask) == matrix.shape[0] >= 21
+    first_event = int(np.argmax(mask))
+    assert mask[first_event:].all() and not mask[:first_event].any()
+    assert np.all(matrix[mask].sum(axis=1) == 1)
+    # The infection loop stops early only when the population runs out, never here.
+    assert len(effective) == len(mask)
+    assert effective[mask].sum() == 0
+
+
+def test_pre_b54_vector_saves_no_event_mask(run10_vector: np.ndarray,
+                                            demographic_parameters: object) -> None:
+    assert 'municipality_event_mask' not in _index_contacts(run10_vector, demographic_parameters, 0)
+
+
+# --- warm start -----------------------------------------------------------------------
+
+def test_warm_start_pads_only_a_199_value_vector() -> None:
+    pytest.importorskip('sklearn')  # firefly_optimizer imports it at module level
+    from covsyn.calibration.firefly_optimizer import pad_pre_b54_vector
+
+    seed_vector = np.arange(204, dtype=float)
+    padded = pad_pre_b54_vector(np.full(199, -1.0), seed_vector)
+    np.testing.assert_array_equal(padded[:199], -1.0)
+    np.testing.assert_array_equal(padded[199:], seed_vector[199:])
+    for size in (198, 200, 203, 204):
+        assert pad_pre_b54_vector(np.zeros(size), seed_vector).size == size

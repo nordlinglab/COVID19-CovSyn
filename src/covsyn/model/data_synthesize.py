@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from collections.abc import Sequence
 from functools import lru_cache
 from scipy import stats
 
@@ -66,11 +67,20 @@ COMMUNITY_EVENT_FIRST_INDEX = 199
 COMMUNITY_EVENT_FIELDS = ('probability', 'exponent', 'min_size', 'max_size', 'risk_ratio')
 
 
-def community_event_parameters(P):
-    """The mass-event parameters P[199..203], or None for a vector without them (B54).
+def community_event_parameters(P: Sequence[float]) -> dict[str, float | int] | None:
+    """Read the mass-event parameters P[199..203] (B54).
 
-    Raises ValueError for a partial or invalid block, so a malformed vector cannot
-    silently run the pre-B54 model."""
+    Args:
+        P: The full parameter vector.
+
+    Returns:
+        A dict keyed by COMMUNITY_EVENT_FIELDS, with integer min_size and max_size, or None
+        for a vector that ends before P[199] (run 10 and earlier).
+
+    Raises:
+        ValueError: The block is partial, not finite, or out of range, so a malformed
+            vector cannot silently run the pre-B54 model.
+    """
     extra = len(P) - COMMUNITY_EVENT_FIRST_INDEX
     if extra <= 0:
         return None
@@ -97,17 +107,29 @@ def community_event_parameters(P):
 
 
 @lru_cache(maxsize=64)
-def _event_size_cdf(exponent, min_size, max_size):
+def _event_size_cdf(exponent: float, min_size: int, max_size: int) -> np.ndarray:
     sizes = np.arange(min_size, max_size + 1)
     weights = sizes.astype(float) ** -exponent
-    return np.cumsum(weights) / np.sum(weights)
+    cdf = np.cumsum(weights) / np.sum(weights)
+    # Cached and shared by every later draw, so it must not be modifiable in place.
+    cdf.setflags(write=False)
+    return cdf
 
 
-def draw_event_size(exponent, min_size, max_size):
-    """One draw of P(S = s) proportional to s^-exponent on [min_size, max_size] (B54).
+def draw_event_size(exponent: float, min_size: int, max_size: int) -> int:
+    """Draw one event size from P(S = s) proportional to s^-exponent (B54).
 
-    Inverse-CDF sampling with a single uniform, from the global numpy stream like every
-    other draw in this module."""
+    Inverse-CDF sampling with a single uniform from the global numpy stream, like every
+    other draw in this module.
+
+    Args:
+        exponent: Power-law exponent gamma, positive.
+        min_size: Smallest event size, at least 1.
+        max_size: Largest event size, at least min_size.
+
+    Returns:
+        The event size, in [min_size, max_size].
+    """
     cdf = _event_size_cdf(float(exponent), int(min_size), int(max_size))
     index = int(np.searchsorted(cdf, np.random.random(), side='right'))
     return int(min_size) + min(index, len(cdf) - 1)
@@ -1025,24 +1047,47 @@ class Draw_contact_data:
             window = min(window, max(isolation, follow_up))
         return int(window)
 
-    def daily_contact_p(self, p, steepness, symptom_phase, width, end_day):
-        """Daily contact probability on days 0..end_day: constant p[2] for an asymptomatic
-        case, otherwise the logistic curve from p[2] (healthy) to p[3] (symptomatic)."""
+    def daily_contact_p(self, p: Sequence[float], steepness: float, symptom_phase: float,
+                        width: float, end_day: int) -> np.ndarray:
+        """Daily contact probability of one layer on days 0..end_day.
+
+        Args:
+            p: The layer's [contact_p, contact_previous_day_p, healthy_p, symptom_p].
+            steepness: Steepness of the logistic curve.
+            symptom_phase: Offset of the curve from symptom onset, in days.
+            width: Days between the healthy and the symptomatic phase.
+            end_day: Last day of the layer's window, counted from infection.
+
+        Returns:
+            Constant healthy_p for an asymptomatic case, otherwise the logistic curve from
+            healthy_p to symptom_p; length end_day + 1.
+        """
         symptom_onset = self.course_of_disease_data_object.incubation_period
         if np.isnan(symptom_onset):
             return np.full(end_day+1, p[2])
         return self.generate_logistic_contact_p(
             np.arange(end_day+1)-symptom_onset, p[2], p[3], steepness, symptom_phase, width)
 
-    def draw_community_event_contacts(self, p, steepness, symptom_phase, width, end_day, room):
-        """Contacts of at most one mass event before isolation (B54).
+    def draw_community_event_contacts(self, p: Sequence[float], steepness: float,
+                                      symptom_phase: float, width: float, end_day: int,
+                                      room: int) -> np.ndarray:
+        """Draw the contacts of at most one mass event before isolation (B54).
 
         With probability community_event['probability'] the case attends one event whose
-        size follows draw_event_size(), capped at `room`, the people of the municipality not
-        already drawn as ordinary contacts. Everyone at the event is met once, on one day
-        drawn from the layer's daily contact profile, so being symptomatic lowers the chance
-        the event falls on that day exactly as it lowers ordinary contacts (B19).
-        Returns a boolean matrix (contacts x days), empty when there is no event."""
+        size follows draw_event_size(). Everyone at the event is met once, on one day drawn
+        from the layer's daily contact profile, so being symptomatic lowers the chance the
+        event falls on that day exactly as it lowers ordinary contacts (B19).
+
+        Args:
+            p, steepness, symptom_phase, width: The municipality layer's contact profile,
+                as for daily_contact_p().
+            end_day: Last day of the municipality window, counted from infection.
+            room: People of the municipality not already drawn as ordinary contacts; caps
+                the event size.
+
+        Returns:
+            Boolean matrix (contacts x end_day + 1), with no rows when there is no event.
+        """
         no_event = np.zeros((0, end_day+1), dtype=bool)
         event = self.community_event
         if event is None or np.random.random() >= event['probability']:

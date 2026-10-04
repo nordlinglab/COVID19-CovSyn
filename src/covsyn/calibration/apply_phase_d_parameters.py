@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIRST_INDEX
+
 from covsyn.calibration.sar_anchors import ATTACK_RATE_SLICE, CONTACT_DAYS_MEASURED_ON, LAYERS, \
     LAYER_CUMULATIVE_SAR, MEAN_CONTACT_DAYS, attack_rate_block
 
@@ -106,7 +108,8 @@ OVERDISPERSION_BOUNDS = ([0.15, 3.0], [0.8, 60.0])
 COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 
 # P[199..203] (B54): municipality mass events, (seed, lower, upper) in the order of
-# data_synthesize.COMMUNITY_EVENT_FIELDS; course index 162 is P[199].
+# data_synthesize.COMMUNITY_EVENT_FIELDS. The course block starts after the 37 contact
+# parameters P[0..36], so course index 162 is P[199].
 # * probability: searched. 0.10 puts the tail ratio p90/median at about 6 (inside the
 #   tracing data's bootstrap CI [5.5, 93.1], E77) while the median stays at 3-4.
 # * exponent 1.49 and min_size 21: locked to the maximum-likelihood power-law tail of the 38
@@ -116,7 +119,8 @@ COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 # * risk_ratio: searched in [0, 0.07]. The 2,795 contacts of records with >= 100 community
 #   contacts produced no infection; the rule-of-three 95% upper bound 3/2795 against the
 #   8/523 of the other records gives 0.07.
-COMMUNITY_EVENT_COURSE_INDEX = 162
+CONTACT_PARAMETER_COUNT = 37
+COMMUNITY_EVENT_COURSE_INDEX = COMMUNITY_EVENT_FIRST_INDEX - CONTACT_PARAMETER_COUNT
 COMMUNITY_EVENT = ((0.10, 0.0, 0.20),
                    (1.49, 1.49, 1.49),
                    (21, 21, 21),
