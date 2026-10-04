@@ -236,14 +236,14 @@ def main():
         value[161], lower[161], upper[161] = v, lo, hi
 
     # P[199..203] (B54) follow P[198] for the same reason.
-    for offset, (v, lo, hi) in enumerate(COMMUNITY_EVENT):
+    for offset, (event_v, event_lo, event_hi) in enumerate(COMMUNITY_EVENT):
         i = COMMUNITY_EVENT_COURSE_INDEX + offset
         if len(value) == i:
-            value = np.append(value, v)
-            lower = np.append(lower, lo)
-            upper = np.append(upper, hi)
+            value = np.append(value, event_v)
+            lower = np.append(lower, event_lo)
+            upper = np.append(upper, event_hi)
         else:
-            value[i], lower[i], upper[i] = v, lo, hi
+            value[i], lower[i], upper[i] = event_v, event_lo, event_hi
 
     # Rebuild each layer's 25 daily attack rates from the anchors, rather than rescaling
     # whatever happens to be on disk. The arrays in variable/ descend from the ORIGINAL

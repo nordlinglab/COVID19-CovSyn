@@ -226,3 +226,24 @@ def test_warm_start_pads_only_a_199_value_vector() -> None:
     np.testing.assert_array_equal(padded[199:], seed_vector[199:])
     for size in (198, 200, 203, 204):
         assert pad_pre_b54_vector(np.zeros(size), seed_vector).size == size
+
+
+def test_apply_script_reports_the_community_dispersion_not_the_last_event_parameter(
+        tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """The event loop must not overwrite the values printed for P[198]."""
+    import shutil
+    from pathlib import Path
+
+    from covsyn.calibration import apply_phase_d_parameters as apply
+
+    for name in ('contact_parameters.pkl', 'course_parameters.npy',
+                 'course_parameters_lb.npy', 'course_parameters_ub.npy'):
+        shutil.copy(Path('variable') / name, tmp_path / name)
+    monkeypatch.setattr(apply, 'VAR', tmp_path)
+    monkeypatch.setattr(apply, 'BACKUP', tmp_path / 'backup')
+    (tmp_path / 'backup').mkdir()
+    apply.main()
+    v, lo, hi = apply.COMMUNITY_DISPERSION
+    assert f'community dispersion k in  [{lo:g}, {hi:g}], seed {v:g}' in capsys.readouterr().out
+    upper = np.load(tmp_path / 'course_parameters_ub.npy')
+    assert upper.size + 37 == 204
