@@ -61,8 +61,9 @@ AGE_BAND_EDGES = (20, 40, 60)
 # index keeps its meaning. The Gamma-Poisson count of B27 has an exponential tail
 # (P(N >= 446) ~ 2e-16 at run 10), while 3 of the 38 first-wave tracing records with a
 # known community count list 446, 822 and 850 contacts; those 7 records with >= 100 contacts
-# hold 84% of all community contacts and produced no infection. An event therefore adds a
-# heavy-tailed number of contacts, met once, at a reduced per-contact attack rate.
+# hold 84% of all community contacts. An event therefore adds a heavy-tailed number of
+# contacts, met once. P[203] scales their attack rate; it is locked at 1 for now, so the
+# events change the contact-count distribution only.
 COMMUNITY_EVENT_FIRST_INDEX = 199
 COMMUNITY_EVENT_FIELDS = ('probability', 'exponent', 'min_size', 'max_size', 'risk_ratio')
 
@@ -1577,8 +1578,7 @@ class Draw_contact_data:
         self.municipality_effective_contacts_infection_time = []
         self.municipality_secondary_contact_ages = []
         self.municipality_contact_ages = []
-        # B54: a mass-event contact is brief and casual; Taiwan's 2,795 contacts of the
-        # tracing records with >= 100 community contacts produced no infection.
+        # B54: event contacts carry the municipality rate times P[203] (locked at 1 for now).
         event_mask = getattr(self, 'municipality_event_mask', None)
         event_risk_ratio = (self.community_event['risk_ratio']
                             if self.community_event is not None else 1.0)

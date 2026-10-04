@@ -116,16 +116,18 @@ COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 #   first-wave tracing records (Clauset et al. 2009 method: k_min chosen by the KS distance,
 #   0.065, 17 records in the tail), not chosen by eye (todolist929 4.3).
 # * max_size 1000: locked; the largest record is 850, and the cap bounds the run time.
-# * risk_ratio: searched in [0, 0.07]. The 2,795 contacts of records with >= 100 community
-#   contacts produced no infection; the rule-of-three 95% upper bound 3/2795 against the
-#   8/523 of the other records gives 0.07.
+# * risk_ratio: locked at 1, so an event contact carries the ordinary municipality attack
+#   rate and only the contact-count distribution changes, as the 2026-09-29 meeting asked.
+#   The 0 infections among the 2,795 contacts of records with >= 100 community contacts
+#   come from only 7 index cases; with CovSyn's case-level dispersion (run 10: P[35] = 0.177) and
+#   municipality attack rate (~0.22%) they do not reject a ratio of 1 (P(0) = 0.14).
 CONTACT_PARAMETER_COUNT = 37
 COMMUNITY_EVENT_COURSE_INDEX = COMMUNITY_EVENT_FIRST_INDEX - CONTACT_PARAMETER_COUNT
 COMMUNITY_EVENT = ((0.10, 0.0, 0.20),
                    (1.49, 1.49, 1.49),
                    (21, 21, 21),
                    (1000, 1000, 1000),
-                   (0.05, 0.0, 0.07))
+                   (1.0, 1.0, 1.0))
 
 # The five layers' daily attack-rate bounds are no longer patched in place here. They are
 # REBUILT from sar_anchors.py, which is the single source of truth for the anchors, the Ge
