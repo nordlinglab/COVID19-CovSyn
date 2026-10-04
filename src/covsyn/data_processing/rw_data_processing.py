@@ -882,10 +882,11 @@ def extract_state_transition_days_synthetic(course_of_disease_data_list):
         symptomatic_to_confirmed_day = course_of_disease_data['monitor_isolation_period'] - \
             course_of_disease_data['incubation_period']
         symptomatic_to_confirmed_days[i] = symptomatic_to_confirmed_day
-        # Critically ill to confirmed
+        # Critically ill to confirmed. date_of_critically_ill is an absolute day and the
+        # isolation period is counted from infection, so the ICU day is made relative first.
         critically_ill_to_confirmed_day = course_of_disease_data['monitor_isolation_period'] - \
-            course_of_disease_data['date_of_critically_ill'] - \
-            course_of_disease_data['infection_day']
+            (course_of_disease_data['date_of_critically_ill'] -
+             course_of_disease_data['infection_day'])
         critically_ill_to_confirmed_days[i] = critically_ill_to_confirmed_day
 
     return (asymptomatic_to_symptomatic_days, asymptomatic_to_recovered_days,
