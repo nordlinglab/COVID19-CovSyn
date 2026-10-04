@@ -1113,7 +1113,10 @@ class Draw_contact_data:
         """
         no_event = np.zeros((0, end_day+1), dtype=bool)
         event = self.community_event
-        if event is None or np.random.random() >= event['probability']:
+        # Probability 0 draws nothing, so a padded vector with no events reproduces the
+        # pre-B54 random stream exactly.
+        if (event is None or event['probability'] <= 0.0
+                or np.random.random() >= event['probability']):
             return no_event
         size = min(draw_event_size(event['exponent'], event['min_size'], event['max_size']),
                    int(room))

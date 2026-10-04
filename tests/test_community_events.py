@@ -247,3 +247,24 @@ def test_apply_script_reports_the_community_dispersion_not_the_last_event_parame
     assert f'community dispersion k in  [{lo:g}, {hi:g}], seed {v:g}' in capsys.readouterr().out
     upper = np.load(tmp_path / 'course_parameters_ub.npy')
     assert upper.size + 37 == 204
+
+
+# Seeds whose outbreak has 4 or more cases: one extra random draw changes their output,
+# whereas a single-case outbreak with no infection hides it.
+@pytest.mark.parametrize("seed", [26, 95, 118])
+def test_event_probability_zero_reproduces_the_pre_b54_stream(
+        seed: int, run10_vector: np.ndarray, demographic_parameters: object) -> None:
+    """A vector padded with probability 0 simulates exactly what the 199-value one does."""
+    import copy
+
+    import regression_digest as rd
+    from covsyn.model.data_synthesis_main import run_covid
+
+    padded = np.concatenate([run10_vector, [0.0, 1.49, 21, 1000, 1.0]])
+    old = run_covid(seed, run10_vector.copy(), copy.deepcopy(demographic_parameters),
+                    save_file=False, mode='spread_Taiwan_weight')
+    new = run_covid(seed, padded.copy(), copy.deepcopy(demographic_parameters),
+                    save_file=False, mode='spread_Taiwan_weight')
+    for contact in new[3]:
+        contact.pop('municipality_event_mask', None)
+    assert rd.digest(new) == rd.digest(old)
