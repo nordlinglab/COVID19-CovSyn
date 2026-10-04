@@ -617,6 +617,27 @@ class Draw_course_of_disease_data:
 
         return (natural_immunity_status)
 
+    def apply_icu_isolation(self) -> None:
+        """Isolate a case on the day it is admitted to intensive care (B52, finding E81).
+
+        Isolation is decided before the ICU day is drawn, so 74.5% of run 10's ICU cases
+        entered the ICU while still meeting household, school and work contacts (C14). A
+        patient in intensive care is hospitalised, so isolation moves back to the admission
+        day, and the positive and negative test dates move with it to keep the confirming
+        test at isolation (C07). Applied after the outcome is drawn and without drawing a
+        random number, so the course-of-disease random stream is the same as before B52.
+        """
+        if not np.isfinite(self.date_of_critically_ill):
+            return
+        icu_day = int(np.floor(self.date_of_critically_ill - self.infection_day))
+        shift = self.monitor_isolation_period - icu_day
+        if shift <= 0:
+            return
+        self.monitor_isolation_period = icu_day
+        self.positive_test_date = self.positive_test_date - shift
+        self.negative_test_date = self.negative_test_date - shift
+        self.isolation_route = 'critical'
+
     def draw_course_of_disease(self):
         """Draw the whole course of disease for one case.
 
@@ -728,6 +749,7 @@ class Draw_course_of_disease_data:
                     if self.date_of_death < earliest_end:
                         self.date_of_death = earliest_end + 1
 
+        self.apply_icu_isolation()
         self.natural_immunity_status = self.draw_natural_immunity_status()
 
         return (self.monitor_isolation_period, self.latent_period, self.incubation_period, self.infectious_period,
