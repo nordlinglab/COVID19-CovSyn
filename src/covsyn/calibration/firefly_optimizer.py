@@ -1049,6 +1049,11 @@ def decode_metrics(P):
     if len(P) > 198:
         # E35: dispersion of the community contact count, independent of infectiousness.
         m['community_dispersion_k'] = P[198]
+    if len(P) >= COMMUNITY_EVENT_FIRST_INDEX + len(COMMUNITY_EVENT_FIELDS):
+        # B54: the two searched mass-event parameters.
+        m['community_event_probability'] = P[COMMUNITY_EVENT_FIRST_INDEX]
+        m['community_event_risk_ratio'] = P[COMMUNITY_EVENT_FIRST_INDEX
+                                            + COMMUNITY_EVENT_FIELDS.index('risk_ratio')]
     m['age_risk_0_19'] = P[63]
     m['age_risk_20_39'] = P[64]
     m['age_risk_40_59'] = P[65]
@@ -1069,6 +1074,24 @@ def decode_metrics(P):
     m['municipality_contacts_lambda'] = P[28]
     m['municipality_healthy_p'] = P[30]
     return {k: float(v) for k, v in m.items()}
+
+
+def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarray:
+    """Extend a pre-B54 warm-start vector with the seed values of the appended parameters.
+
+    Args:
+        vector: A best vector read from an earlier run.
+        seed_vector: The literature seed vector of this run.
+
+    Returns:
+        The vector with seed_vector[199:] appended when it has exactly the 199 values of
+        run 10 and earlier; otherwise the vector unchanged, so a misaligned vector of any
+        other length still fails the caller's shape check instead of being padded into a
+        plausible-looking start.
+    """
+    if vector.size == COMMUNITY_EVENT_FIRST_INDEX < seed_vector.size:
+        return np.concatenate([vector, seed_vector[vector.size:]])
+    return vector
 
 
 class Firefly:
@@ -1310,10 +1333,13 @@ if __name__ == "__main__":
     for path in args.warm_start:
         earlier = np.atleast_2d(np.loadtxt(path))
         vector = earlier[int(np.argmin(earlier[:, -1])), 1:-1]
-        if vector.shape != lower_bound.shape:
+        padded = pad_pre_b54_vector(vector, seed_vector)
+        if padded.shape != lower_bound.shape:
             sys.exit(f'warm start {path}: {vector.size} parameters, expected {lower_bound.size}')
-        warm_start_vectors.append(vector)
-        print(f'warm start from {path}: recorded cost {earlier[:, -1].min():.4f}', flush=True)
+        warm_start_vectors.append(padded)
+        print(f'warm start from {path}: recorded cost {earlier[:, -1].min():.4f}'
+              + (f' for its {vector.size} parameters; P[{vector.size}:] from the seed vector'
+                 if padded.size != vector.size else ''), flush=True)
 
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:

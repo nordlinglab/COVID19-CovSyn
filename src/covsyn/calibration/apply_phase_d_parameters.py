@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIRST_INDEX
+
 from covsyn.calibration.sar_anchors import ATTACK_RATE_SLICE, CONTACT_DAYS_MEASURED_ON, LAYERS, \
     LAYER_CUMULATIVE_SAR, MEAN_CONTACT_DAYS, attack_rate_block
 
@@ -104,6 +106,28 @@ OVERDISPERSION_BOUNDS = ([0.15, 3.0], [0.8, 60.0])
 # records -- the heavy tail B27 exists for was simply absent. Below 1 the Gamma-Poisson has
 # the over-dispersed shape the records show.
 COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
+
+# P[199..203] (B54): municipality mass events, (seed, lower, upper) in the order of
+# data_synthesize.COMMUNITY_EVENT_FIELDS. The course block starts after the 37 contact
+# parameters P[0..36], so course index 162 is P[199].
+# * probability: searched. 0.10 puts the tail ratio p90/median at about 6 (inside the
+#   tracing data's bootstrap CI [5.5, 93.1], E77) while the median stays at 3-4.
+# * exponent 1.49 and min_size 21: locked to the maximum-likelihood power-law tail of the 38
+#   first-wave tracing records (Clauset et al. 2009 method: k_min chosen by the KS distance,
+#   0.065, 17 records in the tail), not chosen by eye (todolist929 4.3).
+# * max_size 1000: locked; the largest record is 850, and the cap bounds the run time.
+# * risk_ratio: locked at 1, so an event contact carries the ordinary municipality attack
+#   rate and only the contact-count distribution changes, as the 2026-09-29 meeting asked.
+#   The 0 infections among the 2,795 contacts of records with >= 100 community contacts
+#   come from only 7 index cases; with CovSyn's case-level dispersion (run 10: P[35] = 0.177) and
+#   municipality attack rate (~0.22%) they do not reject a ratio of 1 (P(0) = 0.14).
+CONTACT_PARAMETER_COUNT = 37
+COMMUNITY_EVENT_COURSE_INDEX = COMMUNITY_EVENT_FIRST_INDEX - CONTACT_PARAMETER_COUNT
+COMMUNITY_EVENT = ((0.10, 0.0, 0.20),
+                   (1.49, 1.49, 1.49),
+                   (21, 21, 21),
+                   (1000, 1000, 1000),
+                   (1.0, 1.0, 1.0))
 
 # The five layers' daily attack-rate bounds are no longer patched in place here. They are
 # REBUILT from sar_anchors.py, which is the single source of truth for the anchors, the Ge
@@ -210,6 +234,16 @@ def main():
         upper = np.append(upper, hi)
     else:
         value[161], lower[161], upper[161] = v, lo, hi
+
+    # P[199..203] (B54) follow P[198] for the same reason.
+    for offset, (event_v, event_lo, event_hi) in enumerate(COMMUNITY_EVENT):
+        i = COMMUNITY_EVENT_COURSE_INDEX + offset
+        if len(value) == i:
+            value = np.append(value, event_v)
+            lower = np.append(lower, event_lo)
+            upper = np.append(upper, event_hi)
+        else:
+            value[i], lower[i], upper[i] = event_v, event_lo, event_hi
 
     # Rebuild each layer's 25 daily attack rates from the anchors, rather than rescaling
     # whatever happens to be on disk. The arrays in variable/ descend from the ORIGINAL

@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from collections.abc import Sequence
 from functools import lru_cache
 from scipy import stats
 
@@ -55,6 +56,84 @@ HEALTH_CARE_POST_ISOLATION_PROTECTION = 0.25
 SYMPTOM_TO_ICU_AGE_RR = np.array([0.05, 1.0, 2.8, 6.4])
 ICU_TO_DEATH_AGE_RR = np.array([0.10, 1.0, 2.3, 12.8])
 AGE_BAND_EDGES = (20, 40, 60)
+
+# B54: municipality mass events, P[199]..P[203], appended after P[198] so every existing
+# index keeps its meaning. The Gamma-Poisson count of B27 has an exponential tail
+# (P(N >= 446) ~ 2e-16 at run 10), while 3 of the 38 first-wave tracing records with a
+# known community count list 446, 822 and 850 contacts; those 7 records with >= 100 contacts
+# hold 84% of all community contacts. An event therefore adds a heavy-tailed number of
+# contacts, met once. P[203] scales their attack rate; it is locked at 1 for now, so the
+# events change the contact-count distribution only.
+COMMUNITY_EVENT_FIRST_INDEX = 199
+COMMUNITY_EVENT_FIELDS = ('probability', 'exponent', 'min_size', 'max_size', 'risk_ratio')
+
+
+def community_event_parameters(P: Sequence[float]) -> dict[str, float | int] | None:
+    """Read the mass-event parameters P[199..203] (B54).
+
+    Args:
+        P: The full parameter vector.
+
+    Returns:
+        A dict keyed by COMMUNITY_EVENT_FIELDS, with integer min_size and max_size, or None
+        for a vector that ends before P[199] (run 10 and earlier).
+
+    Raises:
+        ValueError: The block is partial, not finite, or out of range, so a malformed
+            vector cannot silently run the pre-B54 model.
+    """
+    extra = len(P) - COMMUNITY_EVENT_FIRST_INDEX
+    if extra <= 0:
+        return None
+    if extra < len(COMMUNITY_EVENT_FIELDS):
+        raise ValueError(f'parameter vector has {len(P)} entries: the community event block '
+                         f'P[199..203] needs all {len(COMMUNITY_EVENT_FIELDS)}')
+    values = [float(P[COMMUNITY_EVENT_FIRST_INDEX + i])
+              for i in range(len(COMMUNITY_EVENT_FIELDS))]
+    if not np.all(np.isfinite(values)):
+        raise ValueError(f'community event parameters must be finite: {values}')
+    event = dict(zip(COMMUNITY_EVENT_FIELDS, values))
+    event['min_size'] = int(round(event['min_size']))
+    event['max_size'] = int(round(event['max_size']))
+    if not 0.0 <= event['probability'] <= 1.0:
+        raise ValueError(f"event probability {event['probability']} is outside [0, 1]")
+    if event['exponent'] <= 0.0:
+        raise ValueError(f"event size exponent {event['exponent']} must be positive")
+    if not 1 <= event['min_size'] <= event['max_size']:
+        raise ValueError(f"event sizes need 1 <= min_size <= max_size, got "
+                         f"{event['min_size']} and {event['max_size']}")
+    if event['risk_ratio'] < 0.0:
+        raise ValueError(f"event risk ratio {event['risk_ratio']} must not be negative")
+    return event
+
+
+@lru_cache(maxsize=64)
+def _event_size_cdf(exponent: float, min_size: int, max_size: int) -> np.ndarray:
+    sizes = np.arange(min_size, max_size + 1)
+    weights = sizes.astype(float) ** -exponent
+    cdf = np.cumsum(weights) / np.sum(weights)
+    # Cached and shared by every later draw, so it must not be modifiable in place.
+    cdf.setflags(write=False)
+    return cdf
+
+
+def draw_event_size(exponent: float, min_size: int, max_size: int) -> int:
+    """Draw one event size from P(S = s) proportional to s^-exponent (B54).
+
+    Inverse-CDF sampling with a single uniform from the global numpy stream, like every
+    other draw in this module.
+
+    Args:
+        exponent: Power-law exponent gamma, positive.
+        min_size: Smallest event size, at least 1.
+        max_size: Largest event size, at least min_size.
+
+    Returns:
+        The event size, in [min_size, max_size].
+    """
+    cdf = _event_size_cdf(float(exponent), int(min_size), int(max_size))
+    index = int(np.searchsorted(cdf, np.random.random(), side='right'))
+    return int(min_size) + min(index, len(cdf) - 1)
 
 
 @lru_cache(maxsize=None)
@@ -659,7 +738,8 @@ class Draw_contact_data:
     def __init__(self, attack_rate, social_data_object, course_of_disease_data_object,
                  previously_infected_list, population_size, vaccine_efficacy, vaccination_rate,
                  natural_immunity_status_list, overdispersion_rate, overdispersion_weight,
-                 age_risk_ratios, age_p, layer_age_p=None, community_dispersion=None):
+                 age_risk_ratios, age_p, layer_age_p=None, community_dispersion=None,
+                 community_event=None):
         self.course_of_disease_data_object = course_of_disease_data_object
         self.social_data_object = social_data_object
         self.attack_rate = attack_rate
@@ -694,6 +774,8 @@ class Draw_contact_data:
         self.community_dispersion = (None if community_dispersion is None
                                      else max(float(community_dispersion), 1e-3))
         self.community_activity = self.draw_community_activity()
+        # B54: dict from community_event_parameters(), or None for no mass events.
+        self.community_event = community_event
         self.age_risk_ratios = age_risk_ratios
         self.age_p = age_p
         if layer_age_p is None:
@@ -966,6 +1048,64 @@ class Draw_contact_data:
             window = min(window, max(isolation, follow_up))
         return int(window)
 
+    def daily_contact_p(self, p: Sequence[float], steepness: float, symptom_phase: float,
+                        width: float, end_day: int) -> np.ndarray:
+        """Daily contact probability of one layer on days 0..end_day.
+
+        Args:
+            p: The layer's [contact_p, contact_previous_day_p, healthy_p, symptom_p].
+            steepness: Steepness of the logistic curve.
+            symptom_phase: Offset of the curve from symptom onset, in days.
+            width: Days between the healthy and the symptomatic phase.
+            end_day: Last day of the layer's window, counted from infection.
+
+        Returns:
+            Constant healthy_p for an asymptomatic case, otherwise the logistic curve from
+            healthy_p to symptom_p; length end_day + 1.
+        """
+        symptom_onset = self.course_of_disease_data_object.incubation_period
+        if np.isnan(symptom_onset):
+            return np.full(end_day+1, p[2])
+        return self.generate_logistic_contact_p(
+            np.arange(end_day+1)-symptom_onset, p[2], p[3], steepness, symptom_phase, width)
+
+    def draw_community_event_contacts(self, p: Sequence[float], steepness: float,
+                                      symptom_phase: float, width: float, end_day: int,
+                                      room: int) -> np.ndarray:
+        """Draw the contacts of at most one mass event before isolation (B54).
+
+        With probability community_event['probability'] the case attends one event whose
+        size follows draw_event_size(). Everyone at the event is met once, on one day drawn
+        from the layer's daily contact profile, so being symptomatic lowers the chance the
+        event falls on that day exactly as it lowers ordinary contacts (B19).
+
+        Args:
+            p, steepness, symptom_phase, width: The municipality layer's contact profile,
+                as for daily_contact_p().
+            end_day: Last day of the municipality window, counted from infection.
+            room: People of the municipality not already drawn as ordinary contacts; caps
+                the event size.
+
+        Returns:
+            Boolean matrix (contacts x end_day + 1), with no rows when there is no event.
+        """
+        no_event = np.zeros((0, end_day+1), dtype=bool)
+        event = self.community_event
+        if event is None or np.random.random() >= event['probability']:
+            return no_event
+        size = min(draw_event_size(event['exponent'], event['min_size'], event['max_size']),
+                   int(room))
+        if size <= 0:
+            return no_event
+        daily_p = np.clip(self.daily_contact_p(p, steepness, symptom_phase, width, end_day),
+                          0.0, None)
+        total = np.sum(daily_p)
+        weights = daily_p / total if total > 0 else np.full(end_day+1, 1.0 / (end_day+1))
+        day = np.random.choice(end_day+1, p=weights)
+        contacts = np.zeros((size, end_day+1), dtype=bool)
+        contacts[:, day] = True
+        return contacts
+
     def draw_social_contacts_each_day(self, social_size, p, steepness, symptom_phase, width,
                                       end_day=None, contacts_number=None):
         """
@@ -996,22 +1136,7 @@ class Draw_contact_data:
         if contacts_number == 0:
             return np.empty((0, isolation_period+1))
 
-        # Determine contact probabilities based on symptom status
-        symptom_onset = self.course_of_disease_data_object.incubation_period
-        
-        if np.isnan(symptom_onset):
-            # Asymptomatic case: constant probability
-            daily_p = np.full(isolation_period+1, p[2])
-        else:
-            # Symptomatic case: logistic probability curve
-            daily_p = self.generate_logistic_contact_p(
-                np.arange(isolation_period+1)-symptom_onset,
-                p[2],  # base_p
-                p[3],  # peak_p
-                steepness,
-                symptom_phase,
-                width
-            )
+        daily_p = self.daily_contact_p(p, steepness, symptom_phase, width, isolation_period)
 
         # Initialize contact matrix with first day probabilities
         contacts_matrix = self.generate_first_contact_matrix(
@@ -1101,6 +1226,22 @@ class Draw_contact_data:
         self.municipality_contacts_matrix = self.draw_social_contacts_each_day(
             None, p, steepness, symptom_phase, recover_phase,
             end_day=self.layer_windows['municipality'], contacts_number=community_contacts)
+        # B54: event contacts go after the ordinary ones, flagged by municipality_event_mask
+        # so the infection loop can apply the event risk ratio. Without event parameters
+        # nothing is drawn and the mask is never set, which keeps the random stream, and so
+        # every pre-B54 result, unchanged.
+        if self.community_event is not None:
+            event_contacts = self.draw_community_event_contacts(
+                p, steepness, symptom_phase, recover_phase, self.layer_windows['municipality'],
+                self.social_data_object.municipality_size - community_contacts)
+            ordinary = self.municipality_contacts_matrix
+            if event_contacts.shape[0] > 0:
+                self.municipality_contacts_matrix = (
+                    event_contacts if ordinary.shape[0] == 0
+                    else np.vstack([ordinary, event_contacts.astype(ordinary.dtype)]))
+            self.municipality_event_mask = np.concatenate(
+                [np.zeros(ordinary.shape[0], dtype=bool),
+                 np.ones(event_contacts.shape[0], dtype=bool)])
 
     def draw_from_previously_infected_set(self):
         if self.population_size > 0:
@@ -1437,6 +1578,10 @@ class Draw_contact_data:
         self.municipality_effective_contacts_infection_time = []
         self.municipality_secondary_contact_ages = []
         self.municipality_contact_ages = []
+        # B54: event contacts carry the municipality rate times P[203] (locked at 1 for now).
+        event_mask = getattr(self, 'municipality_event_mask', None)
+        event_risk_ratio = (self.community_event['risk_ratio']
+                            if self.community_event is not None else 1.0)
         if np.sum(self.municipality_contacts_matrix) > 0:
             for index, row in enumerate(self.municipality_contacts_matrix):
                 if self.population_size > 0:
@@ -1458,8 +1603,11 @@ class Draw_contact_data:
                     secondary_contact_age = random.choices(
                         np.arange(100+1), weights=self.layer_age_p['municipality'])[0]
                     self.municipality_contact_ages.append(secondary_contact_age)
+                    contact_attack_rate = municipality_attack_rate
+                    if event_mask is not None and event_mask[index]:
+                        contact_attack_rate = municipality_attack_rate * event_risk_ratio
                     infection_status, effective_contacts_vector = self.draw_infection_status(
-                        municipality_attack_rate, row, natural_immunity_status, vaccination_status, secondary_contact_age,
+                        contact_attack_rate, row, natural_immunity_status, vaccination_status, secondary_contact_age,
                         'municipality')
                     self.municipality_expected_infections += self.last_infection_probability
                     if infection_status == True:

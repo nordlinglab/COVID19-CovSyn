@@ -88,6 +88,10 @@ def get_saveable_data(data, data_type):
             'municipality_contact_ages': getattr(data, 'municipality_contact_ages', None),
             'municipality_previously_infected_index_list': getattr(data, 'municipality_previously_infected_index_list', None)
         }
+        # B54: only present when the vector carries event parameters, so pre-B54 output
+        # keeps exactly its old keys.
+        if getattr(data, 'municipality_event_mask', None) is not None:
+            data_dict['municipality_event_mask'] = data.municipality_event_mask
 
     return data_dict
 
@@ -121,6 +125,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     # infectiousness multiplier. Appended at the end of the vector so every existing index
     # keeps its meaning; older 198-long vectors simply fall back to the shared draw.
     community_dispersion = input_P[198] if len(input_P) > 198 else None
+    # P[199..203] (B54): municipality mass events; None for older vectors.
+    community_event = community_event_parameters(input_P)
     latent_period_gamma = {
         'latent_period_shape': input_P[37], 'latent_period_scale': input_P[38]}
     infectious_period_gamma = {
@@ -377,7 +383,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                  previously_infected_list, population_size, vaccine_efficacy,
                                                  vaccination_rate, natural_immunity_status_list,
                                                  overdispersion_rate, overdispersion_weight, age_risk_ratios, age_p,
-                                                 layer_age_p, community_dispersion)
+                                                 layer_age_p, community_dispersion, community_event)
 
                 _, population_size = contact_data.draw_contact_data(input_P)
                 contact_data_tmp = get_saveable_data(contact_data, 'contact')
