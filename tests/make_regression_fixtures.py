@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Write the regression fixtures that pin CovSyn's output before any restructuring.
 
-Run once, at the commit that produced Phase D run 10, from the repository root:
+Run from the repository root, on the compute server's pinned environment, whenever a decision
+intentionally changes simulated output; first at the commit that produced Phase D run 10, last
+for B52 (isolation at ICU admission):
 
     python tests/make_regression_fixtures.py
 

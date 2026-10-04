@@ -297,7 +297,7 @@ def main():
     check('B26', 'infection to isolation, mean', isolation.mean(), (8.0, 14.0),
           note='B2: incubation about 5.3 d plus an onset-to-confirmation median of 5-7 d')
     routes = [c.get('isolation_route') for c in course]
-    for route in ('symptom', 'traced', 'untraced'):
+    for route in ('symptom', 'traced', 'untraced', 'critical'):  # 'critical': B52
         check('B26', f'isolation route: {route}', 100 * routes.count(route) / len(routes), None, '%')
 
     # share of contacts that happen before onset (Cheng: 27.5%)
