@@ -67,6 +67,17 @@ def summarise(rows, cheng_contact):
     }
 
 
+def top_outcome_terms(parts, count=4):
+    """The outcome targets that contribute most to cost_outcome, as 'name=penalty(measured)'."""
+    terms = []
+    for name, (_lo, _hi, w) in fo.OUTCOME_TARGETS.items():
+        x = parts.get('measured_' + name, np.nan)
+        if w > 0 and np.isfinite(x):
+            terms.append((fo.outcome_penalty({name: x}), name, x))
+    terms.sort(reverse=True)
+    return '; '.join(f'{n}={pen:.3g}({x:.3g})' for pen, n, x in terms[:count] if pen > 0)
+
+
 def main():
     best_path, out_path = sys.argv[1], sys.argv[2]
     n_cases = int(sys.argv[3]) if len(sys.argv) > 3 else 3000
@@ -99,8 +110,10 @@ def main():
                      objective_cost_contact_others=float(LAST.get('cost_contact_others', np.nan)),
                      objective_cost_outcome=float(LAST.get('cost_outcome', np.nan)),
                      objective_tail_ratio=float(LAST.get('measured_community_tail_ratio', np.nan)))
+        stats['objective_top_outcome_terms'] = top_outcome_terms(LAST)
         rows_out.append(stats)
-        print(' '.join(f'{k}={v:.4g}' for k, v in stats.items()), flush=True)
+        print(' '.join(f'{k}={v:.4g}' if isinstance(v, float) else f'{k}=[{v}]'
+                       for k, v in stats.items()), flush=True)
     pool.shutdown()
 
     with open(out_path, 'w', newline='') as f:
