@@ -68,7 +68,7 @@ def main():
     line(c, d, 'expected_cost_contact_others', BLUE, 'o', 'expected (mean of 3,000 cases)')
     line(c, d, 'objective_cost_contact_others', ORANGE, 's', 'what the optimizer saw (100 fixed seeds)')
     c.legend(frameon=False, fontsize=8, labelcolor=INK, loc='upper left')
-    c.set_ylim(0, d['objective_cost_contact_others'].max() * 1.15)
+    c.set_ylim(0, d[['objective_cost_contact_others', 'expected_cost_contact_others']].max().max() * 1.15)
     mark_run11(c, p199, y=0.45)
 
     style(e, 'D  Community infections per index case (3,000 cases)', 'infections per index case')
