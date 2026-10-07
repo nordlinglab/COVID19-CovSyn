@@ -38,6 +38,7 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
+from covsyn.model.contact_measures import contacts_per_day_before_onset
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
@@ -84,7 +85,7 @@ def _case_cheng_bins(course, contact):
     for gi, (_group, layer_names) in enumerate(CHENG_GROUPS):
         for layer in layer_names:
             _, contact_array, _, infection_array = create_array_cheng2020_fig2(
-                one_course, one_contact, layer=layer)
+                one_course, one_contact, layer=layer, expected_events=True)   # B55
             if contact_array.size == 6:
                 bins[gi, 0] += contact_array
                 bins[gi, 1] += infection_array
@@ -117,13 +118,8 @@ def _index_case_scalars(course, contact):
 
     onset = course['incubation_period']
     for layer in LAYERS:
-        matrix = np.asarray(contact[MATRIX[layer]], dtype=float)
-        if matrix.size == 0 or matrix.shape[1] == 0:
-            out[f'per_day_{layer}'] = 0.0
-            continue
-        days = matrix.shape[1] if (onset is None or np.isnan(onset)) \
-            else int(min(matrix.shape[1], max(onset, 1)))
-        out[f'per_day_{layer}'] = float(matrix[:, :days].sum() / max(days, 1))
+        # B55: ordinary contacts only, see contact_measures.contacts_per_day_before_onset.
+        out[f'per_day_{layer}'] = contacts_per_day_before_onset(course, contact, layer)
 
     medical_early = medical_late = medical_total = 0
     if not (onset is None or np.isnan(onset)):

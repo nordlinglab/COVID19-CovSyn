@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import LAYER_CUMULATIVE_SAR, LAYER_INFECTIONS_PER_INDEX
+from covsyn.model.contact_measures import contacts_per_day_before_onset
 from covsyn.model.data_synthesize import *
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
@@ -285,7 +286,8 @@ def generate_contact_result(course_of_disease_data_list, contact_data_list, laye
         _, workplace_contact_array, _, workplace_infection_array = create_array_cheng2020_fig2(
             course_of_disease_data_list, contact_data_list, layer='Workplace')
         _, municipality_contact_array, _, municipality_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='Municipality')
+            course_of_disease_data_list, contact_data_list, layer='Municipality',
+            expected_events=True)   # B55
         contact_array = np.sum(np.vstack(
             (school_contact_array, workplace_contact_array, municipality_contact_array)), axis=0)
         infection_array = np.sum(np.vstack(
@@ -699,17 +701,9 @@ def measure_outcomes(index_cases):
         measured['offspring_k'] = 100.0        # Poisson or tighter: no overdispersion at all
 
     for layer in layers:
-        key = 'school_class_contacts_matrix' if layer == 'school' else f'{layer}_contacts_matrix'
-        per_day = []
-        for course, contact, _ in index_cases:
-            matrix = np.asarray(contact[key], dtype=float)
-            if matrix.size == 0 or matrix.shape[1] == 0:
-                per_day.append(0.0)
-                continue
-            onset = course['incubation_period']
-            days = matrix.shape[1] if (onset is None or np.isnan(onset)) \
-                else int(min(matrix.shape[1], max(onset, 1)))
-            per_day.append(matrix[:, :days].sum() / max(days, 1))
+        # B55: ordinary contacts only, see contact_measures.contacts_per_day_before_onset.
+        per_day = [contacts_per_day_before_onset(course, contact, layer)
+                   for course, contact, _ in index_cases]
         measured[f'daily_{layer}'] = float(np.mean(per_day))
 
     for layer in layers:

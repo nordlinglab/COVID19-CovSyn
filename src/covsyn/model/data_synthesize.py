@@ -136,6 +136,26 @@ def draw_event_size(exponent: float, min_size: int, max_size: int) -> int:
     return int(min_size) + min(index, len(cdf) - 1)
 
 
+def expected_event_size(exponent: float, min_size: int, max_size: int, room: float) -> float:
+    """E[min(S, room)] for the event size S of draw_event_size() (B55).
+
+    Args:
+        exponent: Power-law exponent gamma, positive.
+        min_size: Smallest event size, at least 1.
+        max_size: Largest event size, at least min_size.
+        room: People of the municipality left after the ordinary contacts; caps each event.
+
+    Returns:
+        The expected number of event contacts given that an event happens.
+    """
+    if room <= 0:
+        return 0.0
+    cdf = _event_size_cdf(float(exponent), int(min_size), int(max_size))
+    pmf = np.diff(np.concatenate([[0.0], cdf]))
+    sizes = np.arange(int(min_size), int(max_size) + 1)
+    return float(np.sum(np.minimum(sizes, room) * pmf))
+
+
 @lru_cache(maxsize=None)
 def _capped_gamma_mean(shape, cap):
     """E[min(X, cap)] for X ~ Gamma(shape, 1/shape), which has mean 1 before capping.
@@ -1091,6 +1111,18 @@ class Draw_contact_data:
         return self.generate_logistic_contact_p(
             np.arange(end_day+1)-symptom_onset, p[2], p[3], steepness, symptom_phase, width)
 
+    def event_day_weights(self, p: Sequence[float], steepness: float, symptom_phase: float,
+                          width: float, end_day: int) -> np.ndarray:
+        """Probability that an event falls on each day 0..end_day (B54, B55).
+
+        The municipality daily contact profile, normalised; uniform when it is zero on every
+        day. Shared by the event draw and by the expected event contacts of the calibration.
+        """
+        daily_p = np.clip(self.daily_contact_p(p, steepness, symptom_phase, width, end_day),
+                          0.0, None)
+        total = np.sum(daily_p)
+        return daily_p / total if total > 0 else np.full(end_day+1, 1.0 / (end_day+1))
+
     def draw_community_event_contacts(self, p: Sequence[float], steepness: float,
                                       symptom_phase: float, width: float, end_day: int,
                                       room: int) -> np.ndarray:
@@ -1122,10 +1154,7 @@ class Draw_contact_data:
                    int(room))
         if size <= 0:
             return no_event
-        daily_p = np.clip(self.daily_contact_p(p, steepness, symptom_phase, width, end_day),
-                          0.0, None)
-        total = np.sum(daily_p)
-        weights = daily_p / total if total > 0 else np.full(end_day+1, 1.0 / (end_day+1))
+        weights = self.event_day_weights(p, steepness, symptom_phase, width, end_day)
         day = np.random.choice(end_day+1, p=weights)
         contacts = np.zeros((size, end_day+1), dtype=bool)
         contacts[:, day] = True
@@ -1267,6 +1296,16 @@ class Draw_contact_data:
             self.municipality_event_mask = np.concatenate(
                 [np.zeros(ordinary.shape[0], dtype=bool),
                  np.ones(event_contacts.shape[0], dtype=bool)])
+            # B55: the expected event contacts on each day, P[199] x E[min(S, room)] x the
+            # event-day weights. The calibration bins these instead of the sampled event
+            # contacts; computing them draws no random number.
+            event = self.community_event
+            room = self.social_data_object.municipality_size - community_contacts
+            self.municipality_event_expected_contacts = (
+                event['probability']
+                * expected_event_size(event['exponent'], event['min_size'], event['max_size'], room)
+                * self.event_day_weights(p, steepness, symptom_phase, recover_phase,
+                                         self.layer_windows['municipality']))
 
     def draw_from_previously_infected_set(self):
         if self.population_size > 0:

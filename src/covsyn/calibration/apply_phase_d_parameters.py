@@ -110,8 +110,11 @@ COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 # P[199..203] (B54): municipality mass events, (seed, lower, upper) in the order of
 # data_synthesize.COMMUNITY_EVENT_FIELDS. The course block starts after the 37 contact
 # parameters P[0..36], so course index 162 is P[199].
-# * probability: searched. 0.10 puts the tail ratio p90/median at about 6 (inside the
-#   tracing data's bootstrap CI [5.5, 93.1], E77) while the median stays at 3-4.
+# * probability: locked at 0.10 (B55). Run 11 searched [0, 0.20] and settled at 0.012
+#   because one event of hundreds of people in its 100 fixed seeds inflates the Cheng fit
+#   (E85). Measured on 3,000 cases, CovSyn's Cheng 'others' contacts per 100 cases are 660
+#   without events and 1,817 at 0.10, against Cheng et al. 2020's 1,822; the tail ratio
+#   there is 7.3, inside the tracing data's bootstrap CI [5.5, 93.1] (E77).
 # * exponent 1.49 and min_size 21: locked to the maximum-likelihood power-law tail of the 38
 #   first-wave tracing records (Clauset et al. 2009 method: k_min chosen by the KS distance,
 #   0.065, 17 records in the tail), not chosen by eye (todolist929 4.3).
@@ -123,7 +126,7 @@ COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 #   municipality attack rate (~0.22%) they do not reject a ratio of 1 (P(0) = 0.14).
 CONTACT_PARAMETER_COUNT = 37
 COMMUNITY_EVENT_COURSE_INDEX = COMMUNITY_EVENT_FIRST_INDEX - CONTACT_PARAMETER_COUNT
-COMMUNITY_EVENT = ((0.10, 0.0, 0.20),
+COMMUNITY_EVENT = ((0.10, 0.10, 0.10),
                    (1.49, 1.49, 1.49),
                    (21, 21, 21),
                    (1000, 1000, 1000),
