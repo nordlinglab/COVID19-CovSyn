@@ -92,6 +92,10 @@ def get_saveable_data(data, data_type):
         # keeps exactly its old keys.
         if getattr(data, 'municipality_event_mask', None) is not None:
             data_dict['municipality_event_mask'] = data.municipality_event_mask
+            data_dict['municipality_event_expected_contacts'] = (
+                data.municipality_event_expected_contacts)
+            data_dict['municipality_event_expected_infections'] = getattr(
+                data, 'municipality_event_expected_infections', None)
 
     return data_dict
 

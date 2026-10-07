@@ -110,8 +110,13 @@ COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 # P[199..203] (B54): municipality mass events, (seed, lower, upper) in the order of
 # data_synthesize.COMMUNITY_EVENT_FIELDS. The course block starts after the 37 contact
 # parameters P[0..36], so course index 162 is P[199].
-# * probability: searched. 0.10 puts the tail ratio p90/median at about 6 (inside the
-#   tracing data's bootstrap CI [5.5, 93.1], E77) while the median stays at 3-4.
+# * probability: searched in [0, 0.20], seed 0.10 (B55). Run 11 settled at 0.012 for two
+#   reasons now removed: a single sampled event inflated the Cheng fit (E85; the fit now
+#   bins the expected event contacts) and the fit compared 300 cases of contacts with
+#   Cheng's 100 (E86). Locking it at 0.10, where run 11's other parameters give Cheng's
+#   1,822 'others' contacts per 100 cases, was considered and dropped: those parameters
+#   were fitted under E86, so the Cheng fit itself now decides how much of the contact
+#   count comes from events. The seed 0.10 puts the tail ratio at 7.3 (target [5.5, 93.1]).
 # * exponent 1.49 and min_size 21: locked to the maximum-likelihood power-law tail of the 38
 #   first-wave tracing records (Clauset et al. 2009 method: k_min chosen by the KS distance,
 #   0.065, 17 records in the tail), not chosen by eye (todolist929 4.3).

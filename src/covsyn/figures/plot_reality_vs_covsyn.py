@@ -31,6 +31,7 @@ import pandas as pd
 # the community anchor, B2 replaced the 1-day onset-to-confirmation with 5-7 days), so this
 # figure was scoring run 5 against targets that no longer existed.
 from covsyn.calibration.sar_anchors import LAYER_CUMULATIVE_SAR, LAYER_INFECTIONS_PER_INDEX
+from covsyn.model.contact_measures import contacts_per_day_before_onset
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2] if len(sys.argv) > 2 else 'synthetic_data_results_taiwan_first_outbreak')
@@ -74,16 +75,9 @@ def layer_sar(layer, cases):
 
 
 def daily_contacts(layer):
-    per_day = []
-    for c, k in zip(index_contact, index_course):
-        m = np.asarray(c[MATRIX[layer]], dtype=float)
-        if m.size == 0 or m.shape[1] == 0:
-            per_day.append(0.0)
-            continue
-        onset = k['incubation_period']
-        days = m.shape[1] if (onset is None or np.isnan(onset)) else int(min(m.shape[1], max(onset, 1)))
-        per_day.append(m[:, :days].sum() / max(days, 1))
-    return float(np.mean(per_day))
+    # B55: ordinary contacts only, the same function the objective uses.
+    return float(np.mean([contacts_per_day_before_onset(k, c, layer)
+                          for c, k in zip(index_contact, index_course)]))
 
 
 def contact_bins(layers, only_symptomatic=True):

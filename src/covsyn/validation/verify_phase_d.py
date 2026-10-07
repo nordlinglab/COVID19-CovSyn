@@ -18,6 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
+from covsyn.model.contact_measures import contacts_per_day_before_onset
+
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
 OUT_JSON = Path(sys.argv[3] if len(sys.argv) > 3 else 'validation_reference/phaseD_checks.json')
@@ -146,15 +148,9 @@ def main():
                'municipality': (1.2, 1.8), 'health_care': (0.0, 0.3)}
     total = 0.0
     for L in LAYERS:
-        per_day = []
-        for c, k in zip(index_contact, index_course):
-            m = np.asarray(c[MATRIX[L]], dtype=float)
-            if m.size == 0 or m.shape[1] == 0:
-                per_day.append(0.0)
-                continue
-            onset = k['incubation_period']
-            days = m.shape[1] if (onset is None or np.isnan(onset)) else int(min(m.shape[1], max(onset, 1)))
-            per_day.append(m[:, :days].sum() / max(days, 1))
+        # B55: ordinary contacts only, the same function the objective uses.
+        per_day = [contacts_per_day_before_onset(k, c, L)
+                   for c, k in zip(index_contact, index_course)]
         value = float(np.mean(per_day))
         total += value
         check('B25', f'contacts per day before onset, {L}', value, targets[L])

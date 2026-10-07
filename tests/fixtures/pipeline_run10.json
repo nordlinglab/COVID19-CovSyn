@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "26a4958b3b612bd62a2d81b5b51a09dfbcd53889",
+ "generated_at_commit": "f98d126c9a157cc223137bdd594acda568dee5cb",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -504,8 +504,8 @@
   },
   "check_gap": {
    "returncode": 0,
-   "stdout_head": "=== best firefly (cost 2.0260, row 55 of 100) ===\nparam gamma means: latent 4.43  infectious 6.96  incubation 1.38\nage risk ratios  : [0.390, 1.000, 1.900, 1.440]\noverdispersion   : rate 0.177 weight 28.65\ntransition p     : asx->R 0.253  sym->R 0.899  crit->R 0.858\n   mean daily attack rate household     0.0097\n   mean daily attack rate school        0.0062\n   mean daily attack rate workplace    ",
-   "stdout_sha256": "fbf2ab3ad4db9411e6183b97aaae81dae79985183838db4cb4b7714e5ca3f04b"
+   "stdout_head": "=== best firefly (cost 2.0260, row 55 of 100) ===\nparam gamma means: latent 4.43  infectious 6.96  pre-onset window 1.38\nage risk ratios  : [0.390, 1.000, 1.900, 1.440]\ninfectiousness   : Gamma shape k 0.177, cap 28.65 (B17)\ntransition p     : asx->R 0.253  sym->R 0.899  crit->R 0.858\n   mean daily attack rate household     0.0097\n   mean daily attack rate school        0.0062\n   mean daily attack",
+   "stdout_sha256": "55fcb2972d9b4808a3e42144ce9a5b2cd646ef2f0f04654bedd63e5a235069aa"
   },
   "constraint_summary": {
    "sha256": "bc21d074b1feef5c58019bb12e86bf3640d9037ba643dfff4ab38cbd03080634"
@@ -533,7 +533,7 @@
   "show_final": {
    "returncode": 0,
    "stdout_head": "=== final generation (119 of 120) ===\n  best_cost                        2.026\n  cost_contact                     1.9176\n  cost_attack_rate                 0.3081\n  cost_energy                      -0.2623\n  cost_penalty                     0.0\n  cost_outcome                     0.0626\n  cost_contact_household           0.4899\n  cost_contact_healthcare          0.0652\n  cost_contact_others        ",
-   "stdout_sha256": "53231656137ab7cf6b570115e047b7de70e8aa4b76d9adb9a6555e8e2bec7b08"
+   "stdout_sha256": "3646bf1adb0df8d5fd5d4f55874129db82d573f62c62bfc54cf20b62d5c6ad49"
   },
   "tw_check": {
    "returncode": 0,

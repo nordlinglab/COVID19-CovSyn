@@ -38,6 +38,7 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
+from covsyn.model.contact_measures import contacts_per_day_before_onset
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
@@ -84,7 +85,7 @@ def _case_cheng_bins(course, contact):
     for gi, (_group, layer_names) in enumerate(CHENG_GROUPS):
         for layer in layer_names:
             _, contact_array, _, infection_array = create_array_cheng2020_fig2(
-                one_course, one_contact, layer=layer)
+                one_course, one_contact, layer=layer, expected_events=True)   # B55
             if contact_array.size == 6:
                 bins[gi, 0] += contact_array
                 bins[gi, 1] += infection_array
@@ -117,13 +118,8 @@ def _index_case_scalars(course, contact):
 
     onset = course['incubation_period']
     for layer in LAYERS:
-        matrix = np.asarray(contact[MATRIX[layer]], dtype=float)
-        if matrix.size == 0 or matrix.shape[1] == 0:
-            out[f'per_day_{layer}'] = 0.0
-            continue
-        days = matrix.shape[1] if (onset is None or np.isnan(onset)) \
-            else int(min(matrix.shape[1], max(onset, 1)))
-        out[f'per_day_{layer}'] = float(matrix[:, :days].sum() / max(days, 1))
+        # B55: ordinary contacts only, see contact_measures.contacts_per_day_before_onset.
+        out[f'per_day_{layer}'] = contacts_per_day_before_onset(course, contact, layer)
 
     medical_early = medical_late = medical_total = 0
     if not (onset is None or np.isnan(onset)):
@@ -176,7 +172,8 @@ def run_batch(seeds, P, columns):
         cases = []
         for j, (course, contact) in enumerate(zip(course_list, contact_list)):
             cases.append((_case_cheng_bins(course, contact),
-                          _case_matrix_row(demographic_list[j], course, contact, columns)))
+                          _case_matrix_row(demographic_list[j], course, contact, columns),
+                          not np.isnan(course['incubation_period'])))
         index = (_index_case_scalars(course_list[0], contact_list[0])
                  if course_list and contact_list else None)
         out.append((index, cases))
@@ -301,11 +298,12 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     index_scalars = []
     bins = np.zeros((len(CHENG_GROUPS), 2, 6))
     rows = []
+    symptomatic_cases = 0
     for future in futures:
         for index, cases in future.result():
             if index is not None:
                 index_scalars.append(index)
-            for case_bins, case_row in cases:
+            for case_bins, case_row, symptomatic in cases:
                 # Only the first `case_limit` POOLED cases feed the Cheng fit and the test
                 # matrix: the original truncated the concatenated lists at that length, so
                 # cases beyond it were never counted. Stopping here keeps that exactly.
@@ -313,6 +311,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
                     continue
                 bins += case_bins
                 rows.append(case_row)
+                symptomatic_cases += symptomatic
 
     max_Cheng_contact = np.max(Cheng_contact_array)
     norm_Cheng_contact_array = Cheng_contact_array / max_Cheng_contact
@@ -321,6 +320,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
 
     contact_costs = []
     attack_rate_costs = []
+    contact_scale = fo.cheng_contact_scale(symptomatic_cases)   # E86
     for i in range(len(CHENG_GROUPS)):
         contact_array = bins[i, 0].astype(float)
         infection_array = bins[i, 1].astype(float)
@@ -336,9 +336,9 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         # per-group term rather than at the binning.
         if CHENG_GROUPS[i][0] == 'Health care':
             weights = np.array([1, 1, 1, 1, 2, 2])
-            cost = np.sum((((norm_contact_array / repeat_number - norm_Cheng_data) * weights) ** 2))
+            cost = np.sum((((norm_contact_array * contact_scale - norm_Cheng_data) * weights) ** 2))
         else:
-            cost = np.sum(((norm_contact_array / repeat_number - norm_Cheng_data) ** 2))
+            cost = np.sum(((norm_contact_array * contact_scale - norm_Cheng_data) ** 2))
         attack_rate_cost = np.nansum(((norm_attack_rate - norm_Cheng_attack) * norm_weights[i]) ** 2)
         contact_costs.append(cost)
         attack_rate_costs.append(attack_rate_cost)

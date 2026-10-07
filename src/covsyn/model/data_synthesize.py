@@ -66,6 +66,7 @@ AGE_BAND_EDGES = (20, 40, 60)
 # events change the contact-count distribution only.
 COMMUNITY_EVENT_FIRST_INDEX = 199
 COMMUNITY_EVENT_FIELDS = ('probability', 'exponent', 'min_size', 'max_size', 'risk_ratio')
+EXPECTED_CONTACT_GRID = 2.0 ** 20   # resolution of the expected event contacts (B55)
 
 
 def community_event_parameters(P: Sequence[float]) -> dict[str, float | int] | None:
@@ -134,6 +135,33 @@ def draw_event_size(exponent: float, min_size: int, max_size: int) -> int:
     cdf = _event_size_cdf(float(exponent), int(min_size), int(max_size))
     index = int(np.searchsorted(cdf, np.random.random(), side='right'))
     return int(min_size) + min(index, len(cdf) - 1)
+
+
+def expected_event_size(exponent: float, min_size: int, max_size: int, room: float) -> float:
+    """E[min(S, room)] for the event size S of draw_event_size() (B55).
+
+    Args:
+        exponent: Power-law exponent gamma, positive.
+        min_size: Smallest event size, at least 1.
+        max_size: Largest event size, at least min_size.
+        room: People of the municipality left after the ordinary contacts; caps each event.
+
+    Returns:
+        The expected number of event contacts given that an event happens.
+    """
+    if room <= 0:
+        return 0.0
+    # room is almost always above max_size, so the cap, not room, is the cache key.
+    return _expected_capped_event_size(float(exponent), int(min_size), int(max_size),
+                                       float(min(room, max_size)))
+
+
+@lru_cache(maxsize=256)
+def _expected_capped_event_size(exponent, min_size, max_size, cap):
+    cdf = _event_size_cdf(exponent, min_size, max_size)
+    pmf = np.diff(np.concatenate([[0.0], cdf]))
+    sizes = np.arange(min_size, max_size + 1)
+    return float(np.sum(np.minimum(sizes, cap) * pmf))
 
 
 @lru_cache(maxsize=None)
@@ -1091,6 +1119,18 @@ class Draw_contact_data:
         return self.generate_logistic_contact_p(
             np.arange(end_day+1)-symptom_onset, p[2], p[3], steepness, symptom_phase, width)
 
+    def event_day_weights(self, p: Sequence[float], steepness: float, symptom_phase: float,
+                          width: float, end_day: int) -> np.ndarray:
+        """Probability that an event falls on each day 0..end_day (B54, B55).
+
+        The municipality daily contact profile, normalised; uniform when it is zero on every
+        day. Shared by the event draw and by the expected event contacts of the calibration.
+        """
+        daily_p = np.clip(self.daily_contact_p(p, steepness, symptom_phase, width, end_day),
+                          0.0, None)
+        total = np.sum(daily_p)
+        return daily_p / total if total > 0 else np.full(end_day+1, 1.0 / (end_day+1))
+
     def draw_community_event_contacts(self, p: Sequence[float], steepness: float,
                                       symptom_phase: float, width: float, end_day: int,
                                       room: int) -> np.ndarray:
@@ -1122,10 +1162,7 @@ class Draw_contact_data:
                    int(room))
         if size <= 0:
             return no_event
-        daily_p = np.clip(self.daily_contact_p(p, steepness, symptom_phase, width, end_day),
-                          0.0, None)
-        total = np.sum(daily_p)
-        weights = daily_p / total if total > 0 else np.full(end_day+1, 1.0 / (end_day+1))
+        weights = self.event_day_weights(p, steepness, symptom_phase, width, end_day)
         day = np.random.choice(end_day+1, p=weights)
         contacts = np.zeros((size, end_day+1), dtype=bool)
         contacts[:, day] = True
@@ -1267,6 +1304,21 @@ class Draw_contact_data:
             self.municipality_event_mask = np.concatenate(
                 [np.zeros(ordinary.shape[0], dtype=bool),
                  np.ones(event_contacts.shape[0], dtype=bool)])
+            # B55: the expected event contacts on each day, P[199] x E[min(S, room)] x the
+            # event-day weights. The calibration bins these instead of the sampled event
+            # contacts; computing them draws no random number.
+            event = self.community_event
+            room = self.social_data_object.municipality_size - community_contacts
+            expected = (
+                event['probability']
+                * expected_event_size(event['exponent'], event['min_size'], event['max_size'], room)
+                * self.event_day_weights(p, steepness, symptom_phase, recover_phase,
+                                         self.layer_windows['municipality']))
+            # Rounded to multiples of 2**-20 contacts, so every sum of these in the Cheng bins is
+            # exact and the two objective implementations, which add the cases in a different
+            # order, still agree bit for bit (E65). The rounding is below 1e-6 contacts a day.
+            self.municipality_event_expected_contacts = (
+                np.round(expected * EXPECTED_CONTACT_GRID) / EXPECTED_CONTACT_GRID)
 
     def draw_from_previously_infected_set(self):
         if self.population_size > 0:
@@ -1383,6 +1435,19 @@ class Draw_contact_data:
         workplace_attack_rate = attack_rate_profiles['workplace']
         health_care_attack_rate = attack_rate_profiles['health_care']
         municipality_attack_rate = attack_rate_profiles['municipality']
+        expected_contacts = getattr(self, 'municipality_event_expected_contacts', None)
+        if expected_contacts is not None:
+            # B55: the expected infections among the expected event contacts, so the Cheng
+            # attack rate divides expected infections by expected contacts. An event contact is
+            # met on one day, where its infection probability is that day's municipality rate
+            # times the event ratio; the contact-age factor averages to 1 by construction
+            # (age_risk_ratio_norm), and prior immunity is ignored.
+            rate = np.zeros(len(expected_contacts))
+            days = min(len(rate), len(municipality_attack_rate))
+            rate[:days] = np.clip(municipality_attack_rate[:days]
+                                  * self.community_event['risk_ratio'], 0.0, 1.0)
+            self.municipality_event_expected_infections = (
+                np.round(expected_contacts * rate * EXPECTED_CONTACT_GRID) / EXPECTED_CONTACT_GRID)
 
         self.household_previously_infected_index_list = np.array([])
         self.school_previously_infected_index_list = np.array([])

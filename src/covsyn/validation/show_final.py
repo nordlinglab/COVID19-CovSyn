@@ -30,7 +30,7 @@ def ou(x, lo, hi):
 # and five OUT rows for a run whose real cost_penalty was 0.0004 (finding E54). Keep this
 # list in step with firefly_optimizer.physiology_penalty().
 terms = [('latent_mean', P[37] * P[38], 4.1, 5.5),
-         ('infectious_mean', P[39] * P[40], 5.0, 10.0),
+         ('infectious_mean', P[39] * P[40], 3.45, 20.0),   # B5 / B55
          ('pre_onset_window', P[41] * P[42], 1.0, 3.0),
          ('onset_to_confirmation', P[43] * P[44] + P[45], 1.0, 12.0)]
 print('%-26s %9s  %-14s %s' % ('penalty term', 'value', 'target', 'contribution'))
@@ -38,13 +38,14 @@ tot = 0.0
 for n, v, lo, hi in terms:
     c = PHYSIOLOGY_PENALTY_WEIGHT * ou(v, lo, hi) ** 2
     tot += c
-    print('%-26s %9.3f  [%.1f, %.1f]%s%.4f %s' % (n, v, lo, hi, ' ' * 5, c, '<-- OUT' if c > 1e-6 else ''))
+    print('%-26s %9.3f  [%g, %g]%s%.4f %s' % (n, v, lo, hi, ' ' * 5, c, '<-- OUT' if c > 1e-6 else ''))
 print('%-26s %9s  %-14s %.4f' % ('TOTAL penalty', '', '', tot))
 print('  (the recovery times, the asymptomatic share and the severity cascade are NOT here:')
 print('   they are measured on the simulation by outcome_penalty(), see the measured_* rows)')
 print('\nage risk ratios (locked): %s' % np.round(P[63:67], 3).tolist())
-print('overdispersion: rate %.4f weight %.3f  -> expected multiplier %.3f'
-      % (P[35], P[36], (1 - P[35]) + P[35] * P[36]))
+# B17 made P[35] / P[36] the Gamma shape k and the cap of the case-level infectiousness
+# multiplier; the old 'rate / weight -> expected multiplier' line no longer meant anything.
+print('infectiousness multiplier: Gamma shape k %.4f, cap %.3f' % (P[35], P[36]))
 for name, j in [('household', 70), ('school', 95), ('workplace', 120), ('healthcare', 145), ('municipality', 170)]:
     print('  mean daily attack rate %-13s %.5f' % (name, float(np.mean(P[j:j + 25]))))
 

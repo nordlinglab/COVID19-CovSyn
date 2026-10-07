@@ -16,7 +16,9 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration.sar_anchors import LAYER_CUMULATIVE_SAR, LAYER_INFECTIONS_PER_INDEX
+from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
+                                            LAYER_INFECTIONS_PER_INDEX)
+from covsyn.model.contact_measures import contacts_per_day_before_onset
 from covsyn.model.data_synthesize import *
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
@@ -285,7 +287,8 @@ def generate_contact_result(course_of_disease_data_list, contact_data_list, laye
         _, workplace_contact_array, _, workplace_infection_array = create_array_cheng2020_fig2(
             course_of_disease_data_list, contact_data_list, layer='Workplace')
         _, municipality_contact_array, _, municipality_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='Municipality')
+            course_of_disease_data_list, contact_data_list, layer='Municipality',
+            expected_events=True)   # B55
         contact_array = np.sum(np.vstack(
             (school_contact_array, workplace_contact_array, municipality_contact_array)), axis=0)
         infection_array = np.sum(np.vstack(
@@ -434,7 +437,10 @@ def physiology_penalty(P, weight=PHYSIOLOGY_PENALTY_WEIGHT):
     # so aiming at its lower edge is aiming at a number that is not a mean at all. Inside the
     # range the term costs nothing, which is also what the professor asked for (todolist 1.11).
     pen += ou(latent_mean,      4.1, 5.5)  ** 2
-    pen += ou(infectious_mean,  5.0, 10.0) ** 2
+    # B5 put every term on the literature reported-mean range; the infectious period kept
+    # the older 5-10 days, so run 4 and run 11 paid for a mean of 4.2 days that lies inside
+    # the reported range of 3.45-20 (E25). B55 applies B5 here as well.
+    pen += ou(infectious_mean,  3.45, 20.0) ** 2
     pen += ou(pre_onset_window, 1.0, 3.0)  ** 2
     # Widened from [1, 6] once B2 gave this quantity a measured target of 5-7 days: a
     # Gamma with median 7 has a mean near 7.8, so the old ceiling made the new target
@@ -699,17 +705,9 @@ def measure_outcomes(index_cases):
         measured['offspring_k'] = 100.0        # Poisson or tighter: no overdispersion at all
 
     for layer in layers:
-        key = 'school_class_contacts_matrix' if layer == 'school' else f'{layer}_contacts_matrix'
-        per_day = []
-        for course, contact, _ in index_cases:
-            matrix = np.asarray(contact[key], dtype=float)
-            if matrix.size == 0 or matrix.shape[1] == 0:
-                per_day.append(0.0)
-                continue
-            onset = course['incubation_period']
-            days = matrix.shape[1] if (onset is None or np.isnan(onset)) \
-                else int(min(matrix.shape[1], max(onset, 1)))
-            per_day.append(matrix[:, :days].sum() / max(days, 1))
+        # B55: ordinary contacts only, see contact_measures.contacts_per_day_before_onset.
+        per_day = [contacts_per_day_before_onset(course, contact, layer)
+                   for course, contact, _ in index_cases]
         measured[f'daily_{layer}'] = float(np.mean(per_day))
 
     for layer in layers:
@@ -874,6 +872,24 @@ FAILED_EVALUATION_COST = 1e6
 # already nearly flat after 150 (1.36 -> 1.27).
 SIMULATIONS_PER_EVALUATION = 300
 
+# E86: the objective summed the contact bins of all 300 simulated cases and compared them
+# with Cheng et al. 2020's totals for 100 cases (the original 100 cases x 3 repeats lost its
+# division by 3 when E38 raised the simulations), pushing contacts per case towards a third of
+# Cheng's from run 3 to run 11. The bins hold symptomatic cases only (days from onset), so
+# they are scaled to Cheng's 91 symptomatic index cases; Cheng's bins also hold the 91
+# contacts of his 9 asymptomatic cases (Table 2), 3.3% of his 2,761, which cannot be
+# separated by setting and are left in.
+CHENG_SYMPTOMATIC_INDEX_CASES = CHENG2020_INDEX_CASES - 9
+
+
+def cheng_contact_scale(symptomatic_cases):
+    """Factor that puts contact bins summed over these symptomatic cases on Cheng's scale."""
+    # No symptomatic case leaves no Cheng bins to scale; raising lets cost_function charge
+    # FAILED_EVALUATION_COST instead of returning a NaN the firefly cannot rank.
+    if symptomatic_cases <= 0:
+        raise ValueError('no symptomatic case among the pooled cases')
+    return CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic_cases
+
 
 def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights):
     try:
@@ -945,6 +961,9 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         results, source_case_number * repeat_number)
     # print('Time spend before loop: ', time.time() - start_t)
     # start_t = time.time()
+    # E86: contacts per Cheng cohort of symptomatic index cases.
+    contact_scale = cheng_contact_scale(sum(
+        1 for course in course_of_disease_data_list if not np.isnan(course['incubation_period'])))
     for i, layer in enumerate(layers):
         contact_array, infection_array = generate_contact_result(
             course_of_disease_data_list, contact_data_list, layer=layer)
@@ -961,11 +980,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         if layer == 'Health care':
             health_care_weights = np.array([1, 1, 1, 1, 2, 2])
             cost = np.sum(
-                (((norm_contact_array / repeat_number -
+                (((norm_contact_array * contact_scale -
                  norm_Cheng_data)*health_care_weights) ** 2))
         else:
             cost = np.sum(
-                ((norm_contact_array / repeat_number - norm_Cheng_data) ** 2))
+                ((norm_contact_array * contact_scale - norm_Cheng_data) ** 2))
         attack_rate_cost = np.nansum(
             ((norm_attack_rate - norm_Cheng_attack) * norm_weights[i]) ** 2)
         # if layer == 'Household':

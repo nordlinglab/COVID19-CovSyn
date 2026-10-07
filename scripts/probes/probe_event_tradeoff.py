@@ -27,6 +27,7 @@ import numpy as np
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
+from covsyn.figures.plot_results import create_array_cheng2020_fig2
 from covsyn.model.data_synthesis_main import run_covid
 
 PROBABILITIES = [0.0, 0.012, 0.025, 0.05, 0.075, 0.10, 0.15, 0.20]
@@ -40,8 +41,16 @@ def measure_seeds(P, seeds):
     out = []
     for seed in seeds:
         _, _, courses, contacts = run_covid(seed, P.copy(), demo, save_file=False, mode='result')
-        bins = sum((fast_cost._case_cheng_bins(c, k) for c, k in zip(courses, contacts)),
-                   np.zeros((len(fast_cost.CHENG_GROUPS), 2, 6)))
+        # The SAMPLED bins (expected_events=False), as E85 measured them; the objective now
+        # bins the expected event contacts instead (B55).
+        bins = np.zeros((len(fast_cost.CHENG_GROUPS), 2, 6))
+        for c, k in zip(courses, contacts):
+            for gi, (_group, layers) in enumerate(fast_cost.CHENG_GROUPS):
+                for layer in layers:
+                    _, cnt, _, inf = create_array_cheng2020_fig2([c], [k], layer=layer)
+                    if cnt.size == 6:
+                        bins[gi, 0] += cnt
+                        bins[gi, 1] += inf
         effective = np.asarray(contacts[0]['municipality_effective_contacts'] or [], dtype=float)
         out.append((bins, len(courses), len(effective), float(np.nansum(effective))))
     return out

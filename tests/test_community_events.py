@@ -110,6 +110,7 @@ def _contact_owner(event: dict | None, end_day: int = 9, onset: float = np.nan) 
     owner = SimpleNamespace(community_event=event, course_of_disease_data_object=course,
                             generate_logistic_contact_p=ds.Draw_contact_data.generate_logistic_contact_p)
     owner.daily_contact_p = ds.Draw_contact_data.daily_contact_p.__get__(owner)
+    owner.event_day_weights = ds.Draw_contact_data.event_day_weights.__get__(owner)
     return owner
 
 
@@ -266,5 +267,7 @@ def test_event_probability_zero_reproduces_the_pre_b54_stream(
     new = run_covid(seed, padded.copy(), copy.deepcopy(demographic_parameters),
                     save_file=False, mode='spread_Taiwan_weight')
     for contact in new[3]:
-        contact.pop('municipality_event_mask', None)
+        assert not np.any(contact.pop('municipality_event_mask'))
+        assert not np.any(contact.pop('municipality_event_expected_contacts'))
+        assert not np.any(contact.pop('municipality_event_expected_infections'))
     assert rd.digest(new) == rd.digest(old)
