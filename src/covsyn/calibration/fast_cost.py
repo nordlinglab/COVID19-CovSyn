@@ -282,8 +282,8 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
 
 def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
                    norm_weights):
-    source_case_number = fo.SIMULATIONS_PER_EVALUATION
-    repeat_number = 1
+    source_case_number = fo.CHENG_INDEX_CASES   # E86: contacts compared per 100 cases
+    repeat_number = fo.cheng_repeat_number()
     case_limit = source_case_number * repeat_number
     taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
     columns = taiwan_data_matrix.shape[1]

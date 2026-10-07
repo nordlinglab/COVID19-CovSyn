@@ -16,7 +16,8 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration.sar_anchors import LAYER_CUMULATIVE_SAR, LAYER_INFECTIONS_PER_INDEX
+from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
+                                            LAYER_INFECTIONS_PER_INDEX)
 from covsyn.model.contact_measures import contacts_per_day_before_onset
 from covsyn.model.data_synthesize import *
 from covsyn.figures.plot_results import *
@@ -871,6 +872,19 @@ FAILED_EVALUATION_COST = 1e6
 # already nearly flat after 150 (1.36 -> 1.27).
 SIMULATIONS_PER_EVALUATION = 300
 
+# E86: Cheng et al. 2020 traced 100 index cases, so the summed contact bins are compared per 100
+# cases. The original objective simulated 100 cases three times and divided by the 3 repeats;
+# raising the simulations to 300 (E38) set the repeats to 1 and so compared 300 cases of
+# contacts with Cheng's 100 in every run from run 3 to run 11.
+CHENG_INDEX_CASES = CHENG2020_INDEX_CASES
+
+
+def cheng_repeat_number():
+    """How many Cheng-sized cohorts of 100 cases one objective evaluation simulates."""
+    if SIMULATIONS_PER_EVALUATION % CHENG_INDEX_CASES:
+        raise ValueError('SIMULATIONS_PER_EVALUATION must be a multiple of %d' % CHENG_INDEX_CASES)
+    return SIMULATIONS_PER_EVALUATION // CHENG_INDEX_CASES
+
 
 def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights):
     try:
@@ -890,8 +904,8 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
 
 
 def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights):
-    source_case_number = SIMULATIONS_PER_EVALUATION
-    repeat_number = 1
+    source_case_number = CHENG_INDEX_CASES      # E86
+    repeat_number = cheng_repeat_number()
     seeds = range(source_case_number * repeat_number)
 
     # Submit simulations to the SHARED (persistent) process pool passed in by firefly().
