@@ -18,7 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from covsyn.model.contact_measures import contacts_per_day_before_onset
+from covsyn.model.contact_measures import contacts_per_case, contacts_per_day_before_onset
+from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
@@ -236,10 +237,14 @@ def main():
     # state different intervals for the same quantity (OUTCOME_TARGETS has 0.20-0.35).
     check('B17', 'offspring dispersion k', k_hat, (0.10, 0.35),
           note='Taiwan tracing NegBin MLE k = 0.29')
-    check('B17', 'R (mean offspring of an index case)', counts.mean(), (0.3, 0.6),
-          note='Taiwan tracing R = 0.43')
-    check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), (2.0, 8.0), '%',
-          note='Taiwan tracing 4.3%')
+    # B56 (E80): Taiwan's R = 0.43 counts contacts who were later confirmed, including people
+    # exposed together with the case (same tour group, flight, ship), so it is an upper bound;
+    # the recorded infector -> infectee links give 0.047, a lower bound. CovSyn counts the people
+    # this case infected, so the acceptance interval runs between the two definitions.
+    check('B17', 'R (mean offspring of an index case)', counts.mean(), (0.047, 0.43),
+          note='B56: between Taiwan links (0.047, lower bound) and confirmed contacts (0.43, upper bound), E80')
+    check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), (0.2, 4.3), '%',
+          note='B56: between Taiwan links (0.2%) and confirmed contacts (4.3%), E80')
     check('B17', 'largest number infected by one case', counts.max(), (5, 30),
           note='Taiwan tracing maximum 8')
 
@@ -255,18 +260,34 @@ def main():
     check('B27', 'community contacts per case, p90',
           np.percentile(nonzero, 90) if len(nonzero) else np.nan, None,
           note='Taiwan tracing 2020 first wave p90 = 195 (n=38); informational since B47')
+    # B56 (E88): reported as a known limitation, no longer accepted on. The 38 records are the
+    # first-wave cases whose community count was published; reported cases average 52 contacts
+    # against 16.5 for all 487 cases of Jian et al. 2020, so their tail is not the population's.
+    # The objective still charges OUTCOME_TARGETS['community_tail_ratio'].
     check('B50', 'community contacts, p90 / median',
           (np.percentile(nonzero, 90) / np.median(nonzero)) if len(nonzero) and np.median(nonzero) > 0 else np.nan,
-          tuple(OUTCOME_TARGETS['community_tail_ratio'][:2]),
-          note='Taiwan tracing 2020 first wave 26.0 (n=38), bootstrap 95% CI [5.5, 93.1] (E77)')
+          None,
+          note='B56: limitation, selected sample (E88); Taiwan reported cases 26.0 (n=38), CI [5.5, 93.1]')
     check('B27', 'community contacts per case, maximum', community.max(), None,
           note='Taiwan tracing maximum 850 (informational: one order statistic)')
     # decoupled from city population (finding E4)
+    # B56 (E83): max / min over ~15 small city samples is mostly noise; the check asks whether
+    # the cities differ more than they do with the city labels shuffled.
     city = np.array([s['municipality'] for s in index_social])
-    by_city = {c: community[city == c].mean() for c in set(city) if (city == c).sum() >= 20}
-    spread_ratio = (max(by_city.values()) / max(min(by_city.values()), 1e-9)) if by_city else np.nan
-    check('B27', 'largest / smallest city mean community contacts', spread_ratio, (1.0, 1.6),
-          note='was 12x, proportional to city population (E4)')
+    check('B27', 'largest / smallest city mean community contacts',
+          max_min_city_ratio(community, city), None,
+          note='informational since B56; was 12x, proportional to city population (E4)')
+    city_p = permutation_p_value(community, city)
+    check('B27', 'city effect on community contacts, permutation p-value', city_p, (0.05, 1.0),
+          note='B56: passes when no city effect is detectable (p >= 0.05, 2000 label shuffles)')
+
+    # B56: independent validation against all 487 cases of Jian et al. 2020 (16.5 close
+    # contacts per confirmed case, 95% CI 13.9-19.1), which no objective term uses. Jian counts
+    # traced contacts of every confirmed case, imported ones included; CovSyn counts every
+    # candidate contact of an index case from infection on.
+    check('B56', 'contacts per case, all layers',
+          float(np.mean([contacts_per_case(c) for c in index_contact])), (13.9, 19.1),
+          note='Jian et al. 2020: 16.5 per case over 487 cases (independent; see note in B56)')
 
     # ---------------------------------------------------------------- B22 / B26 timing
     incubation = field('incubation_period', index_course)
@@ -316,8 +337,10 @@ def main():
                 med_before += int((first < 0).sum())
                 med_after8 += int((first >= 8).sum())
                 med_early += int((first < 4).sum())
-    check('B26', 'contacts starting before symptom onset', 100 * before / max(totalc, 1), (20.0, 40.0), '%',
-          note='Cheng 2020: 27.5%; was 54% before Phase D')
+    # B56 (E84): informational. Cheng's 27.5% reflects how the tracing recorded contacts (only
+    # 66% of his household contacts start before onset), not when contacts really began.
+    check('B26', 'contacts starting before symptom onset', 100 * before / max(totalc, 1), None, '%',
+          note='B56: informational, Cheng 2020 27.5% is a recording artefact (E84)')
     check('B23', 'health care contacts starting 8+ days after onset',
           100 * med_after8 / max(med_total, 1), (20.0, 50.0), '%',
           note='Cheng 2020 medical: 256/697 = 36.7%; was ~1-3% before Phase D')
