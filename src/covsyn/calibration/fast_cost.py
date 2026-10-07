@@ -254,11 +254,9 @@ def reduce_outcomes(scalars):
         measured['death_share_of_icu'] = float(dead.sum() / icu.sum())
     measured['case_fatality'] = float(dead.mean())
 
-    closure = np.array([s['date_of_recovery'] for s in scalars], dtype=float) - infection_day
-    if np.isfinite(closure[symptomatic]).any():
-        measured['closure_symptomatic'] = float(np.nanmean(closure[symptomatic]))
-    if np.isfinite(closure[~symptomatic]).any():
-        measured['closure_asymptomatic'] = float(np.nanmean(closure[~symptomatic]))
+    recovery = np.array([s['date_of_recovery'] for s in scalars], dtype=float)
+    measured.update(fo.course_timing(recovery, positive, critical, infection_day, incubation,
+                                     symptomatic))
     return measured
 
 

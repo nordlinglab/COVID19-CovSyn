@@ -622,10 +622,22 @@ OUTCOME_TARGETS = {
     # mistake as E23 and E34; both bands here are the ones verify_phaseD.py already checks.
     'pre_onset_window_mean':  (1.0, 3.0, 1.0),
     'pre_onset_zero_share':   (0.0, 0.12, 1.0),
-    # B28: date_of_recovery is the day the case is CLOSED (released from isolation), which
-    # Taiwan's records put at about 25 days from onset, not a clinical recovery at 14-20.
-    'closure_symptomatic':    (20.0, 32.0, 1.0),
-    'closure_asymptomatic':   (20.0, 32.0, 1.0),
+    # B28: date_of_recovery is the day the case is CLOSED (released from isolation), not a
+    # clinical recovery at 14-20 days.
+    # E91 (2026-10-08): case closure is measured from CONFIRMATION, the quantity Taiwan's
+    # records hold. B28's "onset -> release about 25 days" had been applied to infection ->
+    # closure (20-32), which left out the ~5-day incubation period; run 12 sat at 20.7 days,
+    # i.e. about 9 days after confirmation against Taiwan's 24. Bands: bootstrap 95% interval
+    # of the Taiwan mean confirmed -> recovery (figshare file, symptomatic 27.0, n=56;
+    # asymptomatic 23.3, n=23).
+    'closure_after_confirmation_symptomatic':  (22.0, 32.0, 1.0),
+    'closure_after_confirmation_asymptomatic': (17.0, 31.0, 1.0),
+    # E93: nothing constrained ICU -> closure and run 12 settled at 6.4 days; Taiwan 36.2
+    # (n=28, bootstrap 95% interval of the mean 28.9-44.0).
+    'icu_to_closure':         (29.0, 44.0, 1.0),
+    # E92: once ICU admission is no longer capped at the end of infectiousness, its timing
+    # needs a target of its own. Taiwan onset -> ICU 7.2 (n=40, 95% interval 5.4-9.2).
+    'onset_to_icu':           (5.4, 9.2, 1.0),
     # B2 (2026-09-25): median days from symptom onset to confirmation, for symptomatic index
     # cases. Until now this was left free inside a 1-6 day physiological range with NO target
     # (B26, E27, E33), and all three Phase D runs settled at 1.0 day -- the shortest value
@@ -793,13 +805,45 @@ def measure_outcomes(index_cases):
         measured['death_share_of_icu'] = float(dead.sum() / icu.sum())
     measured['case_fatality'] = float(dead.mean())
 
-    closure = np.array([c['date_of_recovery'] - c['infection_day'] for c, _, _ in index_cases],
-                       dtype=float)
-    if np.isfinite(closure[symptomatic]).any():
-        measured['closure_symptomatic'] = float(np.nanmean(closure[symptomatic]))
-    if np.isfinite(closure[~symptomatic]).any():
-        measured['closure_asymptomatic'] = float(np.nanmean(closure[~symptomatic]))
+    # E91 / E92 / E93: closure from confirmation, ICU -> closure, onset -> ICU, computed by
+    # the same function fast_cost.reduce_outcomes calls, so the two stay bit-identical.
+    def column(key):
+        return np.array([c[key] for c, _, _ in index_cases], dtype=float)
+    measured.update(course_timing(column('date_of_recovery'), column('positive_test_date'),
+                                  column('date_of_critically_ill'), column('infection_day'),
+                                  column('incubation_period'), symptomatic))
     return measured
+
+
+def course_timing(recovery: np.ndarray, positive: np.ndarray, critical: np.ndarray,
+                  infection: np.ndarray, incubation: np.ndarray,
+                  symptomatic: np.ndarray) -> dict[str, float]:
+    """Closure after confirmation, ICU -> closure and onset -> ICU, as means (E91-E93).
+
+    Args:
+        recovery: Closure day of each case (absolute day, NaN if the case died).
+        positive: Positive test day (absolute).
+        critical: ICU admission day (absolute, NaN if never critical).
+        infection: Infection day.
+        incubation: Incubation period (NaN for asymptomatic cases).
+        symptomatic: Boolean mask of symptomatic cases.
+
+    Returns:
+        The measured values that exist in this sample.
+    """
+    out = {}
+    closure = recovery - positive
+    for key, mask in (('closure_after_confirmation_symptomatic', symptomatic),
+                      ('closure_after_confirmation_asymptomatic', ~symptomatic)):
+        if np.isfinite(closure[mask]).any():
+            out[key] = float(np.nanmean(closure[mask]))
+    icu_stay = recovery - critical
+    if np.isfinite(icu_stay).any():
+        out['icu_to_closure'] = float(np.nanmean(icu_stay))
+    onset_to_icu = critical - infection - incubation
+    if np.isfinite(onset_to_icu).any():
+        out['onset_to_icu'] = float(np.nanmean(onset_to_icu))
+    return out
 
 
 # E66, 2026-09-27: how wide an interval is allowed to be before it stops setting the scale of

@@ -457,8 +457,12 @@ GROUP = {
         'contacts starting before symptom onset': 'Cheng 2020 contact-timing bins (cost_contact)',
         'health care contacts starting 8+ days after onset': 'charged: medical_late_share',
         'health care contacts starting before day 4': 'charged: medical_early_share',
-        'infection to case closure, symptomatic': 'charged: closure_symptomatic',
-        'infection to case closure, asymptomatic': 'charged: closure_asymptomatic',
+        'confirmation to case closure, symptomatic':
+            'charged: closure_after_confirmation_symptomatic',
+        'confirmation to case closure, asymptomatic':
+            'charged: closure_after_confirmation_asymptomatic',
+        'ICU to case closure': 'charged: icu_to_closure',
+        'onset to ICU': 'charged: onset_to_icu',
         'asymptomatic share': 'charged: asymptomatic_share (B39)',
     },
     'C': {

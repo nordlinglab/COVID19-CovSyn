@@ -29,7 +29,8 @@ import numpy as np
 # Far above the objective's seeds 0..299 and the chain's Monte-Carlo seeds 0..999.
 VALIDATION_SEED_START = 100000
 REPORTED_OUTCOMES = ('community_tail_ratio', 'community_median', 'daily_municipality',
-                     'medical_early_share', 'medical_late_share', 'closure_asymptomatic',
+                     'medical_early_share', 'medical_late_share', 'closure_after_confirmation_asymptomatic',
+                     'icu_to_closure', 'onset_to_icu',
                      'infections_per_index_health_care', 'infections_per_index_municipality',
                      'offspring_k')
 

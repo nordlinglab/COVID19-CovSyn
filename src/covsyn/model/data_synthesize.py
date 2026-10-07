@@ -604,7 +604,7 @@ class Draw_course_of_disease_data:
         return (symptomatic_to_critically_ill_time)
 
     def draw_time_from_symptomatic_to_critically_ill_new(self, lower_bound=None, upper_bound=None):
-        if lower_bound > upper_bound:
+        if upper_bound is not None and lower_bound > upper_bound:
             print('here')
             print(lower_bound, upper_bound)
             raise ValueError('lower_bound must be smaller than upper_bound')
@@ -756,11 +756,13 @@ class Draw_course_of_disease_data:
                 self.date_of_recovery = onset_day + self.draw_time_from_symptomatic_to_recovered(
                     lower_bound=lower_bound)
             else:
-                lower_bound = 0
-                upper_bound = max(infectious_end - self.incubation_period, lower_bound + 1)
+                # E92 (2026-10-08): ICU admission is no longer capped at the end of the
+                # infectious period. With the corrected ~5-day infectious period that cap held
+                # onset -> ICU at 1.8 days against Taiwan's 7.2 (median 5.5, n=40). Isolation
+                # still precedes ICU (B52); transmission still ends with infectiousness.
                 self.date_of_critically_ill = onset_day + \
                     self.draw_time_from_symptomatic_to_critically_ill_new(
-                        lower_bound=lower_bound, upper_bound=upper_bound)
+                        lower_bound=0, upper_bound=None)
                 earliest_end = max(self.infection_day + infectious_end,
                                    self.date_of_critically_ill)
                 death_probability = self.age_adjusted_probability(

@@ -32,19 +32,20 @@ def test_inside_the_interval_costs_nothing(name: str) -> None:
 
 
 def test_quadratic_below_one_unit_with_the_capped_width() -> None:
-    """closure_symptomatic [20, 32]: width 12 is below half the centre (13), so 12 is the unit."""
-    lo, hi, weight = fo.OUTCOME_TARGETS["closure_symptomatic"]
-    assert (lo, hi) == (20.0, 32.0)
-    miss = 0.5 / 12.0
-    assert _alone("closure_symptomatic", 19.5) == pytest.approx(
+    """closure_after_confirmation_symptomatic [22, 32]: width 10 is below half the centre
+    (13.5), so 10 is the unit."""
+    lo, hi, weight = fo.OUTCOME_TARGETS["closure_after_confirmation_symptomatic"]
+    assert (lo, hi) == (22.0, 32.0)
+    miss = 0.5 / 10.0
+    assert _alone("closure_after_confirmation_symptomatic", 21.5) == pytest.approx(
         fo.OUTCOME_PENALTY_WEIGHT * weight * miss**2)
 
 
 def test_linear_beyond_one_unit() -> None:
     """A miss of two units costs 2 * 2 - 1 = 3 units, not 4."""
-    lo, hi, weight = fo.OUTCOME_TARGETS["closure_symptomatic"]
-    unit = fo.outcome_scale("closure_symptomatic", lo, hi)
-    assert _alone("closure_symptomatic", hi + 2 * unit) == pytest.approx(
+    lo, hi, weight = fo.OUTCOME_TARGETS["closure_after_confirmation_symptomatic"]
+    unit = fo.outcome_scale("closure_after_confirmation_symptomatic", lo, hi)
+    assert _alone("closure_after_confirmation_symptomatic", hi + 2 * unit) == pytest.approx(
         fo.OUTCOME_PENALTY_WEIGHT * weight * 3.0)
 
 
@@ -69,7 +70,7 @@ def test_tail_ratio_is_measured_in_units_of_its_lower_bound() -> None:
 
 def test_missing_and_uncharged_targets_are_ignored() -> None:
     """A NaN measurement and a weight-0 (reported) target never add to the penalty."""
-    assert _alone("closure_symptomatic", math.nan) == 0.0
+    assert _alone("closure_after_confirmation_symptomatic", math.nan) == 0.0
     reported = next(n for n, (_, _, w) in fo.OUTCOME_TARGETS.items() if w == 0)
     assert _alone(reported, 1e9) == 0.0
 
