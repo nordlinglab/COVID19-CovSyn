@@ -1155,7 +1155,7 @@ class Firefly:
             max_workers=max_workers, initializer=_init_reduction_worker,
             initargs=(demographic_parameters, _columns))
         print(f'evaluating initial population: {self.pop_size} fireflies '
-              f'(100 simulations each)...', flush=True)
+              f'({SIMULATIONS_PER_EVALUATION} simulations each)...', flush=True)
         intensities = np.empty(self.pop_size)
         cost_parts = [{} for _ in range(self.pop_size)]
         best_parts = [{} for _ in range(self.pop_size)]
