@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "7a91a2c70fa1b84f950eab7db11e8527431fed36",
+ "generated_at_commit": "88fa6f2a84086847d16c1840308258a576f6332e",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -542,11 +542,11 @@
   },
   "verify_phaseD": {
    "returncode": 0,
-   "stdout_head": "<WORKDIR>/spread_Taiwan_weight: 40 simulations, 49 cases\n\n--- B29\n  FAIL household: other members per case                                     3.100    [2.6, 3]         \n   ok  household: living alone                                              15.000%   [11, 16]         \n--- B30\n  FAIL class size, elementary (7-12)                                        20.000    [21, 27]         n=1\n   ok  clas",
-   "stdout_sha256": "ec4bf30590d2f4edaa2146c814e9c9c94456b4a82af925ab262b93f525ba27ac"
+   "stdout_head": "<WORKDIR>/spread_Taiwan_weight: 40 simulations, 49 cases\n\n--- B29\n  ok~  household: other members per case                                     3.100    [2.6, 3]         [2.27, 3.75]         \n   ok  household: living alone                                              15.000%   [11, 16]         [5, 27.5]            \n--- B30\n  FAIL class size, elementary (7-12)                                        ",
+   "stdout_sha256": "0063a5ad4c49767c6c334f2c3d0fe0001dff78ff4775bfe517ab25e5bf2853f8"
   },
   "verify_phaseD_json": {
-   "sha256": "7cbf7fa454972f33b8f6eef7867aa133f54ddb7dcf22b1d34e21c215915d4fa8"
+   "sha256": "06881afc27a9f140d27bf0f83740a1049f1c9797aabc8d86455b4577b32beea9"
   }
  }
 }
