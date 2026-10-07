@@ -48,7 +48,8 @@ def contacts_in_tracing_window(course: Mapping[str, Any], contact: Mapping[str, 
     """
     isolation = int(course['monitor_isolation_period'])
     onset = course['incubation_period']
-    start = (onset if onset is not None and np.isfinite(onset) else isolation) - lead_days
+    # Whole days, like the matrix columns (incubation_period is an int in the model today).
+    start = (int(np.floor(onset)) if onset is not None and np.isfinite(onset) else isolation) - lead_days
     count = 0
     for key in MATRIX_KEY.values():
         matrix = np.asarray(contact.get(key, np.zeros((0, 0))), dtype=bool)
