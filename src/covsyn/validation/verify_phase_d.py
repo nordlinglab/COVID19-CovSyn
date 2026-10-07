@@ -19,24 +19,29 @@ from pathlib import Path
 import numpy as np
 
 from covsyn.model.contact_measures import contacts_per_case, contacts_per_day_before_onset
+from covsyn.validation.acceptance import bootstrap_intervals, verdict
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
 OUT_JSON = Path(sys.argv[3] if len(sys.argv) > 3 else 'validation_reference/phaseD_checks.json')
+# B57: bootstrap replicates over the simulations for each check's 95% interval; 0 turns the
+# intervals off and judges on the value alone, as before B57.
+BOOTSTRAP_REPLICATES = int(sys.argv[4]) if len(sys.argv) > 4 else 200
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix') for L in LAYERS}
 
 results = []
 
 
-def check(decision, name, value, target, unit='', ok=None, note=''):
+def check(decision, name, value, target, unit='', ok=None, note='', ci=None):
     """Record one checklist line. target is (lo, hi), a string, or None for information."""
     if ok is None and isinstance(target, tuple) and value is not None and np.isfinite(value):
         ok = target[0] <= value <= target[1]
     results.append({'decision': decision, 'name': name, 'value': None if value is None else float(value),
                     'target': list(target) if isinstance(target, tuple) else target,
-                    'unit': unit, 'ok': None if ok is None else bool(ok), 'note': note})
+                    'unit': unit, 'ok': None if ok is None else bool(ok), 'note': note,
+                    'ci': None if ci is None else [float(ci[0]), float(ci[1])]})
 
 
 def load(directory):
@@ -68,10 +73,13 @@ def negative_binomial_k(counts):
     return mean ** 2 / (var - mean) if var > mean > 0 else np.inf
 
 
-def main():
-    runs = load(SPREAD)
-    if not runs:
-        raise SystemExit(f'no Monte-Carlo output found in {SPREAD}')
+def compute_checks(runs, first_runs, permutations=True):
+    """Every check on these spread simulations (and first-outbreak runs), as result rows.
+
+    permutations=False skips the city permutation test, which is a test of its own and too slow
+    to repeat inside the bootstrap.
+    """
+    results.clear()
     course = [c for r in runs for c in r['course']]
     contact = [c for r in runs for c in r['contact']]
     social = [s for r in runs for s in r['social']]
@@ -80,8 +88,6 @@ def main():
     index_contact = [r['contact'][0] for r in runs]
     index_social = [r['social'][0] for r in runs]
     index_demo = [r['demo'][0] for r in runs]
-    print(f'{SPREAD}: {len(runs)} simulations, {len(course)} cases\n')
-
     def field(key, source, cast=float):
         return np.array([x.get(key, np.nan) for x in source], dtype=cast)
 
@@ -277,7 +283,7 @@ def main():
     check('B27', 'largest / smallest city mean community contacts',
           max_min_city_ratio(community, city), None,
           note='informational since B56; was 12x, proportional to city population (E4)')
-    city_p = permutation_p_value(community, city)
+    city_p = permutation_p_value(community, city) if permutations else np.nan
     check('B27', 'city effect on community contacts, permutation p-value', city_p, (0.05, 1.0),
           note='B56: passes when no city effect is detectable (p >= 0.05, 2000 label shuffles)')
 
@@ -414,7 +420,7 @@ def main():
         for label, band in measurement.get('bands', {}).items():
             lo, hi = band['target']
             ci_lo, ci_hi = band['ci']
-            check('B14', f'measured age risk ratio, {label}', band['rr'], (lo, hi),
+            check('B14', f'measured age risk ratio, {label}', band['rr'], (lo, hi), ci=(ci_lo, ci_hi),
                   note=(f'{n_cases} index cases, {infections} infections over {layers} '
                         f'(the settings Cheng traced); 95% CI [{ci_lo:.3f}, {ci_hi:.3f}]; '
                         f'{band["precision"]}; reference: '
@@ -444,28 +450,62 @@ def main():
                    'informational rows above are available')
 
     # ---------------------------------------------------------------- B36 Taiwan first wave
-    if FIRST.exists():
-        first_runs = load(FIRST)
-        if first_runs:
-            sizes = np.array([len(r['course']) for r in first_runs], dtype=float)
-            deaths = np.array([sum(1 for c in r['course'] if not np.isnan(c['date_of_death']))
-                               for r in first_runs], dtype=float)
-            kept = sizes >= 29
-            check('B36', 'first wave cases per simulation, all runs', sizes.mean(), None,
-                  note=f'observed 55 reported cases; n={len(sizes)}')
-            check('B36', 'first wave cases per simulation, runs with at least 1 onward case',
-                  sizes[kept].mean() if kept.any() else np.nan, None,
-                  note=f'the filter used in taiwan_first_outbreak.ipynb; n={int(kept.sum())}')
-            check('B36', 'first wave deaths per simulation', deaths.mean(), None,
-                  note='observed 3; expected about 0.6 under the B33 cascade, see B36')
-            first_ages = np.array([d['age'] for r in first_runs for d in r['demo']], dtype=float)
-            check('B34', 'Taiwan scenario mean case age', first_ages.mean(), (33.0, 42.0),
-                  note='observed tracing mean 37.1')
+    if first_runs:
+        sizes = np.array([len(r['course']) for r in first_runs], dtype=float)
+        deaths = np.array([sum(1 for c in r['course'] if not np.isnan(c['date_of_death']))
+                           for r in first_runs], dtype=float)
+        kept = sizes >= 29
+        check('B36', 'first wave cases per simulation, all runs', sizes.mean(), None,
+              note=f'observed 55 reported cases; n={len(sizes)}')
+        check('B36', 'first wave cases per simulation, runs with at least 1 onward case',
+              sizes[kept].mean() if kept.any() else np.nan, None,
+              note=f'the filter used in taiwan_first_outbreak.ipynb; n={int(kept.sum())}')
+        check('B36', 'first wave deaths per simulation', deaths.mean(), None,
+              note='observed 3; expected about 0.6 under the B33 cascade, see B36')
+        first_ages = np.array([d['age'] for r in first_runs for d in r['demo']], dtype=float)
+        check('B34', 'Taiwan scenario mean case age', first_ages.mean(), (33.0, 42.0),
+              note='observed tracing mean 37.1')
+
+    return [dict(r) for r in results]
+
+
+def main():
+    runs = load(SPREAD)
+    if not runs:
+        raise SystemExit(f'no Monte-Carlo output found in {SPREAD}')
+    first_runs = load(FIRST) if FIRST.exists() else []
+    point = compute_checks(runs, first_runs)
+    print(f'{SPREAD}: {len(runs)} simulations, '
+          f'{sum(len(r["course"]) for r in runs)} cases\n')
+
+    # B57: 95% bootstrap intervals over the simulations; the spread and first-outbreak runs are
+    # resampled together so a check sees one consistent replicate.
+    if BOOTSTRAP_REPLICATES > 0:
+        pairs = [(r, first_runs[i % len(first_runs)] if first_runs else None)
+                 for i, r in enumerate(runs)]
+
+        def replicate(sample):
+            rows = compute_checks([p[0] for p in sample],
+                                  [p[1] for p in sample if p[1] is not None], permutations=False)
+            return {(r['decision'], r['name']): r['value'] for r in rows
+                    if r['value'] is not None}
+
+        intervals = bootstrap_intervals(replicate, pairs, replicates=BOOTSTRAP_REPLICATES)
+        for r in point:
+            if r['ci'] is None and (r['decision'], r['name']) in intervals:
+                r['ci'] = list(intervals[(r['decision'], r['name'])])
+    for r in point:
+        if isinstance(r['target'], list):
+            judged = verdict(r['value'] if r['value'] is not None else np.nan,
+                             tuple(r['target']), tuple(r['ci']) if r['ci'] else None)
+            r['ok'] = None if judged is None else judged != 'fail'
+            r['within_noise'] = judged == 'within'
+    results[:] = point
 
     # ---------------------------------------------------------------- report
     width = max(len(r['name']) for r in results)
     current = None
-    passed = failed = 0
+    passed = failed = within = 0
     for r in results:
         if r['decision'] != current:
             current = r['decision']
@@ -476,23 +516,29 @@ def main():
         else:
             target_text = '(information)'
         if r['ok'] is None:
-            verdict = '    '
+            mark = '    '
+        elif r['ok'] and r.get('within_noise'):
+            mark = 'ok~ '
+            passed += 1
+            within += 1
         elif r['ok']:
-            verdict = ' ok '
+            mark = ' ok '
             passed += 1
         else:
-            verdict = 'FAIL'
+            mark = 'FAIL'
             failed += 1
         value = 'n/a' if r['value'] is None or not np.isfinite(r['value']) else '%9.3f' % r['value']
-        print('  %s %-*s %s%-2s  %-16s %s' % (verdict, width, r['name'], value, r['unit'],
-                                              target_text, r['note']))
-    print(f'\n{passed} checks passed, {failed} failed, '
-          f'{len(results) - passed - failed} informational')
+        interval = '[%.3g, %.3g]' % tuple(r['ci']) if r.get('ci') else ''
+        print('  %s %-*s %s%-2s  %-16s %-20s %s' % (mark, width, r['name'], value, r['unit'],
+                                                    target_text, interval, r['note']))
+    print(f'\n{passed} checks passed ({within} of them only within the 95% interval, marked ok~), '
+          f'{failed} failed, {len(results) - passed - failed} informational')
 
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_JSON, 'w') as f:
-        json.dump({'spread_dir': str(SPREAD), 'simulations': len(runs), 'cases': len(course),
-                   'checks': results}, f, indent=1)
+        json.dump({'spread_dir': str(SPREAD), 'simulations': len(runs),
+                   'cases': sum(len(r['course']) for r in runs),
+                   'bootstrap_replicates': BOOTSTRAP_REPLICATES, 'checks': results}, f, indent=1)
     print('written', OUT_JSON)
 
 
