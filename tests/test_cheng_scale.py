@@ -1,11 +1,13 @@
 # Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The Cheng contact fit compares contacts per 100 cases with Cheng et al. 2020 (finding E86).
+"""The Cheng contact fit compares contacts per symptomatic index case with Cheng et al. 2020.
 
-Cheng traced the contacts of 100 index cases. The original objective simulated 100 cases three
-times and divided the summed contact bins by 3. Run 3 (E38) changed this to 300 cases simulated
-once, which left the division at 1, so every run since compared 300 cases of contacts with
-Cheng's 100 and pushed CovSyn's contacts per case towards a third of Cheng's.
+Finding E86: the objective summed the contact bins of 300 simulated cases and compared them
+with Cheng's totals for 100 cases, pushing CovSyn's contacts per case towards a third of
+Cheng's. The bins drop asymptomatic cases (Cheng's six bins count days from symptom onset), so
+the CovSyn bins are scaled to Cheng's 91 symptomatic index cases: Cheng's bins hold all 2,761
+contacts, of which 91 belong to his 9 asymptomatic cases (Table 2), so the comparison is off
+by those 3.3% at most.
 """
 
 from __future__ import annotations
@@ -13,21 +15,27 @@ from __future__ import annotations
 import pytest
 
 
-def test_cheng_repeats_scale_the_simulations_to_cheng_cohorts() -> None:
+def test_contact_scale_maps_the_symptomatic_cases_onto_cheng_cohort() -> None:
     pytest.importorskip('sklearn')  # firefly_optimizer imports it at module level
     from covsyn.calibration import firefly_optimizer as fo
-    from covsyn.calibration.sar_anchors import CHENG2020_INDEX_CASES
 
-    assert CHENG2020_INDEX_CASES == 100
-    assert fo.SIMULATIONS_PER_EVALUATION % CHENG2020_INDEX_CASES == 0
-    assert fo.cheng_repeat_number() == fo.SIMULATIONS_PER_EVALUATION // CHENG2020_INDEX_CASES
-    assert fo.cheng_repeat_number() == 3
+    assert fo.CHENG_SYMPTOMATIC_INDEX_CASES == 91
+    assert fo.cheng_contact_scale(91) == 1.0
+    assert fo.cheng_contact_scale(227) == pytest.approx(91 / 227)
 
 
-def test_simulated_cases_stay_at_three_hundred() -> None:
-    """The fix rescales the comparison only; the objective still simulates 300 seeds."""
+def test_contact_scale_without_symptomatic_cases_is_not_a_number() -> None:
+    """No symptomatic case means no Cheng bins: the cost must not divide by zero silently."""
+    pytest.importorskip('sklearn')
+    import math
+
+    from covsyn.calibration import firefly_optimizer as fo
+
+    assert math.isnan(fo.cheng_contact_scale(0))
+
+
+def test_objective_still_simulates_three_hundred_seeds() -> None:
     pytest.importorskip('sklearn')
     from covsyn.calibration import firefly_optimizer as fo
 
     assert fo.SIMULATIONS_PER_EVALUATION == 300
-    assert fo.CHENG_INDEX_CASES * fo.cheng_repeat_number() == fo.SIMULATIONS_PER_EVALUATION

@@ -172,7 +172,8 @@ def run_batch(seeds, P, columns):
         cases = []
         for j, (course, contact) in enumerate(zip(course_list, contact_list)):
             cases.append((_case_cheng_bins(course, contact),
-                          _case_matrix_row(demographic_list[j], course, contact, columns)))
+                          _case_matrix_row(demographic_list[j], course, contact, columns),
+                          not np.isnan(course['incubation_period'])))
         index = (_index_case_scalars(course_list[0], contact_list[0])
                  if course_list and contact_list else None)
         out.append((index, cases))
@@ -282,8 +283,8 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
 
 def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
                    norm_weights):
-    source_case_number = fo.CHENG_INDEX_CASES   # E86: contacts compared per 100 cases
-    repeat_number = fo.cheng_repeat_number()
+    source_case_number = fo.SIMULATIONS_PER_EVALUATION
+    repeat_number = 1
     case_limit = source_case_number * repeat_number
     taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
     columns = taiwan_data_matrix.shape[1]
@@ -297,11 +298,12 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     index_scalars = []
     bins = np.zeros((len(CHENG_GROUPS), 2, 6))
     rows = []
+    symptomatic_cases = 0
     for future in futures:
         for index, cases in future.result():
             if index is not None:
                 index_scalars.append(index)
-            for case_bins, case_row in cases:
+            for case_bins, case_row, symptomatic in cases:
                 # Only the first `case_limit` POOLED cases feed the Cheng fit and the test
                 # matrix: the original truncated the concatenated lists at that length, so
                 # cases beyond it were never counted. Stopping here keeps that exactly.
@@ -309,6 +311,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
                     continue
                 bins += case_bins
                 rows.append(case_row)
+                symptomatic_cases += symptomatic
 
     max_Cheng_contact = np.max(Cheng_contact_array)
     norm_Cheng_contact_array = Cheng_contact_array / max_Cheng_contact
@@ -317,6 +320,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
 
     contact_costs = []
     attack_rate_costs = []
+    contact_scale = fo.cheng_contact_scale(symptomatic_cases)   # E86
     for i in range(len(CHENG_GROUPS)):
         contact_array = bins[i, 0].astype(float)
         infection_array = bins[i, 1].astype(float)
@@ -332,9 +336,9 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         # per-group term rather than at the binning.
         if CHENG_GROUPS[i][0] == 'Health care':
             weights = np.array([1, 1, 1, 1, 2, 2])
-            cost = np.sum((((norm_contact_array / repeat_number - norm_Cheng_data) * weights) ** 2))
+            cost = np.sum((((norm_contact_array * contact_scale - norm_Cheng_data) * weights) ** 2))
         else:
-            cost = np.sum(((norm_contact_array / repeat_number - norm_Cheng_data) ** 2))
+            cost = np.sum(((norm_contact_array * contact_scale - norm_Cheng_data) ** 2))
         attack_rate_cost = np.nansum(((norm_attack_rate - norm_Cheng_attack) * norm_weights[i]) ** 2)
         contact_costs.append(cost)
         attack_rate_costs.append(attack_rate_cost)

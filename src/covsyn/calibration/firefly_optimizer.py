@@ -872,18 +872,21 @@ FAILED_EVALUATION_COST = 1e6
 # already nearly flat after 150 (1.36 -> 1.27).
 SIMULATIONS_PER_EVALUATION = 300
 
-# E86: Cheng et al. 2020 traced 100 index cases, so the summed contact bins are compared per 100
-# cases. The original objective simulated 100 cases three times and divided by the 3 repeats;
-# raising the simulations to 300 (E38) set the repeats to 1 and so compared 300 cases of
-# contacts with Cheng's 100 in every run from run 3 to run 11.
-CHENG_INDEX_CASES = CHENG2020_INDEX_CASES
+# E86: the objective summed the contact bins of all 300 simulated cases and compared them
+# with Cheng et al. 2020's totals for 100 cases (the original 100 cases x 3 repeats lost its
+# division by 3 when E38 raised the simulations), pushing contacts per case towards a third of
+# Cheng's from run 3 to run 11. The bins hold symptomatic cases only (days from onset), so
+# they are scaled to Cheng's 91 symptomatic index cases; Cheng's bins also hold the 91
+# contacts of his 9 asymptomatic cases (Table 2), 3.3% of his 2,761, which cannot be
+# separated by setting and are left in.
+CHENG_SYMPTOMATIC_INDEX_CASES = CHENG2020_INDEX_CASES - 9
 
 
-def cheng_repeat_number():
-    """How many Cheng-sized cohorts of 100 cases one objective evaluation simulates."""
-    if SIMULATIONS_PER_EVALUATION % CHENG_INDEX_CASES:
-        raise ValueError('SIMULATIONS_PER_EVALUATION must be a multiple of %d' % CHENG_INDEX_CASES)
-    return SIMULATIONS_PER_EVALUATION // CHENG_INDEX_CASES
+def cheng_contact_scale(symptomatic_cases):
+    """Factor that puts contact bins summed over these symptomatic cases on Cheng's scale."""
+    if symptomatic_cases <= 0:
+        return float('nan')
+    return CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic_cases
 
 
 def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights):
@@ -904,8 +907,8 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
 
 
 def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights):
-    source_case_number = CHENG_INDEX_CASES      # E86
-    repeat_number = cheng_repeat_number()
+    source_case_number = SIMULATIONS_PER_EVALUATION
+    repeat_number = 1
     seeds = range(source_case_number * repeat_number)
 
     # Submit simulations to the SHARED (persistent) process pool passed in by firefly().
@@ -956,6 +959,9 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         results, source_case_number * repeat_number)
     # print('Time spend before loop: ', time.time() - start_t)
     # start_t = time.time()
+    # E86: contacts per Cheng cohort of symptomatic index cases.
+    contact_scale = cheng_contact_scale(sum(
+        1 for course in course_of_disease_data_list if not np.isnan(course['incubation_period'])))
     for i, layer in enumerate(layers):
         contact_array, infection_array = generate_contact_result(
             course_of_disease_data_list, contact_data_list, layer=layer)
@@ -972,11 +978,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         if layer == 'Health care':
             health_care_weights = np.array([1, 1, 1, 1, 2, 2])
             cost = np.sum(
-                (((norm_contact_array / repeat_number -
+                (((norm_contact_array * contact_scale -
                  norm_Cheng_data)*health_care_weights) ** 2))
         else:
             cost = np.sum(
-                ((norm_contact_array / repeat_number - norm_Cheng_data) ** 2))
+                ((norm_contact_array * contact_scale - norm_Cheng_data) ** 2))
         attack_rate_cost = np.nansum(
             ((norm_attack_rate - norm_Cheng_attack) * norm_weights[i]) ** 2)
         # if layer == 'Household':
