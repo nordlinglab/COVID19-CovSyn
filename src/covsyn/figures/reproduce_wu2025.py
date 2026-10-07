@@ -529,6 +529,7 @@ def fig5(directory: Path, out_dir: Path, bootstrap: int = 1000, seed: int = 0) -
                              & (tw_curve[:int(np.max(tw_days)) + 1]
                                 <= ub[:int(np.max(tw_days)) + 1]))), 2)})
         ax.set_xlim(-1, xlim)
+        ax.set_xticks(np.arange(0, xlim, {51: 10, 71: 10, 121: 20, 201: 40}[xlim]))
         ax.set_xlabel('Day' if p >= 6 else '')
         ax.set_ylabel('Proportion of cases' if p % 3 == 0 else '')
         ax.legend(fontsize=12)
@@ -751,7 +752,8 @@ def fig7(directory: Path, out_dir: Path) -> None:
         if len(courses) < len(SOURCE_CONFIRMED_DATES) + 1:
             continue
         series = transform_course_object_to_population_data(
-            courses, contacts, time_limit=time_limit - 1, population_size=TAIWAN_POPULATION)
+            np.array(courses, dtype=object), np.array(contacts, dtype=object),
+            time_limit=time_limit - 1, population_size=TAIWAN_POPULATION)
         cases.append(series[4])
         deaths.append(series[10])
     cases, deaths = np.array(cases, dtype=float), np.array(deaths, dtype=float)
