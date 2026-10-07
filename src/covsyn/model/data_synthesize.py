@@ -785,8 +785,7 @@ class Draw_course_of_disease_data:
                 # earliest possible day instead of clamped onto it. With ICU no longer capped
                 # (E92) the clamp would put every death drawn before ICU on ICU + 1.
                 if np.random.random() >= death_probability:
-                    earliest_closure = max(earliest_end + 1,
-                                           self.infection_day + confirmed)
+                    earliest_closure = max(earliest_end, self.infection_day + confirmed)
                     self.date_of_recovery = self.date_of_critically_ill + \
                         self.draw_time_from_critically_ill_to_recovered(
                             lower_bound=earliest_closure - self.date_of_critically_ill)

@@ -69,7 +69,7 @@ CONSTRAINTS = [
      'by construction (B52; violated by 74.5% of run 10 ICU cases, E81)',
      'todolist 1.2; clinical definition of ICU admission'),
     ('C15', 'confirmation <= closure', 'a case cannot be released before it is confirmed (E94)',
-     'recovered cases', 'by construction (E94)', 'definition of release from isolation'),
+     'closed cases', 'by construction (E94)', 'definition of release from isolation'),
     ('T01', 'infector latent <= generation interval', 'no transmission before the infector is '
      'infectious (todolist 1.2 C04)', 'transmissions', 'model rule',
      'definition of the latent period; Byrne et al. 2020'),
