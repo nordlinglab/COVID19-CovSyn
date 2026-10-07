@@ -1,0 +1,65 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Re-scoring candidate vectors on seeds the optimizer never saw (finding E87).
+
+Run 12's best vector sat exactly on the edge of several targets on the objective's 300 fixed
+seeds and fell outside them on 1,000 independent simulations. fast_cost.cost_function therefore
+takes a seed offset, so the candidates can be scored on fresh seed blocks; the default offset of
+0 is the objective exactly as before.
+"""
+
+from __future__ import annotations
+
+import concurrent.futures
+from typing import Any
+
+import numpy as np
+import pytest
+
+from covsyn.calibration import revalidation as rv
+
+
+def test_seed_blocks_do_not_overlap_the_objective_or_each_other() -> None:
+    blocks = rv.validation_seed_blocks(4, simulations=300)
+    starts = [b.start for b in blocks]
+    assert all(b.start >= rv.VALIDATION_SEED_START for b in blocks)
+    assert rv.VALIDATION_SEED_START >= 300
+    assert all(len(b) == 300 for b in blocks)
+    assert len({s for b in blocks for s in b}) == 1200
+    assert starts == sorted(starts)
+
+
+def test_candidates_merge_population_and_personal_bests_without_duplicates(tmp_path) -> None:
+    population = np.array([[1.0, 2.0, 0.5], [3.0, 4.0, 0.7]])          # params..., cost
+    bests = np.array([[7, 1.0, 2.0, 0.5], [9, 5.0, 6.0, 0.6]])          # iteration, params..., cost
+    np.savetxt(tmp_path / 'firefly_result.txt', population)
+    np.savetxt(tmp_path / 'firefly_best.txt', bests)
+    vectors, costs = rv.load_candidates(tmp_path)
+    assert vectors.shape == (3, 2)
+    np.testing.assert_array_equal(costs, [0.5, 0.6, 0.7])          # sorted by training cost
+    np.testing.assert_array_equal(vectors[0], [1.0, 2.0])
+
+
+def test_chosen_vector_file_reads_back_as_the_lowest_cost_row(tmp_path) -> None:
+    vector = np.arange(5, dtype=float)
+    rv.write_best_file(tmp_path / 'firefly_best.txt', vector, 1.25)
+    row = np.atleast_2d(np.loadtxt(tmp_path / 'firefly_best.txt'))
+    best = row[int(np.argmin(row[:, -1]))]
+    np.testing.assert_allclose(best[1:-1], vector)
+    assert best[-1] == pytest.approx(1.25)
+
+
+def test_default_seed_offset_is_the_objective_and_others_differ(
+        run10_vector: np.ndarray, demographic_parameters: Any,
+        cheng_data: tuple[np.ndarray, np.ndarray, np.ndarray],
+        cost_pool: concurrent.futures.ProcessPoolExecutor) -> None:
+    pytest.importorskip('sklearn')
+    from covsyn.calibration import fast_cost
+
+    default = fast_cost.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data)
+    zero = fast_cost.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data,
+                                   seed_offset=0)
+    moved = fast_cost.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data,
+                                    seed_offset=rv.VALIDATION_SEED_START)
+    assert default == zero
+    assert moved != default
