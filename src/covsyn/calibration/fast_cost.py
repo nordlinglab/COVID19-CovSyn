@@ -338,9 +338,9 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         # per-group term rather than at the binning.
         if CHENG_GROUPS[i][0] == 'Health care':
             weights = np.array([1, 1, 1, 1, 2, 2])
-            cost = np.sum((((norm_contact_array * contact_scale - norm_Cheng_data) * weights) ** 2))
+            cost = np.sum(((norm_contact_array * contact_scale - norm_Cheng_data) * weights) ** 2)
         else:
-            cost = np.sum(((norm_contact_array * contact_scale - norm_Cheng_data) ** 2))
+            cost = np.sum((norm_contact_array * contact_scale - norm_Cheng_data) ** 2)
         attack_rate_cost = np.nansum(((norm_attack_rate - norm_Cheng_attack) * norm_weights[i]) ** 2)
         contact_costs.append(cost)
         attack_rate_costs.append(attack_rate_cost)

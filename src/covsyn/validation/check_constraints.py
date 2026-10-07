@@ -65,9 +65,11 @@ CONSTRAINTS = [
      'asymptomatic', 'by construction', 'CovSyn preprint supplement'),
     ('C14', 'isolation <= critical illness', 'a case in intensive care is hospitalised, so it must already '
      'be isolated; before that day it cannot keep meeting household, school or work contacts '
-     '(todolist 1.2: isolation < critical state; its "< end of infectiousness" half was dropped '
-     'by E92: Taiwan onset -> ICU is 7.2 d and Cheng 2020 saw no transmission after day 5)', 'ICU cases',
-     'by construction (B52; violated by 74.5% of run 10 ICU cases, E81)', 'todolist 1.2; clinical definition of ICU admission'),
+     '(todolist 1.2: isolation < critical state; its "< end of infectiousness" half was '
+     'dropped by E92: Taiwan onset -> ICU is 7.2 d and Cheng 2020 saw no transmission after '
+     'day 5)', 'ICU cases',
+     'by construction (B52; violated by 74.5% of run 10 ICU cases, E81)',
+     'todolist 1.2; clinical definition of ICU admission'),
     ('T01', 'infector latent <= generation interval', 'no transmission before the infector is '
      'infectious (todolist 1.2 C04)', 'transmissions', 'model rule',
      'definition of the latent period; Byrne et al. 2020'),

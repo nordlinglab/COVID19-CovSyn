@@ -20,6 +20,7 @@ from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULAT
                                             LAYER_INFECTIONS_PER_INDEX)
 from covsyn.model.contact_measures import contacts_per_day_before_onset
 from covsyn.model.data_synthesize import *
+from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 # from sklearn.metrics.pairwise import nan_euclidean_distances
@@ -1024,11 +1025,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         if layer == 'Health care':
             health_care_weights = np.array([1, 1, 1, 1, 2, 2])
             cost = np.sum(
-                (((norm_contact_array * contact_scale -
-                 norm_Cheng_data)*health_care_weights) ** 2))
+                ((norm_contact_array * contact_scale -
+                  norm_Cheng_data)*health_care_weights) ** 2)
         else:
             cost = np.sum(
-                ((norm_contact_array * contact_scale - norm_Cheng_data) ** 2))
+                (norm_contact_array * contact_scale - norm_Cheng_data) ** 2)
         attack_rate_cost = np.nansum(
             ((norm_attack_rate - norm_Cheng_attack) * norm_weights[i]) ** 2)
         # if layer == 'Household':

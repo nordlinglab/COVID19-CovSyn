@@ -93,7 +93,7 @@ def community_event_parameters(P: Sequence[float]) -> dict[str, float | int] | N
               for i in range(len(COMMUNITY_EVENT_FIELDS))]
     if not np.all(np.isfinite(values)):
         raise ValueError(f'community event parameters must be finite: {values}')
-    event = dict(zip(COMMUNITY_EVENT_FIELDS, values))
+    event = dict(zip(COMMUNITY_EVENT_FIELDS, values, strict=True))
     event['min_size'] = int(round(event['min_size']))
     event['max_size'] = int(round(event['max_size']))
     if not 0.0 <= event['probability'] <= 1.0:
@@ -413,6 +413,11 @@ class Draw_social_data:
 
 
 class Draw_course_of_disease_data:
+    # Set by draw_course_of_disease(); declared here so apply_icu_isolation() is typed.
+    monitor_isolation_period: int
+    positive_test_date: float
+    negative_test_date: np.ndarray
+
     def __init__(self, infection_day, latent_period_gamma, infectious_period_gamma, incubation_period_gamma, symptom_to_isolation_gamma,
                  asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
                  critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma,
@@ -1144,8 +1149,11 @@ class Draw_contact_data:
         event falls on that day exactly as it lowers ordinary contacts (B19).
 
         Args:
-            p, steepness, symptom_phase, width: The municipality layer's contact profile,
-                as for daily_contact_p().
+            p: The municipality layer's [contact_p, contact_previous_day_p, healthy_p,
+                symptom_p], as for daily_contact_p().
+            steepness: Steepness of the logistic curve.
+            symptom_phase: Offset of the curve from symptom onset, in days.
+            width: Days between the healthy and the symptomatic phase.
             end_day: Last day of the municipality window, counted from infection.
             room: People of the municipality not already drawn as ordinary contacts; caps
                 the event size.
@@ -1699,8 +1707,8 @@ class Draw_contact_data:
                     if event_mask is not None and event_mask[index]:
                         contact_attack_rate = municipality_attack_rate * event_risk_ratio
                     infection_status, effective_contacts_vector = self.draw_infection_status(
-                        contact_attack_rate, row, natural_immunity_status, vaccination_status, secondary_contact_age,
-                        'municipality')
+                        contact_attack_rate, row, natural_immunity_status, vaccination_status,
+                        secondary_contact_age, 'municipality')
                     self.municipality_expected_infections += self.last_infection_probability
                     if infection_status == True:
                         self.municipality_effective_contacts.append(1)

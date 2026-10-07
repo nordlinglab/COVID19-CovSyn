@@ -161,7 +161,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     for L in LAYERS:
         # B55: ordinary contacts only, the same function the objective uses.
         per_day = [contacts_per_day_before_onset(k, c, L)
-                   for c, k in zip(index_contact, index_course)]
+                   for c, k in zip(index_contact, index_course, strict=True)]
         value = float(np.mean(per_day))
         total += value
         check('B25', f'contacts per day before onset, {L}', value, targets[L])
@@ -252,7 +252,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # the recorded infector -> infectee links give 0.047, a lower bound. CovSyn counts the people
     # this case infected, so the acceptance interval runs between the two definitions.
     check('B17', 'R (mean offspring of an index case)', counts.mean(), (0.047, 0.43),
-          note='B56: between Taiwan links (0.047, lower bound) and confirmed contacts (0.43, upper bound), E80')
+          note='B56: between Taiwan links (0.047, lower bound) and confirmed contacts '
+               '(0.43, upper bound), E80')
     check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), (0.2, 4.3), '%',
           note='B56: between Taiwan links (0.2%) and confirmed contacts (4.3%), E80')
     check('B17', 'largest number infected by one case', counts.max(), (5, 30), interval=False,
@@ -277,7 +278,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     check('B50', 'community contacts, p90 / median',
           (np.percentile(nonzero, 90) / np.median(nonzero)) if len(nonzero) and np.median(nonzero) > 0 else np.nan,
           None,
-          note='B56: limitation, selected sample (E88); Taiwan reported cases 26.0 (n=38), CI [5.5, 93.1]')
+          note='B56: limitation, selected sample (E88); Taiwan reported cases 26.0 (n=38), '
+               'CI [5.5, 93.1]')
     check('B27', 'community contacts per case, maximum', community.max(), None,
           note='Taiwan tracing maximum 850 (informational: one order statistic)')
     # decoupled from city population (finding E4)
@@ -297,12 +299,14 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # judged quantity uses that window; every candidate contact from infection is information.
     check('B56', "contacts per case in Jian's tracing window",
           float(np.mean([contacts_in_tracing_window(k, c)
-                         for k, c in zip(index_course, index_contact)])), (13.9, 19.1),
+                         for k, c in zip(index_course, index_contact, strict=True)])),
+          (13.9, 19.1),
           note='Jian et al. 2020: 16.5 per case over 487 cases; window onset - 2 d to '
                'isolation (E7, E89); independent')
     check('B56', 'contacts per case, all layers, from infection',
           float(np.mean([contacts_per_case(c) for c in index_contact])), None,
-          note='information: every candidate contact; CovSyn counts from infection, tracing does not')
+          note='information: every candidate contact; CovSyn counts from infection, '
+               'tracing does not')
 
     # ---------------------------------------------------------------- B22 / B26 timing
     incubation = field('incubation_period', index_course)
@@ -437,7 +441,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
         for label, band in measurement.get('bands', {}).items():
             lo, hi = band['target']
             ci_lo, ci_hi = band['ci']
-            check('B14', f'measured age risk ratio, {label}', band['rr'], (lo, hi), ci=(ci_lo, ci_hi),
+            check('B14', f'measured age risk ratio, {label}', band['rr'], (lo, hi),
+                  ci=(ci_lo, ci_hi),
                   note=(f'{n_cases} index cases, {infections} infections over {layers} '
                         f'(the settings Cheng traced); 95% CI [{ci_lo:.3f}, {ci_hi:.3f}]; '
                         f'{band["precision"]}; reference: '
@@ -487,6 +492,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
 
 
 def main():
+    """Run the checklist on SPREAD_DIR and FIRST_DIR and write the JSON report."""
     runs = load(SPREAD)
     if not runs:
         raise SystemExit(f'no Monte-Carlo output found in {SPREAD}')
@@ -544,9 +550,9 @@ def main():
             mark = 'FAIL'
             failed += 1
         value = 'n/a' if r['value'] is None or not np.isfinite(r['value']) else '%9.3f' % r['value']
-        interval = '[%.3g, %.3g]' % tuple(r['ci']) if r.get('ci') else ''
-        print('  %s %-*s %s%-2s  %-16s %-20s %s' % (mark, width, r['name'], value, r['unit'],
-                                                    target_text, interval, r['note']))
+        interval = f"[{r['ci'][0]:.3g}, {r['ci'][1]:.3g}]" if r.get('ci') else ''
+        print(f"  {mark} {r['name']:<{width}} {value}{r['unit']:<2}  {target_text:<16} "
+              f"{interval:<20} {r['note']}")
     print(f'\n{passed} checks passed ({within} of them only within the 95% interval, marked ok~), '
           f'{failed} failed, {len(results) - passed - failed} informational')
 

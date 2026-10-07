@@ -6,6 +6,7 @@ The contacts per day before onset were computed by four copies of the same loop 
 objective implementations, the acceptance checklist and the comparison figure); B55 changes
 the definition, so all four now call contacts_per_day_before_onset().
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -13,11 +14,13 @@ from typing import Any
 
 import numpy as np
 
-MATRIX_KEY = {'household': 'household_contacts_matrix',
-              'school': 'school_class_contacts_matrix',
-              'workplace': 'workplace_contacts_matrix',
-              'health_care': 'health_care_contacts_matrix',
-              'municipality': 'municipality_contacts_matrix'}
+MATRIX_KEY = {
+    "household": "household_contacts_matrix",
+    "school": "school_class_contacts_matrix",
+    "workplace": "workplace_contacts_matrix",
+    "health_care": "health_care_contacts_matrix",
+    "municipality": "municipality_contacts_matrix",
+}
 
 
 def contacts_per_case(contact: Mapping[str, Any]) -> int:
@@ -25,12 +28,15 @@ def contacts_per_case(contact: Mapping[str, Any]) -> int:
 
     The quantity compared with Jian et al. 2020's 16.5 close contacts per confirmed case.
     """
-    return sum(len(contact.get(f'{layer}_effective_contacts') or [])
-               for layer in ('household', 'school', 'workplace', 'health_care', 'municipality'))
+    return sum(
+        len(contact.get(f"{layer}_effective_contacts") or [])
+        for layer in ("household", "school", "workplace", "health_care", "municipality")
+    )
 
 
-def contacts_in_tracing_window(course: Mapping[str, Any], contact: Mapping[str, Any],
-                               lead_days: int = 2) -> int:
+def contacts_in_tracing_window(
+    course: Mapping[str, Any], contact: Mapping[str, Any], lead_days: int = 2
+) -> int:
     """Contacts a contact tracer would list: those met at least once inside the tracing window.
 
     Jian et al. 2020 traced from 2 days before symptom onset to isolation (finding E7), and
@@ -46,10 +52,12 @@ def contacts_in_tracing_window(course: Mapping[str, Any], contact: Mapping[str, 
     Returns:
         The number of contacts, over all five layers, met on a day in the window.
     """
-    isolation = int(course['monitor_isolation_period'])
-    onset = course['incubation_period']
+    isolation = int(course["monitor_isolation_period"])
+    onset = course["incubation_period"]
     # Whole days, like the matrix columns (incubation_period is an int in the model today).
-    start = (int(np.floor(onset)) if onset is not None and np.isfinite(onset) else isolation) - lead_days
+    start = (
+        int(np.floor(onset)) if onset is not None and np.isfinite(onset) else isolation
+    ) - lead_days
     count = 0
     for key in MATRIX_KEY.values():
         matrix = np.asarray(contact.get(key, np.zeros((0, 0))), dtype=bool)
@@ -72,17 +80,20 @@ def ordinary_contact_matrix(contact: Mapping[str, Any], layer: str) -> np.ndarra
         The rows of ordinary contacts, as a float matrix (contacts x days).
     """
     matrix = np.asarray(contact[MATRIX_KEY[layer]], dtype=float)
-    mask = contact.get('municipality_event_mask') if layer == 'municipality' else None
+    mask = contact.get("municipality_event_mask") if layer == "municipality" else None
     if mask is not None:
         if len(mask) != matrix.shape[0]:
-            raise ValueError(f'municipality_event_mask has {len(mask)} entries for '
-                             f'{matrix.shape[0]} contact rows')
+            raise ValueError(
+                f"municipality_event_mask has {len(mask)} entries for "
+                f"{matrix.shape[0]} contact rows"
+            )
         matrix = matrix[~np.asarray(mask, dtype=bool)]
     return matrix
 
 
-def contacts_per_day_before_onset(course: Mapping[str, Any], contact: Mapping[str, Any],
-                                  layer: str) -> float:
+def contacts_per_day_before_onset(
+    course: Mapping[str, Any], contact: Mapping[str, Any], layer: str
+) -> float:
     """Ordinary contacts per day before symptom onset, the quantity of the B25 survey target.
 
     The 2020 national survey records the close contacts of an ordinary day, so a mass event,
@@ -100,7 +111,10 @@ def contacts_per_day_before_onset(course: Mapping[str, Any], contact: Mapping[st
     matrix = ordinary_contact_matrix(contact, layer)
     if matrix.ndim != 2 or matrix.shape[1] == 0:
         return 0.0
-    onset = course['incubation_period']
-    days = matrix.shape[1] if (onset is None or np.isnan(onset)) \
+    onset = course["incubation_period"]
+    days = (
+        matrix.shape[1]
+        if (onset is None or np.isnan(onset))
         else int(min(matrix.shape[1], max(onset, 1)))
+    )
     return float(matrix[:, :days].sum() / max(days, 1))

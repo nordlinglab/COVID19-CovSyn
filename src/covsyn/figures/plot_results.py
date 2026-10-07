@@ -620,7 +620,7 @@ def event_bin_corrections(course_of_disease_data_list: list, contact_data_list: 
     """
     contacts = np.zeros(6)
     infections = np.zeros(6)
-    for course, contact in zip(course_of_disease_data_list, contact_data_list):
+    for course, contact in zip(course_of_disease_data_list, contact_data_list, strict=True):
         onset = course['incubation_period']
         mask = contact.get('municipality_event_mask')
         expected_contacts = contact.get('municipality_event_expected_contacts')
@@ -634,7 +634,8 @@ def event_bin_corrections(course_of_disease_data_list: list, contact_data_list: 
         # The infection loop stops when the population runs out, so the list can be shorter
         # than the rows; the rows beyond it were never exposed.
         times = np.full(matrix.shape[0], np.nan)
-        recorded = np.asarray(contact['municipality_effective_contacts_infection_time'], dtype=float)
+        recorded = np.asarray(contact['municipality_effective_contacts_infection_time'],
+                              dtype=float)
         times[:len(recorded)] = recorded
         event_days = np.argmax(matrix[mask], axis=1)      # every event row has one contact day
         event_infected = ~np.isnan(times[mask])

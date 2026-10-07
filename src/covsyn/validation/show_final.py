@@ -38,14 +38,15 @@ tot = 0.0
 for n, v, lo, hi in terms:
     c = PHYSIOLOGY_PENALTY_WEIGHT * ou(v, lo, hi) ** 2
     tot += c
-    print('%-26s %9.3f  [%g, %g]%s%.4f %s' % (n, v, lo, hi, ' ' * 5, c, '<-- OUT' if c > 1e-6 else ''))
+    flag = '<-- OUT' if c > 1e-6 else ''
+    print(f"{n:<26s} {v:9.3f}  [{lo:g}, {hi:g}]{' ' * 5}{c:.4f} {flag}")
 print('%-26s %9s  %-14s %.4f' % ('TOTAL penalty', '', '', tot))
 print('  (the recovery times, the asymptomatic share and the severity cascade are NOT here:')
 print('   they are measured on the simulation by outcome_penalty(), see the measured_* rows)')
 print('\nage risk ratios (locked): %s' % np.round(P[63:67], 3).tolist())
 # B17 made P[35] / P[36] the Gamma shape k and the cap of the case-level infectiousness
 # multiplier; the old 'rate / weight -> expected multiplier' line no longer meant anything.
-print('infectiousness multiplier: Gamma shape k %.4f, cap %.3f' % (P[35], P[36]))
+print(f'infectiousness multiplier: Gamma shape k {P[35]:.4f}, cap {P[36]:.3f}')
 for name, j in [('household', 70), ('school', 95), ('workplace', 120), ('healthcare', 145), ('municipality', 170)]:
     print('  mean daily attack rate %-13s %.5f' % (name, float(np.mean(P[j:j + 25]))))
 

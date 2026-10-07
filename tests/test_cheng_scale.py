@@ -16,7 +16,8 @@ import pytest
 
 
 def test_contact_scale_maps_the_symptomatic_cases_onto_cheng_cohort() -> None:
-    pytest.importorskip('sklearn')  # firefly_optimizer imports it at module level
+    """Contact scale maps the symptomatic cases onto cheng cohort."""
+    pytest.importorskip("sklearn")  # firefly_optimizer imports it at module level
     from covsyn.calibration import firefly_optimizer as fo
 
     assert fo.CHENG_SYMPTOMATIC_INDEX_CASES == 91
@@ -25,9 +26,12 @@ def test_contact_scale_maps_the_symptomatic_cases_onto_cheng_cohort() -> None:
 
 
 def test_contact_scale_without_symptomatic_cases_raises() -> None:
-    """No symptomatic case means no Cheng bins; raising makes cost_function charge the failure
-    cost rather than return a NaN the firefly cannot rank."""
-    pytest.importorskip('sklearn')
+    """No symptomatic case means no Cheng bins, so the scale raises.
+
+    Raising makes cost_function charge the failure cost rather than return a NaN the
+    firefly cannot rank.
+    """
+    pytest.importorskip("sklearn")
     from covsyn.calibration import firefly_optimizer as fo
 
     with pytest.raises(ValueError):
@@ -35,7 +39,8 @@ def test_contact_scale_without_symptomatic_cases_raises() -> None:
 
 
 def test_objective_still_simulates_three_hundred_seeds() -> None:
-    pytest.importorskip('sklearn')
+    """Objective still simulates three hundred seeds."""
+    pytest.importorskip("sklearn")
     from covsyn.calibration import firefly_optimizer as fo
 
     assert fo.SIMULATIONS_PER_EVALUATION == 300

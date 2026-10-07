@@ -8,6 +8,7 @@ company-size ratio on 19 against 22 infections. A check therefore gets a bootstr
 over the simulations, and a value outside the target whose interval still reaches it is
 reported as 'within noise' rather than as a failure.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Sequence
@@ -16,8 +17,9 @@ from typing import Any
 import numpy as np
 
 
-def verdict(value: float, target: tuple[float, float],
-            interval: tuple[float, float] | None) -> str | None:
+def verdict(
+    value: float, target: tuple[float, float], interval: tuple[float, float] | None
+) -> str | None:
     """Judge a value against a target band, allowing for its sampling interval.
 
     Args:
@@ -33,18 +35,21 @@ def verdict(value: float, target: tuple[float, float],
         return None
     lower, upper = target
     if lower <= value <= upper:
-        return 'ok'
+        return "ok"
     # A single-value target (an anomaly count that must be 0) gets no allowance: a resample
     # that happens to miss the few bad cases would otherwise pass a real defect.
-    if (interval is not None and lower < upper
-            and interval[0] <= upper and interval[1] >= lower):
-        return 'within'
-    return 'fail'
+    if interval is not None and lower < upper and interval[0] <= upper and interval[1] >= lower:
+        return "within"
+    return "fail"
 
 
-def bootstrap_intervals(compute: Callable[..., dict[Hashable, float]],
-                        *unit_lists: Sequence[Any], replicates: int = 200, seed: int = 0,
-                        level: float = 0.95) -> dict[Hashable, tuple[float, float]]:
+def bootstrap_intervals(
+    compute: Callable[..., dict[Hashable, float]],
+    *unit_lists: Sequence[Any],
+    replicates: int = 200,
+    seed: int = 0,
+    level: float = 0.95,
+) -> dict[Hashable, tuple[float, float]]:
     """Percentile bootstrap intervals of every value compute() returns.
 
     Args:
@@ -61,11 +66,16 @@ def bootstrap_intervals(compute: Callable[..., dict[Hashable, float]],
     rng = np.random.default_rng(seed)
     collected: dict[Hashable, list[float]] = {}
     for _ in range(replicates):
-        samples = [[units[i] for i in rng.integers(0, len(units), len(units))] if len(units)
-                   else [] for units in unit_lists]
+        samples = [
+            [units[i] for i in rng.integers(0, len(units), len(units))] if len(units) else []
+            for units in unit_lists
+        ]
         for key, value in compute(*samples).items():
             if value is not None and np.isfinite(value):
                 collected.setdefault(key, []).append(float(value))
     tail = 100 * (1 - level) / 2
-    return {key: (float(np.percentile(v, tail)), float(np.percentile(v, 100 - tail)))
-            for key, v in collected.items() if len(v) >= 2}
+    return {
+        key: (float(np.percentile(v, tail)), float(np.percentile(v, 100 - tail)))
+        for key, v in collected.items()
+        if len(v) >= 2
+    }

@@ -32,8 +32,11 @@ def test_inside_the_interval_costs_nothing(name: str) -> None:
 
 
 def test_quadratic_below_one_unit_with_the_capped_width() -> None:
-    """closure_after_confirmation_symptomatic [22, 32]: width 10 is below half the centre
-    (13.5), so 10 is the unit."""
+    """A miss below one unit is quadratic, with the unit capped at the width.
+
+    closure_after_confirmation_symptomatic [22, 32]: width 10 is below half the centre (13.5),
+    so 10 is the unit.
+    """
     lo, hi, weight = fo.OUTCOME_TARGETS["closure_after_confirmation_symptomatic"]
     assert (lo, hi) == (22.0, 32.0)
     miss = 0.5 / 10.0

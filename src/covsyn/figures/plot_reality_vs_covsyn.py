@@ -77,7 +77,7 @@ def layer_sar(layer, cases):
 def daily_contacts(layer):
     # B55: ordinary contacts only, the same function the objective uses.
     return float(np.mean([contacts_per_day_before_onset(k, c, layer)
-                          for c, k in zip(index_contact, index_course)]))
+                          for c, k in zip(index_contact, index_course, strict=True)]))
 
 
 def contact_bins(layers, only_symptomatic=True):

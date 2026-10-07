@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from tqdm import tqdm
 from covsyn.model.data_synthesize import *
+from covsyn.model.data_synthesize import community_event_parameters
 
 
 def get_saveable_data(data, data_type):
