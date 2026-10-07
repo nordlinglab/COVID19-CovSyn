@@ -269,4 +269,5 @@ def test_event_probability_zero_reproduces_the_pre_b54_stream(
     for contact in new[3]:
         assert not np.any(contact.pop('municipality_event_mask'))
         assert not np.any(contact.pop('municipality_event_expected_contacts'))
+        assert not np.any(contact.pop('municipality_event_expected_infections'))
     assert rd.digest(new) == rd.digest(old)

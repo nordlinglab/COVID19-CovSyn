@@ -151,10 +151,17 @@ def expected_event_size(exponent: float, min_size: int, max_size: int, room: flo
     """
     if room <= 0:
         return 0.0
-    cdf = _event_size_cdf(float(exponent), int(min_size), int(max_size))
+    # room is almost always above max_size, so the cap, not room, is the cache key.
+    return _expected_capped_event_size(float(exponent), int(min_size), int(max_size),
+                                       float(min(room, max_size)))
+
+
+@lru_cache(maxsize=256)
+def _expected_capped_event_size(exponent, min_size, max_size, cap):
+    cdf = _event_size_cdf(exponent, min_size, max_size)
     pmf = np.diff(np.concatenate([[0.0], cdf]))
-    sizes = np.arange(int(min_size), int(max_size) + 1)
-    return float(np.sum(np.minimum(sizes, room) * pmf))
+    sizes = np.arange(min_size, max_size + 1)
+    return float(np.sum(np.minimum(sizes, cap) * pmf))
 
 
 @lru_cache(maxsize=None)
@@ -1428,6 +1435,19 @@ class Draw_contact_data:
         workplace_attack_rate = attack_rate_profiles['workplace']
         health_care_attack_rate = attack_rate_profiles['health_care']
         municipality_attack_rate = attack_rate_profiles['municipality']
+        expected_contacts = getattr(self, 'municipality_event_expected_contacts', None)
+        if expected_contacts is not None:
+            # B55: the expected infections among the expected event contacts, so the Cheng
+            # attack rate divides expected infections by expected contacts. An event contact is
+            # met on one day, where its infection probability is that day's municipality rate
+            # times the event ratio; the contact-age factor averages to 1 by construction
+            # (age_risk_ratio_norm), and prior immunity is ignored.
+            rate = np.zeros(len(expected_contacts))
+            days = min(len(rate), len(municipality_attack_rate))
+            rate[:days] = np.clip(municipality_attack_rate[:days]
+                                  * self.community_event['risk_ratio'], 0.0, 1.0)
+            self.municipality_event_expected_infections = (
+                np.round(expected_contacts * rate * EXPECTED_CONTACT_GRID) / EXPECTED_CONTACT_GRID)
 
         self.household_previously_infected_index_list = np.array([])
         self.school_previously_infected_index_list = np.array([])

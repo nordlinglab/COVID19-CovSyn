@@ -590,41 +590,67 @@ def plot_contact_day_vs_infection_day(course_of_disease_data_list, contact_data_
             plt.savefig('RW2022_contact_day_vs_infection_day_%s.pdf' % layer)
 
 
+# Cheng et al. 2020's six bins of days from onset, written exactly as the count_nonzero
+# conditions of create_array_cheng2020_fig2 below: a fractional offset in a gap (3.5, 5.5,
+# 7.5) falls in no bin there, so it must fall in none here either.
+_CHENG_BIN_CONDITIONS = (lambda x: x < 0, lambda x: 0 <= x <= 3, lambda x: 4 <= x <= 5,
+                         lambda x: 6 <= x <= 7, lambda x: 8 <= x <= 9, lambda x: x > 9)
+
+
 def _cheng_day_bin(days_from_onset):
-    """Index of Cheng et al. 2020's six bins (<0, 0-3, 4-5, 6-7, 8-9, >9 days from onset)."""
-    if days_from_onset < 0:
-        return 0
-    if days_from_onset <= 3:
-        return 1
-    if days_from_onset <= 5:
-        return 2
-    if days_from_onset <= 7:
-        return 3
-    if days_from_onset <= 9:
-        return 4
-    return 5
+    """Index of the Cheng bin holding this offset, or None in a gap between bins."""
+    for index, condition in enumerate(_CHENG_BIN_CONDITIONS):
+        if condition(days_from_onset):
+            return index
+    return None
 
 
-def event_contact_correction(course_of_disease_data_list, contact_data_list):
-    """Expected minus sampled mass-event contacts per Cheng bin, symptomatic cases only (B55).
+def event_bin_corrections(course_of_disease_data_list, contact_data_list):
+    """Expected minus sampled mass-event contacts and infections per Cheng bin (B55).
 
-    Added to the sampled contact bins, it replaces each case's sampled event contacts with
-    their expectation (municipality_event_expected_contacts), so one event of hundreds of
-    people no longer dominates a 100-case calibration; the expectation is unchanged.
+    Symptomatic cases only, like create_array_cheng2020_fig2. Added to the sampled bins it
+    replaces each case's sampled event contacts and their infections with the expectations the
+    simulation recorded, so one event of hundreds of people no longer dominates a 300-case
+    calibration while the expected bins are unchanged. All expectations lie on a 2**-20 grid,
+    so the sums are exact in any order and both objective implementations agree bit for bit.
+
+    Returns:
+        (contacts, infections), two arrays of six floats.
     """
-    correction = np.zeros(6)
+    contacts = np.zeros(6)
+    infections = np.zeros(6)
     for course, contact in zip(course_of_disease_data_list, contact_data_list):
         onset = course['incubation_period']
         mask = contact.get('municipality_event_mask')
-        expected = contact.get('municipality_event_expected_contacts')
-        if np.isnan(onset) or mask is None or expected is None:
+        expected_contacts = contact.get('municipality_event_expected_contacts')
+        if np.isnan(onset) or mask is None or expected_contacts is None:
             continue
-        rows = np.asarray(contact['municipality_contacts_matrix'])[np.asarray(mask, dtype=bool)]
-        for row in rows:
-            correction[_cheng_day_bin(np.where(row)[0][0] - onset)] -= 1
-        for day, count in enumerate(expected):
-            correction[_cheng_day_bin(day - onset)] += count
-    return correction
+        matrix = np.asarray(contact['municipality_contacts_matrix'], dtype=bool)
+        mask = np.asarray(mask, dtype=bool)
+        if len(mask) != matrix.shape[0]:
+            raise ValueError(f'municipality_event_mask has {len(mask)} entries for '
+                             f'{matrix.shape[0]} contact rows')
+        # The infection loop stops when the population runs out, so the list can be shorter
+        # than the rows; the rows beyond it were never exposed.
+        times = np.full(matrix.shape[0], np.nan)
+        recorded = np.asarray(contact['municipality_effective_contacts_infection_time'], dtype=float)
+        times[:len(recorded)] = recorded
+        event_days = np.argmax(matrix[mask], axis=1)      # every event row has one contact day
+        event_infected = ~np.isnan(times[mask])
+        for day in np.unique(event_days):
+            index = _cheng_day_bin(day - onset)
+            if index is not None:
+                on_day = event_days == day
+                contacts[index] -= np.count_nonzero(on_day)
+                infections[index] -= np.count_nonzero(on_day & event_infected)
+        expected_infections = contact.get('municipality_event_expected_infections')
+        for day, count in enumerate(expected_contacts):
+            index = _cheng_day_bin(day - onset)
+            if index is not None:
+                contacts[index] += count
+                if expected_infections is not None:
+                    infections[index] += expected_infections[day]
+    return contacts, infections
 
 
 def create_array_cheng2020_fig2(course_of_disease_data_list, contact_data_list, layer='All',
@@ -632,7 +658,7 @@ def create_array_cheng2020_fig2(course_of_disease_data_list, contact_data_list, 
     """Contacts and infections in Cheng et al. 2020's six onset bins.
 
     expected_events=True (B55, used by the objective only) replaces the sampled mass-event
-    contacts of the municipality layer by their expectation; infections stay as sampled.
+    contacts of the municipality layer, and their infections, by their expectation.
     """
     duration_array, infection_day_array, first_contact_day_array, incubation_period_array = \
         generate_course_and_contact_combine_data(
@@ -669,11 +695,13 @@ def create_array_cheng2020_fig2(course_of_disease_data_list, contact_data_list, 
                                     np.count_nonzero((adjust_first_contact_day_array > 9)*infection_map)])
 
     if expected_events and layer in ('Municipality', 'All'):
-        correction = event_contact_correction(course_of_disease_data_list, contact_data_list)
-        if np.any(correction):
+        contact_correction, infection_correction = event_bin_corrections(
+            course_of_disease_data_list, contact_data_list)
+        if np.any(contact_correction) or np.any(infection_correction):
             if contact_array.size == 0:
-                contact_array, infection_array = np.zeros(6), np.zeros(6, dtype=int)
-            contact_array = contact_array + correction
+                contact_array, infection_array = np.zeros(6), np.zeros(6)
+            contact_array = contact_array + contact_correction
+            infection_array = infection_array + infection_correction
 
     return (adjust_first_contact_day_array, contact_array, infection_map, infection_array)
 

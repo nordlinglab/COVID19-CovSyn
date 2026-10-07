@@ -94,6 +94,8 @@ def get_saveable_data(data, data_type):
             data_dict['municipality_event_mask'] = data.municipality_event_mask
             data_dict['municipality_event_expected_contacts'] = (
                 data.municipality_event_expected_contacts)
+            data_dict['municipality_event_expected_infections'] = getattr(
+                data, 'municipality_event_expected_infections', None)
 
     return data_dict
 

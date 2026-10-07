@@ -86,6 +86,18 @@ def test_expected_event_contacts_are_saved_per_day(
     np.testing.assert_array_equal(expected * 2.0 ** 20, np.round(expected * 2.0 ** 20))
 
 
+@pytest.mark.parametrize("seed", range(4))
+def test_expected_event_infections_are_saved_per_day(
+        seed: int, run10_vector: np.ndarray, demographic_parameters: object) -> None:
+    vector = np.concatenate([run10_vector, [0.10, 1.49, 21, 1000, 1.0]])
+    _, contact = _index_contact(vector, demographic_parameters, seed)
+    contacts = contact['municipality_event_expected_contacts']
+    infections = contact['municipality_event_expected_infections']
+    assert len(infections) == len(contacts)
+    assert np.all(infections >= 0) and np.all(infections <= contacts)
+    np.testing.assert_array_equal(infections * 2.0 ** 20, np.round(infections * 2.0 ** 20))
+
+
 def test_vector_without_events_saves_no_expectation(run10_vector: np.ndarray,
                                                     demographic_parameters: object) -> None:
     _, contact = _index_contact(run10_vector, demographic_parameters, 0)
@@ -109,6 +121,8 @@ def _case(onset: float = 2.0) -> tuple[dict, dict]:
     contact['municipality_event_mask'] = np.array([False, False, True, True, True])
     contact['municipality_event_expected_contacts'] = np.array(
         [0, 0, 0, 0, 0, 0, 0, 10.0])          # all expected on day 7, onset + 5
+    contact['municipality_event_expected_infections'] = np.array(
+        [0, 0, 0, 0, 0, 0, 0, 0.5])
     course = {'incubation_period': onset}
     return course, contact
 
@@ -123,15 +137,47 @@ def test_default_binning_counts_the_sampled_event_contacts() -> None:
     np.testing.assert_array_equal(infections, [0, 2, 0, 0, 0, 0])
 
 
-def test_expected_binning_replaces_event_contacts_and_keeps_infections() -> None:
+def test_expected_binning_replaces_event_contacts_and_their_infections() -> None:
+    """Contacts and infections of the event both come from the expectation, so the per-bin
+    attack rate never divides sampled event infections by expected event contacts."""
     from covsyn.figures.plot_results import create_array_cheng2020_fig2
 
     course, contact = _case()
     _, contacts, _, infections = create_array_cheng2020_fig2([course], [contact], 'Municipality',
                                                            expected_events=True)
-    # ordinary: -2 -> <0, +1 -> 0-3; expected 10 on day 7 = onset + 5 -> bin 4-5
+    # ordinary: -2 -> <0, +1 -> 0-3 (infected); the sampled event infection (day 5, +3) is
+    # removed, and the expected 10 contacts / 0.5 infections on day 7 (+5) go to bin 4-5
     np.testing.assert_allclose(contacts, [1, 1, 10, 0, 0, 0])
-    np.testing.assert_array_equal(infections, [0, 2, 0, 0, 0, 0])
+    np.testing.assert_allclose(infections, [0, 1, 0.5, 0, 0, 0])
+
+
+def test_infection_rows_cut_short_by_the_population_count_as_uninfected() -> None:
+    """The infection loop stops when the population runs out, leaving a shorter time list."""
+    from covsyn.figures.plot_results import event_bin_corrections
+
+    course, contact = _case()
+    contact['municipality_effective_contacts_infection_time'] = [np.nan, 4.0]
+    contacts, infections = event_bin_corrections([course], [contact])
+    np.testing.assert_allclose(contacts, [0, -3, 10, 0, 0, 0])
+    np.testing.assert_allclose(infections, [0, 0, 0.5, 0, 0, 0])
+
+
+def test_correction_rejects_a_mask_of_the_wrong_length() -> None:
+    from covsyn.figures.plot_results import event_bin_corrections
+
+    course, contact = _case()
+    contact['municipality_event_mask'] = np.array([False, True])
+    with pytest.raises(ValueError):
+        event_bin_corrections([course], [contact])
+
+
+@pytest.mark.parametrize("offset,expected", [(-0.5, 0), (0, 1), (3, 1), (3.5, None), (4, 2),
+                                             (5.5, None), (7, 3), (9, 4), (9.5, 5), (12, 5)])
+def test_day_bins_match_create_array_including_its_gaps(offset: float, expected: int | None) -> None:
+    """The correction must use exactly create_array_cheng2020_fig2's edges, gaps included."""
+    from covsyn.figures.plot_results import _cheng_day_bin
+
+    assert _cheng_day_bin(offset) == expected
 
 
 def test_expected_binning_skips_asymptomatic_cases() -> None:
@@ -171,6 +217,13 @@ def test_contacts_per_day_before_onset_unchanged_for_other_layers() -> None:
 def test_contacts_per_day_of_an_asymptomatic_case_use_the_whole_window() -> None:
     course, contact = _case(onset=np.nan)
     assert cm.contacts_per_day_before_onset(course, contact, 'municipality') == pytest.approx(2 / 8)
+
+
+def test_contacts_per_day_rejects_a_mask_of_the_wrong_length() -> None:
+    course, contact = _case(onset=4.0)
+    contact['municipality_event_mask'] = np.array([True])
+    with pytest.raises(ValueError):
+        cm.contacts_per_day_before_onset(course, contact, 'municipality')
 
 
 def test_contacts_per_day_with_no_contacts_is_zero() -> None:

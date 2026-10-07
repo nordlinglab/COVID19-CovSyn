@@ -32,7 +32,10 @@ def ordinary_contact_matrix(contact: Mapping[str, Any], layer: str) -> np.ndarra
     """
     matrix = np.asarray(contact[MATRIX_KEY[layer]], dtype=float)
     mask = contact.get('municipality_event_mask') if layer == 'municipality' else None
-    if mask is not None and len(mask) == matrix.shape[0]:
+    if mask is not None:
+        if len(mask) != matrix.shape[0]:
+            raise ValueError(f'municipality_event_mask has {len(mask)} entries for '
+                             f'{matrix.shape[0]} contact rows')
         matrix = matrix[~np.asarray(mask, dtype=bool)]
     return matrix
 
