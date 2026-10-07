@@ -263,11 +263,15 @@ def reduce_outcomes(scalars):
 
 
 def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
-                  norm_weights):
-    """Same contract as firefly_optimizer.cost_function, including the 1e6 on failure (E31)."""
+                  norm_weights, seed_offset=0):
+    """Same contract as firefly_optimizer.cost_function, including the 1e6 on failure (E31).
+
+    seed_offset shifts the simulation seeds; 0, the default, is the objective the optimizer
+    uses. revalidation.py scores candidates on other offsets (E87).
+    """
     try:
         return _cost_function(P, demographic_parameters, executor, Cheng_contact_array,
-                              Cheng_attack_rate, norm_weights)
+                              Cheng_attack_rate, norm_weights, seed_offset)
     except Exception:
         traceback.print_exc()
         print('fast_cost: simulation failed for this parameter vector, charging '
@@ -282,14 +286,14 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
 
 
 def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
-                   norm_weights):
+                   norm_weights, seed_offset=0):
     source_case_number = fo.SIMULATIONS_PER_EVALUATION
     repeat_number = 1
     case_limit = source_case_number * repeat_number
     taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
     columns = taiwan_data_matrix.shape[1]
 
-    seeds = list(range(case_limit))
+    seeds = list(range(seed_offset, seed_offset + case_limit))
     P_copy = copy.deepcopy(P)
     batches = [seeds[i:i + fo.SIMULATIONS_PER_TASK]
                for i in range(0, len(seeds), fo.SIMULATIONS_PER_TASK)]
