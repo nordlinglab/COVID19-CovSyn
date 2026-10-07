@@ -20,6 +20,15 @@ MATRIX_KEY = {'household': 'household_contacts_matrix',
               'municipality': 'municipality_contacts_matrix'}
 
 
+def contacts_per_case(contact: Mapping[str, Any]) -> int:
+    """Candidate contacts of one case over all five layers, mass events included (B56).
+
+    The quantity compared with Jian et al. 2020's 16.5 close contacts per confirmed case.
+    """
+    return sum(len(contact.get(f'{layer}_effective_contacts') or [])
+               for layer in ('household', 'school', 'workplace', 'health_care', 'municipality'))
+
+
 def ordinary_contact_matrix(contact: Mapping[str, Any], layer: str) -> np.ndarray:
     """The layer's contact matrix without mass-event contacts (B54).
 

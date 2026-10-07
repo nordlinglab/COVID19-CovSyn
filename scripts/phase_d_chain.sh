@@ -6,6 +6,7 @@
 # validation output in one go, so the whole chain can run unattended overnight.
 #
 #   1. wait for the firefly tmux session to end
+#   1b. re-score the candidates on unseen seed blocks and use the best of those (B56, E87)
 #   2. archive the previous synthetic data, then generate spread_Taiwan_weight and
 #      taiwan_first_outbreak with 1000 Monte-Carlo runs each (decisions A4, A5, B36)
 #   3. run the checklist of every post-simulation item of B14 / B17-B36
@@ -16,7 +17,7 @@
 #   8. draw the todolist923 figures and check the per-case constraints
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
-# Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional).
+# Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional), REVALIDATE (default 1).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,6 +38,17 @@ run() { "$PYTHON" -m "$@"; }
 
 say 'waiting for the firefly session to finish'
 while tmux has-session -t firefly 2>/dev/null; do sleep 120; done
+# B56 (E87): the objective's 300 fixed seeds pick a vector that sits on the edge of several
+# targets; re-score the final population and every personal best on unseen seed blocks and
+# report the lowest mean instead. REVALIDATE=0 skips it, e.g. for a directory that already
+# holds a revalidated choice.
+if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
+    say "re-scoring the candidates of $FIREFLY_RUN on unseen seeds (E87)"
+    run covsyn.calibration.revalidation "$FIREFLY_RUN" revalidation >> "$LOG" 2>&1 \
+        || { say 'ERROR: revalidation failed, stopping'; exit 1; }
+    say "$(grep 'validation best' "$LOG" | tail -1)"
+    FIREFLY_RUN=revalidation
+fi
 if [ -f "$FIREFLY_RUN/firefly_best.txt" ]; then
     rm -rf "$FIREFLY"
     cp -R "$FIREFLY_RUN" "$FIREFLY"
