@@ -1,10 +1,10 @@
 {
  "cost_parts": {
   "cost_attack_rate": 0.29359730961447394,
-  "cost_contact": 2.0664456452693596,
-  "cost_contact_healthcare": 0.06538839724680434,
-  "cost_contact_household": 0.4899365651186467,
-  "cost_contact_others": 1.5111206829039083,
+  "cost_contact": 1.227216957736184,
+  "cost_contact_healthcare": 0.23522390743786314,
+  "cost_contact_household": 0.02068570776639797,
+  "cost_contact_others": 0.971307342531923,
   "cost_energy": -0.24125622478948683,
   "cost_outcome": 0.09273640020347212,
   "cost_penalty": 0.0,
@@ -41,8 +41,8 @@
   "measured_sar_school": 0.010666666666666666,
   "measured_sar_workplace": 0.026845637583892617
  },
- "cost_total": 2.2115231302978184,
- "generated_at_commit": "26a4958b3b612bd62a2d81b5b51a09dfbcd53889",
+ "cost_total": 1.3722944427646433,
+ "generated_at_commit": "9bbe72868b6faf0566fbbbd8a51def502ad1a799",
  "parameter_vector": "firefly_result/phaseD_run10/firefly_best.txt (lowest-cost row)",
  "synthesis_digests": {
   "result/0": "6e91578e81eedfee28c0c4f160cd1efd7b9d3385c913d0c97227796bd11d9882",
