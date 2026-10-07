@@ -54,8 +54,6 @@ CONSTRAINTS = [
      'Jian et al. 2020 (release criteria); Byrne et al. 2020'),
     ('C09', 'onset <= critical illness', 'critical illness follows symptom onset', 'ICU cases',
      'by construction', 'CovSyn preprint supplement'),
-    ('C10', 'critical illness <= end of infectiousness + 1', 'the model draws ICU admission inside the '
-     'infectious period', 'ICU cases', 'model rule', 'CovSyn preprint supplement; to be confirmed'),
     ('C11', 'critical illness <= closure', 'recovery or death does not precede critical illness; the '
      'model allows death on the day of ICU admission (closure >= max(end of infectiousness, ICU day))',
      'ICU cases', 'by construction', 'definition'),
@@ -70,6 +68,8 @@ CONSTRAINTS = [
      'day 5)', 'ICU cases',
      'by construction (B52; violated by 74.5% of run 10 ICU cases, E81)',
      'todolist 1.2; clinical definition of ICU admission'),
+    ('C15', 'confirmation <= closure', 'a case cannot be released before it is confirmed (E94)',
+     'recovered cases', 'by construction (E94)', 'definition of release from isolation'),
     ('T01', 'infector latent <= generation interval', 'no transmission before the infector is '
      'infectious (todolist 1.2 C04)', 'transmissions', 'model rule',
      'definition of the latent period; Byrne et al. 2020'),
@@ -90,6 +90,9 @@ DESCRIPTIVE = [
      'was C03 in the draft; removed by B26: an untraced asymptomatic case is found only afterwards'),
     ('D03', 'traced before its own symptom onset (symptomatic, isolation < incubation)',
      'contact tracing reaching a case pre-symptomatically'),
+    ('D04', 'admitted to ICU after the end of infectiousness (ICU > latent + infectious + 1)',
+     'was C10; removed by E92: Taiwan onset -> ICU is 7.2 d, past the ~4 d of post-onset '
+     'infectiousness'),
 ]
 
 
@@ -155,7 +158,11 @@ def check(dirs):
                 record('C07', finite(pos) and abs(pos - (t0 + iso)) <= 1, True, where, {**v, 'positive_test': pos})
                 record('C08', finite(closure) and closure >= t0 + end, True, where, v)
                 record('C09', finite(icu) and sym and icu >= t0 + inc, finite(icu), where, v)
-                record('C10', finite(icu) and icu <= t0 + end + 1, finite(icu), where, v)
+                record('C15', finite(pos) and finite(closure) and pos <= closure,
+                       finite(closure), where, v)
+                if finite(icu):
+                    described['D04'][1] += 1
+                    described['D04'][0] += icu > t0 + end + 1
                 record('C11', finite(icu) and finite(closure) and icu <= closure, finite(icu), where, v)
                 record('C14', finite(icu) and t0 + iso <= icu, finite(icu), where, v)
                 record('C12', finite(rec) != finite(dead), True, where, v)

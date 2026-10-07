@@ -38,3 +38,10 @@ def test_still_in_state_counts_cases_whose_duration_reaches_the_day() -> None:
     np.testing.assert_allclose(
         wu.still_in_state(np.array([0.0, 2.0, 2.0, 5.0]), 4), [1.0, 0.75, 0.75, 0.25]
     )
+
+
+def test_a_run_with_compacted_case_ids_is_skipped_not_mispaired() -> None:
+    """Case ids that no longer match list positions give no intervals."""
+    courses = [_case(0, 5), _case(3, 2)]
+    digraph = np.array([["nan", "1", "0", "nan"], ["1", "3", "3", "household"]], dtype="<U32")
+    assert wu.transmission_intervals(courses, digraph) == ([], [])

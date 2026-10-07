@@ -69,12 +69,14 @@ metrics = [
      'literature reported means (B5; the objective uses the same range since B55)'),
     ('Pre-symptomatic window', g(lambda c: None if missing(c.incubation_period) else c.incubation_period - c.latent_period), 1.0, 3.0,
      'about 2 days of pre-symptomatic infectiousness (B22)'),
-    ('Onset -> case closure', g(lambda c: None if (missing(c.incubation_period) or missing(c.date_of_recovery))
-                                else c.date_of_recovery - c.incubation_period), 20.0, 32.0,
-     'date_of_recovery is release from isolation, about 25 days in Taiwan (B28)'),
-    ('Infection -> closure (asymptomatic)', g(lambda c: None if (not missing(c.incubation_period) or missing(c.date_of_recovery))
-                                              else c.date_of_recovery), 20.0, 32.0,
-     'same definition, asymptomatic cases (B28)'),
+    ('Confirmation -> closure (symptomatic)',
+     g(lambda c: None if (missing(c.incubation_period) or missing(c.date_of_recovery))
+       else c.date_of_recovery - float(np.ravel(c.positive_test_date)[0])), 22.0, 32.0,
+     'release from isolation; Taiwan confirmed -> release, mean 27.0 (n=56, E91)'),
+    ('Confirmation -> closure (asymptomatic)',
+     g(lambda c: None if (not missing(c.incubation_period) or missing(c.date_of_recovery))
+       else c.date_of_recovery - float(np.ravel(c.positive_test_date)[0])), 17.0, 31.0,
+     'same definition, asymptomatic cases; Taiwan mean 23.3 (n=23, E91)'),
     ('Onset -> death', g(lambda c: None if (missing(c.incubation_period) or missing(c.date_of_death))
                          else c.date_of_death - c.incubation_period), 14.0, 21.0,
      'literature'),

@@ -18,13 +18,18 @@ notebooks' errors corrected (finding E90):
   generate_generation_time also skips the last transmission edge; every edge is used here.
 * Fig 5: the simulated 'confirmed' date was the isolation date. It is the positive test date
   here, which is what the Taiwan confirmed_date records. The simulated courses come from the
-  first-outbreak runs, so severity depends on the cases' ages as it does in the model.
+  first-outbreak runs, so severity depends on the cases' ages as it does in the model. The
+  notebook kept only Taiwan cases with no recovery (and, for symptomatic, no ICU) date in the
+  two 'to confirmed' panels, a subset the simulated side cannot match; every Taiwan case with
+  both dates is used here.
 * Fig 6: the contact intervals were 5-95 % percentiles labelled as 95 % intervals; they are
   2.5-97.5 % here. Contacts are scaled to Cheng's 91 symptomatic index cases, as the objective
   does (E86).
 * Fig 7: the simulated deaths were shifted by the fitted delay while the simulated cases were
   not, and the delay was chosen by a bisection that returned one shift and dated the axis with
-  another. One shift, found by exhaustive search, is applied to everything here.
+  another. One shift, found by exhaustive search, is applied to everything here. The daily
+  counts are differences of the cumulative series, so the first one belongs to the day after
+  the first record; the notebook dated it a day early.
 
 Usage (repository root, PYTHONPATH=src):
     python -m covsyn.figures.reproduce_wu2025 fig3 FIRST_OUTBREAK_DIR OUT_DIR
@@ -199,8 +204,17 @@ def transmission_intervals(courses: list[dict], digraph: np.ndarray) -> tuple[li
 
     Each digraph row is [source id, case id, infection day, layer] with 1-based ids and
     'nan' as the source of a seed case. The serial interval needs both cases symptomatic.
+    A run whose case ids do not match list positions (data_synthesis_main compacts the lists
+    when its daily-confirmation threshold fires) is skipped rather than mis-paired.
     """
-    generation, serial = [], []
+    generation: list = []
+    serial: list = []
+    targets = [int(float(row[1])) for row in digraph]
+    if len(targets) != len(courses) or targets != list(range(1, len(courses) + 1)):
+        print(
+            f"skipped a run whose {len(digraph)} digraph rows do not index its {len(courses)} cases"
+        )
+        return generation, serial
     for source, target, *_ in digraph:
         if str(source) == "nan":
             continue
@@ -442,6 +456,11 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
         "Best": (best[:, 1:-1], best[:, -1]),
         "Final": (final[:, :-1], final[:, -1]),
     }
+    if not (len(initial) == len(best) == len(worst) == len(final)):
+        raise ValueError(
+            f"{run_dir} is not an optimizer run with one row per firefly in each file "
+            "(a revalidation directory holds every candidate in firefly_best.txt)"
+        )
     best_index = int(np.argmin(best[:, -1]))
     reference = normalise(best[best_index, 1:-1])
     distance = {k: np.linalg.norm(normalise(v) - reference, axis=1) for k, (v, _) in stages.items()}
@@ -615,7 +634,11 @@ def simulated_transition_days(directory: Path) -> dict[str, np.ndarray]:
 
 
 def taiwan_transition_days() -> dict[str, Any]:
-    """The Taiwan dataset's transition days, selected exactly as Course_synthesis.ipynb does."""
+    """The Taiwan dataset's transition days, selected as Course_synthesis.ipynb does.
+
+    The two 'to confirmed' transitions keep every case with both dates (see the module
+    docstring); the notebook's further exclusions selected a subset the simulation cannot match.
+    """
     import pandas as pd
 
     from covsyn.data_processing.rw_data_processing import clean_taiwan_data, extract_state_data
@@ -641,12 +664,8 @@ def taiwan_transition_days() -> dict[str, Any]:
     }
     out["IA_to_C"] = extract_state_data(
         data, "earliest_infection_date", "confirmed_date", "onset_of_symptom"
-    ).drop(out["IA_to_R"].index)
-    out["IS_to_C"] = (
-        extract_state_data(data, "onset_of_symptom", "confirmed_date")
-        .drop(out["IS_to_IC"].index)
-        .drop(out["IS_to_R"].index)
     )
+    out["IS_to_C"] = extract_state_data(data, "onset_of_symptom", "confirmed_date")
     return out
 
 
@@ -946,7 +965,7 @@ def taiwan_daily_series() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     daily_cases = np.pad(daily_cases, (0, 365 - len(daily_cases)))
     daily_deaths = np.pad(daily_deaths, (0, 365 - len(daily_deaths)))
     return (
-        np.arange(full_dates[0], full_dates[0] + np.timedelta64(365, "D")),
+        np.arange(full_dates[1], full_dates[1] + np.timedelta64(365, "D")),
         daily_cases,
         daily_deaths,
     )

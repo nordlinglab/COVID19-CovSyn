@@ -245,8 +245,9 @@ rows = [
     # Taiwan's POST-March-2020 number, and it made the model's correct 5 days look 5x wrong.
     ('Disease course', 'onset to confirmation, median', 6.0,
      float(np.nanmedian((positive - infection_day - incubation)[symptomatic])), 'd', 'Taiwan tracing median, n=442 (B2)'),
-    ('Disease course', 'infection to case closure', 25.0, float(np.nanmean(recovery[symptomatic])), 'd',
-     'Taiwan, onset to release ~25 d'),
+    ('Disease course', 'confirmation to case closure', 27.0,
+     float(np.nanmean((recovery + infection_day - positive)[symptomatic])), 'd',
+     'Taiwan confirmed -> release, mean, n=56 (E91)'),
     ('Disease course', 'generation time', 4.05, generation.mean() if len(generation) else np.nan, 'd',
      'literature 2.9-5.2'),
 

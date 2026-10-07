@@ -631,16 +631,20 @@ class Draw_course_of_disease_data:
 
         return (symptomatic_to_recovered_time)
 
-    def draw_time_from_critically_ill_to_recovered(self):
-        critically_ill_to_recovered_time = round(np.random.gamma(
-            shape=self.critically_ill_to_recovered_shape, scale=self.critically_ill_to_recovered_scale)
-            + self.critically_ill_to_recovered_loc)
+    def draw_time_from_critically_ill_to_recovered(self, lower_bound=None):
+        """Days from ICU admission to closure, truncated below at lower_bound (E94)."""
+        critically_ill_to_recovered_time = round(self.truncated_gamma_sample(
+            shape=self.critically_ill_to_recovered_shape,
+            scale=self.critically_ill_to_recovered_scale,
+            loc=self.critically_ill_to_recovered_loc, lower_bound=lower_bound)[0])
 
         return (critically_ill_to_recovered_time)
 
-    def draw_time_from_infection_to_death(self):
-        infection_to_death_time = round(np.random.gamma(
-            shape=self.infection_to_death_shape, scale=self.infection_to_death_scale))
+    def draw_time_from_infection_to_death(self, lower_bound=None):
+        """Days from infection to death, truncated below at lower_bound (E94)."""
+        infection_to_death_time = round(self.truncated_gamma_sample(
+            shape=self.infection_to_death_shape, scale=self.infection_to_death_scale,
+            lower_bound=lower_bound)[0])
 
         return (infection_to_death_time)
 
@@ -746,18 +750,22 @@ class Draw_course_of_disease_data:
         self.date_of_death = np.nan
         self.date_of_recovery = np.nan
 
+        # date_of_recovery is the day the case is closed (B28): it cannot fall before the end
+        # of the infectious period, nor before the case is confirmed (E94: without the second
+        # bound a symptomatic case could be released before its own positive test).
+        confirmed = self.positive_test_date - self.infection_day
         if asymptomatic:
-            # date_of_recovery is the day the case is closed (B28), so it cannot fall
-            # before the end of the infectious period.
             self.date_of_recovery = self.infection_day + \
-                self.draw_time_from_asymptomatic_to_recovered(lower_bound=infectious_end)
+                self.draw_time_from_asymptomatic_to_recovered(
+                    lower_bound=max(infectious_end, confirmed))
         else:
             onset_day = self.infection_day + self.incubation_period
             icu_probability = self.age_adjusted_probability(
                 1 - self.symptom_to_recovered_transition_p, SYMPTOM_TO_ICU_AGE_RR,
                 self.symptom_to_icu_norm)
             if np.random.random() >= icu_probability:   # recovers without critical illness
-                lower_bound = max(0, infectious_end - self.incubation_period)
+                lower_bound = max(0, infectious_end - self.incubation_period,
+                                  confirmed - self.incubation_period)
                 self.date_of_recovery = onset_day + self.draw_time_from_symptomatic_to_recovered(
                     lower_bound=lower_bound)
             else:
@@ -773,16 +781,19 @@ class Draw_course_of_disease_data:
                 death_probability = self.age_adjusted_probability(
                     1 - self.critically_ill_to_recovered_transition_p, ICU_TO_DEATH_AGE_RR,
                     self.icu_to_death_norm)
+                # E94: both outcomes are drawn from their distributions truncated at the
+                # earliest possible day instead of clamped onto it. With ICU no longer capped
+                # (E92) the clamp would put every death drawn before ICU on ICU + 1.
                 if np.random.random() >= death_probability:
+                    earliest_closure = max(earliest_end + 1,
+                                           self.infection_day + confirmed)
                     self.date_of_recovery = self.date_of_critically_ill + \
-                        self.draw_time_from_critically_ill_to_recovered()
-                    if self.date_of_recovery < earliest_end:
-                        self.date_of_recovery = earliest_end + 1
+                        self.draw_time_from_critically_ill_to_recovered(
+                            lower_bound=earliest_closure - self.date_of_critically_ill)
                 else:
                     self.date_of_death = self.infection_day + \
-                        self.draw_time_from_infection_to_death()
-                    if self.date_of_death < earliest_end:
-                        self.date_of_death = earliest_end + 1
+                        self.draw_time_from_infection_to_death(
+                            lower_bound=earliest_end + 1 - self.infection_day)
 
         self.apply_icu_isolation()
         self.natural_immunity_status = self.draw_natural_immunity_status()

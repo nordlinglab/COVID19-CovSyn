@@ -372,18 +372,20 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
           note='Cheng 2020 medical: 33.9% before onset + 21.5% on days 0-3 = 55.4%')
 
     # ---------------------------------------------------------------- B28 case closure
-    recovery = field('date_of_recovery', index_course)
-    closure = recovery - field('positive_test_date', index_course)
-    check('B28', 'confirmation to case closure, symptomatic', np.nanmean(closure[symptomatic]),
-          (22.0, 32.0), note='E91: Taiwan confirmed to release, mean 27.0 (n=56)')
-    check('B28', 'confirmation to case closure, asymptomatic', np.nanmean(closure[~symptomatic]),
-          (17.0, 31.0), note='E91: Taiwan mean 23.3 (n=23)')
-    critical = field('date_of_critically_ill', index_course)
-    check('B28', 'ICU to case closure', np.nanmean(recovery - critical), (29.0, 44.0),
-          note='E93: Taiwan mean 36.2 (n=28)')
-    check('B28', 'onset to ICU',
-          np.nanmean(critical - infection_day - field('incubation_period', index_course)),
-          (5.4, 9.2), note='E92: Taiwan mean 7.2 (n=40), median 5.5')
+    # The objective's own function and bands (B58), so the checklist cannot drift from them.
+    from covsyn.calibration.firefly_optimizer import course_timing
+    timing = course_timing(field('date_of_recovery', index_course),
+                           field('positive_test_date', index_course),
+                           field('date_of_critically_ill', index_course), infection_day,
+                           field('incubation_period', index_course), symptomatic)
+    for key, name, note in (
+            ('closure_after_confirmation_symptomatic', 'confirmation to case closure, symptomatic',
+             'E91: Taiwan confirmed to release, mean 27.0 (n=56)'),
+            ('closure_after_confirmation_asymptomatic',
+             'confirmation to case closure, asymptomatic', 'E91: Taiwan mean 23.3 (n=23)'),
+            ('icu_to_closure', 'ICU to case closure', 'E93: Taiwan mean 36.2 (n=28)'),
+            ('onset_to_icu', 'onset to ICU', 'E92: Taiwan mean 7.2 (n=40), median 5.5')):
+        check('B28', name, timing.get(key, np.nan), OUTCOME_TARGETS[key][:2], note=note)
 
     # ---------------------------------------------------------------- B33 / B20 severity
     icu = ~np.isnan(field('date_of_critically_ill', index_course))
