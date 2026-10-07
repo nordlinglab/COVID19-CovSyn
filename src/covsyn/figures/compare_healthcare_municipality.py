@@ -87,7 +87,8 @@ def wilson(k, n, z=1.96):
     d = 1 + z * z / n
     c = (p + z * z / (2 * n)) / d
     h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return 100 * p, 100 * max(c - h, 0), 100 * (c + h)
+    # Clamped so the interval always contains p (rounding at k = 0 or k = n, see errorbar).
+    return 100 * p, 100 * min(max(c - h, 0), p), 100 * max(c + h, p)
 
 
 fig, ax = plt.subplots(2, 2, figsize=(17, 11))

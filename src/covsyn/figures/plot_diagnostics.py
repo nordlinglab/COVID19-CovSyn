@@ -118,7 +118,9 @@ def wilson(k, n, z=1.96):
     p = k / n; d = 1 + z * z / n
     c = (p + z * z / (2 * n)) / d
     h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return p, max(c - h, 0.0), c + h
+    # Clamped so the interval always contains p: at k = 0 or k = n rounding can put a bound
+    # a hair past p, and errorbar() rejects the negative error that gives.
+    return p, min(max(c - h, 0.0), p), max(c + h, p)
 
 
 # --------------------------------------------------------------------------- Taiwan references (D1: left half)
