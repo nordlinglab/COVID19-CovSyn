@@ -29,6 +29,37 @@ def contacts_per_case(contact: Mapping[str, Any]) -> int:
                for layer in ('household', 'school', 'workplace', 'health_care', 'municipality'))
 
 
+def contacts_in_tracing_window(course: Mapping[str, Any], contact: Mapping[str, Any],
+                               lead_days: int = 2) -> int:
+    """Contacts a contact tracer would list: those met at least once inside the tracing window.
+
+    Jian et al. 2020 traced from 2 days before symptom onset to isolation (finding E7), and
+    CovSyn's candidate contacts run from infection, so only this count is comparable with
+    Jian's 16.5 close contacts per case (E89). An asymptomatic case has no onset; its window
+    starts lead_days before isolation, the day its confirming test is taken (C07).
+
+    Args:
+        course: The case's saved course of disease.
+        contact: The case's saved contact data.
+        lead_days: Days before onset (or isolation) at which the window opens.
+
+    Returns:
+        The number of contacts, over all five layers, met on a day in the window.
+    """
+    isolation = int(course['monitor_isolation_period'])
+    onset = course['incubation_period']
+    start = (onset if onset is not None and np.isfinite(onset) else isolation) - lead_days
+    count = 0
+    for key in MATRIX_KEY.values():
+        matrix = np.asarray(contact.get(key, np.zeros((0, 0))), dtype=bool)
+        if matrix.ndim != 2 or matrix.shape[0] == 0:
+            continue
+        days = np.arange(matrix.shape[1])
+        window = (days >= start) & (days <= isolation)
+        count += int(np.count_nonzero(matrix[:, window].any(axis=1)))
+    return count
+
+
 def ordinary_contact_matrix(contact: Mapping[str, Any], layer: str) -> np.ndarray:
     """The layer's contact matrix without mass-event contacts (B54).
 
