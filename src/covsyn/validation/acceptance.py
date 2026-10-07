@@ -34,19 +34,23 @@ def verdict(value: float, target: tuple[float, float],
     lower, upper = target
     if lower <= value <= upper:
         return 'ok'
-    if interval is not None and interval[0] <= upper and interval[1] >= lower:
+    # A single-value target (an anomaly count that must be 0) gets no allowance: a resample
+    # that happens to miss the few bad cases would otherwise pass a real defect.
+    if (interval is not None and lower < upper
+            and interval[0] <= upper and interval[1] >= lower):
         return 'within'
     return 'fail'
 
 
-def bootstrap_intervals(compute: Callable[[Sequence[Any]], dict[Hashable, float]],
-                        units: Sequence[Any], replicates: int = 200, seed: int = 0,
+def bootstrap_intervals(compute: Callable[..., dict[Hashable, float]],
+                        *unit_lists: Sequence[Any], replicates: int = 200, seed: int = 0,
                         level: float = 0.95) -> dict[Hashable, tuple[float, float]]:
     """Percentile bootstrap intervals of every value compute() returns.
 
     Args:
-        compute: Maps a list of units (simulations) to {key: value}.
-        units: The units to resample with replacement.
+        compute: Maps one resampled list per unit list to {key: value}.
+        *unit_lists: The units to resample with replacement, each list on its own (spread
+            and first-outbreak simulations differ in number and must not be paired).
         replicates: Number of bootstrap samples.
         seed: Seed of the resampling, for reproducible intervals.
         level: Coverage of the intervals.
@@ -57,8 +61,9 @@ def bootstrap_intervals(compute: Callable[[Sequence[Any]], dict[Hashable, float]
     rng = np.random.default_rng(seed)
     collected: dict[Hashable, list[float]] = {}
     for _ in range(replicates):
-        sample = [units[i] for i in rng.integers(0, len(units), len(units))]
-        for key, value in compute(sample).items():
+        samples = [[units[i] for i in rng.integers(0, len(units), len(units))] if len(units)
+                   else [] for units in unit_lists]
+        for key, value in compute(*samples).items():
             if value is not None and np.isfinite(value):
                 collected.setdefault(key, []).append(float(value))
     tail = 100 * (1 - level) / 2

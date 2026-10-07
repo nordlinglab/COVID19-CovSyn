@@ -16,14 +16,22 @@ def load(path):
     return data, {(c['decision'], c['name']): c for c in data['checks']}
 
 
+def status(check):
+    """'ok', 'within' (passed only within its 95% interval, B57), 'fail', or None."""
+    if check is None or check['ok'] is None:
+        return None
+    if not check['ok']:
+        return 'fail'
+    return 'within' if check.get('within_noise') else 'ok'
+
+
 def fmt(check):
     if check is None:
         return 'not measured'
     value = check['value']
     text = 'n/a' if value is None else f'{value:.3f}'
-    if check['ok'] is None:
-        return f'{text} (info)'
-    return f'{text} {"ok" if check["ok"] else "FAIL"}'
+    label = {None: '(info)', 'ok': 'ok', 'within': 'ok~', 'fail': 'FAIL'}[status(check)]
+    return f'{text} {label}'
 
 
 def main():
@@ -34,12 +42,16 @@ def main():
     print(f'new: {new_path}  ({new_data["simulations"]} simulations, {new_data["cases"]} cases)\n')
 
     keys = list(old) + [k for k in new if k not in old]
-    regressions = [k for k in keys
-                   if old.get(k) and new.get(k) and old[k]['ok'] is True and new[k]['ok'] is False]
-    fixes = [k for k in keys
-             if old.get(k) and new.get(k) and old[k]['ok'] is False and new[k]['ok'] is True]
-    still = [k for k in keys
-             if old.get(k) and new.get(k) and old[k]['ok'] is False and new[k]['ok'] is False]
+
+    def moved(before, after):
+        return [k for k in keys if old.get(k) and new.get(k)
+                and status(old[k]) in before and status(new[k]) in after]
+
+    regressions = moved({'ok', 'within'}, {'fail'})
+    fixes = moved({'fail', 'within'}, {'ok'})
+    noise_only = moved({'fail'}, {'within'})
+    softened = moved({'ok'}, {'within'})
+    still = moved({'fail'}, {'fail'})
     added = [k for k in keys if k not in old]
 
     def section(title, entries):
@@ -53,14 +65,17 @@ def main():
 
     section('REGRESSIONS: passed before, fails now', regressions)
     section('fixed: failed before, passes now', fixes)
+    section('failed before, now passes only within noise (ok~, B57)', noise_only)
+    section('passed before, now only within noise (ok~, B57)', softened)
     section('still failing', still)
     section('new checks, not in the old run', added)
 
-    old_pass = sum(1 for c in old.values() if c['ok'] is True)
-    new_pass = sum(1 for c in new.values() if c['ok'] is True)
-    old_fail = sum(1 for c in old.values() if c['ok'] is False)
-    new_fail = sum(1 for c in new.values() if c['ok'] is False)
-    print(f'passed {old_pass} -> {new_pass}   failed {old_fail} -> {new_fail}')
+    def count(checks, wanted):
+        return sum(1 for c in checks.values() if status(c) == wanted)
+
+    print(f'passed {count(old, "ok")} -> {count(new, "ok")}   '
+          f'within noise (ok~) {count(old, "within")} -> {count(new, "within")}   '
+          f'failed {count(old, "fail")} -> {count(new, "fail")}')
 
     # every informational quantity that moved a lot is worth a look too
     print('\n=== informational values that moved by more than 25% ===')

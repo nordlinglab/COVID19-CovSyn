@@ -68,3 +68,55 @@ def test_bootstrap_leaves_out_values_that_are_never_finite() -> None:
     intervals = ac.bootstrap_intervals(compute, [1, 2, 3], replicates=20, seed=0)
     assert ('B0', 'never') not in intervals
     assert intervals[('B0', 'always')] == (1.0, 1.0)
+
+
+# --- review of B57 -------------------------------------------------------------------
+
+def test_a_single_value_target_gets_no_noise_allowance() -> None:
+    """B32 expects exactly 0 anomalies; a resample that misses the 3 bad cases must not pass it."""
+    assert ac.verdict(0.003, (0.0, 0.0), (0.0, 0.006)) == 'fail'
+    assert ac.verdict(0.0, (0.0, 0.0), (0.0, 0.0)) == 'ok'
+
+
+def test_independent_unit_lists_are_resampled_independently() -> None:
+    """Spread and first-outbreak runs of different sizes each keep their own sample size."""
+    seen = []
+
+    def compute(spread, first):
+        seen.append((len(spread), len(first)))
+        return {('B0', 'sum'): float(len(spread) + len(first))}
+
+    ac.bootstrap_intervals(compute, list(range(10)), list(range(25)), replicates=5, seed=0)
+    assert seen == [(10, 25)] * 5
+
+
+def _checks(path, rows):
+    import json
+    path.write_text(json.dumps({'simulations': 1, 'cases': 1, 'checks': rows}))
+    return str(path)
+
+
+def _row(name, ok, within=False, value=1.0):
+    return {'decision': 'B0', 'name': name, 'value': value, 'target': [0, 1], 'unit': '',
+            'ok': ok, 'note': '', 'within_noise': within}
+
+
+def test_run_comparison_does_not_call_a_within_noise_pass_fixed(tmp_path, capsys) -> None:
+    import sys
+
+    from covsyn.validation import compare_phase_d_runs as cmp
+
+    old = _checks(tmp_path / 'old.json', [_row('a', False), _row('b', False), _row('c', True)])
+    new = _checks(tmp_path / 'new.json', [_row('a', True, within=True), _row('b', True),
+                                          _row('c', True, within=True)])
+    argv, sys.argv = sys.argv, ['compare', old, new]
+    try:
+        cmp.main()
+    finally:
+        sys.argv = argv
+    out = capsys.readouterr().out
+    fixed = out.split('=== fixed')[1].split('\n\n')[0]
+    within = out.split('now passes only within noise')[1].split('\n\n')[0]
+    assert 'B0    b' in fixed and 'B0    a' not in fixed
+    assert 'B0    a' in within
+    assert 'ok~' in out

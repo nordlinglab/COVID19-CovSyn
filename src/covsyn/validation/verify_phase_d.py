@@ -34,14 +34,17 @@ MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contact
 results = []
 
 
-def check(decision, name, value, target, unit='', ok=None, note='', ci=None):
+def check(decision, name, value, target, unit='', ok=None, note='', ci=None, interval=True):
     """Record one checklist line. target is (lo, hi), a string, or None for information."""
     if ok is None and isinstance(target, tuple) and value is not None and np.isfinite(value):
         ok = target[0] <= value <= target[1]
     results.append({'decision': decision, 'name': name, 'value': None if value is None else float(value),
                     'target': list(target) if isinstance(target, tuple) else target,
                     'unit': unit, 'ok': None if ok is None else bool(ok), 'note': note,
-                    'ci': None if ci is None else [float(ci[0]), float(ci[1])]})
+                    'ci': None if ci is None else [float(ci[0]), float(ci[1])],
+                    # False for order statistics such as a maximum, which a bootstrap
+                    # resample can only lower, so their interval would mislead (B57).
+                    'interval': interval})
 
 
 def load(directory):
@@ -251,7 +254,7 @@ def compute_checks(runs, first_runs, permutations=True):
           note='B56: between Taiwan links (0.047, lower bound) and confirmed contacts (0.43, upper bound), E80')
     check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), (0.2, 4.3), '%',
           note='B56: between Taiwan links (0.2%) and confirmed contacts (4.3%), E80')
-    check('B17', 'largest number infected by one case', counts.max(), (5, 30),
+    check('B17', 'largest number infected by one case', counts.max(), (5, 30), interval=False,
           note='Taiwan tracing maximum 8')
 
     community = np.array([len(c['municipality_effective_contacts']) for c in index_contact], dtype=float)
@@ -481,18 +484,18 @@ def main():
     # B57: 95% bootstrap intervals over the simulations; the spread and first-outbreak runs are
     # resampled together so a check sees one consistent replicate.
     if BOOTSTRAP_REPLICATES > 0:
-        pairs = [(r, first_runs[i % len(first_runs)] if first_runs else None)
-                 for i, r in enumerate(runs)]
-
-        def replicate(sample):
-            rows = compute_checks([p[0] for p in sample],
-                                  [p[1] for p in sample if p[1] is not None], permutations=False)
+        def replicate(spread_sample, first_sample):
+            rows = compute_checks(spread_sample, first_sample, permutations=False)
             return {(r['decision'], r['name']): r['value'] for r in rows
                     if r['value'] is not None}
 
-        intervals = bootstrap_intervals(replicate, pairs, replicates=BOOTSTRAP_REPLICATES)
+        # The spread and first-outbreak runs are resampled independently: they are separate
+        # scenarios and need not be equal in number.
+        intervals = bootstrap_intervals(replicate, runs, first_runs,
+                                        replicates=BOOTSTRAP_REPLICATES)
         for r in point:
-            if r['ci'] is None and (r['decision'], r['name']) in intervals:
+            if (r['ci'] is None and r['interval']
+                    and (r['decision'], r['name']) in intervals):
                 r['ci'] = list(intervals[(r['decision'], r['name'])])
     for r in point:
         if isinstance(r['target'], list):
