@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Decision B55: how mass-event contacts enter the calibration.
 
-1. The event probability P[199] is locked at 0.10, where CovSyn's Cheng 'others' contacts per
-   100 cases match Cheng et al. (2020) (finding E85).
+1. The event probability P[199] is searched in [0, 0.20] from a seed of 0.10; with the two
+   defects behind run 11's 0.012 removed (E85, E86), the Cheng fit decides it.
 2. In the Cheng contact fit, the sampled event contacts are replaced by their expectation,
    P[199] x E[event size] spread over the event-day weights, so a single event of hundreds of
    people no longer dominates a 100-case objective; infections stay as sampled.
@@ -180,14 +180,14 @@ def test_contacts_per_day_with_no_contacts_is_zero() -> None:
 
 # --- search bounds and the physiology penalty -----------------------------------------
 
-def test_event_probability_is_locked_at_the_cheng_match() -> None:
+def test_event_probability_is_searched_from_a_seed_of_ten_percent() -> None:
     from covsyn.calibration import apply_phase_d_parameters as apply
 
-    assert apply.COMMUNITY_EVENT[0] == (0.10, 0.10, 0.10)
-    course_upper = np.load('variable/course_parameters_ub.npy')
-    course_lower = np.load('variable/course_parameters_lb.npy')
-    assert course_lower[apply.COMMUNITY_EVENT_COURSE_INDEX] == 0.10
-    assert course_upper[apply.COMMUNITY_EVENT_COURSE_INDEX] == 0.10
+    assert apply.COMMUNITY_EVENT[0] == (0.10, 0.0, 0.20)
+    i = apply.COMMUNITY_EVENT_COURSE_INDEX
+    assert np.load('variable/course_parameters.npy')[i] == 0.10
+    assert np.load('variable/course_parameters_lb.npy')[i] == 0.0
+    assert np.load('variable/course_parameters_ub.npy')[i] == 0.20
 
 
 def test_infectious_period_uses_the_reported_mean_range() -> None:
