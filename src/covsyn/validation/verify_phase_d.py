@@ -18,7 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from covsyn.model.contact_measures import contacts_per_case, contacts_per_day_before_onset
+from covsyn.model.contact_measures import (contacts_in_tracing_window, contacts_per_case,
+                                            contacts_per_day_before_onset)
 from covsyn.validation.acceptance import bootstrap_intervals, verdict
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
@@ -291,12 +292,17 @@ def compute_checks(runs, first_runs, permutations=True):
           note='B56: passes when no city effect is detectable (p >= 0.05, 2000 label shuffles)')
 
     # B56: independent validation against all 487 cases of Jian et al. 2020 (16.5 close
-    # contacts per confirmed case, 95% CI 13.9-19.1), which no objective term uses. Jian counts
-    # traced contacts of every confirmed case, imported ones included; CovSyn counts every
-    # candidate contact of an index case from infection on.
-    check('B56', 'contacts per case, all layers',
-          float(np.mean([contacts_per_case(c) for c in index_contact])), (13.9, 19.1),
-          note='Jian et al. 2020: 16.5 per case over 487 cases (independent; see note in B56)')
+    # contacts per confirmed case, 95% CI 13.9-19.1), which no objective term uses. E89: Jian
+    # counts the contacts a tracer listed, from 2 days before onset to isolation (E7), so the
+    # judged quantity uses that window; every candidate contact from infection is information.
+    check('B56', "contacts per case in Jian's tracing window",
+          float(np.mean([contacts_in_tracing_window(k, c)
+                         for k, c in zip(index_course, index_contact)])), (13.9, 19.1),
+          note='Jian et al. 2020: 16.5 per case over 487 cases; window onset - 2 d to '
+               'isolation (E7, E89); independent')
+    check('B56', 'contacts per case, all layers, from infection',
+          float(np.mean([contacts_per_case(c) for c in index_contact])), None,
+          note='information: every candidate contact; CovSyn counts from infection, tracing does not')
 
     # ---------------------------------------------------------------- B22 / B26 timing
     incubation = field('incubation_period', index_course)

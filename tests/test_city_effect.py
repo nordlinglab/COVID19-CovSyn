@@ -59,3 +59,40 @@ def test_contacts_per_case_count_every_layer() -> None:
                'workplace_effective_contacts': [0], 'health_care_effective_contacts': None,
                'municipality_effective_contacts': [0, 0, 0]}
     assert cm.contacts_per_case(contact) == 6
+
+
+# --- E89: contacts per case in Jian et al. 2020's tracing window -----------------------
+
+def _traced_case(onset: float, isolation: int) -> tuple[dict, dict]:
+    """Five household contacts, first met on days 0, 2, 3, 6 and 9 (day 0 = infection)."""
+    m = np.zeros((5, 12), dtype=bool)
+    for row, day in enumerate((0, 2, 3, 6, 9)):
+        m[row, day] = True
+    contact = {'household_contacts_matrix': m}
+    for key in ('school_class', 'workplace', 'health_care', 'municipality'):
+        contact[f'{key}_contacts_matrix'] = np.zeros((0, 12), dtype=bool)
+    return {'incubation_period': onset, 'monitor_isolation_period': isolation}, contact
+
+
+def test_traced_window_runs_from_two_days_before_onset_to_isolation() -> None:
+    course, contact = _traced_case(onset=5.0, isolation=8)
+    # window 3..8: the contacts on days 3 and 6
+    assert cm.contacts_in_tracing_window(course, contact) == 2
+
+
+def test_traced_window_of_an_asymptomatic_case_ends_at_isolation() -> None:
+    course, contact = _traced_case(onset=float('nan'), isolation=9)
+    # window 7..9: the contact on day 9
+    assert cm.contacts_in_tracing_window(course, contact) == 1
+
+
+def test_traced_window_lead_is_adjustable() -> None:
+    course, contact = _traced_case(onset=5.0, isolation=8)
+    assert cm.contacts_in_tracing_window(course, contact, lead_days=4) == 3   # days 1..8
+    assert cm.contacts_in_tracing_window(course, contact, lead_days=0) == 1   # days 5..8
+
+
+def test_contact_met_across_the_window_edge_counts_once() -> None:
+    course, contact = _traced_case(onset=5.0, isolation=8)
+    contact['household_contacts_matrix'][0, :] = True           # met every day
+    assert cm.contacts_in_tracing_window(course, contact) == 3
