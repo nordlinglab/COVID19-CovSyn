@@ -77,7 +77,7 @@ def negative_binomial_k(counts):
     return mean ** 2 / (var - mean) if var > mean > 0 else np.inf
 
 
-def compute_checks(runs, first_runs, permutations=True):
+def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> list:
     """Every check on these spread simulations (and first-outbreak runs), as result rows.
 
     permutations=False skips the city permutation test, which is a test of its own and too slow

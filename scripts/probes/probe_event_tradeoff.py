@@ -12,6 +12,11 @@ Each point is therefore measured on many index cases, and the Cheng 'others' con
 computed from the MEAN bin counts per 100 cases, i.e. the cost the objective would charge on
 average. One ordinary objective evaluation per point is printed alongside for comparison.
 
+This reproduces the objective as it was when E85 was measured: sampled event bins scaled per
+100 cases of all kinds. The objective now scales by 91 symptomatic cases (E86) and bins the
+expected event contacts (B55), so 'expected_cost_contact_others' is the pre-E86 cost, kept so
+the run 11 figure can be reproduced; it is not what the current objective charges.
+
 Usage (repository root, PYTHONPATH=src):
     python scripts/probes/probe_event_tradeoff.py BEST_TXT OUT_CSV [N_INDEX_CASES]
 """

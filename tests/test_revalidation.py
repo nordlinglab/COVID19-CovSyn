@@ -57,6 +57,22 @@ def test_best_file_with_a_single_candidate_is_still_two_dimensional(tmp_path) ->
     assert np.loadtxt(tmp_path / 'firefly_best.txt').ndim == 2
 
 
+def test_output_directory_holds_the_whole_run_for_the_report(tmp_path) -> None:
+    """phase_d_chain.sh copies OUT_DIR over the run directory, and show_final reads
+    progress_metrics.csv from it; only firefly_best.txt is replaced by the revalidated one."""
+    run, out = tmp_path / 'run', tmp_path / 'out'
+    run.mkdir()
+    out.mkdir()
+    for name in ('bound.txt', 'progress_metrics.csv', 'firefly_result.txt'):
+        (run / name).write_text(name)
+    (run / 'firefly_best.txt').write_text('training')
+    (out / 'firefly_best.txt').write_text('validation')
+    rv.copy_run_files(run, out)
+    assert {p.name for p in out.iterdir()} == {'bound.txt', 'progress_metrics.csv',
+                                               'firefly_result.txt', 'firefly_best.txt'}
+    assert (out / 'firefly_best.txt').read_text() == 'validation'
+
+
 def test_default_seed_offset_is_the_objective_and_others_differ(
         run10_vector: np.ndarray, demographic_parameters: Any,
         cheng_data: tuple[np.ndarray, np.ndarray, np.ndarray],

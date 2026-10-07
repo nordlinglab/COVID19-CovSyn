@@ -882,7 +882,7 @@ SIMULATIONS_PER_EVALUATION = 300
 CHENG_SYMPTOMATIC_INDEX_CASES = CHENG2020_INDEX_CASES - 9
 
 
-def cheng_contact_scale(symptomatic_cases):
+def cheng_contact_scale(symptomatic_cases: int) -> float:
     """Factor that puts contact bins summed over these symptomatic cases on Cheng's scale."""
     # No symptomatic case leaves no Cheng bins to scale; raising lets cost_function charge
     # FAILED_EVALUATION_COST instead of returning a NaN the firefly cannot rank.

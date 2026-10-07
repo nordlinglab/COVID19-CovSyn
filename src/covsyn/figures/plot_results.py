@@ -605,7 +605,8 @@ def _cheng_day_bin(days_from_onset):
     return None
 
 
-def event_bin_corrections(course_of_disease_data_list, contact_data_list):
+def event_bin_corrections(course_of_disease_data_list: list, contact_data_list: list
+                          ) -> tuple[np.ndarray, np.ndarray]:
     """Expected minus sampled mass-event contacts and infections per Cheng bin (B55).
 
     Symptomatic cases only, like create_array_cheng2020_fig2. Added to the sampled bins it

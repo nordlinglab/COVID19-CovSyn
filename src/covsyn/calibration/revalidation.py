@@ -11,16 +11,18 @@ Usage (repository root, PYTHONPATH=src):
     python -m covsyn.calibration.revalidation FIREFLY_DIR OUT_DIR [BLOCKS]
 
 Writes OUT_DIR/revalidation.csv (every candidate) and OUT_DIR/firefly_best.txt (every candidate
-with its validation cost, so its minimum is the chosen vector) and bound.txt, so the post-run
-chain can be pointed at OUT_DIR.
+with its validation cost, so its minimum is the chosen vector), and copies the run's other files
+(bound.txt, progress_metrics.csv, ...), so the post-run chain can be pointed at OUT_DIR.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import csv
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -79,7 +81,20 @@ def write_best_file(path: Path, vectors: np.ndarray, costs: np.ndarray) -> None:
     np.savetxt(path, rows, fmt='%.7f')
 
 
-def score(vector, demo, pool, cheng, seed_blocks):
+def copy_run_files(firefly_dir: Path, out_dir: Path) -> None:
+    """Copy every file of the optimizer run except the two this module writes itself.
+
+    phase_d_chain.sh replaces the run directory with OUT_DIR before the run report, and
+    show_final reads progress_metrics.csv from it, so OUT_DIR must hold the whole run.
+    """
+    for source in Path(firefly_dir).iterdir():
+        if source.is_file() and source.name not in ('firefly_best.txt', 'revalidation.csv'):
+            shutil.copy(source, Path(out_dir) / source.name)
+
+
+def score(vector: np.ndarray, demo: Any, pool: concurrent.futures.Executor,
+          cheng: tuple[np.ndarray, np.ndarray, np.ndarray],
+          seed_blocks: list[range]) -> tuple[list[float], dict[str, float]]:
     """Objective cost and reported outcomes of one vector on each seed block."""
     from covsyn.calibration import fast_cost
     from covsyn.calibration.cost_parts import LAST
@@ -94,7 +109,6 @@ def score(vector, demo, pool, cheng, seed_blocks):
 
 
 def main() -> None:
-    import concurrent.futures
     import pickle
 
     from covsyn.calibration import fast_cost
@@ -137,7 +151,7 @@ def main() -> None:
     chosen = min(rows, key=lambda r: r['validation_mean'])
     write_best_file(out_dir / 'firefly_best.txt', vectors,
                     np.array([r['validation_mean'] for r in rows]))
-    shutil.copy(Path(firefly_dir) / 'bound.txt', out_dir / 'bound.txt')
+    copy_run_files(firefly_dir, out_dir)
     training_best = rows[0]
     print(f'\ntraining best: candidate 0, train {training_best["training_cost"]:.4f}, '
           f'validation {training_best["validation_mean"]:.4f}')

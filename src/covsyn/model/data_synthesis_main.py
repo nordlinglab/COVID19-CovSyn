@@ -100,6 +100,27 @@ def get_saveable_data(data, data_type):
     return data_dict
 
 
+def apply_contact_weight(input_P, contact_weight):
+    """Scale every layer's contact parameter in place by contact_weight (the *_weight modes).
+
+    Args:
+        input_P: Parameter vector, modified in place.
+        contact_weight: Factor on the contacts of every layer.
+    """
+    # Household, school, workplace and health care are probabilities, capped at 1.
+    for index in (0, 7, 14, 21):
+        input_P[index] = min(input_P[index]*contact_weight, 1)
+    # Municipality: P[28] is a COUNT since B27 (mean community contacts per case), not
+    # a probability, so it must not be capped at 1 -- doing so would silently cut the
+    # community layer down to a single contact per case.
+    input_P[28] = input_P[28]*contact_weight
+    # Mass events (B54) are part of the community layer too: scaling their probability scales
+    # the expected event contacts by the same factor, while the event size stays a property
+    # of the event. Vectors from before B54 have no event block.
+    if len(input_P) > 199:
+        input_P[199] = min(input_P[199]*contact_weight, 1)
+
+
 def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.', mode='result'):
     # Load parameters
     # Load demographic and social data
@@ -202,18 +223,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         population_size = 23008366 - number_source_cases
         natural_immunity_rate = 1
         contact_weight = 1
-        # Household
-        input_P[0] = min(input_P[0]*contact_weight, 1)
-        # School
-        input_P[7] = min(input_P[7]*contact_weight, 1)
-        # Workplace
-        input_P[14] = min(input_P[14]*contact_weight, 1)
-        # Health Care
-        input_P[21] = min(input_P[21]*contact_weight, 1)
-        # Municipality: P[28] is a COUNT since B27 (mean community contacts per case), not
-        # a probability, so it must not be capped at 1 -- doing so would silently cut the
-        # community layer down to a single contact per case.
-        input_P[28] = input_P[28]*contact_weight
+        apply_contact_weight(input_P, contact_weight)
         # print(input_P[0], input_P[7], input_P[14], input_P[21], input_P[28])
 
     if mode == 'spread_Taitung':
@@ -232,18 +242,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         population_size = 213032 - number_source_cases
         natural_immunity_rate = 1
         contact_weight = 4
-        # Household
-        input_P[0] = min(input_P[0]*contact_weight, 1)
-        # School
-        input_P[7] = min(input_P[7]*contact_weight, 1)
-        # Workplace
-        input_P[14] = min(input_P[14]*contact_weight, 1)
-        # Health Care
-        input_P[21] = min(input_P[21]*contact_weight, 1)
-        # Municipality: P[28] is a COUNT since B27 (mean community contacts per case), not
-        # a probability, so it must not be capped at 1 -- doing so would silently cut the
-        # community layer down to a single contact per case.
-        input_P[28] = input_P[28]*contact_weight
+        apply_contact_weight(input_P, contact_weight)
     if mode == 'spread_Lienchiang':
         time_limit = 365*3
         number_source_cases = 1000

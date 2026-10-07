@@ -271,3 +271,18 @@ def test_event_probability_zero_reproduces_the_pre_b54_stream(
         assert not np.any(contact.pop('municipality_event_expected_contacts'))
         assert not np.any(contact.pop('municipality_event_expected_infections'))
     assert rd.digest(new) == rd.digest(old)
+
+
+def test_contact_weight_scales_the_event_probability_with_the_other_layers() -> None:
+    """The *_weight scenario modes scale community contacts; mass events are community contacts."""
+    from covsyn.model.data_synthesis_main import apply_contact_weight
+
+    P = np.full(204, 0.1)
+    P[28] = 12.0
+    apply_contact_weight(P, 4)
+    assert P[28] == 48.0 and P[0] == pytest.approx(0.4)
+    assert P[199] == pytest.approx(0.4)
+    assert P[200] == 0.1                    # exponent, size bounds and risk ratio unchanged
+    old = np.full(199, 0.1)
+    apply_contact_weight(old, 4)            # a pre-B54 vector has no event block
+    assert old.shape == (199,)
