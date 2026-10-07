@@ -81,7 +81,9 @@ def test_expected_event_contacts_are_saved_per_day(
     expected = contact['municipality_event_expected_contacts']
     assert len(expected) == contact['municipality_contacts_matrix'].shape[1]
     assert np.sum(expected) == pytest.approx(0.10 * ds.expected_event_size(1.49, 21, 1000, 10**7),
-                                             rel=1e-6)
+                                             abs=len(expected) * 2.0 ** -21)
+    # On the 2**-20 grid, so sums over cases are exact in any order (E65).
+    np.testing.assert_array_equal(expected * 2.0 ** 20, np.round(expected * 2.0 ** 20))
 
 
 def test_vector_without_events_saves_no_expectation(run10_vector: np.ndarray,

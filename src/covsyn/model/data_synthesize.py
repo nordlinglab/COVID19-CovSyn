@@ -66,6 +66,7 @@ AGE_BAND_EDGES = (20, 40, 60)
 # events change the contact-count distribution only.
 COMMUNITY_EVENT_FIRST_INDEX = 199
 COMMUNITY_EVENT_FIELDS = ('probability', 'exponent', 'min_size', 'max_size', 'risk_ratio')
+EXPECTED_CONTACT_GRID = 2.0 ** 20   # resolution of the expected event contacts (B55)
 
 
 def community_event_parameters(P: Sequence[float]) -> dict[str, float | int] | None:
@@ -1301,11 +1302,16 @@ class Draw_contact_data:
             # contacts; computing them draws no random number.
             event = self.community_event
             room = self.social_data_object.municipality_size - community_contacts
-            self.municipality_event_expected_contacts = (
+            expected = (
                 event['probability']
                 * expected_event_size(event['exponent'], event['min_size'], event['max_size'], room)
                 * self.event_day_weights(p, steepness, symptom_phase, recover_phase,
                                          self.layer_windows['municipality']))
+            # Rounded to multiples of 2**-20 contacts, so every sum of these in the Cheng bins is
+            # exact and the two objective implementations, which add the cases in a different
+            # order, still agree bit for bit (E65). The rounding is below 1e-6 contacts a day.
+            self.municipality_event_expected_contacts = (
+                np.round(expected * EXPECTED_CONTACT_GRID) / EXPECTED_CONTACT_GRID)
 
     def draw_from_previously_infected_set(self):
         if self.population_size > 0:
