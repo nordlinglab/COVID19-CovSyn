@@ -61,12 +61,12 @@ def g(f):
 
 # (name, data, low, high, where the range comes from)
 metrics = [
-    ('Latent period', g(lambda c: c.latent_period), 4.1, 4.5,
-     'held at the lower edge of 4.1-5.5 so the generation time stays as low as it can (B1)'),
+    ('Latent period', g(lambda c: c.latent_period), 4.1, 5.5,
+     'literature reported means, the whole range since B3 (4.1 is a median, 5.5 a mean, E45)'),
     ('Incubation period', g(lambda c: None if missing(c.incubation_period) else c.incubation_period), 3.9, 8.0,
      'literature reported means; now built as latent + window (B22)'),
-    ('Infectious period', g(lambda c: c.infectious_period), 5.0, 10.0,
-     'inside the reported 3.45-20 range'),
+    ('Infectious period', g(lambda c: c.infectious_period), 3.45, 20.0,
+     'literature reported means (B5; the objective uses the same range since B55)'),
     ('Pre-symptomatic window', g(lambda c: None if missing(c.incubation_period) else c.incubation_period - c.latent_period), 1.0, 3.0,
      'about 2 days of pre-symptomatic infectiousness (B22)'),
     ('Onset -> case closure', g(lambda c: None if (missing(c.incubation_period) or missing(c.date_of_recovery))
