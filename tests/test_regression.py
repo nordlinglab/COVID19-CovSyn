@@ -50,24 +50,32 @@ def test_cost_function_reproduces_run10(
     assert mismatched == []
 
 
+@pytest.mark.parametrize("events", [None, (0.10, 1.49, 21, 1000, 1.0)],
+                         ids=["run10", "run10-with-B55-events"])
 def test_fast_cost_equals_reference_cost_function(
+    events: tuple[float, ...] | None,
     run10_vector: np.ndarray,
     demographic_parameters: Any,
     cheng_data: tuple[np.ndarray, np.ndarray, np.ndarray],
     cost_pool: concurrent.futures.ProcessPoolExecutor,
 ) -> None:
-    """Gate 1 of CLAUDE.md: fast_cost and firefly_optimizer.cost_function agree exactly (E65)."""
+    """Gate 1 of CLAUDE.md: fast_cost and firefly_optimizer.cost_function agree exactly (E65).
+
+    The event case covers the expected-event Cheng bins and the ordinary-contact daily
+    measure of B55, which run 10's 199-value vector never reaches.
+    """
     from covsyn.calibration import fast_cost
     from covsyn.calibration import firefly_optimizer as fo
     from covsyn.calibration.cost_parts import LAST
 
+    vector = run10_vector if events is None else np.concatenate([run10_vector, events])
     reference_pool = concurrent.futures.ProcessPoolExecutor(max_workers=4)
     try:
-        slow = fo.cost_function(run10_vector, demographic_parameters, reference_pool, *cheng_data)
+        slow = fo.cost_function(vector, demographic_parameters, reference_pool, *cheng_data)
         slow_parts = dict(LAST)
     finally:
         reference_pool.shutdown()
-    fast = fast_cost.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data)
+    fast = fast_cost.cost_function(vector, demographic_parameters, cost_pool, *cheng_data)
     fast_parts = dict(LAST)
 
     assert _same(float(slow), float(fast))
