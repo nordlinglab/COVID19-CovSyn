@@ -884,8 +884,10 @@ CHENG_SYMPTOMATIC_INDEX_CASES = CHENG2020_INDEX_CASES - 9
 
 def cheng_contact_scale(symptomatic_cases):
     """Factor that puts contact bins summed over these symptomatic cases on Cheng's scale."""
+    # No symptomatic case leaves no Cheng bins to scale; raising lets cost_function charge
+    # FAILED_EVALUATION_COST instead of returning a NaN the firefly cannot rank.
     if symptomatic_cases <= 0:
-        return float('nan')
+        raise ValueError('no symptomatic case among the pooled cases')
     return CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic_cases
 
 

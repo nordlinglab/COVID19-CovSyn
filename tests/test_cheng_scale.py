@@ -24,14 +24,14 @@ def test_contact_scale_maps_the_symptomatic_cases_onto_cheng_cohort() -> None:
     assert fo.cheng_contact_scale(227) == pytest.approx(91 / 227)
 
 
-def test_contact_scale_without_symptomatic_cases_is_not_a_number() -> None:
-    """No symptomatic case means no Cheng bins: the cost must not divide by zero silently."""
+def test_contact_scale_without_symptomatic_cases_raises() -> None:
+    """No symptomatic case means no Cheng bins; raising makes cost_function charge the failure
+    cost rather than return a NaN the firefly cannot rank."""
     pytest.importorskip('sklearn')
-    import math
-
     from covsyn.calibration import firefly_optimizer as fo
 
-    assert math.isnan(fo.cheng_contact_scale(0))
+    with pytest.raises(ValueError):
+        fo.cheng_contact_scale(0)
 
 
 def test_objective_still_simulates_three_hundred_seeds() -> None:
