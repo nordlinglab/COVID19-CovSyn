@@ -42,10 +42,10 @@ res = np.loadtxt(Path(PARAM) / 'firefly_best.txt')
 best_row = int(np.argmin(res[:, -1]))
 P = res[best_row, 1:-1]
 print('=== best firefly (cost %.4f, row %d of %d) ===' % (res[best_row, -1], best_row, len(res)))
-print('param gamma means: latent %.2f  infectious %.2f  incubation %.2f'
+print('param gamma means: latent %.2f  infectious %.2f  pre-onset window %.2f'
       % (P[37]*P[38], P[39]*P[40], P[41]*P[42]))
 print('age risk ratios  : [%.3f, %.3f, %.3f, %.3f]' % tuple(P[63:67]))
-print('overdispersion   : rate %.3f weight %.2f' % (P[35], P[36]))
+print('infectiousness   : Gamma shape k %.3f, cap %.2f (B17)' % (P[35], P[36]))
 print('transition p     : asx->R %.3f  sym->R %.3f  crit->R %.3f' % (P[195], P[196], P[197]))
 for name, i in [('household', 70), ('school', 95), ('workplace', 120), ('healthcare', 145), ('municipality', 170)]:
     print('   mean daily attack rate %-13s %.4f' % (name, float(np.mean(P[i:i+25]))))

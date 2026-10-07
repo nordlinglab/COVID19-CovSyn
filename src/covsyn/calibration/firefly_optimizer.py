@@ -436,7 +436,10 @@ def physiology_penalty(P, weight=PHYSIOLOGY_PENALTY_WEIGHT):
     # so aiming at its lower edge is aiming at a number that is not a mean at all. Inside the
     # range the term costs nothing, which is also what the professor asked for (todolist 1.11).
     pen += ou(latent_mean,      4.1, 5.5)  ** 2
-    pen += ou(infectious_mean,  5.0, 10.0) ** 2
+    # B5 put every term on the literature reported-mean range; the infectious period kept
+    # the older 5-10 days, so run 4 and run 11 paid for a mean of 4.2 days that lies inside
+    # the reported range of 3.45-20 (E25). B55 applies B5 here as well.
+    pen += ou(infectious_mean,  3.45, 20.0) ** 2
     pen += ou(pre_onset_window, 1.0, 3.0)  ** 2
     # Widened from [1, 6] once B2 gave this quantity a measured target of 5-7 days: a
     # Gamma with median 7 has a mean near 7.8, so the old ceiling made the new target
