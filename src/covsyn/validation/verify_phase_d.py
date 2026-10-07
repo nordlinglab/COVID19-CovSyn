@@ -481,8 +481,7 @@ def main():
     print(f'{SPREAD}: {len(runs)} simulations, '
           f'{sum(len(r["course"]) for r in runs)} cases\n')
 
-    # B57: 95% bootstrap intervals over the simulations; the spread and first-outbreak runs are
-    # resampled together so a check sees one consistent replicate.
+    # B57: 95% bootstrap intervals over the simulations.
     if BOOTSTRAP_REPLICATES > 0:
         def replicate(spread_sample, first_sample):
             rows = compute_checks(spread_sample, first_sample, permutations=False)
