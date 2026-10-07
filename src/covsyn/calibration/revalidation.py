@@ -10,8 +10,9 @@ every firefly's personal best on fresh, disjoint seed blocks and picks the lowes
 Usage (repository root, PYTHONPATH=src):
     python -m covsyn.calibration.revalidation FIREFLY_DIR OUT_DIR [BLOCKS]
 
-Writes OUT_DIR/revalidation.csv (every candidate) and OUT_DIR/firefly_best.txt and bound.txt
-(the chosen vector), so the post-run chain can be pointed at OUT_DIR.
+Writes OUT_DIR/revalidation.csv (every candidate) and OUT_DIR/firefly_best.txt (every candidate
+with its validation cost, so its minimum is the chosen vector) and bound.txt, so the post-run
+chain can be pointed at OUT_DIR.
 """
 from __future__ import annotations
 
@@ -64,9 +65,18 @@ def load_candidates(firefly_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     return vectors[order], costs[order]
 
 
-def write_best_file(path: Path, vector: np.ndarray, cost: float) -> None:
-    """Write one row in firefly_best.txt's layout (iteration, params..., cost)."""
-    np.savetxt(path, np.atleast_2d(np.concatenate([[0.0], vector, [cost]])), fmt='%.7f')
+def write_best_file(path: Path, vectors: np.ndarray, costs: np.ndarray) -> None:
+    """Write candidates in firefly_best.txt's layout (row number, params..., cost).
+
+    The report scripts index the loaded file as a matrix, so a single candidate is written
+    twice rather than as a one-dimensional row; the lowest cost is the chosen vector.
+    """
+    vectors = np.atleast_2d(vectors)
+    costs = np.atleast_1d(costs)
+    rows = np.column_stack([np.arange(len(vectors), dtype=float), vectors, costs])
+    if len(rows) == 1:
+        rows = np.vstack([rows, rows])
+    np.savetxt(path, rows, fmt='%.7f')
 
 
 def score(vector, demo, pool, cheng, seed_blocks):
@@ -125,8 +135,8 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
     chosen = min(rows, key=lambda r: r['validation_mean'])
-    write_best_file(out_dir / 'firefly_best.txt', vectors[chosen['candidate']],
-                    chosen['validation_mean'])
+    write_best_file(out_dir / 'firefly_best.txt', vectors,
+                    np.array([r['validation_mean'] for r in rows]))
     shutil.copy(Path(firefly_dir) / 'bound.txt', out_dir / 'bound.txt')
     training_best = rows[0]
     print(f'\ntraining best: candidate 0, train {training_best["training_cost"]:.4f}, '

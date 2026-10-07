@@ -40,13 +40,21 @@ def test_candidates_merge_population_and_personal_bests_without_duplicates(tmp_p
     np.testing.assert_array_equal(vectors[0], [1.0, 2.0])
 
 
-def test_chosen_vector_file_reads_back_as_the_lowest_cost_row(tmp_path) -> None:
-    vector = np.arange(5, dtype=float)
-    rv.write_best_file(tmp_path / 'firefly_best.txt', vector, 1.25)
-    row = np.atleast_2d(np.loadtxt(tmp_path / 'firefly_best.txt'))
-    best = row[int(np.argmin(row[:, -1]))]
-    np.testing.assert_allclose(best[1:-1], vector)
+def test_best_file_is_two_dimensional_and_its_minimum_is_the_chosen_vector(tmp_path) -> None:
+    """The report scripts read firefly_best.txt with np.loadtxt(...)[:, -1], which needs at least
+    two rows; the file holds every candidate with its validation cost, like the optimizer's."""
+    vectors = np.arange(15, dtype=float).reshape(3, 5)
+    rv.write_best_file(tmp_path / 'firefly_best.txt', vectors, np.array([2.0, 1.25, 3.0]))
+    rows = np.loadtxt(tmp_path / 'firefly_best.txt')
+    assert rows.ndim == 2 and rows.shape == (3, 7)
+    best = rows[int(np.argmin(rows[:, -1]))]
+    np.testing.assert_allclose(best[1:-1], vectors[1])
     assert best[-1] == pytest.approx(1.25)
+
+
+def test_best_file_with_a_single_candidate_is_still_two_dimensional(tmp_path) -> None:
+    rv.write_best_file(tmp_path / 'firefly_best.txt', np.ones((1, 4)), np.array([1.0]))
+    assert np.loadtxt(tmp_path / 'firefly_best.txt').ndim == 2
 
 
 def test_default_seed_offset_is_the_objective_and_others_differ(
