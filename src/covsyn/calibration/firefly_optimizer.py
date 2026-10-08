@@ -1089,6 +1089,8 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         if course_list and contact_list:
             index_cases.append((course_list[0], contact_list[0], None))
     measured = measure_outcomes(index_cases)
+    # The sampled share stays in the log next to the charged probability (E95, E96).
+    measured['pre_onset_zero_share_sampled'] = measured['pre_onset_zero_share']
     measured['pre_onset_zero_share'] = pre_onset_zero_probability(P)
     outcome = outcome_penalty(measured)
     total_cost = contact_cost + attack_cost + energy_weight * energy_cost + penalty + outcome

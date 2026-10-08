@@ -1421,6 +1421,11 @@ class Draw_contact_data:
         drawn does not move the objective either. Every value is put on EXPECTED_CONTACT_GRID
         so the two objective implementations sum them to the same bits.
 
+        The expected event terms (B55) assume the full event is met and ignore prior immunity
+        and the per-contact age clip. That is exact for the objective, which simulates one
+        index case in the whole Taiwan population with vaccination locked at 0 (P[68]), but
+        not for the small-population modes, where the municipality loop can stop early.
+
         Returns:
             expected_infections_<layer> for the five layers and expected_contacts_municipality.
         """

@@ -224,7 +224,9 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                    + ('' if charged else '; informational since E56, accepted on the count'))
 
     # E56 / E57: what one index case actually infects in each layer, which is the quantity
-    # Cheng measured and the quantity the objective now charges. Every layer is printed; the
+    # Cheng measured. The objective charges its expectation (E95: sums of infection
+    # probabilities, with expected event contacts); this checklist counts the realised
+    # infections over the Monte-Carlo runs, so the two agree on average. Every layer is printed; the
     # three Cheng reports are the ones with an acceptance interval.
     for layer, (infections, contacts) in per_index.items():
         target = LAYER_INFECTIONS_PER_INDEX.get(layer)
