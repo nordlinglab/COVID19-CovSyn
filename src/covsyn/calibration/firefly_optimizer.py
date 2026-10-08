@@ -877,7 +877,7 @@ OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio'}
 
 # B60: the intervals the objective charges, from target_margins.py; OUTCOME_TARGETS keeps the
 # acceptance intervals that the checklist judges.
-CHARGED_BOUNDS = load_charged_bounds()
+CHARGED_BOUNDS = load_charged_bounds(targets=OUTCOME_TARGETS)
 
 
 def outcome_scale(name, lo, hi):

@@ -42,6 +42,7 @@ def test_sigma_comes_from_the_bootstrap_interval_in_objective_units() -> None:
         {
             "decision": "B23",
             "name": "health care contacts starting before day 4",
+            "target": [40.0, 70.0],
             "ci": [35.0, 38.92],
         }
     ]
@@ -49,6 +50,42 @@ def test_sigma_comes_from_the_bootstrap_interval_in_objective_units() -> None:
     m = margins["medical_early_share"]
     assert m["sigma"] == pytest.approx(0.01)
     assert m["charged"] == pytest.approx([0.41645, 0.68355])
+
+
+def test_a_stricter_objective_bound_is_kept_not_tightened_again() -> None:
+    """The checklist interval shrinks, then intersects the objective's own interval."""
+    checks = [
+        {
+            "decision": "B23",
+            "name": "health care contacts starting 8+ days after onset",
+            "target": [20.0, 50.0],
+            "ci": [34.0, 37.92],
+        }
+    ]
+    m = tm.compute_margins(checks, {"medical_late_share": (0.25, 0.50, 1.0)})["medical_late_share"]
+    assert m["acceptance"] == pytest.approx([0.20, 0.50])
+    assert m["charged"] == pytest.approx([0.25, 0.48355])
+
+
+def test_integer_medians_get_no_margin() -> None:
+    """The bootstrap width of an integer median is the integer grid, not noise."""
+    assert "onset_to_confirmation" not in tm.CHECK_FOR_TARGET
+    assert "community_median" not in tm.CHECK_FOR_TARGET
+
+
+def test_a_stale_charged_file_is_refused(tmp_path) -> None:
+    """Charged intervals derived from an interval that has since changed raise."""
+    path = tmp_path / "charged.json"
+    path.write_text(
+        json.dumps(
+            {"targets": {"icu_to_closure": {"objective": [29.0, 44.0], "charged": [31.5, 41.5]}}}
+        )
+    )
+    assert tm.load_charged_bounds(path, {"icu_to_closure": (29.0, 44.0, 1.0)}) == {
+        "icu_to_closure": (31.5, 41.5)
+    }
+    with pytest.raises(ValueError):
+        tm.load_charged_bounds(path, {"icu_to_closure": (25.0, 40.0, 1.0)})
 
 
 def test_a_missing_checklist_row_is_an_error() -> None:
@@ -67,8 +104,9 @@ def test_committed_charged_targets_agree_with_the_acceptance_intervals() -> None
     for key, m in data["targets"].items():
         lo, hi, weight = fo.OUTCOME_TARGETS[key]
         assert weight > 0
-        assert m["acceptance"] == pytest.approx([lo, hi])
+        assert m["objective"] == pytest.approx([lo, hi])
         assert lo <= m["charged"][0] < m["charged"][1] <= hi
+        assert m["acceptance"][0] <= m["charged"][0] < m["charged"][1] <= m["acceptance"][1]
 
 
 def test_checklist_counts_failures_and_noise_passes() -> None:
@@ -100,7 +138,7 @@ def test_first_wave_seeds_beyond_the_list_wrap_around(
     from covsyn.model.data_synthesis_main import run_covid
 
     _, _, courses, _ = run_covid(
-        100000,
+        500000,
         run10_vector.copy(),
         copy.deepcopy(demographic_parameters),
         save_file=False,

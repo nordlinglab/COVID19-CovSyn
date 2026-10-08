@@ -63,6 +63,9 @@ def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, cpu_cores
     write_best_file(workdir / "firefly_best.txt", vector[None, :], np.array([cost]))
     with open(workdir / "log.txt", "w") as log:
         for name, mode in MODES:
+            # data_synthesis_main does not create its result path, and a missing one makes
+            # every save fail inside the worker pool without failing the process.
+            (workdir / name).mkdir(parents=True, exist_ok=True)
             _run(
                 [
                     "-m",
@@ -123,6 +126,13 @@ def main() -> None:
     best = np.atleast_2d(np.loadtxt(source / "firefly_best.txt"))
     vectors = best[:, 1:-1]
     ranked = sorted(table, key=lambda r: float(r["validation_mean"]))[:top]
+    if out_dir.resolve() == source.resolve():
+        raise SystemExit("OUT_DIR must differ from REVALIDATION_DIR")
+    if len(best) != len(table):
+        raise SystemExit(
+            f"{source}: {len(table)} rows in revalidation.csv but "
+            f"{len(best)} in firefly_best.txt; not a revalidation output"
+        )
     if out_dir.exists():
         shutil.rmtree(out_dir)
     shutil.copytree(source, out_dir)

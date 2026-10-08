@@ -12,10 +12,14 @@ Bower 2010; Andrianakis et al. 2015).
 
 For each charged outcome that the checklist also judges, sigma is the standard error of the
 checklist's estimate, read from its 95% bootstrap interval (B57): sigma = width / (2 * 1.96).
-Each finite, active bound moves inward by 1.645 * sigma (one-sided 95%), capped at a quarter of
-the interval's width so that no interval collapses. A lower bound of 0 is not a constraint and
-is left in place. The checklist itself keeps the original intervals; only the objective aims
-inside them.
+Each active bound of the CHECKLIST interval moves inward by 1.645 * sigma (one-sided 95%),
+capped at a quarter of the interval's width so that no interval collapses; a lower bound of 0 is
+not a constraint and stays. The charged interval is that, intersected with the objective's own
+interval, so a bound the objective already holds stricter than the checklist (medical_late_share
+0.25 against 0.20, offspring_k 0.2 against 0.1) is neither loosened nor tightened again. The two
+integer-valued medians (onset_to_confirmation, community_median) are left out: their bootstrap
+interval reflects the integer grid, not Monte-Carlo noise. The checklist keeps its intervals;
+only the objective aims inside them.
 
 Usage (repository root, PYTHONPATH=src):
     python -m covsyn.calibration.target_margins CHECKS_JSON [OUT_JSON]
@@ -44,7 +48,6 @@ CHECK_FOR_TARGET = {
     "sar_workplace": ("B9", "cumulative SAR per contact, workplace", 0.01),
     "medical_late_share": ("B23", "health care contacts starting 8+ days after onset", 0.01),
     "medical_early_share": ("B23", "health care contacts starting before day 4", 0.01),
-    "community_median": ("B27", "community contacts per case, median", 1.0),
     "incubation_mean": ("B22", "incubation period, mean", 1.0),
     "pre_onset_window_mean": ("B22", "pre-onset infectious window, mean", 1.0),
     "pre_onset_zero_share": ("B22", "pre-onset window of zero days", 0.01),
@@ -60,10 +63,10 @@ CHECK_FOR_TARGET = {
     ),
     "icu_to_closure": ("B28", "ICU to case closure", 1.0),
     "onset_to_icu": ("B28", "onset to ICU", 1.0),
-    "onset_to_confirmation": ("B2", "onset to confirmation, median", 1.0),
     "infections_per_index_household": ("B9", "infections per index case, household", 1.0),
     "infections_per_index_health_care": ("B9", "infections per index case, health_care", 1.0),
     "infections_per_index_municipality": ("B9", "infections per index case, municipality", 1.0),
+    "offspring_k": ("B17", "offspring dispersion k", 1.0),
 }
 
 
@@ -90,7 +93,8 @@ def compute_margins(checks: list[dict], targets: dict) -> dict[str, dict]:
         targets: OUTCOME_TARGETS, {key: (lo, hi, weight)}.
 
     Returns:
-        {key: {'acceptance', 'charged', 'sigma', 'check'}} in objective units.
+        {key: {'acceptance', 'objective', 'charged', 'sigma', 'check'}} in objective units;
+        'acceptance' is the checklist interval, 'objective' the OUTCOME_TARGETS interval.
     """
     by_name = {(c["decision"], c["name"]): c for c in checks}
     out = {}
@@ -98,26 +102,53 @@ def compute_margins(checks: list[dict], targets: dict) -> dict[str, dict]:
         if key not in targets or targets[key][2] <= 0:
             continue
         row = by_name.get((decision, name))
-        if row is None or not row.get("ci"):
+        if row is None or not row.get("ci") or not isinstance(row.get("target"), list):
             raise ValueError(f"checklist row {decision} {name!r} with an interval is missing")
         ci_lo, ci_hi = row["ci"]
         sigma = (ci_hi - ci_lo) / (2 * Z_TWO_SIDED_95) * unit
-        lo, hi = float(targets[key][0]), float(targets[key][1])
+        accept_lo, accept_hi = (float(row["target"][0]) * unit, float(row["target"][1]) * unit)
+        shrunk_lo, shrunk_hi = charged_interval(accept_lo, accept_hi, sigma)
+        obj_lo, obj_hi = float(targets[key][0]), float(targets[key][1])
+        charged = (max(shrunk_lo, obj_lo), min(shrunk_hi, obj_hi))
+        if not charged[0] < charged[1]:
+            raise ValueError(f"{key}: charged interval {charged} is empty")
         out[key] = {
-            "acceptance": [lo, hi],
-            "charged": list(charged_interval(lo, hi, sigma)),
+            "acceptance": [accept_lo, accept_hi],
+            "objective": [obj_lo, obj_hi],
+            "charged": list(charged),
             "sigma": sigma,
             "check": f"{decision} {name}",
         }
     return out
 
 
-def load_charged_bounds(path: Path = CHARGED_TARGETS_FILE) -> dict[str, tuple[float, float]]:
-    """The charged intervals by objective key, or {} when the file does not exist."""
+def load_charged_bounds(
+    path: Path = CHARGED_TARGETS_FILE, targets: dict | None = None
+) -> dict[str, tuple[float, float]]:
+    """The charged intervals by objective key, or {} when the file does not exist.
+
+    Args:
+        path: The charged-targets JSON.
+        targets: When given (OUTCOME_TARGETS), every entry's recorded objective interval must
+            still equal the current one; a stale file raises instead of silently charging
+            intervals derived from targets that have since changed.
+    """
     if not path.exists():
         return {}
     data = json.loads(path.read_text())
-    return {k: (float(v["charged"][0]), float(v["charged"][1])) for k, v in data["targets"].items()}
+    bounds = {}
+    for key, entry in data["targets"].items():
+        if targets is not None:
+            current = [float(targets[key][0]), float(targets[key][1])] if key in targets else None
+            if current is None or any(
+                abs(a - b) > 1e-12 for a, b in zip(entry["objective"], current, strict=True)
+            ):
+                raise ValueError(
+                    f"{path.name} is stale for {key}: derived from {entry['objective']}, "
+                    f"OUTCOME_TARGETS now {current}; re-run target_margins"
+                )
+        bounds[key] = (float(entry["charged"][0]), float(entry["charged"][1]))
+    return bounds
 
 
 def main() -> None:
@@ -142,7 +173,7 @@ def main() -> None:
     )
     for key, m in margins.items():
         print(
-            f"{key:42s} acceptance {m['acceptance']} -> charged "
+            f"{key:42s} checklist {m['acceptance']} objective {m['objective']} -> charged "
             f"[{m['charged'][0]:.4g}, {m['charged'][1]:.4g}] (sigma {m['sigma']:.3g})"
         )
 

@@ -8,6 +8,10 @@
     1.5,
     2.2
    ],
+   "objective": [
+    1.5,
+    2.2
+   ],
    "charged": [
     1.5665753956330803,
     2.13342460436692
@@ -17,6 +21,10 @@
   },
   "daily_school": {
    "acceptance": [
+    0.9,
+    1.4
+   ],
+   "objective": [
     0.9,
     1.4
    ],
@@ -32,6 +40,10 @@
     1.2,
     1.8
    ],
+   "objective": [
+    1.2,
+    1.8
+   ],
    "charged": [
     1.3166026531586137,
     1.6833973468413863
@@ -41,6 +53,10 @@
   },
   "daily_municipality": {
    "acceptance": [
+    1.2,
+    1.8
+   ],
+   "objective": [
     1.2,
     1.8
    ],
@@ -56,6 +72,10 @@
     0.0,
     0.3
    ],
+   "objective": [
+    0.0,
+    0.3
+   ],
    "charged": [
     0.0,
     0.2871721503423931
@@ -65,6 +85,10 @@
   },
   "asymptomatic_share": {
    "acceptance": [
+    0.2,
+    0.28
+   ],
+   "objective": [
     0.2,
     0.28
    ],
@@ -80,6 +104,10 @@
     0.01,
     0.04
    ],
+   "objective": [
+    0.01,
+    0.04
+   ],
    "charged": [
     0.0175,
     0.0325
@@ -92,6 +120,10 @@
     0.015,
     0.05
    ],
+   "objective": [
+    0.015,
+    0.05
+   ],
    "charged": [
     0.02375,
     0.04125
@@ -101,11 +133,15 @@
   },
   "medical_late_share": {
    "acceptance": [
+    0.2,
+    0.5
+   ],
+   "objective": [
     0.25,
     0.5
    ],
    "charged": [
-    0.2650970106102254,
+    0.25,
     0.4849029893897746
    ],
    "sigma": 0.009177514048769224,
@@ -114,29 +150,25 @@
   "medical_early_share": {
    "acceptance": [
     0.4,
+    0.7000000000000001
+   ],
+   "objective": [
+    0.4,
     0.7
    ],
    "charged": [
     0.41630742708971746,
-    0.6836925729102825
+    0.6836925729102826
    ],
    "sigma": 0.00991332953782216,
    "check": "B23 health care contacts starting before day 4"
   },
-  "community_median": {
-   "acceptance": [
-    3.0,
-    15.0
-   ],
-   "charged": [
-    3.419642857142857,
-    14.580357142857142
-   ],
-   "sigma": 0.25510204081632654,
-   "check": "B27 community contacts per case, median"
-  },
   "incubation_mean": {
    "acceptance": [
+    3.9,
+    8.0
+   ],
+   "objective": [
     3.9,
     8.0
    ],
@@ -152,6 +184,10 @@
     1.0,
     3.0
    ],
+   "objective": [
+    1.0,
+    3.0
+   ],
    "charged": [
     1.0542298470172196,
     2.9457701529827807
@@ -161,6 +197,10 @@
   },
   "pre_onset_zero_share": {
    "acceptance": [
+    0.0,
+    0.12
+   ],
+   "objective": [
     0.0,
     0.12
    ],
@@ -176,6 +216,10 @@
     22.0,
     32.0
    ],
+   "objective": [
+    22.0,
+    32.0
+   ],
    "charged": [
     22.759214821175362,
     31.240785178824638
@@ -185,6 +229,10 @@
   },
   "closure_after_confirmation_asymptomatic": {
    "acceptance": [
+    17.0,
+    31.0
+   ],
+   "objective": [
     17.0,
     31.0
    ],
@@ -200,6 +248,10 @@
     29.0,
     44.0
    ],
+   "objective": [
+    29.0,
+    44.0
+   ],
    "charged": [
     31.495362501582832,
     41.50463749841717
@@ -212,6 +264,10 @@
     5.4,
     9.2
    ],
+   "objective": [
+    5.4,
+    9.2
+   ],
    "charged": [
     6.35,
     8.25
@@ -219,20 +275,12 @@
    "sigma": 1.0293204532614493,
    "check": "B28 onset to ICU"
   },
-  "onset_to_confirmation": {
-   "acceptance": [
-    5.0,
-    7.0
-   ],
-   "charged": [
-    5.419642857142857,
-    6.580357142857143
-   ],
-   "sigma": 0.25510204081632654,
-   "check": "B2 onset to confirmation, median"
-  },
   "infections_per_index_household": {
    "acceptance": [
+    0.047953886961324334,
+    0.18390356042017778
+   ],
+   "objective": [
     0.047953886961324334,
     0.18390356042017778
    ],
@@ -248,6 +296,10 @@
     0.022018942534908506,
     0.13059474022518683
    ],
+   "objective": [
+    0.022018942534908506,
+    0.13059474022518683
+   ],
    "charged": [
     0.03210086217776564,
     0.12051282058232969
@@ -260,12 +312,32 @@
     0.001,
     0.03
    ],
+   "objective": [
+    0.001,
+    0.03
+   ],
    "charged": [
     0.00825,
     0.02275
    ],
    "sigma": 0.004591836734693877,
    "check": "B9 infections per index case, municipality"
+  },
+  "offspring_k": {
+   "acceptance": [
+    0.1,
+    0.35
+   ],
+   "objective": [
+    0.2,
+    0.35
+   ],
+   "charged": [
+    0.2,
+    0.29640417137751895
+   ],
+   "sigma": 0.032581050834334956,
+   "check": "B17 offspring dispersion k"
   }
  }
 }

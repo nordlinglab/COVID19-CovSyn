@@ -28,7 +28,9 @@ def old_miss(x, lo, hi):
 
 def new_miss(x, lo, hi, name=None):
     scale = fo.outcome_scale(name, lo, hi)
-    return max(0.0, lo - x, x - hi) / scale if scale else 0.0
+    # B60: measured from the charged interval, as outcome_penalty does.
+    charged_lo, charged_hi = fo.CHARGED_BOUNDS.get(name, (lo, hi))
+    return max(0.0, charged_lo - x, x - charged_hi) / scale if scale else 0.0
 
 
 def shaped(miss):
