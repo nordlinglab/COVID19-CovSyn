@@ -9,7 +9,9 @@
 #   1b. re-score the candidates on unseen seed blocks and use the best of those (B56, E87)
 #   2. archive the previous synthetic data, then generate spread_Taiwan_weight and
 #      taiwan_first_outbreak with 1000 Monte-Carlo runs each (decisions A4, A5, B36)
+#   1c. run the checklist for the best revalidated candidates and keep the best (B60)
 #   3. run the checklist of every post-simulation item of B14 / B17-B36
+#   3b. run the checklist again on independent seeds (B60), the one to report
 #   4. run the standard run report (show_final, check_gap, rr_exact, tw_check, show_bounds)
 #   5. redraw the full validation figure set
 #   6. re-measure the contact days
@@ -50,6 +52,14 @@ if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
     say "$(grep 'validation best' "$LOG" | tail -1)"
     FIREFLY_RUN=revalidation
 fi
+# B60: run the full checklist for the best revalidated candidates and keep the one with the
+# fewest failures. SELECT=0 skips it; SELECT_TOP sets how many candidates (default 5).
+if [ "${SELECT:-1}" = 1 ] && [ -f "$FIREFLY_RUN/revalidation.csv" ]; then
+    say "running the checklist on the best ${SELECT_TOP:-5} revalidated candidates (B60)"
+    run covsyn.calibration.select_by_checklist "$FIREFLY_RUN" selected "${SELECT_TOP:-5}"         >> "$LOG" 2>&1 || { say 'ERROR: checklist selection failed, stopping'; exit 1; }
+    say "$(grep 'checklist choice' "$LOG" | tail -1)"
+    FIREFLY_RUN=selected
+fi
 if [ -f "$FIREFLY_RUN/firefly_best.txt" ]; then
     rm -rf "$FIREFLY"
     cp -R "$FIREFLY_RUN" "$FIREFLY"
@@ -86,6 +96,18 @@ say 'running the Phase D checklist'
 run covsyn.validation.verify_phase_d "$SPREAD" "$FIRST" validation_reference/phaseD_checks.json \
     > phaseD_checks.txt 2>&1 || say 'WARNING: the checklist exited with an error'
 tail -3 phaseD_checks.txt | tee -a "$LOG"
+
+# ---------------------------------------------------------------- 3b. independent checklist
+# B60: the candidate was chosen on the checklist of seeds 0..999, so the same checklist is run
+# again on an independent seed set; this is the one to report.
+say 'running the checklist again on independent seeds from 100000 (B60)'
+for mode in spread_Taiwan_weight taiwan_first_outbreak; do
+    rm -rf "synthetic_data_results_${mode}_independent"
+    mkdir -p "synthetic_data_results_${mode}_independent"
+    run covsyn.model.data_synthesis_main --mode "$mode" --monte_carlo_number 1000         --result_path "synthetic_data_results_${mode}_independent" --cpu_cores "${CPU_CORES:-24}"         --parameter_path "$FIREFLY" --seed_start 100000 >> "$LOG" 2>&1         || say "WARNING: independent data synthesis failed for $mode"
+done
+run covsyn.validation.verify_phase_d "${SPREAD}_independent" "${FIRST}_independent"     validation_reference/phaseD_checks_independent.json > phaseD_checks_independent.txt 2>&1     || say 'WARNING: the independent checklist exited with an error'
+tail -3 phaseD_checks_independent.txt | tee -a "$LOG"
 
 # ---------------------------------------------------------------- 4. standard run report
 say 'running the standard run report'

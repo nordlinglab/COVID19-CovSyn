@@ -307,7 +307,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     threshold_confirmed_day = np.nan
     # for infection_day in tqdm(infection_days):
     if mode == 'taiwan_first_outbreak':
-        infection_days = infection_days_list[seed]
+        # The list holds the same 28 seed days 1100 times; wrapping lets seeds beyond it (an
+        # independent set, B60) reuse them, and changes nothing below 1100.
+        infection_days = infection_days_list[seed % len(infection_days_list)]
         for infection_day in infection_days:
             seed_age = random.choices(np.arange(100+1), weights=seed_age_p)[0]
             infection_queue.put((source_case_id, infection_day,
@@ -535,12 +537,15 @@ if __name__ == "__main__":
     parser.add_argument('--monte_carlo_number', type=int, default=100)
     parser.add_argument('--result_path', type=str, required=True)
     parser.add_argument('--cpu_cores', type=int, default=1)
+    parser.add_argument('--seed_start', type=int, default=0,
+                        help='first Monte-Carlo seed; B60 uses 100000 for an independent set')
 
     args = parser.parse_args()
     mode = args.mode
     parameter_path = Path(args.parameter_path)
     mc_number = args.monte_carlo_number
     cpu_cores = args.cpu_cores
+    seed_start = args.seed_start
     result_path = Path(args.result_path)
     print(f'Result path: {result_path}')
     if mode == 'spread_Taitung_outbreak_weight_2' or mode == 'spread_Taitung_outbreak_weight_1p5' or mode == 'spread_Taitung_outbreak_weight_3' or mode == 'spread_Taitung':
@@ -596,7 +601,7 @@ if __name__ == "__main__":
 
         print(f'Full batches: {full_batches}, Remainder: {remainder}')
         for i in tqdm(range(full_batches)):
-            seeds = range(i*cpu_cores, (i+1)*cpu_cores)
+            seeds = range(seed_start + i*cpu_cores, seed_start + (i+1)*cpu_cores)
             with concurrent.futures.ProcessPoolExecutor() as executor:  # Multiprocessing
                 results = [executor.submit(run_covid, seed, input_P, demographic_parameters, save_file=True,
                                            result_path=result_path, mode=mode)
@@ -605,7 +610,7 @@ if __name__ == "__main__":
         # Process the remainder
         print('Processing the remainder')
         if remainder > 0:
-            seeds = range(full_batches*cpu_cores, mc_number)
+            seeds = range(seed_start + full_batches*cpu_cores, seed_start + mc_number)
             with concurrent.futures.ProcessPoolExecutor() as executor:
                 results = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode)

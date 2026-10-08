@@ -13,6 +13,7 @@ first_outbreak_dir  synthetic_data_results_taiwan_first_outbreak (28 seeds), opt
 """
 import glob
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -438,7 +439,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                        'workplace category, and CovSyn school carries a 2.3% attack rate '
                        'concentrated in 0-19, so this pooling is not comparable to his (E70)')
 
-    age_rr_file = Path('validation_reference/age_rr.json')
+    # B60: the checklist-based selection measures each candidate into its own file.
+    age_rr_file = Path(os.environ.get('AGE_RR_FILE', 'validation_reference/age_rr.json'))
     if age_rr_file.exists():
         measurement = json.loads(age_rr_file.read_text())
         layers = ', '.join(measurement.get('cheng_comparable_layers', []))

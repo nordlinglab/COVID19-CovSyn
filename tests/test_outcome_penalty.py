@@ -5,6 +5,8 @@
 B43: a target costs nothing inside its interval; outside it the miss is measured in units of the
 interval width, capped at half the interval's centre, and costs miss**2 up to one unit and
 2*miss - 1 beyond, times the target weight and OUTCOME_PENALTY_WEIGHT.
+B60: the miss is measured from the charged interval (the acceptance interval moved inward
+by its Monte-Carlo noise), still in units of the acceptance interval.
 B50: the community tail ratio, whose interval is a wide data CI, is measured in units of its
 lower bound instead.
 """
@@ -35,21 +37,37 @@ def test_quadratic_below_one_unit_with_the_capped_width() -> None:
     """A miss below one unit is quadratic, with the unit capped at the width.
 
     closure_after_confirmation_symptomatic [22, 32]: width 10 is below half the centre (13.5),
-    so 10 is the unit.
+    so 10 is the unit. Since B60 the miss is measured from the charged interval.
     """
-    lo, hi, weight = fo.OUTCOME_TARGETS["closure_after_confirmation_symptomatic"]
+    name = "closure_after_confirmation_symptomatic"
+    lo, hi, weight = fo.OUTCOME_TARGETS[name]
     assert (lo, hi) == (22.0, 32.0)
+    charged_lo, _ = fo.CHARGED_BOUNDS.get(name, (lo, hi))
     miss = 0.5 / 10.0
-    assert _alone("closure_after_confirmation_symptomatic", 21.5) == pytest.approx(
-        fo.OUTCOME_PENALTY_WEIGHT * weight * miss**2)
+    assert _alone(name, charged_lo - 0.5) == pytest.approx(
+        fo.OUTCOME_PENALTY_WEIGHT * weight * miss**2
+    )
 
 
 def test_linear_beyond_one_unit() -> None:
     """A miss of two units costs 2 * 2 - 1 = 3 units, not 4."""
-    lo, hi, weight = fo.OUTCOME_TARGETS["closure_after_confirmation_symptomatic"]
-    unit = fo.outcome_scale("closure_after_confirmation_symptomatic", lo, hi)
-    assert _alone("closure_after_confirmation_symptomatic", hi + 2 * unit) == pytest.approx(
-        fo.OUTCOME_PENALTY_WEIGHT * weight * 3.0)
+    name = "closure_after_confirmation_symptomatic"
+    lo, hi, weight = fo.OUTCOME_TARGETS[name]
+    unit = fo.outcome_scale(name, lo, hi)
+    _, charged_hi = fo.CHARGED_BOUNDS.get(name, (lo, hi))
+    assert _alone(name, charged_hi + 2 * unit) == pytest.approx(
+        fo.OUTCOME_PENALTY_WEIGHT * weight * 3.0
+    )
+
+
+def test_a_value_inside_acceptance_but_outside_the_charged_interval_costs_something() -> None:
+    """B60: the objective aims inside the acceptance interval by the Monte-Carlo margin."""
+    name = "medical_early_share"
+    lo, hi, _ = fo.OUTCOME_TARGETS[name]
+    charged_lo, charged_hi = fo.CHARGED_BOUNDS[name]
+    assert lo < charged_lo < charged_hi < hi
+    assert _alone(name, (lo + charged_lo) / 2) > 0.0
+    assert _alone(name, (charged_lo + charged_hi) / 2) == 0.0
 
 
 def test_width_is_capped_at_half_the_centre() -> None:

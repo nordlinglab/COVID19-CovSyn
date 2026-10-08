@@ -19,6 +19,7 @@ from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX)
 from covsyn.model.contact_measures import contacts_per_day_before_onset
+from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
 from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX
 from covsyn.figures.plot_results import *
@@ -874,6 +875,11 @@ MAX_INTERVAL_WIDTH_OVER_CENTRE = 0.5
 OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio'}
 
 
+# B60: the intervals the objective charges, from target_margins.py; OUTCOME_TARGETS keeps the
+# acceptance intervals that the checklist judges.
+CHARGED_BOUNDS = load_charged_bounds()
+
+
 def outcome_scale(name, lo, hi):
     """Unit a target's miss is measured in; None when the band is empty. Shared with
     calibrate_outcome_weight.py so the two cannot drift apart (lesson 4)."""
@@ -923,7 +929,11 @@ def outcome_penalty(measured, weight=OUTCOME_PENALTY_WEIGHT):
         scale = outcome_scale(name, lo, hi)
         if scale is None:
             continue
-        miss = max(0.0, lo - x, x - hi) / scale
+        # B60: the miss is measured from the charged interval (the acceptance interval moved
+        # inward by its Monte-Carlo noise) in units of the ACCEPTANCE interval, so only where
+        # the penalty starts moves, not how steeply it grows.
+        charged_lo, charged_hi = CHARGED_BOUNDS.get(name, (lo, hi))
+        miss = max(0.0, charged_lo - x, x - charged_hi) / scale
         pen += w * (miss ** 2 if miss <= 1.0 else 2.0 * miss - 1.0)
     return weight * pen
 
