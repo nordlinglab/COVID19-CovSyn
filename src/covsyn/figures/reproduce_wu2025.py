@@ -824,7 +824,9 @@ def fig6(directory: Path, out_dir: Path) -> None:
         ax1.errorbar(
             x - width,
             mean_i,
-            yerr=[mean_i - lb_i, np.maximum(ub_i - mean_i, 0)],
+            # Clamped: with the heavy-tailed event contacts (B54, B59) the mean can lie outside
+            # the 2.5-97.5% band, and errorbar() rejects a negative error.
+            yerr=[np.maximum(mean_i - lb_i, 0), np.maximum(ub_i - mean_i, 0)],
             fmt=".k",
             capsize=1,
             linewidth=1,
@@ -837,7 +839,7 @@ def fig6(directory: Path, out_dir: Path) -> None:
         ax2.errorbar(
             x + 2 * width,
             mean_c,
-            yerr=[mean_c - lb_c, ub_c - mean_c],
+            yerr=[np.maximum(mean_c - lb_c, 0), np.maximum(ub_c - mean_c, 0)],
             fmt=".k",
             capsize=1,
             linewidth=1,
