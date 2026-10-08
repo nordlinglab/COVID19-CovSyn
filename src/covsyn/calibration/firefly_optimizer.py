@@ -723,13 +723,22 @@ def measure_outcomes(index_cases):
                    for course, contact, _ in index_cases]
         measured[f'daily_{layer}'] = float(np.mean(per_day))
 
+    # E95: expected infections (and, in the municipality layer, expected event contacts) in
+    # place of the realised counts, when every index case carries them.
+    expected = [contact.get('expected_outcomes') for _, contact, _ in index_cases]
+    use_expected = all(e is not None for e in expected)
     for layer in layers:
         candidate = effective = 0
-        for _, contact, _ in index_cases:
+        for (_, contact, _), exp in zip(index_cases, expected, strict=True):
             eff = contact[f'{layer}_effective_contacts']
             eff = [] if eff is None else list(eff)
-            candidate += len(eff)
-            effective += sum(1 for x in eff if x == 1)
+            if use_expected:
+                candidate += (exp['expected_contacts_municipality'] if layer == 'municipality'
+                              else len(eff))
+                effective += exp[f'expected_infections_{layer}']
+            else:
+                candidate += len(eff)
+                effective += sum(1 for x in eff if x == 1)
         if candidate:
             measured[f'sar_{layer}'] = effective / candidate
         # E56: the charged quantity for the three layers Cheng reports. Not divided by the
@@ -874,6 +883,19 @@ def outcome_scale(name, lo, hi):
     centre = abs(lo + hi) / 2.0
     scale = min(width, MAX_INTERVAL_WIDTH_OVER_CENTRE * centre) if centre > 0 else width
     return scale if scale > 0 else width
+
+
+def pre_onset_zero_probability(P: np.ndarray) -> float:
+    """Probability that a symptomatic case gets a zero-day pre-onset window (E95).
+
+    draw_pre_onset_window() rounds a Gamma(P[41], P[42]) draw, so the window is zero exactly
+    when the draw is at most 0.5 (Python rounds 0.5 to 0); the cap at the infectious period
+    cannot make it zero because that period is at least one day (C02). This is the expectation
+    of the share E60 measured on the simulated index cases, without the noise of 300 of them.
+    """
+    from scipy import stats
+
+    return float(stats.gamma.cdf(0.5, a=P[41], scale=P[42]))
 
 
 def outcome_penalty(measured, weight=OUTCOME_PENALTY_WEIGHT):
@@ -1065,6 +1087,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         if course_list and contact_list:
             index_cases.append((course_list[0], contact_list[0], None))
     measured = measure_outcomes(index_cases)
+    measured['pre_onset_zero_share'] = pre_onset_zero_probability(P)
     outcome = outcome_penalty(measured)
     total_cost = contact_cost + attack_cost + energy_weight * energy_cost + penalty + outcome
     LAST_COST_PARTS.clear()

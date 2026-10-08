@@ -133,6 +133,7 @@ def _index_case_scalars(course, contact):
     out['medical_late'] = medical_late
     out['medical_total'] = medical_total
 
+    out['expected'] = contact.get('expected_outcomes')
     out['community'] = len(contact['municipality_effective_contacts'] or [])
     out['incubation_period'] = float(onset) if onset is not None else np.nan
     out['pre_onset_window'] = float(course['pre_onset_window'])
@@ -199,11 +200,21 @@ def reduce_outcomes(scalars):
     elif mean > 0:
         measured['offspring_k'] = 100.0
 
+    use_expected = all(s['expected'] is not None for s in scalars)
     for layer in LAYERS:
         measured[f'daily_{layer}'] = float(
             np.mean([s[f'per_day_{layer}'] for s in scalars]))
-        candidate = sum(s[f'candidate_{layer}'] for s in scalars)
-        effective = sum(s[f'effective_{layer}'] for s in scalars)
+        if use_expected:
+            # E95: mirrors firefly_optimizer.measure_outcomes, on the same grid values.
+            candidate = 0
+            effective = 0
+            for s in scalars:
+                candidate += (s['expected']['expected_contacts_municipality']
+                              if layer == 'municipality' else s[f'candidate_{layer}'])
+                effective += s['expected'][f'expected_infections_{layer}']
+        else:
+            candidate = sum(s[f'candidate_{layer}'] for s in scalars)
+            effective = sum(s[f'effective_{layer}'] for s in scalars)
         if candidate:
             measured[f'sar_{layer}'] = effective / candidate
         key = f'infections_per_index_{layer}'
@@ -355,6 +366,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     attack_cost = fo.ATTACK_RATE_WEIGHT * sum(attack_rate_costs)
     penalty = fo.physiology_penalty(P)
     measured = reduce_outcomes(index_scalars)
+    measured['pre_onset_zero_share'] = fo.pre_onset_zero_probability(P)
     outcome = fo.outcome_penalty(measured)
     total_cost = contact_cost + attack_cost + energy_weight * energy_cost + penalty + outcome
 

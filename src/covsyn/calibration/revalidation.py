@@ -136,7 +136,7 @@ def main() -> None:
     from covsyn.calibration import firefly_optimizer as fo
 
     firefly_dir, out_dir = Path(sys.argv[1]), Path(sys.argv[2])
-    blocks = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+    blocks = int(sys.argv[3]) if len(sys.argv) > 3 else 10  # E95: 4 left the choice noisy
     out_dir.mkdir(parents=True, exist_ok=True)
     with open("./variable/demographic_parameters.pkl", "rb") as f:
         demo = pickle.load(f)

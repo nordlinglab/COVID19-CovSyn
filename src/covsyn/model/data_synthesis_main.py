@@ -89,6 +89,9 @@ def get_saveable_data(data, data_type):
             'municipality_contact_ages': getattr(data, 'municipality_contact_ages', None),
             'municipality_previously_infected_index_list': getattr(data, 'municipality_previously_infected_index_list', None)
         }
+        # E95: what the objective charges in place of the realised infection counts.
+        if hasattr(data, 'expected_outcomes'):
+            data_dict['expected_outcomes'] = data.expected_outcomes()
         # B54: only present when the vector carries event parameters, so pre-B54 output
         # keeps exactly its old keys.
         if getattr(data, 'municipality_event_mask', None) is not None:

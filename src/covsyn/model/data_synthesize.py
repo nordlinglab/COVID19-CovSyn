@@ -801,6 +801,11 @@ class Draw_course_of_disease_data:
                 self.date_of_critically_ill, self.date_of_recovery, self.date_of_death, self.positive_test_date)
 
 
+def on_expected_grid(value: float) -> float:
+    """Round to EXPECTED_CONTACT_GRID so that sums over cases are exact in any order (B55)."""
+    return float(np.round(value * EXPECTED_CONTACT_GRID) / EXPECTED_CONTACT_GRID)
+
+
 class Draw_contact_data:
     def __init__(self, attack_rate, social_data_object, course_of_disease_data_object,
                  previously_infected_list, population_size, vaccine_efficacy, vaccination_rate,
@@ -1403,6 +1408,39 @@ class Draw_contact_data:
 
         return profiles
 
+    def expected_outcomes(self) -> dict[str, float]:
+        """Expected infections per layer, and the municipality's expected contacts (E95).
+
+        The objective's infections per index case and per-contact attack rates used to count
+        realised infections, a Bernoulli draw per contact on top of the infection probability.
+        With about 0.03 community infections per index case, 300 index cases realise about
+        nine, and that count alone moved the objective by a standard deviation of 12.9. The
+        sums of the per-contact infection probabilities (E38) give the same expectation
+        without that draw. In the municipality layer the sampled event rows are replaced by
+        the expected event contacts and infections of B55, so whether an event happened to be
+        drawn does not move the objective either. Every value is put on EXPECTED_CONTACT_GRID
+        so the two objective implementations sum them to the same bits.
+
+        Returns:
+            expected_infections_<layer> for the five layers and expected_contacts_municipality.
+        """
+        out = {
+            f'expected_infections_{layer}': on_expected_grid(
+                getattr(self, f'{layer}_expected_infections', 0.0))
+            for layer in ('household', 'school', 'workplace', 'health_care')
+        }
+        infections = float(getattr(self, 'municipality_ordinary_expected_infections', 0.0))
+        contacts = float(getattr(self, 'municipality_ordinary_candidates', 0))
+        event_contacts = getattr(self, 'municipality_event_expected_contacts', None)
+        event_infections = getattr(self, 'municipality_event_expected_infections', None)
+        if event_contacts is not None:
+            contacts += float(np.sum(event_contacts))
+        if event_infections is not None:
+            infections += float(np.sum(event_infections))
+        out['expected_infections_municipality'] = on_expected_grid(infections)
+        out['expected_contacts_municipality'] = on_expected_grid(contacts)
+        return out
+
     def draw_infection_status(self, adjusted_attack_rate, contact_day_vector, natural_immunity_status,
                               vaccine_status, secondary_contact_age, layer='household'):
         """Whether this contact gets infected, and on which day.
@@ -1685,6 +1723,11 @@ class Draw_contact_data:
         # Sum of the per-contact infection probabilities: the expected number of
         # infections in this layer, a low-variance version of the realised count (E38).
         self.municipality_expected_infections = 0.0
+        # E95: the same sum over the ordinary (non-event) contacts only, and their count, so
+        # the objective can put the expected event contacts and infections of B55 in place of
+        # the sampled event rows.
+        self.municipality_ordinary_expected_infections = 0.0
+        self.municipality_ordinary_candidates = 0
         self.municipality_effective_contacts_infection_time = []
         self.municipality_secondary_contact_ages = []
         self.municipality_contact_ages = []
@@ -1720,6 +1763,10 @@ class Draw_contact_data:
                         contact_attack_rate, row, natural_immunity_status, vaccination_status,
                         secondary_contact_age, 'municipality')
                     self.municipality_expected_infections += self.last_infection_probability
+                    if event_mask is None or not event_mask[index]:
+                        self.municipality_ordinary_expected_infections += (
+                            self.last_infection_probability)
+                        self.municipality_ordinary_candidates += 1
                     if infection_status == True:
                         self.municipality_effective_contacts.append(1)
                         self.municipality_effective_contacts_infection_time.append(

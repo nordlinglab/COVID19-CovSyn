@@ -17,7 +17,8 @@
 #   8. draw the todolist923 figures and check the per-case constraints
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
-# Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional), REVALIDATE (default 1).
+# Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional), REVALIDATE (default 1),
+#              REVALIDATION_BLOCKS (default 10; E95: 4 blocks left the choice noisy).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,7 +45,7 @@ while tmux has-session -t firefly 2>/dev/null; do sleep 120; done
 # holds a revalidated choice.
 if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
     say "re-scoring the candidates of $FIREFLY_RUN on unseen seeds (E87)"
-    run covsyn.calibration.revalidation "$FIREFLY_RUN" revalidation >> "$LOG" 2>&1 \
+    run covsyn.calibration.revalidation "$FIREFLY_RUN" revalidation "${REVALIDATION_BLOCKS:-10}" >> "$LOG" 2>&1 \
         || { say 'ERROR: revalidation failed, stopping'; exit 1; }
     say "$(grep 'validation best' "$LOG" | tail -1)"
     FIREFLY_RUN=revalidation
