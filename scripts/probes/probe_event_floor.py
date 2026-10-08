@@ -9,8 +9,13 @@ scaling, B55 expected events, B58 course timing): it holds every other parameter
 choice and evaluates fast_cost.cost_function on many unseen 300-seed blocks per value, so
 each point is the expected cost and its parts rather than one draw.
 
+With --compensate the community attack rate P[170:195] is scaled at each value so that the
+infections per index case stay at the base vector's level, as the optimizer can do when the
+event risk ratio is locked at 1 (B54); without it the attack rate is held fixed. B59 (floor
+0.05) was decided on the compensated probe.
+
 Usage (repository root, PYTHONPATH=src):
-    python scripts/probes/probe_event_floor.py BEST_TXT OUT_CSV [BLOCKS]
+    python scripts/probes/probe_event_floor.py BEST_TXT OUT_CSV [BLOCKS] [--compensate]
 """
 
 import concurrent.futures
@@ -48,10 +53,31 @@ MEASURED = [
 ]
 
 
+def evaluate(vector, demo, pool, cheng, blocks):
+    """Mean and SD of the cost, its parts and the measured outcomes over the seed blocks."""
+    values = {k: [] for k in ["total", *PARTS, *MEASURED]}
+    for b in range(blocks):
+        offset = SEED_START + b * fo.SIMULATIONS_PER_EVALUATION
+        values["total"].append(
+            float(fast_cost.cost_function(vector, demo, pool, *cheng, seed_offset=offset))
+        )
+        for k in PARTS:
+            values[k].append(float(LAST.get(k, np.nan)))
+        for k in MEASURED:
+            values[k].append(float(LAST.get("measured_" + k, np.nan)))
+    row = {}
+    for k, v in values.items():
+        row[k] = float(np.nanmean(v))
+        row[k + "_sd"] = float(np.nanstd(v, ddof=1))
+    return row
+
+
 def main():
     """Evaluate every probability on BLOCKS seed blocks and write mean and SD per quantity."""
-    best_path, out_path = sys.argv[1], sys.argv[2]
-    blocks = int(sys.argv[3]) if len(sys.argv) > 3 else 20
+    args = [a for a in sys.argv[1:] if a != "--compensate"]
+    compensate = "--compensate" in sys.argv
+    best_path, out_path = args[0], args[1]
+    blocks = int(args[2]) if len(args) > 2 else 20
     best = np.atleast_2d(np.loadtxt(best_path))
     base = best[int(np.argmin(best[:, -1])), 1:-1].copy()
     with open("./variable/demographic_parameters.pkl", "rb") as f:
@@ -65,36 +91,33 @@ def main():
     ).stdout.strip()
     print(
         f"commit {commit}; base {best_path}; P[199] there {base[199]:.4f}; {blocks} blocks of "
-        f"{fo.SIMULATIONS_PER_EVALUATION} seeds from {SEED_START}",
+        f"{fo.SIMULATIONS_PER_EVALUATION} seeds from {SEED_START}; compensate {compensate}",
         flush=True,
     )
     pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns)
     )
+    key = "infections_per_index_municipality"
+    target = evaluate(base, demo, pool, cheng, blocks)[key] if compensate else np.nan
     rows = []
     for p in PROBABILITIES:
         vector = base.copy()
         vector[199] = p
-        values = {k: [] for k in ["total", *PARTS, *MEASURED]}
-        for b in range(blocks):
-            offset = SEED_START + b * fo.SIMULATIONS_PER_EVALUATION
-            values["total"].append(
-                float(fast_cost.cost_function(vector, demo, pool, *cheng, seed_offset=offset))
-            )
-            for k in PARTS:
-                values[k].append(float(LAST.get(k, np.nan)))
-            for k in MEASURED:
-                values[k].append(float(LAST.get("measured_" + k, np.nan)))
-        row = {"event_probability": p}
-        for k, v in values.items():
-            row[k] = float(np.nanmean(v))
-            row[k + "_sd"] = float(np.nanstd(v, ddof=1))
+        factor = 1.0
+        if compensate:
+            factor = target / evaluate(vector, demo, pool, cheng, blocks)[key]
+            vector[170:195] = base[170:195] * factor
+        row = {
+            "event_probability": p,
+            "attack_rate_factor": factor,
+            **evaluate(vector, demo, pool, cheng, blocks),
+        }
         rows.append(row)
         print(
-            f"P[199]={p:.4f} total {row['total']:.3f} (sd {row['total_sd']:.3f}) others "
-            f"{row['cost_contact_others']:.3f} outcome {row['cost_outcome']:.3f} tail "
-            f"{row['community_tail_ratio']:.2f} daily {row['daily_municipality']:.2f} "
-            f"inf/idx {row['infections_per_index_municipality']:.4f}",
+            f"P[199]={p:.4f} SAR x{factor:.3f} total {row['total']:.3f} "
+            f"(sd {row['total_sd']:.3f}) others {row['cost_contact_others']:.3f} outcome "
+            f"{row['cost_outcome']:.3f} tail {row['community_tail_ratio']:.2f} inf/idx "
+            f"{row[key]:.4f}",
             flush=True,
         )
     pool.shutdown()

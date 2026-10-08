@@ -128,7 +128,10 @@ COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 #   municipality attack rate (~0.22%) they do not reject a ratio of 1 (P(0) = 0.14).
 CONTACT_PARAMETER_COUNT = 37
 COMMUNITY_EVENT_COURSE_INDEX = COMMUNITY_EVENT_FIRST_INDEX - CONTACT_PARAMETER_COUNT
-COMMUNITY_EVENT = ((0.10, 0.0, 0.20),
+# B59 (2026-10-08): P[199] is floored at 0.05. Run 13 settled at 0.0035, but with the community
+# attack rate compensating, the expected objective is flat from 0 to 0.05 (probe_event_floor.py,
+# 50 unseen 300-seed blocks per point) and 0.05 is where the tail ratio enters [5.5, 93.1].
+COMMUNITY_EVENT = ((0.10, 0.05, 0.20),
                    (1.49, 1.49, 1.49),
                    (21, 21, 21),
                    (1000, 1000, 1000),

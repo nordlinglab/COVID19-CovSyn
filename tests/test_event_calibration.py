@@ -283,14 +283,14 @@ def test_contacts_per_day_with_no_contacts_is_zero() -> None:
 # --- search bounds and the physiology penalty -----------------------------------------
 
 
-def test_event_probability_is_searched_from_a_seed_of_ten_percent() -> None:
-    """Event probability is searched from a seed of ten percent."""
+def test_event_probability_is_searched_from_ten_percent_above_a_floor() -> None:
+    """Event probability is seeded at 0.10 and searched in [0.05, 0.20] (B59)."""
     from covsyn.calibration import apply_phase_d_parameters as apply
 
-    assert apply.COMMUNITY_EVENT[0] == (0.10, 0.0, 0.20)
+    assert apply.COMMUNITY_EVENT[0] == (0.10, 0.05, 0.20)
     i = apply.COMMUNITY_EVENT_COURSE_INDEX
     assert np.load("variable/course_parameters.npy")[i] == 0.10
-    assert np.load("variable/course_parameters_lb.npy")[i] == 0.0
+    assert np.load("variable/course_parameters_lb.npy")[i] == 0.05
     assert np.load("variable/course_parameters_ub.npy")[i] == 0.20
 
 
