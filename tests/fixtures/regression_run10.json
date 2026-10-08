@@ -37,6 +37,7 @@
   "measured_onset_to_icu": 6.6,
   "measured_pre_onset_window_mean": 1.360730593607306,
   "measured_pre_onset_zero_share": 0.1484386897900717,
+  "measured_pre_onset_zero_share_sampled": 0.1278538812785388,
   "measured_sar_health_care": 0.007420538777139931,
   "measured_sar_household": 0.041385040000283674,
   "measured_sar_municipality": 0.004509079909698009,
