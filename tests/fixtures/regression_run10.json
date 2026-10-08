@@ -6,7 +6,7 @@
   "cost_contact_household": 0.04417093993702327,
   "cost_contact_others": 0.8925418795102642,
   "cost_energy": -0.255396556153666,
-  "cost_outcome": 29.885720273629634,
+  "cost_outcome": 29.58486520938171,
   "cost_penalty": 0.0,
   "measured_asymptomatic_share": 0.27,
   "measured_case_fatality": 0.013333333333333334,
@@ -44,7 +44,7 @@
   "measured_sar_school": 0.021758462540865588,
   "measured_sar_workplace": 0.02126203020680404
  },
- "cost_total": 31.05002518721759,
+ "cost_total": 30.749170122969666,
  "generated_at_commit": "",
  "parameter_vector": "firefly_result/phaseD_run10/firefly_best.txt (lowest-cost row)",
  "synthesis_digests": {
