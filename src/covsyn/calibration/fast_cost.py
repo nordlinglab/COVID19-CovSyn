@@ -247,7 +247,8 @@ def reduce_outcomes(scalars):
     pre_onset = np.array([s['pre_onset_window'] for s in scalars], dtype=float)
     if np.isfinite(pre_onset).any():
         measured['pre_onset_window_mean'] = float(np.nanmean(pre_onset))
-        measured['pre_onset_zero_share'] = float(np.nanmean(pre_onset == 0))
+        # E96: over symptomatic cases only, as in firefly_optimizer.measure_outcomes.
+        measured['pre_onset_zero_share'] = float(np.mean(pre_onset[np.isfinite(pre_onset)] == 0))
 
     positive = np.array([s['positive_test_date'] for s in scalars], dtype=float)
     infection_day = np.array([s['infection_day'] for s in scalars], dtype=float)

@@ -117,3 +117,17 @@ def test_zero_window_probability_matches_the_draws(run10_vector: np.ndarray) -> 
     zeros = sum(ds.Draw_course_of_disease_data.draw_pre_onset_window(owner) == 0 for _ in range(n))
     p = fo.pre_onset_zero_probability(P)
     assert zeros / n == pytest.approx(p, abs=4 * np.sqrt(p * (1 - p) / n))
+
+
+def test_zero_window_share_counts_symptomatic_cases_only(
+    run10_vector: np.ndarray, demographic_parameters: object
+) -> None:
+    """The measured zero-window share leaves asymptomatic cases out of the denominator (E96)."""
+    pytest.importorskip("sklearn")
+    from covsyn.calibration import firefly_optimizer as fo
+
+    cases = [(*_index_contact(run10_vector, demographic_parameters, s), None) for s in range(40)]
+    window = np.array([course["pre_onset_window"] for course, _, _ in cases], dtype=float)
+    assert np.isnan(window).any() and np.isfinite(window).any()
+    share = np.mean(window[np.isfinite(window)] == 0)
+    assert fo.measure_outcomes(cases)["pre_onset_zero_share"] == pytest.approx(share)

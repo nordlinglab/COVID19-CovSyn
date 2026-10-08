@@ -795,7 +795,9 @@ def measure_outcomes(index_cases):
     pre_onset = np.array([c['pre_onset_window'] for c, _, _ in index_cases], dtype=float)
     if np.isfinite(pre_onset).any():
         measured['pre_onset_window_mean'] = float(np.nanmean(pre_onset))
-        measured['pre_onset_zero_share'] = float(np.nanmean(pre_onset == 0))
+        # E96: over symptomatic cases only. nanmean(pre_onset == 0) counted the asymptomatic
+        # cases (NaN == 0 is False, not NaN) and understated the share by about a quarter.
+        measured['pre_onset_zero_share'] = float(np.mean(pre_onset[np.isfinite(pre_onset)] == 0))
 
     # Onset -> confirmation, realised rather than read off the parameters. It is negative for
     # a case isolated before its own onset; an index case has no tracing source so that is

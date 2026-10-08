@@ -318,8 +318,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     symptomatic = ~np.isnan(incubation)
     check('B22', 'incubation period, mean', np.nanmean(incubation), (3.9, 8.0))
     check('B22', 'pre-onset infectious window, mean', np.nanmean(window), (1.0, 3.0))
-    check('B22', 'pre-onset window of zero days', 100 * np.nanmean(window == 0), (0.0, 12.0), '%',
-          note='was 20% before Phase D')
+    # E96: over symptomatic cases; nanmean(window == 0) also counted the asymptomatic ones.
+    check('B22', 'pre-onset window of zero days',
+          100 * np.mean(window[np.isfinite(window)] == 0), (0.0, 12.0), '%',
+          note='symptomatic cases (E96); was 20% before Phase D')
     check('B22', 'latent period, mean', latent.mean(), (4.1, 5.5),
           note='B3: widened to the whole literature reported-mean range')
     onset_to_confirm = positive - infection_day - incubation
