@@ -642,26 +642,26 @@ if __name__ == "__main__":
         for i in tqdm(range(full_batches)):
             seeds = range(seed_start + i*cpu_cores, seed_start + (i+1)*cpu_cores)
             with concurrent.futures.ProcessPoolExecutor() as executor:  # Multiprocessing
-                results = [executor.submit(run_covid, seed, input_P, demographic_parameters, save_file=True,
+                futures = [executor.submit(run_covid, seed, input_P, demographic_parameters, save_file=True,
                                            result_path=result_path, mode=mode,
                                            contact_weight=contact_weight)
                            for seed in seeds]
                 # A worker's exception used to stay inside its unread future, so a failed
                 # simulation left no file and no error; .result() raises it here.
-                for result in results:
-                    result.result()
+                for future in futures:
+                    future.result()
 
         # Process the remainder
         print('Processing the remainder')
         if remainder > 0:
             seeds = range(seed_start + full_batches*cpu_cores, seed_start + mc_number)
             with concurrent.futures.ProcessPoolExecutor() as executor:
-                results = [executor.submit(run_covid, seed, input_P, demographic_parameters,
+                futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight)
                            for seed in seeds]
-                for result in results:
-                    result.result()
+                for future in futures:
+                    future.result()
 
         write_run_metadata(result_path, mode=mode, contact_weight=contact_weight,
                            seed_start=seed_start, monte_carlo_number=mc_number,
