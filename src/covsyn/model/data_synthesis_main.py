@@ -642,8 +642,8 @@ if __name__ == "__main__":
         for i in tqdm(range(full_batches)):
             seeds = range(seed_start + i*cpu_cores, seed_start + (i+1)*cpu_cores)
             with concurrent.futures.ProcessPoolExecutor() as executor:  # Multiprocessing
-                futures = [executor.submit(run_covid, seed, input_P, demographic_parameters, save_file=True,
-                                           result_path=result_path, mode=mode,
+                futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
+                                           save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight)
                            for seed in seeds]
                 # A worker's exception used to stay inside its unread future, so a failed
