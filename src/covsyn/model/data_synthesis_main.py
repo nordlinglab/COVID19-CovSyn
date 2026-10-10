@@ -104,6 +104,25 @@ def get_saveable_data(data, data_type):
     return data_dict
 
 
+def write_run_metadata(result_path, **settings):
+    """Record how a synthetic dataset was made next to it (todolist929 3.2: commit with data).
+
+    Args:
+        result_path: Directory of the generated data.
+        **settings: Mode, contact weight, seeds and parameter path of the run.
+    """
+    import json
+    import subprocess
+    from datetime import datetime
+
+    commit = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                            check=False).stdout.strip() or None
+    record = {**settings, 'covsyn_commit': commit,
+              'written': datetime.now().isoformat(timespec='seconds')}
+    with open(Path(result_path) / 'run_metadata.json', 'w') as f:
+        json.dump(record, f, indent=1)
+
+
 def apply_contact_weight(input_P, contact_weight):
     """Scale every layer's contact parameter in place by contact_weight (the *_weight modes).
 
@@ -125,7 +144,22 @@ def apply_contact_weight(input_P, contact_weight):
         input_P[199] = min(input_P[199]*contact_weight, 1)
 
 
-def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.', mode='result'):
+def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.',
+              mode='result', contact_weight=1.0):
+    """Simulate one Monte-Carlo run of the given mode.
+
+    Args:
+        seed: Random seed of the run.
+        input_P: Parameter vector.
+        demographic_parameters: Demographic inputs.
+        save_file: Write the run's data files to result_path.
+        result_path: Output directory.
+        mode: Scenario (sources, population, time limit).
+        contact_weight: Contact multiplier of spread_Taiwan_weight; 1 is the calibrated model.
+
+    Returns:
+        The demographic, social, course-of-disease and contact data of every case.
+    """
     # Load parameters
     # Load demographic and social data
     # demographic_parameters = np.load(
@@ -226,9 +260,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         infection_days[0] = 0
         population_size = 23008366 - number_source_cases
         natural_immunity_rate = 1
-        contact_weight = 1
+        # Referee item B2 (2026-10-10): the weight is an argument (--contact_weight) so the
+        # benchmark can span several transmission regimes; 1 is the calibrated Taiwan model.
         apply_contact_weight(input_P, contact_weight)
-        # print(input_P[0], input_P[7], input_P[14], input_P[21], input_P[28])
 
     if mode == 'spread_Taitung':
         time_limit = 365
@@ -537,6 +571,8 @@ if __name__ == "__main__":
     parser.add_argument('--monte_carlo_number', type=int, default=100)
     parser.add_argument('--result_path', type=str, required=True)
     parser.add_argument('--cpu_cores', type=int, default=1)
+    parser.add_argument('--contact_weight', type=float, default=1.0,
+                        help='contact multiplier of spread_Taiwan_weight (1 = calibrated Taiwan)')
     parser.add_argument('--seed_start', type=int, default=0,
                         help='first Monte-Carlo seed; B60 uses 100000 for an independent set')
 
@@ -546,6 +582,9 @@ if __name__ == "__main__":
     mc_number = args.monte_carlo_number
     cpu_cores = args.cpu_cores
     seed_start = args.seed_start
+    contact_weight = args.contact_weight
+    if contact_weight != 1.0 and mode != 'spread_Taiwan_weight':
+        raise SystemExit('--contact_weight applies to spread_Taiwan_weight only')
     result_path = Path(args.result_path)
     print(f'Result path: {result_path}')
     if mode == 'spread_Taitung_outbreak_weight_2' or mode == 'spread_Taitung_outbreak_weight_1p5' or mode == 'spread_Taitung_outbreak_weight_3' or mode == 'spread_Taitung':
@@ -604,8 +643,13 @@ if __name__ == "__main__":
             seeds = range(seed_start + i*cpu_cores, seed_start + (i+1)*cpu_cores)
             with concurrent.futures.ProcessPoolExecutor() as executor:  # Multiprocessing
                 results = [executor.submit(run_covid, seed, input_P, demographic_parameters, save_file=True,
-                                           result_path=result_path, mode=mode)
+                                           result_path=result_path, mode=mode,
+                                           contact_weight=contact_weight)
                            for seed in seeds]
+                # A worker's exception used to stay inside its unread future, so a failed
+                # simulation left no file and no error; .result() raises it here.
+                for result in results:
+                    result.result()
 
         # Process the remainder
         print('Processing the remainder')
@@ -613,7 +657,13 @@ if __name__ == "__main__":
             seeds = range(seed_start + full_batches*cpu_cores, seed_start + mc_number)
             with concurrent.futures.ProcessPoolExecutor() as executor:
                 results = [executor.submit(run_covid, seed, input_P, demographic_parameters,
-                                           save_file=True, result_path=result_path, mode=mode)
+                                           save_file=True, result_path=result_path, mode=mode,
+                                           contact_weight=contact_weight)
                            for seed in seeds]
+                for result in results:
+                    result.result()
 
+        write_run_metadata(result_path, mode=mode, contact_weight=contact_weight,
+                           seed_start=seed_start, monte_carlo_number=mc_number,
+                           parameter_path=str(parameter_path))
         print("--- Done %s seconds ---" % (time.time() - start_time))
