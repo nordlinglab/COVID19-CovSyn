@@ -115,8 +115,14 @@ def write_run_metadata(result_path, **settings):
     import subprocess
     from datetime import datetime
 
-    commit = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
-                            check=False).stdout.strip() or None
+    # The commit of the CovSyn code that ran, whatever directory the run was started from;
+    # no git on the machine records None rather than failing a finished run.
+    try:
+        commit = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                                check=False, cwd=Path(__file__).resolve().parent
+                                ).stdout.strip() or None
+    except OSError:
+        commit = None
     record = {**settings, 'covsyn_commit': commit,
               'written': datetime.now().isoformat(timespec='seconds')}
     with open(Path(result_path) / 'run_metadata.json', 'w') as f:

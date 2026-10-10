@@ -79,3 +79,15 @@ def test_run_metadata_records_the_settings(tmp_path) -> None:
     record = json.loads((tmp_path / "run_metadata.json").read_text())
     assert record["contact_weight"] == 5.0 and record["monte_carlo_number"] == 300
     assert "covsyn_commit" in record and "written" in record
+
+
+def test_run_metadata_survives_a_machine_without_git(tmp_path, monkeypatch) -> None:
+    """A missing git executable records no commit instead of failing the finished run."""
+    import subprocess
+
+    def no_git(*_args, **_kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", no_git)
+    dsm.write_run_metadata(tmp_path, mode="spread_Taiwan_weight", contact_weight=1.0)
+    assert json.loads((tmp_path / "run_metadata.json").read_text())["covsyn_commit"] is None
