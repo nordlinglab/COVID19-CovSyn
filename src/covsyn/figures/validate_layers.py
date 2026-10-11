@@ -26,6 +26,7 @@ import pandas as pd
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
+from covsyn.model.data_synthesize import community_event_parameters, expected_event_size
 from covsyn.data_processing.taiwan_reference import (EFF_COLOR, IMPORTED_COLOR, LEVELS, MARKER_NOTE, REF_COLOR, RNG, SIM_COLOR,
                               half_points, half_violin, household_pmfs, load_demographics,
                               municipality_population, pmf_samples, school_classmates_all, school_reference,
@@ -363,6 +364,29 @@ P = res[int(np.argmin(res[:, -1])), 1:-1]
 by_city = spread.groupby('municipality').agg(pop=('city_population', 'first'), cand=('municipality_cand', 'mean'))
 by_city_index = index.groupby('municipality').agg(pop=('city_population', 'first'), cand=('municipality_cand', 'mean'))
 r = np.corrcoef(by_city_index['pop'], by_city_index['cand'])[0, 1]
+# E97: the city means rest on 2-160 index cases each and the count is heavy-tailed, so r over
+# about 20 cities swings widely by chance (run 15: 0.53, -0.04 and -0.21 on three seed blocks).
+# Shuffling the city labels removes any city effect; the p-value is the share of shuffles whose
+# r is at least the observed one.
+city_rng = np.random.default_rng(0)
+city_labels = index['municipality'].to_numpy()
+city_contacts = index['municipality_cand'].to_numpy(float)
+city_names = np.unique(city_labels)
+city_pops = np.array([MUNICIPALITY_POP[name] for name in city_names])
+
+
+def city_mean_r(labels):
+    """Correlation of city population with the mean community contacts of the index cases."""
+    means = [city_contacts[labels == name].mean() for name in city_names]
+    return np.corrcoef(city_pops, means)[0, 1]
+
+
+r_null = np.array([city_mean_r(city_rng.permutation(city_labels)) for _ in range(2000)])
+r_p = (1 + int(np.sum(r_null >= r))) / (1 + len(r_null))
+# E97: the mean includes the mass events of B54, which P[28] alone leaves out.
+event = community_event_parameters(P)
+expected_mean = P[28] + (0.0 if event is None else event['probability'] * expected_event_size(
+    event['exponent'], event['min_size'], event['max_size'], min(MUNICIPALITY_POP.values())))
 fig, ax = plt.subplots(figsize=(9, 6))
 ax.scatter(by_city_index['pop'] / 1e6, by_city_index['cand'], color='#1f4e79', label='index cases')
 ax.scatter(by_city['pop'] / 1e6, by_city['cand'], color=SIM_COLOR, marker='x', label=f'spread cases ({len(spread):,})')
@@ -371,12 +395,14 @@ xs = np.linspace(0, max(MUNICIPALITY_POP.values()), 50)
 # contacts was a straight line through the origin -- a case in Taipei met twelve times as many
 # people as one in Taitung purely because of where it lived (finding E4). The community layer
 # now draws Poisson(nu * lambda), independent of the city, so the expectation is a flat line.
-ax.axhline(P[28], color='gray', ls='--', label=f'model: lambda = {P[28]:.2f} contacts per case, independent of the city')
+ax.axhline(expected_mean, color='gray', ls='--',
+           label=f'model mean: {expected_mean:.1f} contacts per case (lambda {P[28]:.2f} + mass events), '
+                 'independent of the city')
 ax.set_xlabel('city population (millions)')
 ax.set_ylabel('mean community candidate contacts per case')
 ax.set_ylim(bottom=0)
-ax.set_title('Community contacts no longer scale with city population\n'
-             f'(correlation with population r = {r:.2f}; it was proportional before B27, finding E4)')
+ax.set_title('Mean community contacts per case by city (the model has no city term since B27)\n'
+             f'(r = {r:.2f} over city means, label-shuffle p = {r_p:.2f}; proportional before B27, finding E4)')
 ax.legend(fontsize=8)
 fig.tight_layout()
 fig.savefig(OUT / 'fig_municipality_population_scaling.png', dpi=150)
@@ -400,5 +426,6 @@ with open(OUT / 'candidate_contact_stats.csv', 'w', newline='') as f:
 for line in table:
     print(' | '.join(str(x) for x in line))
 print('municipality r(population, mean candidate contacts) =', round(r, 3),
-      '| lambda (mean community contacts per case) =', P[28])
+      '| label-shuffle p =', round(r_p, 3),
+      '| model mean community contacts per case =', round(expected_mean, 3), '| lambda =', P[28])
 print('saved to', OUT)
