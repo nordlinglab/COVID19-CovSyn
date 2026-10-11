@@ -13,10 +13,11 @@
 #   3. run the checklist of every post-simulation item of B14 / B17-B36
 #   3b. run the checklist again on independent seeds from 500000 (B60), the one to report
 #   4. run the standard run report (show_final, check_gap, rr_exact, tw_check, show_bounds)
-#   5. redraw the full validation figure set
+#   5. redraw the full validation figure set from the independent seeds (E97)
 #   6. re-measure the contact days
 #   7. compare with the previous run, when PREVIOUS_CHECKS names its phaseD_checks.json
-#   8. draw the todolist923 figures and check the per-case constraints
+#   8. draw the todolist923 figures and check the per-case constraints on the independent seeds
+#   9. redraw the Wu & Nordling 2025 comparison figures from the independent seeds (E90, E97)
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
 # Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional), REVALIDATE (default 1),
@@ -35,6 +36,12 @@ FIREFLY_RUN="${FIREFLY_RUN:-Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_
 FIGS=validation_figures_phaseD
 SPREAD=synthetic_data_results_spread_Taiwan_weight
 FIRST=synthetic_data_results_taiwan_first_outbreak
+# E97: every reported number comes from the independent seeds (B60), so every reported figure
+# does too; the seed 0..999 data above stays for choosing the candidate and the run report.
+REPORT_SPREAD=independent_spread_Taiwan_weight
+REPORT_FIRST=independent_taiwan_first_outbreak
+REPORT_CHENG=independent_cheng2020
+REPORT_CHECKS=validation_reference/phaseD_checks_independent.json
 
 say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 run() { "$PYTHON" -m "$@"; }
@@ -50,6 +57,7 @@ if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
     run covsyn.calibration.revalidation "$FIREFLY_RUN" revalidation "${REVALIDATION_BLOCKS:-10}" >> "$LOG" 2>&1 \
         || { say 'ERROR: revalidation failed, stopping'; exit 1; }
     say "$(grep 'validation best' "$LOG" | tail -1)"
+    OPTIMIZER_RUN="$FIREFLY_RUN"
     FIREFLY_RUN=revalidation
     # B60: run the full checklist for the best revalidated candidates and keep the one with
     # the fewest failures. Only right after this chain's own revalidation; SELECT=0 skips it,
@@ -133,20 +141,26 @@ say 'running the standard run report'
 say 'run report written to phaseD_report.txt'
 
 # ---------------------------------------------------------------- 5. figures
+for d in "$REPORT_SPREAD" "$REPORT_FIRST"; do
+    if ! ls "$d"/social_data_*.npy >/dev/null 2>&1; then
+        say "ERROR: $d holds no simulation, so the report figures cannot be drawn; stopping"
+        exit 1
+    fi
+done
 mkdir -p "$FIGS"
-say "drawing the validation figures into $FIGS"
+say "drawing the validation figures into $FIGS from $REPORT_SPREAD and $REPORT_FIRST (E97)"
 {
-  run covsyn.figures.validate_layers               "$SPREAD" "$FIGS"
-  run covsyn.figures.validate_infection            "$SPREAD" "$FIGS"
-  run covsyn.figures.plot_diagnostics              "$SPREAD" "$FIGS"
-  run covsyn.figures.plot_10panel                  "$SPREAD" "$FIGS"
-  run covsyn.figures.plot_cheng_attackrate         "$SPREAD" "$FIGS"
-  run covsyn.figures.plot_vs_notebook_literature   "$SPREAD" "$FIGS"
+  run covsyn.figures.validate_layers               "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.validate_infection            "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_diagnostics              "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_10panel                  "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_cheng_attackrate         "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_vs_notebook_literature   "$REPORT_SPREAD" "$FIGS"
   run covsyn.figures.plot_validation               "$FIREFLY" "$FIGS"
-  run covsyn.figures.workplace_sampling_options    "$SPREAD" "$FIGS" "$FIREFLY"
-  run covsyn.figures.plot_reality_vs_covsyn        "$SPREAD" "$FIRST" "$FIGS"
-  run covsyn.figures.plot_violin_reality_vs_covsyn "$SPREAD" "$FIGS"
-  run covsyn.figures.compare_healthcare_municipality "$SPREAD" "$FIGS"
+  run covsyn.figures.workplace_sampling_options    "$REPORT_SPREAD" "$FIGS" "$FIREFLY"
+  run covsyn.figures.plot_reality_vs_covsyn        "$REPORT_SPREAD" "$REPORT_FIRST" "$FIGS"
+  run covsyn.figures.plot_violin_reality_vs_covsyn "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.compare_healthcare_municipality "$REPORT_SPREAD" "$FIGS"
 } >> "$LOG" 2>&1 || say 'WARNING: a figure step failed'
 say "figures: $(find "$FIGS" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ') files"
 
@@ -176,9 +190,30 @@ fi
 # calibration / independent split) and the per-case constraint check (N2). Both read files the
 # steps above wrote, so they must stay after the checklist.
 say 'drawing the todolist923 figures and checking the per-case constraints'
-run covsyn.figures.plot_todolist923 "$SPREAD" "$FIREFLY_RUN" validation_reference/phaseD_checks.json \
+run covsyn.figures.plot_todolist923 "$REPORT_SPREAD" "$FIREFLY_RUN" "$REPORT_CHECKS" \
     "$FIGS/todolist923" >> "$LOG" 2>&1 || say 'WARNING: plot_todolist923 failed'
-run covsyn.validation.check_constraints "$SPREAD" "$FIRST" --out constraint_check >> "$LOG" 2>&1 \
+run covsyn.validation.check_constraints "$REPORT_SPREAD" "$REPORT_FIRST" --out constraint_check >> "$LOG" 2>&1 \
   || say 'WARNING: check_constraints failed'
 tail -4 "$LOG"
+
+# ---------------------------------------------------------------- 9. Wu & Nordling 2025 figures
+# E90 redraws every comparison figure of the published paper; E97 draws them from the
+# independent seeds like everything else that is reported. Fig 6 needs its own scenario
+# (100 index cases, Cheng 2020), generated here on the same independent seeds.
+say 'drawing the Wu & Nordling 2025 figures from the independent seeds (E97)'
+rm -rf "$REPORT_CHENG"
+mkdir -p "$REPORT_CHENG"
+run covsyn.model.data_synthesis_main --mode cheng2020 --monte_carlo_number 1000 \
+    --result_path "$REPORT_CHENG" --cpu_cores "${CPU_CORES:-24}" \
+    --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
+    || say 'WARNING: independent cheng2020 synthesis failed'
+{
+  for figure in fig3 fig5 fig7; do
+    run covsyn.figures.reproduce_wu2025 "$figure" "$REPORT_FIRST" wu2025_figures
+  done
+  run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures
+  # Fig 4 plots the optimizer's own history, so it reads the optimizer output directory, not
+  # the revalidated or selected copy.
+  run covsyn.figures.reproduce_wu2025 fig4 "${OPTIMIZER_RUN:-$FIREFLY_RUN}" wu2025_figures
+} >> "$LOG" 2>&1 || say 'WARNING: a Wu 2025 figure failed'
 say 'ALL DONE'

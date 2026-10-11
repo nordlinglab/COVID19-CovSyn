@@ -40,13 +40,18 @@ def collect(workdir: Path) -> dict[str, object]:
                                             workdir)}
     record["reports"] = reports
     figures: dict[str, dict[str, object]] = {}
+    # What the figure steps print is kept for the content checks of test_pipeline.py, not for
+    # the fixture: the figures themselves are not compared.
+    figure_stdout: dict[str, str] = {}
     for name, args in pr.figure_steps(workdir).items():
         before = {p.name for p in (workdir / "figures").rglob("*") if p.is_file()} \
             if (workdir / "figures").exists() else set()
         done = pr.run_step(args, workdir)
         after = {p.name for p in (workdir / "figures").rglob("*") if p.is_file()}
         figures[name] = {"returncode": done.returncode, "files": sorted(after - before)}
+        figure_stdout[name] = pr.normalise_text(done.stdout, workdir)
     record["figures"] = figures
+    record["figure_stdout"] = figure_stdout
     return record
 
 
@@ -54,6 +59,7 @@ def main() -> None:
     """Write ``tests/fixtures/pipeline_run10.json``."""
     with tempfile.TemporaryDirectory() as tmp:
         record = collect(Path(tmp))
+    record.pop("figure_stdout")
     record["generated_at_commit"] = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=pr.REPO_ROOT,
         check=False).stdout.strip()

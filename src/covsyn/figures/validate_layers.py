@@ -72,8 +72,11 @@ def load_cases(result_dir):
         for position, (s, c, g, cd) in enumerate(zip(social, contact, demographic, course)):
             recovery = cd.get('date_of_recovery')
             recovers = recovery is not None and np.isfinite(float(recovery)) and float(recovery) >= 0
+            # Named apart from the '{layer}_size' columns below: the community layer has no
+            # context size, so its row['municipality_size'] = NaN used to overwrite the city
+            # population and left the population-scaling figure empty (E97).
             row = {'age': g.get('age'), 'municipality': s.get('municipality'),
-                   'municipality_size': MUNICIPALITY_POP.get(s.get('municipality'), np.nan),
+                   'city_population': MUNICIPALITY_POP.get(s.get('municipality'), np.nan),
                    'enterprise_size': float(s.get('enterprise_size') or 0),
                    'recovers': bool(recovers), 'position_in_sim': position}
             for layer, size_key, matrix_key in LAYERS:
@@ -357,8 +360,8 @@ else:
 # --------------------------------------------------------------------------- figure 4
 res = np.loadtxt(PARAM / 'firefly_best.txt')
 P = res[int(np.argmin(res[:, -1])), 1:-1]
-by_city = spread.groupby('municipality').agg(pop=('municipality_size', 'first'), cand=('municipality_cand', 'mean'))
-by_city_index = index.groupby('municipality').agg(pop=('municipality_size', 'first'), cand=('municipality_cand', 'mean'))
+by_city = spread.groupby('municipality').agg(pop=('city_population', 'first'), cand=('municipality_cand', 'mean'))
+by_city_index = index.groupby('municipality').agg(pop=('city_population', 'first'), cand=('municipality_cand', 'mean'))
 r = np.corrcoef(by_city_index['pop'], by_city_index['cand'])[0, 1]
 fig, ax = plt.subplots(figsize=(9, 6))
 ax.scatter(by_city_index['pop'] / 1e6, by_city_index['cand'], color='#1f4e79', label='index cases')

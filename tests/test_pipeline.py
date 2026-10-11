@@ -11,6 +11,7 @@ files (the images themselves are not compared).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -47,3 +48,18 @@ def test_report_step_output_is_unchanged(step: str, produced: dict[str, object])
 def test_figure_step_still_runs(step: str, produced: dict[str, object]) -> None:
     """Each figure step succeeds and writes the same files as before."""
     assert produced["figures"][step] == FIXTURE["figures"][step]
+
+
+def test_city_population_scaling_has_a_correlation(produced: dict[str, object]) -> None:
+    """The community-contact vs city-population figure is drawn from real populations (E97).
+
+    The city population used to be overwritten by the community layer's missing context size,
+    so the figure was empty and its correlation printed as nan.
+    """
+    figure_stdout = produced["figure_stdout"]
+    assert isinstance(figure_stdout, dict)
+    stdout = figure_stdout["validate_layers"]
+    found = re.search(r"r\(population, mean candidate contacts\) = (\S+)", stdout)
+    assert found is not None
+    assert found.group(1) != "nan"
+    float(found.group(1))
