@@ -38,7 +38,7 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
-from covsyn.model.contact_measures import contacts_per_day_before_onset
+from covsyn.model.contact_measures import contacts_per_day_before_onset, offspring_dispersion
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
@@ -193,12 +193,9 @@ def reduce_outcomes(scalars):
     n = len(scalars)
 
     offspring = np.array([s['offspring'] for s in scalars], dtype=float)
-    mean = offspring.mean()
-    var = offspring.var(ddof=1) if n > 1 else 0.0
-    if var > mean > 0:
-        measured['offspring_k'] = mean ** 2 / (var - mean)
-    elif mean > 0:
-        measured['offspring_k'] = 100.0
+    k = offspring_dispersion(offspring)  # B61, same estimator as measure_outcomes()
+    if np.isfinite(k):
+        measured['offspring_k'] = k
 
     use_expected = all(s['expected'] is not None for s in scalars)
     for layer in LAYERS:

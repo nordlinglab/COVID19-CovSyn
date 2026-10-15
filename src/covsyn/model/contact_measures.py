@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from scipy import optimize, special
 
 MATRIX_KEY = {
     "household": "household_contacts_matrix",
@@ -111,10 +112,83 @@ def contacts_per_day_before_onset(
     matrix = ordinary_contact_matrix(contact, layer)
     if matrix.ndim != 2 or matrix.shape[1] == 0:
         return 0.0
+    days = _days_before_onset(course, matrix)
+    return float(matrix[:, :days].sum() / max(days, 1))
+
+
+def _days_before_onset(course: Mapping[str, Any], matrix: np.ndarray) -> int:
+    """Number of leading matrix columns in the before-onset window (at least one day)."""
     onset = course["incubation_period"]
-    days = (
+    return (
         matrix.shape[1]
         if (onset is None or np.isnan(onset))
         else int(min(matrix.shape[1], max(onset, 1)))
     )
-    return float(matrix[:, :days].sum() / max(days, 1))
+
+
+def daily_contacts_before_onset(
+    course: Mapping[str, Any], contact: Mapping[str, Any], layer: str
+) -> np.ndarray:
+    """Ordinary contacts on each day before onset: one count per day (B61).
+
+    The same window as contacts_per_day_before_onset(), whose value is the mean of these
+    counts, kept per day so the shape can be compared with a contact diary, where one
+    person records one day.
+
+    Args:
+        course: The case's saved course of disease.
+        contact: The case's saved contact data.
+        layer: One of the keys of MATRIX_KEY.
+
+    Returns:
+        Contacts per day, one entry per day; empty when the layer has no contact window.
+    """
+    matrix = ordinary_contact_matrix(contact, layer)
+    if matrix.ndim != 2 or matrix.shape[1] == 0:
+        return np.zeros(0)
+    days = _days_before_onset(course, matrix)
+    return matrix[:, :days].sum(axis=0)
+
+
+# Returned when the counts show no over-dispersion (variance <= mean), i.e. Poisson or tighter.
+NO_OVERDISPERSION_K = 100.0
+
+
+def offspring_dispersion(counts: Any) -> float:
+    """Negative-binomial dispersion k of offspring counts, by maximum likelihood (B61).
+
+    Taiwan's target k = 0.29 is a maximum-likelihood estimate, so the objective and the
+    acceptance check estimate k the same way instead of by the method of moments they used
+    before. The mean's MLE is the sample mean, so only k is searched, on the profile
+    likelihood. The counts are sorted first, so the two objective implementations, which
+    collect the cases in a different order, get the same bits (E65).
+
+    Args:
+        counts: Offspring count of every index case.
+
+    Returns:
+        k; NaN when there are no counts or no case infects anyone; NO_OVERDISPERSION_K when
+        the variance does not exceed the mean or the likelihood peaks at that ceiling.
+    """
+    x = np.sort(np.asarray(counts, dtype=float))
+    n = len(x)
+    mean = float(x.mean()) if n else 0.0
+    if mean <= 0:
+        return float("nan")
+    var = float(x.var(ddof=1)) if n > 1 else 0.0
+    if not var > mean:
+        return NO_OVERDISPERSION_K
+    total = float(x.sum())
+
+    def negative_log_likelihood(log_k: float) -> float:
+        k = np.exp(log_k)
+        return -(
+            float(np.sum(special.gammaln(x + k))) - n * special.gammaln(k)
+            + n * k * np.log(k / (k + mean)) + total * np.log(mean / (k + mean))
+        )
+
+    upper = np.log(NO_OVERDISPERSION_K)
+    fit = optimize.minimize_scalar(negative_log_likelihood, bounds=(np.log(1e-4), upper),
+                                   method="bounded", options={"xatol": 1e-10})
+    k = float(np.exp(fit.x))
+    return NO_OVERDISPERSION_K if k >= 0.999 * NO_OVERDISPERSION_K else k

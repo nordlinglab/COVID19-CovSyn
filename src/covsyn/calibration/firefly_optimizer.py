@@ -18,7 +18,7 @@ from tqdm import tqdm
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX)
-from covsyn.model.contact_measures import contacts_per_day_before_onset
+from covsyn.model.contact_measures import contacts_per_day_before_onset, offspring_dispersion
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
 from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX
@@ -497,8 +497,21 @@ OUTCOME_TARGETS = {
     'offspring_k':            (0.20, 0.35, 1.0),
     # B25: close contacts per day BEFORE symptom onset, from the 2020 national survey
     # (6.03 contacts/day) split by the setting composition of Fu 2012.
-    'daily_household':        (1.50, 2.20, 1.0),
-    'daily_school':           (0.90, 1.40, 1.0),
+    # B61 (2026-10-15): checked against Fu 2010's national contact diaries (Zenodo
+    # 10.5281/zenodo.6385759), counting only contacts of 15 minutes or more -- the close-contact
+    # duration of the 2020 survey and of contact tracing -- one setting per contact (home >
+    # school > work > community), per person per day over all 1,954 diaries: household 3.28,
+    # school 1.72, workplace 1.65, community 1.76 (covid19-research
+    # scripts/summarize_taiwan_contact_data.py). Rule: the lower bound is the 2020 survey value,
+    # the upper bound Fu 2010; a band that already holds Fu 2010 is kept.
+    # * household [2.27, 3.28]: 2.27 is the 2020 survey's household figure (Table 4). Fu 2010's
+    #   "home" is a place, so it includes visitors; by relationship Fu 2012 gives 3.22 a day (all
+    #   durations). With about 2.8 other members and a daily probability capped at 0.95, the
+    #   model reaches about 2.66, inside the band.
+    # * school [1.15, 1.72]: 1.15 is the 2020 survey split by Fu 2012's setting shares.
+    # * workplace and community keep [1.20, 1.80]; Fu 2010 (1.65, 1.76) falls inside.
+    'daily_household':        (2.27, 3.28, 1.0),
+    'daily_school':           (1.15, 1.72, 1.0),
     'daily_workplace':        (1.20, 1.80, 1.0),
     'daily_municipality':     (1.20, 1.80, 1.0),
     # Health care is not one of the survey's everyday settings; a healthy person does not
@@ -506,6 +519,11 @@ OUTCOME_TARGETS = {
     'daily_health_care':      (0.00, 0.30, 1.0),
     # B33: the severity cascade recomputed from the Taiwan contact-tracing file itself
     # (579 cases): asymptomatic 23.7%, symptomatic->ICU 12.7%, ICU->death 12.5%, CFR 1.2%.
+    # B61 (2026-10-15), recomputed on the public 578-row file (recompute_taiwan_targets.py):
+    # an ICU case without an onset date counts as symptomatic with a missing date, so
+    # asymptomatic 20.4% (118/578), symptomatic->ICU 12.6% (58/460), ICU->death 12.1% (7/58),
+    # CFR 1.21% (7/578); the cascade then gives the observed CFR exactly. The old 12.7% put all
+    # ICU cases over the cases with an onset date. Every band below already holds these values.
     # All four are measured only (weight 0). Each is exactly what one parameter already
     # says -- P[195] IS the asymptomatic share, P[196] the ICU share, P[197] the death share
     # given ICU, with the age normalisation built so that they keep that meaning -- and the
@@ -712,11 +730,11 @@ def measure_outcomes(index_cases):
     offspring = np.array([sum(np.nansum(np.asarray(contact[f'{L}_effective_contacts'], dtype=float))
                               for L in layers)
                           for _, contact, _ in index_cases], dtype=float)
-    mean, var = offspring.mean(), offspring.var(ddof=1) if len(offspring) > 1 else 0.0
-    if var > mean > 0:
-        measured['offspring_k'] = mean ** 2 / (var - mean)
-    elif mean > 0:
-        measured['offspring_k'] = 100.0        # Poisson or tighter: no overdispersion at all
+    # B61: maximum likelihood, the estimator Taiwan's k = 0.29 comes from (was the method of
+    # moments). NaN when no case infects anyone; 100 when there is no overdispersion.
+    k = offspring_dispersion(offspring)
+    if np.isfinite(k):
+        measured['offspring_k'] = k
 
     for layer in layers:
         # B55: ordinary contacts only, see contact_measures.contacts_per_day_before_onset.

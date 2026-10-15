@@ -20,7 +20,8 @@ from pathlib import Path
 import numpy as np
 
 from covsyn.model.contact_measures import (contacts_in_tracing_window, contacts_per_case,
-                                            contacts_per_day_before_onset)
+                                            contacts_per_day_before_onset,
+                                            daily_contacts_before_onset, offspring_dispersion)
 from covsyn.validation.acceptance import bootstrap_intervals, verdict
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
@@ -74,8 +75,8 @@ def offspring_counts(contacts):
 
 
 def negative_binomial_k(counts):
-    mean, var = counts.mean(), counts.var(ddof=1)
-    return mean ** 2 / (var - mean) if var > mean > 0 else np.inf
+    """B61: the objective's maximum-likelihood k (was the method of moments)."""
+    return offspring_dispersion(counts)
 
 
 def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> list:
@@ -85,6 +86,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     to repeat inside the bootstrap.
     """
     results.clear()
+    # Imported, not copied (lesson 5): checks of a charged quantity use the objective's bands.
+    # Imported here, at the top, because a function-level import makes the name local to the
+    # whole function, and B25 below is the first check to read it.
+    from covsyn.calibration.firefly_optimizer import OUTCOME_TARGETS
     course = [c for r in runs for c in r['course']]
     contact = [c for r in runs for c in r['contact']]
     social = [s for r in runs for s in r['social']]
@@ -156,8 +161,9 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
               note='Chen 2022 observed 17.8 / 1.1 = 16x')
 
     # ---------------------------------------------------------------- B25 daily contacts
-    targets = {'household': (1.5, 2.2), 'school': (0.9, 1.4), 'workplace': (1.2, 1.8),
-               'municipality': (1.2, 1.8), 'health_care': (0.0, 0.3)}
+    # B61: the objective's bands (they were copied here and would have drifted when B61 moved
+    # the household and school targets).
+    targets = {L: OUTCOME_TARGETS[f'daily_{L}'][:2] for L in LAYERS}
     total = 0.0
     for L in LAYERS:
         # B55: ordinary contacts only, the same function the objective uses.
@@ -166,8 +172,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
         value = float(np.mean(per_day))
         total += value
         check('B25', f'contacts per day before onset, {L}', value, targets[L])
-    check('B25', 'contacts per day, all layers', total, (5.0, 7.0),
-          note='2020 national survey: 6.03 close contacts per day')
+    # B61: same rule as the layers -- the 2020 survey below, Fu 2010 (>=15 min) above. The old
+    # (5.0, 7.0) could not hold the new layer bands, whose lower bounds already sum to 5.82.
+    check('B25', 'contacts per day, all layers', total, (6.03, 8.40),
+          note='2020 national survey 6.03; Fu 2010 diaries, >=15 min, 8.40')
 
     # household: how often is each member actually met
     met = []
@@ -246,10 +254,11 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # ---------------------------------------------------------------- B17 / B27 dispersion
     counts = offspring_counts(index_contact)
     k_hat = negative_binomial_k(counts)
-    # Upper bound raised 0.30 -> 0.35 so that this test and the cost term agree; they used to
-    # state different intervals for the same quantity (OUTCOME_TARGETS has 0.20-0.35).
-    check('B17', 'offspring dispersion k', k_hat, (0.10, 0.35),
-          note='Taiwan tracing NegBin MLE k = 0.29')
+    # B61: the band is the objective's, read from OUTCOME_TARGETS. The upper bound was raised to
+    # 0.35 earlier so the two agreed, but the lower bound stayed 0.10 after the objective's went
+    # to 0.20 (E38), so they disagreed again. The estimator is now also the objective's (MLE).
+    check('B17', 'offspring dispersion k', k_hat, OUTCOME_TARGETS['offspring_k'][:2],
+          note='Taiwan tracing NegBin MLE k = 0.286 (n = 579), recompute_taiwan_targets.py')
     # B56 (E80): Taiwan's R = 0.43 counts contacts who were later confirmed, including people
     # exposed together with the case (same tour group, flight, ship), so it is an upper bound;
     # the recorded infector -> infectee links give 0.047, a lower bound. CovSyn counts the people
@@ -270,7 +279,6 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     nonzero = community[community > 0]
     # B47 made the p90 informational (its band's centre, 110, is out of the model's reach) and
     # B50 checks the ratio on the band the objective charges -- imported, not copied (lesson 5).
-    from covsyn.calibration.firefly_optimizer import OUTCOME_TARGETS
     check('B27', 'community contacts per case, p90',
           np.percentile(nonzero, 90) if len(nonzero) else np.nan, None,
           note='Taiwan tracing 2020 first wave p90 = 195 (n=38); informational since B47')
@@ -296,6 +304,31 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     check('B27', 'city effect on community contacts, permutation p-value', city_p, (0.05, 1.0),
           note='B56: passes when no city effect is detectable (p >= 0.05, 2000 label shuffles)')
 
+    # ---------------------------------------------------------------- B61 one-day shapes
+    # A contact diary records one person's one day, so the model's days before onset are
+    # pooled and compared with Fu 2010's national diaries (contacts of 15 minutes or more;
+    # 2010, before the pandemic). Reported, not charged. A case whose layer has no contact
+    # window at all counts as one day without contacts, so it is not silently dropped.
+    def person_days(layer, cases):
+        days = [daily_contacts_before_onset(k, c, layer) for k, c in cases]
+        return np.concatenate([d if len(d) else np.zeros(1) for d in days]) if days else np.zeros(0)
+
+    pairs = list(zip(index_course, index_contact, strict=True))
+    for layer, label, cases, ref in (
+            ('municipality', 'community', pairs,
+             'Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)'),
+            ('workplace', 'workplace, employed cases', [p for p, e in zip(pairs, employed) if e],
+             'Fu 2010, weekday employed, met daily at work: mean 4.79, median 2, p90 12.5 '
+             '(n=616)')):
+        d = person_days(layer, cases)
+        if not len(d):
+            continue
+        check('B61', f'{label} contacts on one day, mean', d.mean(), None, note=ref)
+        check('B61', f'{label} contacts on one day, zero share', 100 * np.mean(d == 0), None, '%',
+              note=ref)
+        check('B61', f'{label} contacts on one day, median', np.median(d), None, note=ref)
+        check('B61', f'{label} contacts on one day, p90', np.percentile(d, 90), None, note=ref)
+
     # B56: independent validation against all 487 cases of Jian et al. 2020 (16.5 close
     # contacts per confirmed case, 95% CI 13.9-19.1), which no objective term uses. E89: Jian
     # counts the contacts a tracer listed, from 2 days before onset to isolation (E7), so the
@@ -319,7 +352,13 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     positive = field('positive_test_date', index_course)
     infection_day = field('infection_day', index_course)
     symptomatic = ~np.isnan(incubation)
-    check('B22', 'incubation period, mean', np.nanmean(incubation), (3.9, 8.0))
+    check('B22', 'incubation period, mean', np.nanmean(incubation), (3.9, 8.0),
+          note='literature reported-mean range, 15 studies (E45)')
+    # B61: Taiwan's own incubation, checked next to the literature range: the model produces
+    # both, and no single source reports every period (the latent / generation time lesson).
+    check('B61', 'incubation period, mean, Taiwan data', np.nanmean(incubation), (4.96, 7.57),
+          note='Taiwan first wave: onset - earliest infection date, mean 6.2 d (n=28), bootstrap '
+               '95% of the mean; recompute_taiwan_targets.py')
     check('B22', 'pre-onset infectious window, mean', np.nanmean(window), (1.0, 3.0))
     # E96: over symptomatic cases; nanmean(window == 0) also counted the asymptomatic ones.
     check('B22', 'pre-onset window of zero days',
@@ -335,8 +374,17 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # that median at 5-7 days on top of a 5.3-day incubation, infection -> isolation has to
     # land near 11-12 days; the fourth run gave 10.939 and was marked FAIL against a bound
     # that its own decision had already invalidated.
+    # B61: the 5.3-day incubation this band was derived from has no traceable source; the
+    # band stays as the sum of the literature incubation range (3.9-8.0) and Taiwan's
+    # onset-to-confirmation median (5-7), and Taiwan's directly measured interval is checked
+    # on its own below.
     check('B26', 'infection to isolation, mean', isolation.mean(), (8.0, 14.0),
-          note='B2: incubation about 5.3 d plus an onset-to-confirmation median of 5-7 d')
+          note='derived: incubation (literature 3.9-8.0 d; Taiwan 6.2 d) plus Taiwan '
+               'onset-to-confirmation median 5-7 d')
+    check('B61', 'infection to confirmation, mean, Taiwan data', np.nanmean(positive - infection_day),
+          (11.4, 14.6),
+          note='Taiwan first wave: confirmation - earliest infection date, mean 12.9 d (n=33), '
+               'bootstrap 95% of the mean; recompute_taiwan_targets.py')
     routes = [c.get('isolation_route') for c in course]
     for route in ('symptom', 'traced', 'untraced', 'critical'):  # 'critical': B52
         check('B26', f'isolation route: {route}', 100 * routes.count(route) / len(routes), None, '%')
@@ -396,12 +444,14 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     icu = ~np.isnan(field('date_of_critically_ill', index_course))
     dead = ~np.isnan(field('date_of_death', index_course))
     check('B33', 'asymptomatic share', 100 * np.mean(~symptomatic), (20.0, 28.0), '%',
-          note='Taiwan tracing 23.7%')
+          note='B61: Taiwan 20.4% (no onset date and no ICU, 118/578); 23.5% if every case '
+               'without an onset date counts (136/578)')
     check('B33', 'symptomatic to ICU', 100 * icu.sum() / max(symptomatic.sum(), 1), (9.0, 17.0), '%',
-          note='Taiwan tracing 12.7%')
+          note='B61: Taiwan 12.6% (58/460, an ICU case without an onset date counts as '
+               'symptomatic); the cascade then reproduces the observed CFR exactly')
     check('B33', 'ICU to death', 100 * dead.sum() / max(icu.sum(), 1), (7.0, 19.0), '%',
-          note='Taiwan tracing 12.5%')
-    check('B33', 'case fatality', 100 * dead.mean(), (0.7, 2.0), '%', note='Taiwan tracing 1.2%')
+          note='Taiwan 12.1% (7/58)')
+    check('B33', 'case fatality', 100 * dead.mean(), (0.7, 2.0), '%', note='Taiwan 1.21% (7/578)')
     band = np.digitize(ages, [20, 40, 60])
     icu_by_band = []
     for b, label in enumerate(['0-19', '20-39', '40-59', '60+']):

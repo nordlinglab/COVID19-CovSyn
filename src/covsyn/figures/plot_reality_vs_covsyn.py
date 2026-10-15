@@ -190,14 +190,19 @@ rows = [
 
     ('Contacts', 'close contacts per day, all settings', 6.03,
      sum(daily_contacts(L) for L in LAYERS), '', 'national survey 2020'),
-    ('Contacts', 'close contacts per day, household', 1.86, daily_contacts('household'), '', 'survey x Fu 2012'),
-    ('Contacts', 'close contacts per day, school', 1.16, daily_contacts('school'), '', 'survey x Fu 2012'),
-    ('Contacts', 'close contacts per day, workplace', 1.49, daily_contacts('workplace'), '', 'survey x Fu 2012'),
-    ('Contacts', 'close contacts per day, community', 1.49, daily_contacts('municipality'), '', 'survey x Fu 2012'),
-    ('Contacts', 'community contacts per case, median', 7.0,
-     float(np.median(community[community > 0])), '', 'CDC tracing, n=81'),
-    ('Contacts', 'community contacts per case, p90', 172.0,
-     float(np.percentile(community[community > 0], 90)), '', 'CDC tracing, n=81'),
+    # B61: the per-setting references are Fu 2010's contacts of 15 minutes or more (the
+    # close-contact duration of the 2020 survey and of contact tracing), one setting per contact.
+    ('Contacts', 'close contacts per day, all settings, >=15 min', 8.40,
+     sum(daily_contacts(L) for L in LAYERS), '', 'Fu 2010 diaries'),
+    ('Contacts', 'close contacts per day, household', 3.28, daily_contacts('household'), '', 'Fu 2010, >=15 min'),
+    ('Contacts', 'close contacts per day, school', 1.72, daily_contacts('school'), '', 'Fu 2010, >=15 min'),
+    ('Contacts', 'close contacts per day, workplace', 1.65, daily_contacts('workplace'), '', 'Fu 2010, >=15 min'),
+    ('Contacts', 'close contacts per day, community', 1.76, daily_contacts('municipality'), '', 'Fu 2010, >=15 min'),
+    # E77: the old 7.0 / 172 (n = 81) counted the 38 first-wave cases twice.
+    ('Contacts', 'community contacts per case, median', 7.5,
+     float(np.median(community[community > 0])), '', 'CDC tracing, n=38'),
+    ('Contacts', 'community contacts per case, p90', 195.1,
+     float(np.percentile(community[community > 0], 90)), '', 'CDC tracing, n=38'),
     ('Contacts', 'coworker contacts per case, median', 2.5,
      float(np.median(coworker[coworker > 0])) if (coworker > 0).any() else np.nan, '', 'CDC tracing, n=6'),
     ('Contacts', 'medical contacts per case, median', 10.0,

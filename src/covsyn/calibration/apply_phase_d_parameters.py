@@ -25,7 +25,9 @@ not give. Everything this script writes is listed below with the decision it com
   P[52:58]     symptomatic / ICU -> case closure: same, floors lowered.
   P[63:67]     age risk ratios locked to the B14 trial value (B2: lb == ub, set by hand).
   P[195:198]   the severity cascade recomputed from the Taiwan tracing file (B33):
-                 asymptomatic 23.7%, symptomatic->ICU 12.7%, ICU->death 12.5%.
+                 asymptomatic 23.7%, symptomatic->ICU 12.7%, ICU->death 12.5%
+                 (B61: 20.4%, 12.6%, 12.1% on the public file, inside the same bounds).
+  P[200]       mass-event size exponent locked at 1.67 (B61; was 1.49, not reproducible).
 
 Usage: python -m covsyn.calibration.apply_phase_d_parameters [variable_dir]
 """
@@ -117,9 +119,13 @@ COMMUNITY_DISPERSION = (0.4, 0.05, 1.0)
 #   1,822 'others' contacts per 100 cases, was considered and dropped: those parameters
 #   were fitted under E86, so the Cheng fit itself now decides how much of the contact
 #   count comes from events. The seed 0.10 puts the tail ratio at 7.3 (target [5.5, 93.1]).
-# * exponent 1.49 and min_size 21: locked to the maximum-likelihood power-law tail of the 38
+# * exponent 1.67 and min_size 21: locked to the maximum-likelihood power-law tail of the 38
 #   first-wave tracing records (Clauset et al. 2009 method: k_min chosen by the KS distance,
-#   0.065, 17 records in the tail), not chosen by eye (todolist929 4.3).
+#   17 records in the tail), not chosen by eye (todolist929 4.3). B61 (2026-10-15): the
+#   earlier 1.49 could not be reproduced; the exact discrete MLE (Hurwitz zeta likelihood) in
+#   data_processing/recompute_taiwan_targets.py gives 1.668 with the same k_min of 21, as did
+#   the 2026-10-12 recomputation (1.67). Same definition as draw_event_size():
+#   P(S = s) proportional to s^-exponent.
 # * max_size 1000: locked; the largest record is 850, and the cap bounds the run time.
 # * risk_ratio: locked at 1, so an event contact carries the ordinary municipality attack
 #   rate and only the contact-count distribution changes, as the 2026-09-29 meeting asked.
@@ -132,7 +138,7 @@ COMMUNITY_EVENT_COURSE_INDEX = COMMUNITY_EVENT_FIRST_INDEX - CONTACT_PARAMETER_C
 # attack rate compensating, the expected objective is flat from 0 to 0.05 (probe_event_floor.py,
 # 50 unseen 300-seed blocks per point) and 0.05 is where the tail ratio enters [5.5, 93.1].
 COMMUNITY_EVENT = ((0.10, 0.05, 0.20),
-                   (1.49, 1.49, 1.49),
+                   (1.67, 1.67, 1.67),
                    (21, 21, 21),
                    (1000, 1000, 1000),
                    (1.0, 1.0, 1.0))
@@ -201,6 +207,9 @@ TRANSITION_P = {
     # and bounding the parameter at the top of the band cannot bound the share at the top of
     # the band. The share is also charged in the objective now, so this is the belt to that
     # brace rather than the only defence.
+    # B61 (2026-10-15): the public 578-row file gives asymptomatic 20.4% (118/578), ICU 12.6%
+    # (58/460), death given ICU 12.1% (7/58), see firefly_optimizer.OUTCOME_TARGETS (B33). The
+    # bounds hold all three (P[196] 0.874, P[197] 0.879); the seeds stay where run 15 started.
     158: (0.237, 0.200, 0.260),   # P[195] infection -> recovered = asymptomatic share 23.7%
     159: (0.873, 0.840, 0.900),   # P[196] symptom -> recovered, i.e. 10-16% go to ICU
     160: (0.875, 0.820, 0.920),   # P[197] ICU -> recovered, i.e. 8-18% die
