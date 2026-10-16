@@ -18,10 +18,12 @@ from tqdm import tqdm
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX)
-from covsyn.model.contact_measures import contacts_per_day_before_onset, offspring_dispersion
+from covsyn.model.contact_measures import (contacts_per_day_before_onset, offspring_dispersion,
+                                           one_day_counts, one_day_shape)
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
-from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX
+from covsyn.model.data_synthesize import (COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX,
+                                          COMMUNITY_POWER_LAW_INDEX)
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 # from sklearn.metrics.pairwise import nan_euclidean_distances
@@ -513,7 +515,13 @@ OUTCOME_TARGETS = {
     'daily_household':        (2.27, 3.28, 1.0),
     'daily_school':           (1.15, 1.72, 1.0),
     'daily_workplace':        (1.20, 1.80, 1.0),
-    'daily_municipality':     (1.20, 1.80, 1.0),
+    # B63 (2026-10-16, E100): community upper bound 1.80 -> 7.12. Under B62's scale-free count
+    # the mean is set by the tail, and Fu 2010 records at most 40 contacts per person a day
+    # (3.9% of diaries at the cap), so its 1.76 is a lower bound: the same law fitted to it
+    # (alpha 1.737, s 0.790) has mean 2.08 at the diary cap and 7.12 at CovSyn's cap of 1000,
+    # while its zero share (58-60%) and p90 (6-8) hardly move. The shape is charged by
+    # community_day_zero_share and community_day_p90 below.
+    'daily_municipality':     (1.20, 7.12, 1.0),
     # Health care is not one of the survey's everyday settings; a healthy person does not
     # meet medical staff daily, so this one is bounded from above only.
     'daily_health_care':      (0.00, 0.30, 1.0),
@@ -595,7 +603,11 @@ OUTCOME_TARGETS = {
     # cases only, so on run 6 it saw 6 while the checklist saw 0 and called it a failure. This
     # also prices the zero-inflation of E67 directly: every case with no community contact now
     # pulls the charged median down.
-    'community_median':       (3.0, 15.0, 1.0),
+    # B63 (2026-10-16, E100): reported, no longer charged. Under B62 a median of 3 or more per
+    # case cannot coexist with the one-day Fu 2010 shape, and the 38 tracing records are cases
+    # published with their contacts, a selected sample (E88). The one-day Fu 2010 shape below,
+    # from the same data as B62's exponent, is charged instead.
+    'community_median':       (3.0, 15.0, 0.0),
     # E72: reported, not charged. The interval's centre is 110 while CovSyn's candidate-contact
     # scale reaches 16-44, so even B43's capped scale is 55 and missing the lower bound by 4 cost
     # 0.03 of a 1.82 objective -- the optimizer ignored it, correctly. An interval whose centre
@@ -620,7 +632,8 @@ OUTCOME_TARGETS = {
     # count, [5.5, 93.1] around 26.0 (the old "n = 81" counted those 38 twice, E77). Its miss is
     # scaled by the lower bound (OUTCOME_SCALE_BY_LOWER_BOUND), otherwise B43's half-centre cap
     # (24.7) would make a miss from 4 to 5.5 cost 0.02 and the target would not bite at all.
-    'community_tail_ratio':   (5.5, 93.1, 1.0),
+    # B63: reported, no longer charged, for the same reason as community_median (E100).
+    'community_tail_ratio':   (5.5, 93.1, 0.0),
     # E67, 2026-09-27: run 6 finally grew the community tail (p90 13 -> 44.1, max 48 ->
     # 196) and paid for it with the centre -- the median fell 3 -> 0, i.e. more than half
     # the index cases stopped having any community contact at all. With the attack rate
@@ -630,6 +643,13 @@ OUTCOME_TARGETS = {
     # reported rather than charged: it is the number that says whether the median moved
     # because the distribution improved or because the zeros were merely reshuffled.
     'community_zero_share':   (0.0, 0.30, 0.0),
+    # B63 (2026-10-16): the one-day community shape of Fu 2010 (Zenodo 10.5281/zenodo.6385759),
+    # community-only contacts of 15 minutes or more per person per day, n = 1,954: zero share
+    # 62.0% (bootstrap 95% 59.8-64.1%) and p90 6 (5-6; 8 for the fitted law without the
+    # diary cap, so the upper bound is 8). Measured on the index cases' days before onset,
+    # pooled (contact_measures.one_day_shape). Same data as B62's exponent.
+    'community_day_zero_share': (0.598, 0.641, 1.0),
+    'community_day_p90':        (5.0, 8.0, 1.0),
     # B22: incubation back to the literature reported-mean range now that it is built as
     # latent + window rather than drawn and truncated.
     'incubation_mean':        (3.9, 8.0, 1.0),
@@ -802,6 +822,10 @@ def measure_outcomes(index_cases):
         measured['community_p90'] = p90
         if median > 0:
             measured['community_tail_ratio'] = p90 / median
+    # B63: the one-day community shape, every index case's days before onset pooled as diary
+    # days and compared with Fu 2010 (contact_measures.one_day_shape, shared with fast_cost).
+    measured['community_day_zero_share'], measured['community_day_p90'] = one_day_shape(
+        [one_day_counts(course, contact, 'municipality') for course, contact, _ in index_cases])
 
     incubation = np.array([c['incubation_period'] for c, _, _ in index_cases], dtype=float)
     symptomatic = ~np.isnan(incubation)
@@ -1203,12 +1227,15 @@ def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarra
         seed_vector: The literature seed vector of this run.
 
     Returns:
-        The vector with seed_vector[199:] appended when it has exactly the 199 values of
-        run 10 and earlier; otherwise the vector unchanged, so a misaligned vector of any
+        The vector with the seed values of the missing tail appended when it has exactly the
+        199 values of run 10 and earlier or the 204 values of runs 11-16 (before B62's
+        P[204]); otherwise the vector unchanged, so a misaligned vector of any
         other length still fails the caller's shape check instead of being padded into a
         plausible-looking start.
     """
-    if vector.size == COMMUNITY_EVENT_FIRST_INDEX < seed_vector.size:
+    # B62: a vector of run 11-16 ends before P[204] and is padded the same way.
+    if (vector.size in (COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX)
+            and vector.size < seed_vector.size):
         return np.concatenate([vector, seed_vector[vector.size:]])
     return vector
 

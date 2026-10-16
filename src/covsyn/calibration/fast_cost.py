@@ -38,7 +38,8 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
-from covsyn.model.contact_measures import contacts_per_day_before_onset, offspring_dispersion
+from covsyn.model.contact_measures import (contacts_per_day_before_onset, offspring_dispersion,
+                                           one_day_counts, one_day_shape)
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
@@ -135,6 +136,7 @@ def _index_case_scalars(course, contact):
 
     out['expected'] = contact.get('expected_outcomes')
     out['community'] = len(contact['municipality_effective_contacts'] or [])
+    out['community_days'] = one_day_counts(course, contact, 'municipality')  # B63
     out['incubation_period'] = float(onset) if onset is not None else np.nan
     out['pre_onset_window'] = float(course['pre_onset_window'])
     out['positive_test_date'] = float(course['positive_test_date'])
@@ -234,6 +236,9 @@ def reduce_outcomes(scalars):
         measured['community_p90'] = p90
         if median > 0:
             measured['community_tail_ratio'] = p90 / median
+    # B63: the one-day community shape against Fu 2010, as in measure_outcomes.
+    measured['community_day_zero_share'], measured['community_day_p90'] = one_day_shape(
+        [s['community_days'] for s in scalars])
 
     incubation = np.array([s['incubation_period'] for s in scalars], dtype=float)
     symptomatic = ~np.isnan(incubation)

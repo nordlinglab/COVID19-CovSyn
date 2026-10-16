@@ -184,6 +184,23 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 | 3.13 | community tail x_min | 21 | 38 |  | x_min minimising the KS distance (Clauset 2009) |
 | 3.9 | coworker close contacts per index case, median | 2 | 8 |  | infected + uninfected coworkers per index case with any coworker record |
 
+## 7. 社區接觸改為 scale-free（B62、B63，2026-10-16）
+
+依教授 2026-10-12 指示（todolist M3），社區接觸數改為每位病例從單一分布 P(N = n) ∝ (n + s)^−α 抽一次，取消「是否參加大型活動」。
+
+| # | 量 | 舊值 | 新值 | 來源 | 狀態 |
+|---|---|---|---|---|---|
+| 3.12' | 社區接觸冪律指數 α（P[204]，新參數） | —（舊模型為大型活動規模指數 1.67） | **1.74**（鎖定） | Fu 2010 community-only、≥15 分鐘、每人每日的最大概似估計（bootstrap 95% 1.62–1.88）；疫調尾巴 1.67 在區間內 | 📐 |
+| 3.11、3.13–3.16 | 大型活動 P[199..203]、Gamma 離散度 P[198] | 校準／鎖定 | 鎖定不用（P[199] = 0） | B62 取消二元活動 | 🔧 |
+| P[28] | 社區平移量 s | 平均接觸數 [1, 40] | 平移量 **[0.5, 20]** | 中位數約等於 s | 🔧 |
+| P[29] | 社區接觸隔天再碰面機率下限 | 0.5（無來源） | **0** | Fu 2010：社區接觸只有 28.9% 天天碰面 | 📐 |
+| 1.5 | daily_municipality | [1.20, 1.80] | **[1.20, 7.12]** | 上限為同一擬合分布去掉日誌 40 筆上限的平均（日誌上限時 2.08） | 📐 |
+| 新 | community_day_zero_share | — | **[0.598, 0.641]** | Fu 2010 單日 0 次 62.0% 的 bootstrap 95% | 📐 |
+| 新 | community_day_p90 | — | **[5, 8]** | Fu 2010 單日 P90 6（5–6），去掉上限為 8 | 📐 |
+| 1.18、1.20 | community_median、community_tail_ratio | 計費 | **只量** | 疫調 38 筆為選擇樣本（E88） | — |
+
+計算：covid19-research `scripts/summarize_taiwan_contact_data.py`（`by_setting`、`fit_shifted_power_law`）；可達性：`scripts/probes/probe_community_b62.py`（E100、B63）。
+
 ---
 
 ## 查證紀錄
@@ -197,3 +214,4 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 | 2026-10-15 | 3.8、4.10、B4、B5 | 存入 13 篇論文（`lit/`），全部引文經程式比對確認存在於存檔；城市效應與職場的原文與小結見 [`source_quotes.md`](source_quotes.md) |
 | 2026-10-15 | 全部 📐 項目 | 以 `recompute_taiwan_targets.py` 重算（§6）。重現：1.1、1.7、1.9、1.10、1.18–1.20、1.25–1.29、3.12–3.13、4.7。新發現：1.8 舊值分子分母母體不一致；3.9 樣本是 8 不是 6；4.8 可直接由資料算（12.9 天）；`verify_phase_d` 的 k 用動差法 |
 | 2026-10-15 | 1.2–1.5、1.21 | Fu 2010 依情境與 ≥15 分鐘重算（§5）；職場、社區落在現行區間內，家戶、學校高於現行區間 |
+| 2026-10-16 | 社區（B62、B63） | 社區接觸改為 scale-free，α = 1.74 來自 Fu 2010；社區計費目標改為 Fu 2010 單日 0 次比例與 P90；可達性通過（§7） |

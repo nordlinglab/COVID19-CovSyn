@@ -28,6 +28,9 @@ not give. Everything this script writes is listed below with the decision it com
                  asymptomatic 23.7%, symptomatic->ICU 12.7%, ICU->death 12.5%
                  (B61: 20.4%, 12.6%, 12.1% on the public file, inside the same bounds).
   P[200]       mass-event size exponent locked at 1.67 (B61; was 1.49, not reproducible).
+  P[28], P[204] B62: the community count is one draw from P(N = n) ~ (n + s)^-alpha; P[28] is
+                 now the shift s, P[204] = alpha = 1.74 (Fu 2010); P[198] and P[199..203]
+                 are locked and unused, P[199] at 0.
 
 Usage: python -m covsyn.calibration.apply_phase_d_parameters [variable_dir]
 """
@@ -38,7 +41,7 @@ from pathlib import Path
 
 import numpy as np
 
-from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIRST_INDEX
+from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX
 
 from covsyn.calibration.sar_anchors import ATTACK_RATE_SLICE, CONTACT_DAYS_MEASURED_ON, LAYERS, \
     LAYER_CUMULATIVE_SAR, MEAN_CONTACT_DAYS, attack_rate_block
@@ -83,7 +86,14 @@ CONTACT_BOUNDS = {
     # Taiwan tracing records give a median of 7.5 and a mean of 87 friend/other contacts per
     # index case, so the search runs from 1 to 40 and the heavy tail comes from the
     # case-level multiplier rather than from the mean.
-    'municipality': ([1.0, 0.5, 0.01, 0.001, 1, 0, 0], [40.0, 1, 0.50, 0.50, 10, 10, 10]),
+    # B62: index 0 is now the SHIFT s of the scale-free count P(N = n) ~ (n + s)^-alpha. With
+    # alpha = 1.74 the median count per case is about s (3 -> 3, 8 -> 10, 20 -> 26), so
+    # [0.5, 20] spans medians 0-26 around the tracing target [3, 15].
+    # B63 (E100): index 1, the probability of meeting a community contact again the day after
+    # meeting them, gets a floor of 0 instead of 0.5. The 0.5 had no source, and Fu 2010 meets
+    # only 28.9% of community contacts daily or almost daily (33.3% weekly, 14.2% monthly,
+    # 13.5% less often, 10.1% for the first time), against 88.2% at home.
+    'municipality': ([0.5, 0.0, 0.01, 0.001, 1, 0, 0], [20.0, 1, 0.50, 0.50, 10, 10, 10]),
 }
 # Case-level infectiousness multiplier nu ~ Gamma(k, 1/k), capped (B17). k below 1 is where
 # superspreading lives: Taiwan's own offspring dispersion is k = 0.29. The floor was 0.05 in
@@ -142,6 +152,23 @@ COMMUNITY_EVENT = ((0.10, 0.05, 0.20),
                    (21, 21, 21),
                    (1000, 1000, 1000),
                    (1.0, 1.0, 1.0))
+
+# B62 (2026-10-16): the community count is one scale-free draw per case, P(N = n) ~ (n + s)^-alpha
+# (data_synthesize.draw_community_contact_count), as the professor asked on 2026-10-12, so the
+# B27 Gamma dispersion P[198] and the B54 mass events P[199..203] are no longer used: with
+# P[204] in the vector no event is drawn. They stay in the vector, locked, so every index keeps
+# its meaning and older vectors still run their own model; P[199] is locked at 0 (B59's floor
+# applied to the event model only).
+# alpha = 1.74 is the maximum-likelihood fit of the same distribution to Fu 2010's community-
+# only contacts of 15 minutes or more per person per day (n = 1,954, diary cap 40; bootstrap 95%
+# 1.62-1.88), the B61 close-contact definition. The tail of the 38 first-wave tracing records
+# gives 1.67 (Clauset, x_min 21), inside that interval; a fit of the full distribution to those
+# 38 records gives 1.22 (1.06-1.63), a sample selected for many contacts (E88). Computed by
+# covid19-research scripts/summarize_taiwan_contact_data.py (fit_shifted_power_law).
+COMMUNITY_DISPERSION = (0.4, 0.4, 0.4)
+COMMUNITY_EVENT = ((0.0, 0.0, 0.0),) + COMMUNITY_EVENT[1:]
+COMMUNITY_POWER_LAW = (1.74, 1.74, 1.74)
+COMMUNITY_POWER_LAW_COURSE_INDEX = COMMUNITY_POWER_LAW_INDEX - CONTACT_PARAMETER_COUNT
 
 # The five layers' daily attack-rate bounds are no longer patched in place here. They are
 # REBUILT from sar_anchors.py, which is the single source of truth for the anchors, the Ge
@@ -262,6 +289,17 @@ def main():
         else:
             value[i], lower[i], upper[i] = event_v, event_lo, event_hi
 
+    # P[204] (B62) follows P[203] for the same reason.
+    # Own names: v, lo and hi still hold P[198] for the summary printed at the end.
+    alpha_v, alpha_lo, alpha_hi = COMMUNITY_POWER_LAW
+    i = COMMUNITY_POWER_LAW_COURSE_INDEX
+    if len(value) == i:
+        value = np.append(value, alpha_v)
+        lower = np.append(lower, alpha_lo)
+        upper = np.append(upper, alpha_hi)
+    else:
+        value[i], lower[i], upper[i] = alpha_v, alpha_lo, alpha_hi
+
     # Rebuild each layer's 25 daily attack rates from the anchors, rather than rescaling
     # whatever happens to be on disk. The arrays in variable/ descend from the ORIGINAL
     # published values and had been patched in place by earlier runs of this script, so
@@ -298,6 +336,7 @@ def main():
     print('  age risk ratios locked at  %s' % AGE_RISK_RATIOS.tolist())
     print('  infectiousness shape k in  [%g, %g]' % (OVERDISPERSION_BOUNDS[0][0], OVERDISPERSION_BOUNDS[1][0]))
     print('  community dispersion k in  [%g, %g], seed %g' % (lo, hi, v))
+    print('  community power law alpha  %g (B62; P[28] is the shift s)' % alpha_v)
     print('  parameter vector length    %d' % (37 + len(value)))
     print('  backup of the previous files in', BACKUP)
 

@@ -21,7 +21,7 @@ import numpy as np
 
 from covsyn.model.contact_measures import (contacts_in_tracing_window, contacts_per_case,
                                             contacts_per_day_before_onset,
-                                            daily_contacts_before_onset, offspring_dispersion)
+                                            offspring_dispersion, one_day_counts, one_day_shape)
 from covsyn.validation.acceptance import bootstrap_intervals, verdict
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
@@ -272,8 +272,11 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
           note='Taiwan tracing maximum 8')
 
     community = np.array([len(c['municipality_effective_contacts']) for c in index_contact], dtype=float)
-    check('B27', 'community contacts per case, median', np.median(community), (3.0, 15.0),
-          note='Taiwan tracing friend+other median 7.5')
+    # B63 (E100): informational. Under B62 it cannot coexist with the one-day Fu 2010 shape
+    # judged under B63 below, and the tracing records are a selected sample (E88).
+    check('B27', 'community contacts per case, median', np.median(community), None,
+          note='Taiwan tracing friend+other median 7.5 (n=38, selected sample, E88); '
+               'informational since B63')
     # The maximum over 1000 cases is a single order statistic and says almost nothing; the
     # p90 and the shape do. The tracing records have a median of 7 and a p90 of 172.
     nonzero = community[community > 0]
@@ -309,25 +312,30 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # pooled and compared with Fu 2010's national diaries (contacts of 15 minutes or more;
     # 2010, before the pandemic). Reported, not charged. A case whose layer has no contact
     # window at all counts as one day without contacts, so it is not silently dropped.
+    # B63: the community zero share and p90 are charged since B63 and judged on the objective's
+    # own bands, computed by the objective's own function (contact_measures.one_day_shape).
     def person_days(layer, cases):
-        days = [daily_contacts_before_onset(k, c, layer) for k, c in cases]
-        return np.concatenate([d if len(d) else np.zeros(1) for d in days]) if days else np.zeros(0)
+        days = [one_day_counts(k, c, layer) for k, c in cases]
+        return np.concatenate(days) if days else np.zeros(0)
 
     pairs = list(zip(index_course, index_contact, strict=True))
-    for layer, label, cases, ref in (
+    zero_band = tuple(100 * x for x in OUTCOME_TARGETS['community_day_zero_share'][:2])
+    for layer, label, cases, ref, bands in (
             ('municipality', 'community', pairs,
-             'Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)'),
+             'Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)',
+             (zero_band, OUTCOME_TARGETS['community_day_p90'][:2])),
             ('workplace', 'workplace, employed cases', [p for p, e in zip(pairs, employed) if e],
              'Fu 2010, weekday employed, met daily at work: mean 4.79, median 2, p90 12.5 '
-             '(n=616)')):
+             '(n=616)', (None, None))):
         d = person_days(layer, cases)
         if not len(d):
             continue
+        zero_share, p90 = one_day_shape([d])
         check('B61', f'{label} contacts on one day, mean', d.mean(), None, note=ref)
-        check('B61', f'{label} contacts on one day, zero share', 100 * np.mean(d == 0), None, '%',
+        check('B61', f'{label} contacts on one day, zero share', 100 * zero_share, bands[0], '%',
               note=ref)
         check('B61', f'{label} contacts on one day, median', np.median(d), None, note=ref)
-        check('B61', f'{label} contacts on one day, p90', np.percentile(d, 90), None, note=ref)
+        check('B61', f'{label} contacts on one day, p90', p90, bands[1], note=ref)
 
     # B56: independent validation against all 487 cases of Jian et al. 2020 (16.5 close
     # contacts per confirmed case, 95% CI 13.9-19.1), which no objective term uses. E89: Jian

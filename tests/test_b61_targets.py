@@ -80,7 +80,8 @@ def test_both_objective_implementations_agree_bit_for_bit(
     scalars = [fast_cost._index_case_scalars(course, contact) for course, contact, _ in cases[::-1]]
     fast = fast_cost.reduce_outcomes(scalars)
     assert np.isfinite(slow["offspring_k"])
-    for key in ("offspring_k", "daily_household", "daily_school"):
+    for key in ("offspring_k", "daily_household", "daily_school", "daily_municipality",
+                "community_day_zero_share", "community_day_p90"):  # B63 too
         assert fast[key] == slow[key], key
 
 

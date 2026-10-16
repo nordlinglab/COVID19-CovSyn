@@ -68,6 +68,65 @@ COMMUNITY_EVENT_FIRST_INDEX = 199
 COMMUNITY_EVENT_FIELDS = ('probability', 'exponent', 'min_size', 'max_size', 'risk_ratio')
 EXPECTED_CONTACT_GRID = 2.0 ** 20   # resolution of the expected event contacts (B55)
 
+# B62 (2026-10-16, the professor's instruction at the 2026-10-12 meeting): every case draws ONE
+# community contact count from a single scale-free distribution, P(N = n) proportional to
+# (n + s)^-alpha for n = 0..COMMUNITY_MAX_CONTACTS, instead of a Gamma-Poisson count plus a
+# yes/no mass event (B27 + B54), whose two parts made the simulated CCDF show two groups of
+# people that the Taiwan data do not. alpha = P[204], appended so every older vector keeps the
+# B27 / B54 model; s = P[28], whose meaning changes from the mean count to the shift (the body
+# of the distribution and its zero share). With P[204] present no mass event is drawn.
+COMMUNITY_POWER_LAW_INDEX = 204
+COMMUNITY_MAX_CONTACTS = 1000       # Taiwan's largest community record is 850 (B54)
+
+
+def community_power_law_exponent(P: Sequence[float]) -> float | None:
+    """Read the community count exponent P[204] (B62).
+
+    Args:
+        P: The full parameter vector.
+
+    Returns:
+        The exponent, or None for a vector that ends before P[204] (run 16 and earlier).
+
+    Raises:
+        ValueError: The exponent is not finite and positive.
+    """
+    if len(P) <= COMMUNITY_POWER_LAW_INDEX:
+        return None
+    exponent = float(P[COMMUNITY_POWER_LAW_INDEX])
+    if not np.isfinite(exponent) or exponent <= 0.0:
+        raise ValueError(f'community power-law exponent {exponent} must be finite and positive')
+    return exponent
+
+
+@lru_cache(maxsize=256)
+def _community_count_cdf(exponent: float, shift: float, max_count: int) -> np.ndarray:
+    counts = np.arange(0, max_count + 1, dtype=float)
+    weights = (counts + shift) ** -exponent
+    cdf = np.cumsum(weights) / np.sum(weights)
+    cdf.setflags(write=False)
+    return cdf
+
+
+def draw_community_contact_count(exponent: float, shift: float,
+                                 max_count: int = COMMUNITY_MAX_CONTACTS) -> int:
+    """Draw one community contact count from P(N = n) proportional to (n + shift)^-exponent (B62).
+
+    Inverse-CDF sampling with a single uniform from the global numpy stream, like every other
+    draw in this module. The shift is kept away from 0 so that n = 0 has a finite weight.
+
+    Args:
+        exponent: Tail exponent alpha, positive.
+        shift: Shift s of the distribution, positive; it sets the body and the zero share.
+        max_count: Largest count.
+
+    Returns:
+        The count, in [0, max_count].
+    """
+    cdf = _community_count_cdf(float(exponent), max(float(shift), 1e-6), int(max_count))
+    index = int(np.searchsorted(cdf, np.random.random(), side='right'))
+    return min(index, int(max_count))
+
 
 def community_event_parameters(P: Sequence[float]) -> dict[str, float | int] | None:
     """Read the mass-event parameters P[199..203] (B54).
@@ -811,7 +870,7 @@ class Draw_contact_data:
                  previously_infected_list, population_size, vaccine_efficacy, vaccination_rate,
                  natural_immunity_status_list, overdispersion_rate, overdispersion_weight,
                  age_risk_ratios, age_p, layer_age_p=None, community_dispersion=None,
-                 community_event=None):
+                 community_event=None, community_exponent=None):
         self.course_of_disease_data_object = course_of_disease_data_object
         self.social_data_object = social_data_object
         self.attack_rate = attack_rate
@@ -845,9 +904,17 @@ class Draw_contact_data:
         # individual infectiousness in the attack rate, without multiplying one by the other.
         self.community_dispersion = (None if community_dispersion is None
                                      else max(float(community_dispersion), 1e-3))
-        self.community_activity = self.draw_community_activity()
-        # B54: dict from community_event_parameters(), or None for no mass events.
-        self.community_event = community_event
+        # B62: with a community power-law exponent the count is drawn from that distribution
+        # alone, so neither the Gamma activity of B27 nor a mass event of B54 is drawn.
+        self.community_exponent = (None if community_exponent is None
+                                   else float(community_exponent))
+        if self.community_exponent is None:
+            self.community_activity = self.draw_community_activity()
+            # B54: dict from community_event_parameters(), or None for no mass events.
+            self.community_event = community_event
+        else:
+            self.community_activity = None
+            self.community_event = None
         self.age_risk_ratios = age_risk_ratios
         self.age_p = age_p
         if layer_age_p is None:
@@ -1306,8 +1373,12 @@ class Draw_contact_data:
         contact_p, contact_previous_day_p, healthy_p, symptom_p = P[28], P[29], P[30], P[31]
         p = [contact_p, contact_previous_day_p, healthy_p, min(symptom_p, healthy_p)]
         steepness, symptom_phase, recover_phase = P[32], P[33], P[34]
-        community_contacts = np.random.poisson(
-            max(contact_p, 0.0) * self.community_activity)
+        if self.community_exponent is None:
+            community_contacts = np.random.poisson(
+                max(contact_p, 0.0) * self.community_activity)
+        else:
+            # B62: one scale-free count per case; P[28] is the shift s.
+            community_contacts = draw_community_contact_count(self.community_exponent, contact_p)
         community_contacts = int(min(community_contacts,
                                      self.social_data_object.municipality_size))
         self.municipality_contacts_matrix = self.draw_social_contacts_each_day(

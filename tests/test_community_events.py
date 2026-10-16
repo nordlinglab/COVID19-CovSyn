@@ -286,7 +286,7 @@ def test_apply_script_reports_the_community_dispersion_not_the_last_event_parame
     v, lo, hi = apply.COMMUNITY_DISPERSION
     assert f"community dispersion k in  [{lo:g}, {hi:g}], seed {v:g}" in capsys.readouterr().out
     upper = np.load(tmp_path / "course_parameters_ub.npy")
-    assert upper.size + 37 == 204
+    assert upper.size + 37 == 205  # B62 appends P[204]
 
 
 # Seeds whose outbreak has 4 or more cases: one extra random draw changes their output,

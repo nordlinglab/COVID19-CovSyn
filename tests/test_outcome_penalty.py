@@ -80,13 +80,12 @@ def test_width_is_capped_at_half_the_centre() -> None:
 
 
 def test_tail_ratio_is_measured_in_units_of_its_lower_bound() -> None:
-    """B50: the tail ratio [5.5, 93.1] uses 5.5, so run 10's 4.0 still costs something."""
+    """B50: the tail ratio [5.5, 93.1] uses 5.5 as its unit; B63 reports it without charging it."""
     lo, hi, weight = fo.OUTCOME_TARGETS["community_tail_ratio"]
     assert (lo, hi) == (5.5, 93.1)
     assert fo.outcome_scale("community_tail_ratio", lo, hi) == lo
-    expected = fo.OUTCOME_PENALTY_WEIGHT * weight * ((lo - 4.0) / lo) ** 2
-    assert _alone("community_tail_ratio", 4.0) == pytest.approx(expected)
-    assert expected > 0.1
+    assert weight == 0.0  # B63 (E100): the tracing tail is a selected sample (E88)
+    assert _alone("community_tail_ratio", 4.0) == 0.0
 
 
 def test_missing_and_uncharged_targets_are_ignored() -> None:

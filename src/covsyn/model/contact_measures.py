@@ -150,6 +150,34 @@ def daily_contacts_before_onset(
     return matrix[:, :days].sum(axis=0)
 
 
+def one_day_counts(course: Mapping[str, Any], contact: Mapping[str, Any], layer: str) -> np.ndarray:
+    """daily_contacts_before_onset(), with a case whose layer has no window counted as one day
+    without contacts, so that it is not dropped from a pooled one-day distribution (B63)."""
+    days = daily_contacts_before_onset(course, contact, layer)
+    return days if len(days) else np.zeros(1)
+
+
+def one_day_shape(per_case_days: Any) -> tuple[float, float]:
+    """Zero share and 90th percentile of the pooled one-day counts of many cases (B63).
+
+    A contact diary records one person's one day, so the days before onset of every index case
+    are pooled before comparing with Fu 2010. Both statistics depend only on the multiset of
+    days, so the two objective implementations, which collect the cases in a different order,
+    get the same bits.
+
+    Args:
+        per_case_days: One array of one-day counts per case (one_day_counts()).
+
+    Returns:
+        (share of days without contacts, 90th percentile), or (nan, nan) with no days.
+    """
+    days = np.sort(np.concatenate([np.asarray(d, dtype=float) for d in per_case_days])) \
+        if len(per_case_days) else np.zeros(0)
+    if not len(days):
+        return float("nan"), float("nan")
+    return float(np.mean(days == 0)), float(np.percentile(days, 90))
+
+
 # Returned when the counts show no over-dispersion (variance <= mean), i.e. Poisson or tighter.
 NO_OVERDISPERSION_K = 100.0
 

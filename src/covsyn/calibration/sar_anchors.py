@@ -212,9 +212,15 @@ LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
 # realised, not the 13.3% this module printed. The reason that is now tolerable rather than
 # fatal is E56: since the objective charges infections per index case directly, this
 # conversion only sets how much headroom the search has, not what it aims at.
-MEAN_CONTACT_DAYS = {'household': 7.65, 'school': 6.35, 'workplace': 10.30,
-                     'health_care': 5.26, 'municipality': 5.02}
-CONTACT_DAYS_MEASURED_ON = 'Phase D run 5 (spread_Taiwan_weight, 400 simulations)'
+#
+# E99, 2026-10-16: re-measured after run 16 (B61), the first update since run 5. B61 raised the
+# household daily contacts from 1.65 to 2.28, so a member is now met on 85% of days and the
+# household days grew 7.65 -> 10.87; the community days fell 5.02 -> 1.88 because B27 / B54
+# made most community contacts one-off meetings. Run 16's {10.87, 8.16, 11.93, 3.51, 1.88}
+# from the chain's measure_days step (phaseD_report.txt).
+MEAN_CONTACT_DAYS = {'household': 10.87, 'school': 8.16, 'workplace': 11.93,
+                     'health_care': 3.51, 'municipality': 1.88}
+CONTACT_DAYS_MEASURED_ON = 'Phase D run 16 (spread_Taiwan_weight, 400 simulations)'
 
 # How far above the upper anchor the DAILY ceiling may sit. The ceiling is a safety net, not
 # a target: the cumulative SAR itself is a measured cost term (cost_attack_rate, on 300

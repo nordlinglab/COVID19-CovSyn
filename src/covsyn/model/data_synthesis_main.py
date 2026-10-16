@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from tqdm import tqdm
 from covsyn.model.data_synthesize import *
-from covsyn.model.data_synthesize import community_event_parameters
+from covsyn.model.data_synthesize import community_event_parameters, community_power_law_exponent
 
 
 def get_saveable_data(data, data_type):
@@ -142,6 +142,9 @@ def apply_contact_weight(input_P, contact_weight):
     # Municipality: P[28] is a COUNT since B27 (mean community contacts per case), not
     # a probability, so it must not be capped at 1 -- doing so would silently cut the
     # community layer down to a single contact per case.
+    # B62: with P[204] present P[28] is the shift s of P(N = n) ~ (n + s)^-alpha. Scaling s by w
+    # scales the counts by about w too, since (n + w s)^-alpha = w^-alpha (n / w + s)^-alpha,
+    # so the same line keeps meaning "w times the community contacts".
     input_P[28] = input_P[28]*contact_weight
     # Mass events (B54) are part of the community layer too: scaling their probability scales
     # the expected event contacts by the same factor, while the event size stays a property
@@ -196,6 +199,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     community_dispersion = input_P[198] if len(input_P) > 198 else None
     # P[199..203] (B54): municipality mass events; None for older vectors.
     community_event = community_event_parameters(input_P)
+    # P[204] (B62): the scale-free community count replaces B27's count and B54's events.
+    community_exponent = community_power_law_exponent(input_P)
     latent_period_gamma = {
         'latent_period_shape': input_P[37], 'latent_period_scale': input_P[38]}
     infectious_period_gamma = {
@@ -432,7 +437,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                  previously_infected_list, population_size, vaccine_efficacy,
                                                  vaccination_rate, natural_immunity_status_list,
                                                  overdispersion_rate, overdispersion_weight, age_risk_ratios, age_p,
-                                                 layer_age_p, community_dispersion, community_event)
+                                                 layer_age_p, community_dispersion, community_event,
+                                                 community_exponent)
 
                 _, population_size = contact_data.draw_contact_data(input_P)
                 contact_data_tmp = get_saveable_data(contact_data, 'contact')
