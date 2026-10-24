@@ -108,11 +108,25 @@ ATTACK_RATE_SLICE = {'household': (33, 58), 'school': (58, 83), 'workplace': (83
 CHENG2020_INDEX_CASES = 100
 CHENG2020_BY_SETTING = {'household': (10, 151), 'health_care': (6, 698),
                         'municipality': (1, 1836)}
+# B67 (2026-10-24): CovSyn's index case is a person infected in Taiwan who lives in the community,
+# but 71 of Cheng's first 100 index cases were imported (cases 1-100 of the Taiwan case data,
+# confirmed 2020-01-21 to 03-18, the same period), most isolated on or soon after arrival. Cheng
+# 2020 Table 2: local index cases infected 18 people (3 asymptomatic), imported ones 4 (1), so a
+# local index case infects 18 / 29 = 0.62 people (exact Poisson 95% 0.37-0.98) against 22 / 100 =
+# 0.22 for the mixture. Cheng does not split the settings by source, so every layer's count is
+# scaled by the same factor, assuming local index cases infect in the same proportions across
+# settings as all of them; the imported index cases are left to validation (0.056 per case).
+CHENG2020_LOCAL_INDEX_CASES = 29
+CHENG2020_LOCAL_INFECTIONS = 18
+CHENG2020_ALL_INFECTIONS = 22
+CHENG2020_LOCAL_SCALE = ((CHENG2020_LOCAL_INFECTIONS / CHENG2020_LOCAL_INDEX_CASES)
+                         / (CHENG2020_ALL_INFECTIONS / CHENG2020_INDEX_CASES))
 # CovSyn candidate contacts per index case, measured on the fourth Phase D run
 # (verify_phaseD.py, 1000 index cases). Re-measure and update between runs.
-COVSYN_CANDIDATE_CONTACTS = {'household': 2.696, 'school': 1.430, 'workplace': 1.229,
-                             'health_care': 1.728, 'municipality': 4.491}
-CANDIDATE_CONTACTS_MEASURED_ON = 'Phase D run 5 (rr_population_check.py, 1000 index cases)'
+COVSYN_CANDIDATE_CONTACTS = {'household': 2.605, 'school': 3.657, 'workplace': 2.144,
+                             'health_care': 4.759, 'municipality': 23.874}
+CANDIDATE_CONTACTS_MEASURED_ON = ('Phase D run 17 (phaseD_checks.txt, CovSyn candidate contacts '
+                                  'per index, 1000 index cases)')
 # How far these moved on run 5, which is what E56 is about: school -47.7%, health care -37.1%,
 # workplace -12.3%, municipality +9.1%, household +0.4%. Run 4 had
 # {2.684, 2.733, 1.401, 2.747, 4.115}.
@@ -140,7 +154,9 @@ def cheng_poisson_interval(layer):
     centre = infections / CHENG2020_INDEX_CASES
     lo = chi2.ppf(0.025, 2 * infections) / 2 / CHENG2020_INDEX_CASES
     hi = chi2.ppf(0.975, 2 * infections + 2) / 2 / CHENG2020_INDEX_CASES
-    return lo, centre, hi
+    # B67: per LOCAL index case.
+    return (CHENG2020_LOCAL_SCALE * lo, CHENG2020_LOCAL_SCALE * centre,
+            CHENG2020_LOCAL_SCALE * hi)
 
 
 def infections_per_index_target(layer):
@@ -218,9 +234,14 @@ LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
 # household days grew 7.65 -> 10.87; the community days fell 5.02 -> 1.88 because B27 / B54
 # made most community contacts one-off meetings. Run 16's {10.87, 8.16, 11.93, 3.51, 1.88}
 # from the chain's measure_days step (phaseD_report.txt).
-MEAN_CONTACT_DAYS = {'household': 10.87, 'school': 8.16, 'workplace': 11.93,
-                     'health_care': 3.51, 'municipality': 1.88}
-CONTACT_DAYS_MEASURED_ON = 'Phase D run 16 (spread_Taiwan_weight, 400 simulations)'
+#
+# 2026-10-24 (run 18 preparation): re-measured after run 17 (B62, B63), phaseD_report.txt.
+# Community days fell 1.88 -> 1.21 because the scale-free count makes most community contacts
+# one-off meetings; household 10.87 -> 10.27, school 8.16 -> 6.61, workplace 11.93 -> 8.87,
+# health care 3.51 -> 2.70.
+MEAN_CONTACT_DAYS = {'household': 10.27, 'school': 6.61, 'workplace': 8.87,
+                     'health_care': 2.70, 'municipality': 1.21}
+CONTACT_DAYS_MEASURED_ON = 'Phase D run 17 (spread_Taiwan_weight, 400 simulations)'
 
 # How far above the upper anchor the DAILY ceiling may sit. The ceiling is a safety net, not
 # a target: the cumulative SAR itself is a measured cost term (cost_attack_rate, on 300

@@ -51,6 +51,6 @@ for path in sorted(glob.glob('synthetic_data_results_taiwan_first_outbreak_*')):
     if path not in paths:
         summarise(path, 'previous: ' + path)
 print('\nObserved Taiwan first wave: 55 cumulative local confirmed cases, 3 local deaths.')
-print('The 28 seeds are included in the simulated counts. Reporting is complete in the model')
+print('The first-wave seeds (B66) are included in the simulated counts. Reporting is complete in the model')
 print('(B18), so the simulated infection count should sit ABOVE 55, not on it; and under the')
 print('B33 severity cascade the expected death count is about 0.6, not 3 (B36).')

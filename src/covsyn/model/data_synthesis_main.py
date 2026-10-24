@@ -10,7 +10,40 @@ import time
 from pathlib import Path
 from tqdm import tqdm
 from covsyn.model.data_synthesize import *
-from covsyn.model.data_synthesize import community_event_parameters, community_power_law_exponent
+from covsyn.model.data_synthesize import (community_event_parameters, community_power_law_exponent,
+                                          tracing_delay_mean, work_group_parameters)
+
+# B66: the two first-wave scenarios and their seed tables (build_first_wave_seeds). 'all' seeds every
+# imported case to 2020-04-12 with restrictions that grow over time; 'feb7' only the seeds before
+# the 2020-02-07 border control, with none.
+FIRST_WAVE_SEED_FILES = {'taiwan_first_outbreak': './variable/taiwan_first_wave_seeds.csv',
+                         'taiwan_first_outbreak_feb7': './variable/taiwan_first_wave_seeds_feb7.csv'}
+
+
+def load_first_wave_seeds(path):
+    """The seed cases of the Taiwan first wave (B66), as a list of dicts.
+
+    Built by covsyn.data_processing.build_first_wave_seeds from the Taiwan case data: every
+    imported case of the first wave and the 13 local cases of unknown source, with a fixed
+    infection day (day 0 = the earliest seed infection), the ten-year age group, the gender,
+    the arrival day counted from infection and the status after arrival.
+    """
+    import csv
+    seeds = []
+    with open(path, newline='') as f:
+        for row in csv.DictReader(f):
+            seeds.append({
+                'case_id': int(row['case_id']),
+                'seed_type': row['seed_type'],
+                'age_low': float(row['age_low']) if row['age_low'] else np.nan,
+                'age_high': float(row['age_high']) if row['age_high'] else np.nan,
+                'gender': row['gender'] or None,
+                'infection_day': int(row['infection_day']),
+                'arrival_day': (int(float(row['arrival_day_from_infection']))
+                                if row['arrival_day_from_infection'] else None),
+                'status': row['status'],
+            })
+    return seeds
 
 
 def get_saveable_data(data, data_type):
@@ -49,7 +82,10 @@ def get_saveable_data(data, data_type):
             'natural_immunity_status': getattr(data, 'natural_immunity_status', None),
             'negative_test_date': getattr(data, 'negative_test_date', None),
             'negative_test_status': getattr(data, 'negative_test_status', None),
-            'positive_test_date': getattr(data, 'positive_test_date', None)
+            'positive_test_date': getattr(data, 'positive_test_date', None),
+            # B66: 'imported' or 'local_unknown' for a first-wave seed, None otherwise.
+            'seed_type': getattr(data, 'seed_type', None),
+            'seed_status': getattr(data, 'seed_status', None),
         }
     elif data_type == "contact":
         # Save contact data attributes
@@ -201,6 +237,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     community_event = community_event_parameters(input_P)
     # P[204] (B62): the scale-free community count replaces B27's count and B54's events.
     community_exponent = community_power_law_exponent(input_P)
+    # P[205], P[206] (B64): the work group; None keeps B31's. P[207] (B65): tracing delay.
+    work_group = work_group_parameters(input_P)
+    tracing_delay = tracing_delay_mean(input_P)
     latent_period_gamma = {
         'latent_period_shape': input_P[37], 'latent_period_scale': input_P[38]}
     infectious_period_gamma = {
@@ -242,19 +281,16 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                     symptom_to_recovered_transition_p, critically_ill_to_recovered_transition_p]
 
     result_path = Path(result_path)
-    if mode == 'taiwan_first_outbreak':
+    if mode in FIRST_WAVE_SEED_FILES:
         time_limit = 365
-        with open('./variable/infection_days_list.pkl', 'rb') as file:
-            infection_days_list = pickle.load(file)
-        # The seeds are the 28 local index cases of the first wave (finding E29); the old
-        # line subtracted len(infection_days_list), which is the number of SIMULATIONS
-        # (1,100), not the number of seeds.
-        population_size = 23008366 - len(infection_days_list[0])
+        # B66 (2026-10-24): the seeds are every imported case of the first wave and the 13
+        # local cases of unknown source, each with its own infection day, age group, gender and
+        # status after arrival (load_first_wave_seeds). They replace the 28 local confirmation
+        # dates of E29, which used the confirmation date as the infection date and seeded local
+        # cases with a known source.
+        first_wave_seeds = load_first_wave_seeds(FIRST_WAVE_SEED_FILES[mode])
+        population_size = 23008366 - len(first_wave_seeds)
         natural_immunity_rate = 1
-        # B34: seed the Taiwan scenario with the age distribution of the real cases instead
-        # of the general population, because the observed cases were not a random sample of
-        # Taiwan (mostly returning travellers and their households).
-        seed_age_p = np.load('./variable/taiwan_case_age_p.npy')
     if mode == 'spread_Taiwan':
         time_limit = 7*52
         number_source_cases = 1
@@ -351,14 +387,15 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     total_infections = 0  # Variable to store the total number of infections
     threshold_confirmed_day = np.nan
     # for infection_day in tqdm(infection_days):
-    if mode == 'taiwan_first_outbreak':
-        # The list holds the same 28 seed days 1100 times; wrapping lets seeds beyond it (an
-        # independent set, B60) reuse them, and changes nothing below 1100.
-        infection_days = infection_days_list[seed % len(infection_days_list)]
-        for infection_day in infection_days:
-            seed_age = random.choices(np.arange(100+1), weights=seed_age_p)[0]
-            infection_queue.put((source_case_id, infection_day,
-                                previously_infected_index, seed_age, contact_type))
+    if mode in FIRST_WAVE_SEED_FILES:
+        # B66: the year of birth is drawn within the case's ten-year age group (professor,
+        # 2026-10-19); the seed is found again by its contact type when it leaves the queue.
+        for k, seed_case in enumerate(first_wave_seeds):
+            low, high = seed_case['age_low'], seed_case['age_high']
+            seed_age = (random.randint(int(low), int(high)) if np.isfinite(low) and np.isfinite(high)
+                        else np.nan)
+            infection_queue.put((source_case_id, seed_case['infection_day'],
+                                 previously_infected_index, seed_age, f'seed:{k}'))
     else:
         for infection_day in infection_days:
             infection_queue.put((source_case_id, infection_day,
@@ -373,11 +410,15 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 # Save contact network
                 transmission_digraph = transmission_digraph + \
                     [(source_case_id, case_id, infection_day, contact_type)]
+                seed_case = (first_wave_seeds[int(contact_type[5:])]
+                             if isinstance(contact_type, str) and contact_type.startswith('seed:')
+                             else None)
                 # Preciously infected or not
                 if np.isnan(previously_infected_index):  # Not previously infected
                     # Draw demographic data
                     demographic_data = Draw_demographic_data(
-                        age_p, gender_p, student_p, employment_p, job_p, age)
+                        age_p, gender_p, student_p, employment_p, job_p, age,
+                        gender=None if seed_case is None else seed_case['gender'])
                     demographic_data.draw_demographic_data()
                     demographic_tmp = get_saveable_data(
                         demographic_data, 'demographic')
@@ -391,7 +432,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
 
                 # Draw social data
                 social_data = Draw_social_data(municipality_data, family_size_dict, school_p, workplace_p, demographic_data,
-                                               hospital_p, hospital_size_p, hospital_sizes)
+                                               hospital_p, hospital_size_p, hospital_sizes,
+                                               work_group=work_group)
                 social_data.draw_social_data()
                 social_data_tmp = get_saveable_data(social_data, 'social')
                 social_data_list.append(social_data_tmp)
@@ -413,9 +455,13 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 course_of_disease_data = Draw_course_of_disease_data(infection_day, latent_period_gamma, infectious_period_gamma, incubation_period_gamma, symptom_to_isolation_gamma,
                                                                      asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
                                                                      critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma, natural_immunity_rate, transition_p,
-                                                                     age=case_age, source_confirmed_day=source_confirmed_day, age_p=age_p)
+                                                                     age=case_age, source_confirmed_day=source_confirmed_day, age_p=age_p,
+                                                                     tracing_delay=tracing_delay)
                 # print('Infection day: ', infection_day)
                 course_of_disease_data.draw_course_of_disease()
+                if seed_case is not None:
+                    course_of_disease_data.seed_type = seed_case['seed_type']
+                    course_of_disease_data.seed_status = seed_case['status']
                 natural_immunity_status_list.append(
                     course_of_disease_data.natural_immunity_status)
                 course_of_disease_data_tmp = get_saveable_data(
@@ -438,7 +484,11 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                  vaccination_rate, natural_immunity_status_list,
                                                  overdispersion_rate, overdispersion_weight, age_risk_ratios, age_p,
                                                  layer_age_p, community_dispersion, community_event,
-                                                 community_exponent)
+                                                 community_exponent,
+                                                 seed_rule=(None if seed_case is None
+                                                            or seed_case['arrival_day'] is None
+                                                            else {'arrival_day': seed_case['arrival_day'],
+                                                                  'status': seed_case['status']}))
 
                 _, population_size = contact_data.draw_contact_data(input_P)
                 contact_data_tmp = get_saveable_data(contact_data, 'contact')
@@ -576,7 +626,8 @@ if __name__ == "__main__":
     start_time = time.time()
     parser = argparse.ArgumentParser(description='Data synthesis')
     parser.add_argument('--mode', type=str, default='spread_Taiwan_weight', choices=['spread_Taiwan', 'spread_Taiwan_weight', 'spread_Taitung', 'profile', 'result', 'cheng2020', 'test', 'ge2021',
-                        'spread_Taitung_outbreak_weight', 'spread_Lienchiang', 'taiwan_first_outbreak'],
+                        'spread_Taitung_outbreak_weight', 'spread_Lienchiang', 'taiwan_first_outbreak',
+                                 'taiwan_first_outbreak_feb7'],
                         help='Mode options include: spread, spread_demo, profile, ICIDMID, result, cheng2020, test, ge2021, Boonpatcharanon2022')
     parser.add_argument('--parameter_path', type=str,
                         default='./Firefly_result/Firefly_result_pop_size_50_alpha_1_betamin_1_gamma_0.131_max_generations_200')

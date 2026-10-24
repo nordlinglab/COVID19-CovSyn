@@ -78,6 +78,73 @@ EXPECTED_CONTACT_GRID = 2.0 ** 20   # resolution of the expected event contacts 
 COMMUNITY_POWER_LAW_INDEX = 204
 COMMUNITY_MAX_CONTACTS = 1000       # Taiwan's largest community record is 850 (B54)
 
+# B64 (2026-10-24, the professor's instruction at the 2026-10-19 meeting): the work group no
+# longer has a hard cap and no longer grows as a power of the company size. Every coworker of a
+# small company is met (a two-person company always meets the other person), and the share met
+# falls as the company grows, so the MEAN group is (n - 1) a / (a + n - 1) for a company of n
+# people: about n - 1 when n is much smaller than a, and about a in a large company. The group
+# is drawn around that mean with negative-binomial variance (Gamma shape k), so a large company
+# can still put many people in one room now and then; it never exceeds the n - 1 coworkers.
+# a = P[205], k = P[206], appended so older vectors keep B31's group. They are calibrated to
+# Fu 2010's coworker contacts of employed people on a day at work (mean 4.84, zero share 28%,
+# p90 12; weighted to the 2010 population 4.96, 27.4%, 13; covid19-research
+# scripts/summarize_taiwan_contact_data.py at_work()).
+WORK_GROUP_SATURATION_INDEX = 205
+WORK_GROUP_DISPERSION_INDEX = 206
+# B65 (2026-10-24, professor 2026-10-12): the delay between an infector's confirmation and the
+# isolation of the contact is a parameter, P[207], instead of the constant TRACING_DELAY_MEAN.
+# Older vectors keep the constant.
+TRACING_DELAY_INDEX = 207
+
+
+def work_group_parameters(P: Sequence[float]) -> tuple[float, float] | None:
+    """Read the work group saturation a = P[205] and Gamma shape k = P[206] (B64).
+
+    Args:
+        P: The full parameter vector.
+
+    Returns:
+        (a, k), or None for a vector that ends before P[206] (run 17 and earlier).
+
+    Raises:
+        ValueError: a or k is not finite and positive.
+    """
+    if len(P) <= WORK_GROUP_DISPERSION_INDEX:
+        return None
+    a = float(P[WORK_GROUP_SATURATION_INDEX])
+    k = float(P[WORK_GROUP_DISPERSION_INDEX])
+    if not (np.isfinite(a) and a > 0.0 and np.isfinite(k) and k > 0.0):
+        raise ValueError(f'work group parameters a={a}, k={k} must be finite and positive')
+    return a, k
+
+
+def tracing_delay_mean(P: Sequence[float]) -> float:
+    """Mean of the Poisson contact-tracing delay: P[207] when present, else TRACING_DELAY_MEAN (B65)."""
+    if len(P) <= TRACING_DELAY_INDEX:
+        return TRACING_DELAY_MEAN
+    delay = float(P[TRACING_DELAY_INDEX])
+    if not np.isfinite(delay) or delay < 0.0:
+        raise ValueError(f'tracing delay mean {delay} must be finite and non-negative')
+    return delay
+
+
+def draw_work_group(coworkers: int, saturation: float, shape: float) -> int:
+    """Draw the work group met inside a company with this many coworkers (B64).
+
+    Args:
+        coworkers: Other people in the company, n - 1.
+        saturation: a, the mean group of a large company.
+        shape: Gamma shape k of the negative-binomial spread.
+
+    Returns:
+        The group size, in [0, coworkers].
+    """
+    if coworkers <= 0:
+        return 0
+    mean = coworkers * saturation / (saturation + coworkers)
+    group = np.random.poisson(np.random.gamma(shape, mean / shape))
+    return int(min(group, coworkers))
+
 
 def community_power_law_exponent(P: Sequence[float]) -> float | None:
     """Read the community count exponent P[204] (B62).
@@ -324,7 +391,10 @@ def build_layer_age_distributions(age_p, gender_p, student_p, employment_p):
 
 
 class Draw_demographic_data:
-    def __init__(self, age_p, gender_p, student_p, employment_p, job_p, age):
+    def __init__(self, age_p, gender_p, student_p, employment_p, job_p, age, gender=None):
+        """gender: 'Male' or 'Female' to fix it, as for a seed case taken from the Taiwan
+        case data (B66); None draws it from the population, as before."""
+        self.fixed_gender = gender
         self.age_p = age_p
         self.gender_p = gender_p
         self.male_student_p = student_p[0]
@@ -346,6 +416,9 @@ class Draw_demographic_data:
         return (self.age)
 
     def draw_gender(self):
+        if self.fixed_gender is not None:
+            self.gender = self.fixed_gender
+            return (self.gender)
         self.gender = random.choices(
             ['Male', 'Female'], weights=self.gender_p[self.age])[0]
 
@@ -396,7 +469,11 @@ class Draw_demographic_data:
 
 
 class Draw_social_data:
-    def __init__(self, municipality_data, family_size_dict, school_p, workplace_p, demographic_data_object, hospital_p, hospital_size_p, hospital_sizes):
+    def __init__(self, municipality_data, family_size_dict, school_p, workplace_p, demographic_data_object, hospital_p, hospital_size_p, hospital_sizes,
+                 work_group=None):
+        """work_group: (a, k) from work_group_parameters() for the B64 work group, or None
+        for B31's."""
+        self.work_group = work_group
         self.municipality_dict = municipality_data
         self.municipality_list = list(municipality_data.keys())
         self.municipality_p = np.fromiter(
@@ -442,7 +519,10 @@ class Draw_social_data:
         except:
             self.enterprise_size = 0
 
-        if self.enterprise_size > 0:
+        if self.work_group is not None:
+            # B64: no cap; the share of coworkers met falls with the company size.
+            self.work_group_size = draw_work_group(self.enterprise_size - 1, *self.work_group)
+        elif self.enterprise_size > 0:
             typical = WORK_GROUP_COEFFICIENT * self.enterprise_size ** WORK_GROUP_EXPONENT
             group = int(round(np.random.lognormal(
                 mean=np.log(max(typical, 1e-6)) - WORK_GROUP_LOG_SIGMA ** 2 / 2,
@@ -480,13 +560,16 @@ class Draw_course_of_disease_data:
     def __init__(self, infection_day, latent_period_gamma, infectious_period_gamma, incubation_period_gamma, symptom_to_isolation_gamma,
                  asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
                  critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma,
-                 natural_immunity_rate, transition_p, age=np.nan, source_confirmed_day=np.nan, age_p=None):
+                 natural_immunity_rate, transition_p, age=np.nan, source_confirmed_day=np.nan, age_p=None,
+                 tracing_delay=TRACING_DELAY_MEAN):
         self.infection_day = infection_day
         # B20 / B26: the age of the case (severity depends on it) and the day its infector
         # was confirmed (contact tracing isolates this case shortly afterwards).
         self.age = age
         self.source_confirmed_day = source_confirmed_day
         self.age_p = age_p
+        # B65: mean of the Poisson delay from the infector's confirmation to isolation.
+        self.tracing_delay = tracing_delay
         self.latent_period_shape = latent_period_gamma['latent_period_shape']
         self.latent_period_scale = latent_period_gamma['latent_period_scale']
         self.infectious_period_shape = infectious_period_gamma['infectious_period_shape']
@@ -775,7 +858,7 @@ class Draw_course_of_disease_data:
         # --- isolation: own symptoms or contact tracing, whichever comes first (B26) ---
         if np.isfinite(self.source_confirmed_day):
             traced_isolation = max(0, self.source_confirmed_day
-                                   + np.random.poisson(TRACING_DELAY_MEAN)
+                                   + np.random.poisson(self.tracing_delay)
                                    - self.infection_day)
         else:
             traced_isolation = np.inf
@@ -870,7 +953,9 @@ class Draw_contact_data:
                  previously_infected_list, population_size, vaccine_efficacy, vaccination_rate,
                  natural_immunity_status_list, overdispersion_rate, overdispersion_weight,
                  age_risk_ratios, age_p, layer_age_p=None, community_dispersion=None,
-                 community_event=None, community_exponent=None):
+                 community_event=None, community_exponent=None, seed_rule=None):
+        # B66: {'arrival_day', 'status'} for a seed case of the Taiwan first wave, else None.
+        self.seed_rule = seed_rule
         self.course_of_disease_data_object = course_of_disease_data_object
         self.social_data_object = social_data_object
         self.attack_rate = attack_rate
@@ -1561,8 +1646,43 @@ class Draw_contact_data:
 
         return (age_adjusted_attack_rate)
 
+    def apply_seed_rule(self):
+        """Restrict a first-wave seed's contacts to what its own record allows (B66).
+
+        A seed imported from abroad meets nobody in Taiwan before the day it arrives
+        (arrival_day, counted from infection). After that its status, taken from how the case was
+        detected in the Taiwan case data, decides which layers it meets: 'community' every layer;
+        'quarantine' (detected during home quarantine) only the household and health care, the
+        2020 home quarantine being spent at home with the family; 'airport' (detected by airport
+        screening, isolated on arrival) only health care. Contact days outside that are removed,
+        and a contact left without any day is dropped, so it is neither a candidate contact nor
+        an infection. The layers' own windows still end at isolation.
+        """
+        allowed = {'community': LAYER_NAMES, 'quarantine': ('household', 'health_care'),
+                   'airport': ('health_care',)}[self.seed_rule['status']]
+        arrival = max(int(self.seed_rule['arrival_day']), 0)
+        attributes = {'household': 'household_contacts_matrix',
+                      'school': 'school_class_contacts_matrix',
+                      'workplace': 'workplace_contacts_matrix',
+                      'health_care': 'health_care_contacts_matrix',
+                      'municipality': 'municipality_contacts_matrix'}
+        for layer, attribute in attributes.items():
+            matrix = np.array(getattr(self, attribute), dtype=bool)
+            if matrix.ndim != 2 or matrix.shape[0] == 0:
+                continue
+            if layer in allowed:
+                matrix[:, :arrival] = False
+            else:
+                matrix[:, :] = False
+            keep = matrix.any(axis=1)
+            setattr(self, attribute, matrix[keep])
+            if layer == 'municipality' and getattr(self, 'municipality_event_mask', None) is not None:
+                self.municipality_event_mask = self.municipality_event_mask[keep]
+
     def draw_contact_data(self, P):
         self.draw_contacts_each_day(P)
+        if self.seed_rule is not None:
+            self.apply_seed_rule()
         attack_rate_profiles = self.calculate_daily_secondary_attack_rate()
         household_attack_rate = attack_rate_profiles['household']
         school_attack_rate = attack_rate_profiles['school']

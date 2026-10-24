@@ -9,7 +9,7 @@ Usage:
     python -m covsyn.validation.verify_phase_d [spread_dir] [first_outbreak_dir] [out_json]
 
 spread_dir          synthetic_data_results_spread_Taiwan_weight (single seed, 84 days)
-first_outbreak_dir  synthetic_data_results_taiwan_first_outbreak (28 seeds), optional
+first_outbreak_dir  synthetic_data_results_taiwan_first_outbreak (B66 first-wave seeds), optional
 """
 import glob
 import json
@@ -117,48 +117,24 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
         check('B30', f'class size, {label}', classes[band].mean() if band.sum() else np.nan,
               target, note=f'n={int(band.sum())}')
 
-    # ---------------------------------------------------------------- B31 workplace
+    # ---------------------------------------------------------------- B64 workplace
+    # B64 (2026-10-24) replaces B31's work group, so B31's company-size checks (Chen 2022 cases per
+    # cluster by company size, items 4.13 and 4.14) are removed: Chen 2022 Table 5 is by industry,
+    # not by company size (A3), and the professor asked to drop them (2026-10-12). Employed means
+    # an enterprise size of at least 1, as in the objective.
     enterprise = field('enterprise_size', index_social)
     group = field('work_group_size', index_social)
-    employed = group > 0
-    check('B31', 'work group size (median)', np.median(group[employed]) if employed.any() else np.nan,
-          (5, 20), note=f'n={int(employed.sum())}')
-    # Chen 2022 (BMJ Open 12:e055643) found the number of cases per workplace cluster
-    # essentially constant across enterprise sizes (median 4, staff medians 16 to 650), so
-    # the share of staff infected fell from 17.8% to 4.3% to 1.1%. Its numerator is a whole
-    # cluster over all its generations; CovSyn's work groups are drawn per case and are not
-    # shared between cases, so there is no cluster to count and the absolute 17.8% is not
-    # reachable here. What IS testable, and is the actual claim, is the SHAPE: the number a
-    # case infects at work must not grow with the size of the company, which then makes the
-    # share of staff fall roughly as 1/staff.
-    bands = [('1-49 staff', 1, 49), ('50-249 staff', 50, 249), ('250+ staff', 250, 10 ** 9)]
-    per_case, per_staff = {}, {}
-    for label, lo, hi in bands:
-        band = (enterprise >= lo) & (enterprise <= hi)
-        if band.sum() < 20:
-            continue
-        infected = np.array([np.nansum(np.asarray(c['workplace_effective_contacts'], dtype=float))
-                             for c, keep in zip(index_contact, band) if keep])
-        per_case[label] = float(infected.mean())
-        per_staff[label] = float(100 * infected.sum() / enterprise[band].sum())
-        check('B31', f'workplace infections per case, {label}', per_case[label], None,
-              note=f'n={int(band.sum())}; must not grow with company size (Chen 2022)')
-        check('B31', f'workplace infections per staff, {label}', per_staff[label], None, '%',
-              note='Chen 2022 whole-cluster gradient 17.8 / 4.3 / 1.1; CovSyn counts one '
-                   'generation, so only the shape is comparable')
-    if len(per_case) == 3:
-        small, large = per_case['1-49 staff'], per_case['250+ staff']
-        # Chen 2022 does NOT say the cluster is constant: its cases per cluster run from 3 to
-        # 8 while the staff median runs from 16 to 650, which is a ratio of 2.7 over a 40-fold
-        # change in company size. The earlier target of 0.7-1.6 read "constant" into the paper
-        # and failed a model that was actually flatter than the data.
-        check('B31', 'infections per case, 250+ staff / 1-49 staff',
-              large / small if small else np.nan, (1.0, 3.0),
-              note='Chen 2022 cases per cluster 3 -> 8 over staff 16 -> 650, i.e. 2.7x')
-        small, large = per_staff['1-49 staff'], per_staff['250+ staff']
-        check('B31', 'infections per staff, 1-49 staff / 250+ staff',
-              small / large if large else np.nan, (4.0, 60.0),
-              note='Chen 2022 observed 17.8 / 1.1 = 16x')
+    employed = enterprise >= 1
+    check('B64', 'work group size, employed (median)',
+          np.median(group[employed]) if employed.any() else np.nan, None,
+          note=f'n={int(employed.sum())}; (n - 1) a / (a + n - 1) around a company of n')
+    workplace_days = [contacts_per_day_before_onset(k, c, 'workplace')
+                      for c, k, e in zip(index_contact, index_course, employed, strict=True) if e]
+    check('B64', 'coworker contacts per day before onset, employed',
+          float(np.mean(workplace_days)) if workplace_days else np.nan,
+          OUTCOME_TARGETS['daily_workplace_employed'][:2],
+          note='Fu 2010 employed on a day at work, >=15 min, met daily, weighted to the 2010 '
+               'population: mean 4.96 (n=416), summarize_taiwan_contact_data.py at_work()')
 
     # ---------------------------------------------------------------- B25 daily contacts
     # B61: the objective's bands (they were copied here and would have drifted when B61 moved
@@ -171,7 +147,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                    for c, k in zip(index_contact, index_course, strict=True)]
         value = float(np.mean(per_day))
         total += value
-        check('B25', f'contacts per day before onset, {L}', value, targets[L])
+        # B64: the workplace band over every case is reported only; the employed version is
+        # judged under B64 above.
+        check('B25', f'contacts per day before onset, {L}', value,
+              targets[L] if OUTCOME_TARGETS[f'daily_{L}'][2] > 0 else None)
     # B61: same rule as the layers -- the 2020 survey below, Fu 2010 (>=15 min) above. The old
     # (5.0, 7.0) could not hold the new layer bands, whose lower bounds already sum to 5.82.
     check('B25', 'contacts per day, all layers', total, (6.03, 8.40),
@@ -263,9 +242,12 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # exposed together with the case (same tour group, flight, ship), so it is an upper bound;
     # the recorded infector -> infectee links give 0.047, a lower bound. CovSyn counts the people
     # this case infected, so the acceptance interval runs between the two definitions.
-    check('B17', 'R (mean offspring of an index case)', counts.mean(), (0.047, 0.43),
-          note='B56: between Taiwan links (0.047, lower bound) and confirmed contacts '
-               '(0.43, upper bound), E80')
+    # B67 (2026-10-24): CovSyn's index case is a local case living in the community. Cheng
+    # 2020's 29 local index cases infected 18 people, 0.62 each (exact Poisson 95% 0.37-0.98);
+    # the earlier band (0.047, 0.43) came from all cases, 71% of them imported.
+    check('B17', 'R (mean offspring of an index case)', counts.mean(), (0.37, 0.98),
+          note='B67: Cheng 2020 local index cases 18 / 29 = 0.62; all cases between Taiwan '
+               'links 0.047 and confirmed contacts 0.43 (E80)')
     check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), (0.2, 4.3), '%',
           note='B56: between Taiwan links (0.2%) and confirmed contacts (4.3%), E80')
     check('B17', 'largest number infected by one case', counts.max(), (5, 30), interval=False,
@@ -325,8 +307,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
              'Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)',
              (zero_band, OUTCOME_TARGETS['community_day_p90'][:2])),
             ('workplace', 'workplace, employed cases', [p for p, e in zip(pairs, employed) if e],
-             'Fu 2010, weekday employed, met daily at work: mean 4.79, median 2, p90 12.5 '
-             '(n=616)', (None, None))):
+             'Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, '
+             'zero 27.4%, p90 13 (n=416)',
+             (tuple(100 * x for x in OUTCOME_TARGETS['workplace_day_zero_share'][:2]),
+              OUTCOME_TARGETS['workplace_day_p90'][:2]))):
         d = person_days(layer, cases)
         if not len(d):
             continue
@@ -537,21 +521,35 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
               note='B14 is accepted on that measurement since E68; without it only the '
                    'informational rows above are available')
 
-    # ---------------------------------------------------------------- B36 Taiwan first wave
+    # ---------------------------------------------------------------- B66 Taiwan first wave
+    # B66: the first-wave scenario starts from every imported case of the first wave and the 13
+    # local cases of unknown source (variable/taiwan_first_wave_seeds.csv); course['seed_type']
+    # marks them. The local cases of a simulation are its non-seed cases plus the local seeds,
+    # which is what the 55 reported local cases are.
     if first_runs:
-        sizes = np.array([len(r['course']) for r in first_runs], dtype=float)
+        def seeds_of(r, kind):
+            return [i for i, c in enumerate(r['course']) if c.get('seed_type') == kind]
+        local = np.array([sum(1 for c in r['course'] if not c.get('seed_type'))
+                          + len(seeds_of(r, 'local_unknown')) for r in first_runs], dtype=float)
         deaths = np.array([sum(1 for c in r['course'] if not np.isnan(c['date_of_death']))
                            for r in first_runs], dtype=float)
-        kept = sizes >= 29
-        check('B36', 'first wave cases per simulation, all runs', sizes.mean(), None,
-              note=f'observed 55 reported cases; n={len(sizes)}')
-        check('B36', 'first wave cases per simulation, runs with at least 1 onward case',
-              sizes[kept].mean() if kept.any() else np.nan, None,
-              note=f'the filter used in taiwan_first_outbreak.ipynb; n={int(kept.sum())}')
+        check('B66', 'first wave local cases per simulation', local.mean(), None,
+              note=f'observed 55 local cases (13 of unknown source); n={len(local)}')
+        imported_offspring = np.concatenate([
+            offspring_counts([r['contact'][i] for i in seeds_of(r, 'imported')]) for r in first_runs])
+        check('B66', 'infections per imported seed', imported_offspring.mean()
+              if len(imported_offspring) else np.nan, (0.015, 0.14),
+              note='Cheng 2020 imported index cases 4 / 71 = 0.056 (exact Poisson 95% '
+                   '0.015-0.14); the case data give 17 local cases infected by imported cases')
+        everyone = [(c, k) for r in first_runs for c, k in zip(r['course'], r['contact'], strict=True)]
+        check('B66', "contacts per confirmed case in Jian's tracing window, all cases",
+              float(np.mean([contacts_in_tracing_window(c, k) for c, k in everyone])), None,
+              note='Jian et al. 2020: 16.5 per case over all 487 confirmed cases, 76% of them '
+                   'quarantined travellers or contacts; same mixture as this scenario (1.14)')
         check('B36', 'first wave deaths per simulation', deaths.mean(), None,
-              note='observed 3; expected about 0.6 under the B33 cascade, see B36')
+              note='observed 3 local deaths')
         first_ages = np.array([d['age'] for r in first_runs for d in r['demo']], dtype=float)
-        check('B34', 'Taiwan scenario mean case age', first_ages.mean(), (33.0, 42.0),
+        check('B34', 'Taiwan scenario mean case age', np.nanmean(first_ages), (33.0, 42.0),
               note='observed tracing mean 37.1')
 
     return [dict(r) for r in results]

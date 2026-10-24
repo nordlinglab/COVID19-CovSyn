@@ -1,5 +1,5 @@
 {
- "source": "run 14, candidate 156, checklist re-run with the E96 fix (CovSyn 7ecb1ab), 1000 simulations, 200 bootstrap replicates; B61 (2026-10-15): household, school and offspring_k acceptance intervals updated and recharged with the run-14 sigma via compute_margins; re-run target_margins on the next checklist; B63 (2026-10-16): daily_municipality acceptance [1.2, 7.12], recharged with the run-14 sigma via compute_margins",
+ "source": "run 14, candidate 156, checklist re-run with the E96 fix (CovSyn 7ecb1ab), 1000 simulations, 200 bootstrap replicates; B61 (2026-10-15): household, school and offspring_k acceptance intervals updated and recharged with the run-14 sigma via compute_margins; re-run target_margins on the next checklist; B63 (2026-10-16): daily_municipality acceptance [1.2, 7.12], recharged with the run-14 sigma via compute_margins; B67 (2026-10-24): the three Cheng per-index entries rescaled to local index cases (x 2.82) and recharged with their recorded run-14 sigma via charged_interval; B64 (2026-10-24): daily_workplace removed (reported only); daily_workplace_employed is charged on its acceptance interval until a checklist supplies its sigma",
  "z": 1.645,
  "max_shift_of_width": 0.25,
  "targets": {
@@ -34,22 +34,6 @@
    ],
    "sigma": 0.11523170756501905,
    "check": "B25 contacts per day before onset, school"
-  },
-  "daily_workplace": {
-   "acceptance": [
-    1.2,
-    1.8
-   ],
-   "objective": [
-    1.2,
-    1.8
-   ],
-   "charged": [
-    1.3166026531586135,
-    1.6833973468413865
-   ],
-   "sigma": 0.07088307182894442,
-   "check": "B25 contacts per day before onset, workplace"
   },
   "daily_municipality": {
    "acceptance": [
@@ -277,32 +261,32 @@
   },
   "infections_per_index_household": {
    "acceptance": [
-    0.047953886961324334,
-    0.18390356042017778
+    0.13529309801000597,
+    0.5188501704644514
    ],
    "objective": [
-    0.047953886961324334,
-    0.18390356042017778
+    0.13529309801000597,
+    0.5188501704644514
    ],
    "charged": [
-    0.06734138696132434,
-    0.16451606042017777
+    0.15468059801000597,
+    0.49946267046445136
    ],
    "sigma": 0.01178571428571429,
    "check": "B9 infections per index case, household"
   },
   "infections_per_index_health_care": {
    "acceptance": [
-    0.022018942534908506,
-    0.13059474022518683
+    0.06212240840569798,
+    0.3684491103531918
    ],
    "objective": [
-    0.022018942534908506,
-    0.13059474022518686
+    0.06212240840569798,
+    0.3684491103531918
    ],
    "charged": [
-    0.03210086217776564,
-    0.12051282058232969
+    0.07220432804855512,
+    0.3583671907103346
    ],
    "sigma": 0.006128826530612243,
    "check": "B9 infections per index case, health_care"
@@ -310,15 +294,15 @@
   "infections_per_index_municipality": {
    "acceptance": [
     0.001,
-    0.03
+    0.08463949843260188
    ],
    "objective": [
     0.001,
-    0.03
+    0.08463949843260188
    ],
    "charged": [
-    0.00825,
-    0.02275
+    0.00855357142857143,
+    0.07708592700403046
    ],
    "sigma": 0.004591836734693878,
    "check": "B9 infections per index case, municipality"

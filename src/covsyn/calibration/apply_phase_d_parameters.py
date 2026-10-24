@@ -31,6 +31,9 @@ not give. Everything this script writes is listed below with the decision it com
   P[28], P[204] B62: the community count is one draw from P(N = n) ~ (n + s)^-alpha; P[28] is
                  now the shift s, P[204] = alpha = 1.74 (Fu 2010); P[198] and P[199..203]
                  are locked and unused, P[199] at 0.
+  P[205..206]  B64: the work group's saturation a and Gamma shape k (no cap, the share of
+                 coworkers met falls with the company size).
+  P[207]       B65: mean of the Poisson contact-tracing delay, locked at 1 day.
 
 Usage: python -m covsyn.calibration.apply_phase_d_parameters [variable_dir]
 """
@@ -41,7 +44,8 @@ from pathlib import Path
 
 import numpy as np
 
-from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX
+from covsyn.model.data_synthesize import (COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX,
+                                          TRACING_DELAY_INDEX, WORK_GROUP_SATURATION_INDEX)
 
 from covsyn.calibration.sar_anchors import ATTACK_RATE_SLICE, CONTACT_DAYS_MEASURED_ON, LAYERS, \
     LAYER_CUMULATIVE_SAR, MEAN_CONTACT_DAYS, attack_rate_block
@@ -70,7 +74,10 @@ CONTACT_BOUNDS = {
     'school':       ([0.10, 0.5, 0.01, 0.001, 1, 0, 0], [1, 1, 0.50, 0.01, 10, 10, 10]),
     # Workplace: 1.49 contacts/day over the whole population means about 3/day for an
     # employed case, against a work group of about 10 people (B31).
-    'workplace':    ([0.10, 0.5, 0.01, 0.001, 1, 0, 0], [1, 1, 0.70, 0.05, 10, 10, 10]),
+    # B64 (2026-10-24): the target is now 4.84 coworker contacts a day for an EMPLOYED case
+    # (Fu 2010 on a day at work), not 1.65 over the whole population, so the healthy daily
+    # probability gets the household's ceiling of 0.95.
+    'workplace':    ([0.10, 0.5, 0.01, 0.001, 1, 0, 0], [1, 1, 0.95, 0.05, 10, 10, 10]),
     # Health care: a person who is not yet ill barely meets medical staff, so both the gate
     # and the healthy-day probability get a lower floor. The symptomatic probability stays
     # high -- going to a clinic when ill is the point of this layer.
@@ -169,6 +176,28 @@ COMMUNITY_DISPERSION = (0.4, 0.4, 0.4)
 COMMUNITY_EVENT = ((0.0, 0.0, 0.0),) + COMMUNITY_EVENT[1:]
 COMMUNITY_POWER_LAW = (1.74, 1.74, 1.74)
 COMMUNITY_POWER_LAW_COURSE_INDEX = COMMUNITY_POWER_LAW_INDEX - CONTACT_PARAMETER_COUNT
+
+# B64 (2026-10-24, professor 2026-10-19): the work group of a company of n people has mean
+# (n - 1) a / (a + n - 1) and Gamma-Poisson spread with shape k, capped only by the n - 1
+# coworkers (data_synthesize.draw_work_group). (seed, lower, upper):
+# * a = P[205], the mean group of a large company. Seeded at 10, the professor's "most days you
+#   just meet ... 10 people"; searched in [2, 60], wide around Timpka 2016's median work
+#   section of 20 and the 13.5 distinct staff a shift in Lowery-North 2013.
+# * k = P[206], the Gamma shape: below 1 a few people meet many coworkers (a meeting) while
+#   most meet few. Searched in [0.2, 5].
+# Both are calibrated to Fu 2010's employed diaries on a day at work: daily_workplace_employed,
+# workplace_day_zero_share and workplace_day_p90 in firefly_optimizer.OUTCOME_TARGETS.
+WORK_GROUP = ((10.0, 2.0, 60.0), (1.0, 0.2, 5.0))
+WORK_GROUP_COURSE_INDEX = WORK_GROUP_SATURATION_INDEX - CONTACT_PARAMETER_COUNT
+# B65 (2026-10-24, professor 2026-10-12): the mean delay from the infector's confirmation to the
+# contact's isolation is a parameter, P[207]. It is LOCKED at 1 day (Taiwan CDC quarantined named
+# contacts within about a day of confirmation, PMC7605820): the objective simulates one index case
+# for one day (mode 'result'), so almost no case in it has an infector and the delay cannot be
+# identified there; a free bound would let it drift without information and change the spread
+# validation. Jian 2020's 3 days (IQR 1-5) is last exposure to quarantine, a different interval
+# that includes the infector's own detection; [1, 5] is the range for a sensitivity run.
+TRACING_DELAY = (1.0, 1.0, 1.0)
+TRACING_DELAY_COURSE_INDEX = TRACING_DELAY_INDEX - CONTACT_PARAMETER_COUNT
 
 # The five layers' daily attack-rate bounds are no longer patched in place here. They are
 # REBUILT from sar_anchors.py, which is the single source of truth for the anchors, the Ge
@@ -300,6 +329,17 @@ def main():
     else:
         value[i], lower[i], upper[i] = alpha_v, alpha_lo, alpha_hi
 
+    # P[205..207] (B64, B65) follow P[204] for the same reason.
+    for i, (extra_v, extra_lo, extra_hi) in zip(
+            (WORK_GROUP_COURSE_INDEX, WORK_GROUP_COURSE_INDEX + 1, TRACING_DELAY_COURSE_INDEX),
+            (*WORK_GROUP, TRACING_DELAY), strict=True):
+        if len(value) == i:
+            value = np.append(value, extra_v)
+            lower = np.append(lower, extra_lo)
+            upper = np.append(upper, extra_hi)
+        else:
+            value[i], lower[i], upper[i] = extra_v, extra_lo, extra_hi
+
     # Rebuild each layer's 25 daily attack rates from the anchors, rather than rescaling
     # whatever happens to be on disk. The arrays in variable/ descend from the ORIGINAL
     # published values and had been patched in place by earlier runs of this script, so
@@ -337,6 +377,8 @@ def main():
     print('  infectiousness shape k in  [%g, %g]' % (OVERDISPERSION_BOUNDS[0][0], OVERDISPERSION_BOUNDS[1][0]))
     print('  community dispersion k in  [%g, %g], seed %g' % (lo, hi, v))
     print('  community power law alpha  %g (B62; P[28] is the shift s)' % alpha_v)
+    print('  work group a, k seeds      %g, %g (B64)' % (WORK_GROUP[0][0], WORK_GROUP[1][0]))
+    print('  tracing delay mean         %g day, locked (B65)' % TRACING_DELAY[0])
     print('  parameter vector length    %d' % (37 + len(value)))
     print('  backup of the previous files in', BACKUP)
 

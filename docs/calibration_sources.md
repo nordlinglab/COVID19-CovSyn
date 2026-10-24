@@ -203,6 +203,24 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 
 ---
 
+## 8. run 18 的修改（B64–B67，2026-10-24）
+
+| 項目 | 新值 | 來源 |
+|---|---|---|
+| `daily_workplace_employed` | [4.34, 5.61] | Fu 2010（Zenodo 10.5281/zenodo.6385759）平日受僱者中當天有上班者 416 人，每天見面且 ≥15 分鐘的工作接觸；依 2010 年底人口（內政部統計年報 02-01，`covid19-research/data/external/moi_statistical_yearbook_y02-01/`）做性別 × 十歲年齡組加權，平均 4.96（未加權 4.84），bootstrap 95%；`covid19-research/scripts/summarize_taiwan_contact_data.py` 的 `at_work()` |
+| `workplace_day_zero_share` | [0.232, 0.318] | 同上，0 人比例 27.4% |
+| `workplace_day_p90` | [10, 16] | 同上，P90 13 |
+| `daily_workplace` | 只量 | 全人口 1.65 包含無工作者與沒上班的日子 |
+| P[205] 群組飽和 a | 種子 10，[2, 60] | 教授 2026-10-19「平常約碰到 10 人」；Timpka 2016 工作區段中位數 20；Lowery-North 2013 醫護每班 13.5 位不同同事 |
+| P[206] 群組形狀 k | 種子 1，[0.2, 5] | 由上面三個目標校準 |
+| P[207] 疫調延遲 | 鎖定 1 天 | PMC7605820；目標函數無法辨識，見 B65 |
+| Cheng 每例傳染數 | ×2.82（家戶 0.28、醫療 0.17、社區 0.028） | Cheng 2020 表 2（本土 18、境外移入 4）＋figshare 1–100 號（本土 29、境外移入 71），見 B67、E102 |
+| R 驗收 | [0.37, 0.98] | Cheng 2020 本土 18 / 29，精確 Poisson |
+| 第一波種子 | 354 例 | figshare 個案資料＋本土感染源分類，見 B66 |
+| 境外移入種子傳染數 | [0.015, 0.14] | Cheng 2020 境外移入 4 / 71 |
+| `MEAN_CONTACT_DAYS` | {10.27, 6.61, 8.87, 2.70, 1.21} | run 17 `phaseD_report.txt` measure_days |
+| `COVSYN_CANDIDATE_CONTACTS` | {2.605, 3.657, 2.144, 4.759, 23.874} | run 17 `phaseD_checks.txt` |
+
 ## 查證紀錄
 
 | 日期 | 項目 | 結果 |

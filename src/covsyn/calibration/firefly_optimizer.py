@@ -23,7 +23,8 @@ from covsyn.model.contact_measures import (contacts_per_day_before_onset, offspr
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
 from covsyn.model.data_synthesize import (COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX,
-                                          COMMUNITY_POWER_LAW_INDEX)
+                                          COMMUNITY_POWER_LAW_INDEX,
+                                          WORK_GROUP_SATURATION_INDEX)
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 # from sklearn.metrics.pairwise import nan_euclidean_distances
@@ -514,7 +515,17 @@ OUTCOME_TARGETS = {
     # * workplace and community keep [1.20, 1.80]; Fu 2010 (1.65, 1.76) falls inside.
     'daily_household':        (2.27, 3.28, 1.0),
     'daily_school':           (1.15, 1.72, 1.0),
-    'daily_workplace':        (1.20, 1.80, 1.0),
+    # B64 (2026-10-24): reported only. Fu 2010's 1.65 is over every diary, including the people
+    # with no job and the employed on a day off, while the model's employed work every day; the
+    # charged workplace targets are now daily_workplace_employed and the one-day shape below.
+    'daily_workplace':        (1.20, 1.80, 0.0),
+    # B64: coworker contacts of the employed (enterprise size >= 1) index cases per day before
+    # onset, against Fu 2010's employed weekday diaries on a day at work (416 of 616 with at least
+    # one work contact): work contacts of 15 minutes or more met daily or almost daily, weighted
+    # to the 2010 population by sex and age as Fu et al. (2012) weight their sample: mean 4.96,
+    # bootstrap 95% 4.34-5.61 (unweighted 4.84; covid19-research
+    # scripts/summarize_taiwan_contact_data.py at_work()).
+    'daily_workplace_employed': (4.34, 5.61, 1.0),
     # B63 (2026-10-16, E100): community upper bound 1.80 -> 7.12. Under B62's scale-free count
     # the mean is set by the tail, and Fu 2010 records at most 40 contacts per person a day
     # (3.9% of diaries at the cap), so its 1.76 is a lower bound: the same law fitted to it
@@ -650,6 +661,11 @@ OUTCOME_TARGETS = {
     # pooled (contact_measures.one_day_shape). Same data as B62's exponent.
     'community_day_zero_share': (0.598, 0.641, 1.0),
     'community_day_p90':        (5.0, 8.0, 1.0),
+    # B64: the one-day shape of the same 416 weighted diaries, which pins the work group's
+    # saturation P[205] and spread P[206]: zero share 27.4% (bootstrap 95% 23.2-31.8%), p90 13
+    # (10-16).
+    'workplace_day_zero_share': (0.232, 0.318, 1.0),
+    'workplace_day_p90':        (10.0, 16.0, 1.0),
     # B22: incubation back to the literature reported-mean range now that it is built as
     # latent + window rather than drawn and truncated.
     'incubation_mean':        (3.9, 8.0, 1.0),
@@ -736,7 +752,8 @@ for _layer in ('school', 'workplace'):
 def measure_outcomes(index_cases):
     """Summarise the index cases of one cost-function evaluation.
 
-    index_cases is a list of (course_of_disease_dict, contact_dict, demographic_dict).
+    index_cases is a list of (course_of_disease_dict, contact_dict, social_dict); the social
+    dict (None when absent) only decides which index cases are employed (B64).
     Returns the dict of measured quantities named in OUTCOME_TARGETS (missing entries are
     simply not penalised, which is what happens when a quantity has no cases behind it).
     """
@@ -826,6 +843,15 @@ def measure_outcomes(index_cases):
     # days and compared with Fu 2010 (contact_measures.one_day_shape, shared with fast_cost).
     measured['community_day_zero_share'], measured['community_day_p90'] = one_day_shape(
         [one_day_counts(course, contact, 'municipality') for course, contact, _ in index_cases])
+    # B64: the workplace targets are over the employed index cases only (enterprise size >= 1,
+    # read from the social data the index case carries).
+    employed = [(course, contact) for course, contact, social in index_cases
+                if social is not None and (social.get('enterprise_size') or 0) >= 1]
+    if employed:
+        measured['daily_workplace_employed'] = float(np.mean(
+            [contacts_per_day_before_onset(course, contact, 'workplace') for course, contact in employed]))
+        measured['workplace_day_zero_share'], measured['workplace_day_p90'] = one_day_shape(
+            [one_day_counts(course, contact, 'workplace') for course, contact in employed])
 
     incubation = np.array([c['incubation_period'] for c, _, _ in index_cases], dtype=float)
     symptomatic = ~np.isnan(incubation)
@@ -1137,9 +1163,10 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     # time to case closure. Measured on the index case of every simulation.
     index_cases = []
     for result in results:
-        _, _, course_list, contact_list = result.result()
+        _, social_list, course_list, contact_list = result.result()
         if course_list and contact_list:
-            index_cases.append((course_list[0], contact_list[0], None))
+            index_cases.append((course_list[0], contact_list[0],
+                                social_list[0] if social_list else None))
     measured = measure_outcomes(index_cases)
     # The sampled share stays in the log next to the charged probability (E95, E96).
     measured['pre_onset_zero_share_sampled'] = measured['pre_onset_zero_share']
@@ -1228,13 +1255,15 @@ def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarra
 
     Returns:
         The vector with the seed values of the missing tail appended when it has exactly the
-        199 values of run 10 and earlier or the 204 values of runs 11-16 (before B62's
-        P[204]); otherwise the vector unchanged, so a misaligned vector of any
-        other length still fails the caller's shape check instead of being padded into a
-        plausible-looking start.
+        199 values of run 10 and earlier, the 204 values of runs 11-16 (before B62's
+        P[204]) or the 205 values of run 17 (before B64's P[205]); otherwise the vector
+        unchanged, so a misaligned vector of any other length still fails the caller's shape
+        check instead of being padded into a plausible-looking start.
     """
-    # B62: a vector of run 11-16 ends before P[204] and is padded the same way.
-    if (vector.size in (COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX)
+    # B62: a vector of run 11-16 ends before P[204] and is padded the same way; B64: so does
+    # a run-17 vector, which ends before P[205].
+    if (vector.size in (COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX,
+                        WORK_GROUP_SATURATION_INDEX)
             and vector.size < seed_vector.size):
         return np.concatenate([vector, seed_vector[vector.size:]])
     return vector

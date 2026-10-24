@@ -40,7 +40,7 @@ CHARGED_TARGETS_FILE = Path(__file__).with_name("charged_targets.json")
 CHECK_FOR_TARGET = {
     "daily_household": ("B25", "contacts per day before onset, household", 1.0),
     "daily_school": ("B25", "contacts per day before onset, school", 1.0),
-    "daily_workplace": ("B25", "contacts per day before onset, workplace", 1.0),
+    "daily_workplace_employed": ("B64", "coworker contacts per day before onset, employed", 1.0),
     "daily_municipality": ("B25", "contacts per day before onset, municipality", 1.0),
     "daily_health_care": ("B25", "contacts per day before onset, health_care", 1.0),
     "asymptomatic_share": ("B33", "asymptomatic share", 0.01),

@@ -1,0 +1,355 @@
+case_id,seed_type,age_low,age_high,gender,infection_date,infection_rule,clipped,arrival_date,status,status_source,confirmed_date,infection_day,arrival_day_from_infection
+1,imported,50.0,59.0,Female,2020-01-09,confirmation - (incubation + onset to confirmation),False,2020-01-20,airport,data,2020-01-21,0,11.0
+10,imported,40.0,49.0,Male,2020-01-12,onset - incubation,True,2020-01-12,community,data,2020-01-31,3,0.0
+3,imported,50.0,59.0,Male,2020-01-14,onset - incubation,False,2020-01-21,community,data,2020-01-24,5,7.0
+24,local_unknown,60.0,69.0,Female,2020-01-16,onset - incubation,False,,community,local seed,2020-02-19,7,
+2,imported,50.0,59.0,Female,2020-01-17,onset - incubation,False,2020-01-21,community,data,2020-01-24,8,4.0
+4,imported,50.0,59.0,Female,2020-01-19,onset - incubation,False,2020-01-25,airport,data,2020-01-26,10,6.0
+5,imported,50.0,59.0,Female,2020-01-19,onset - incubation,False,2020-01-20,community,data,2020-01-27,10,1.0
+6,imported,70.0,79.0,Female,2020-01-19,onset - incubation,False,2020-01-22,community,data,2020-01-28,10,3.0
+7,imported,70.0,79.0,Female,2020-01-19,onset - incubation,False,2020-01-22,community,data,2020-01-28,10,3.0
+13,imported,20.0,29.0,Female,2020-01-21,onset - incubation,True,2020-01-21,community,data,2020-02-06,12,0.0
+19,local_unknown,60.0,69.0,Male,2020-01-21,onset - incubation,False,,community,local seed,2020-02-03,12,
+11,imported,50.0,59.0,Male,2020-01-22,confirmation - infection to confirmation,False,2020-02-03,community,data,2020-02-04,13,12.0
+14,imported,50.0,59.0,Male,2020-01-22,onset - incubation,True,2020-02-01,community,data,2020-02-06,13,10.0
+17,imported,20.0,29.0,Male,2020-01-22,onset - incubation,True,2020-02-01,community,data,2020-02-08,13,10.0
+16,imported,40.0,49.0,Female,2020-01-24,onset - incubation,True,2020-01-24,community,data,2020-02-06,15,0.0
+15,imported,50.0,59.0,Female,2020-01-26,onset - incubation,False,2020-02-01,community,data,2020-02-06,17,6.0
+18,imported,20.0,29.0,Male,2020-01-27,confirmation - infection to confirmation,False,2020-02-01,community,data,2020-02-09,18,5.0
+12,imported,40.0,49.0,Male,2020-01-28,onset - incubation,False,2020-02-02,community,data,2020-02-06,19,5.0
+27,local_unknown,80.0,89.0,Male,2020-01-31,onset - incubation,False,,community,local seed,2020-02-23,22,
+33,imported,30.0,39.0,Male,2020-02-02,onset - incubation,True,2020-02-02,community,data,2020-02-28,24,0.0
+39,imported,60.0,69.0,Female,2020-02-02,onset - incubation,True,2020-02-02,community,data,2020-02-29,24,0.0
+34,local_unknown,50.0,59.0,Female,2020-02-14,recorded,False,,community,local seed,2020-02-28,36,
+192,imported,20.0,29.0,Female,2020-02-16,onset - incubation,False,2020-03-18,community,data,2020-03-23,38,31.0
+40,imported,70.0,79.0,Female,2020-02-17,confirmation - infection to confirmation,False,2020-02-26,community,data,2020-03-01,39,9.0
+49,imported,40.0,49.0,Female,2020-02-21,confirmation - (incubation + onset to confirmation),True,2020-02-21,community,data,2020-03-12,43,0.0
+268,local_unknown,50.0,59.0,Male,2020-02-22,onset - incubation,False,,community,local seed,2020-03-28,44,
+326,imported,30.0,39.0,Female,2020-02-23,onset - incubation,False,2020-03-30,airport,data,2020-04-01,45,36.0
+50,local_unknown,50.0,59.0,Male,2020-02-24,recorded,False,,community,local seed,2020-03-13,46,
+181,imported,30.0,39.0,Female,2020-02-24,onset - incubation,False,2020-03-20,airport,data,2020-03-23,46,25.0
+319,imported,30.0,39.0,Male,2020-02-24,onset - incubation,False,2020-03-29,airport,data,2020-03-31,46,34.0
+47,imported,30.0,39.0,Male,2020-02-27,confirmation - (incubation + onset to confirmation),False,2020-03-10,community,data,2020-03-10,49,12.0
+44,imported,30.0,39.0,Male,2020-02-28,confirmation - (incubation + onset to confirmation),True,2020-03-03,community,data,2020-03-05,50,4.0
+48,imported,30.0,39.0,Female,2020-02-28,confirmation - (incubation + onset to confirmation),False,2020-03-11,community,data,2020-03-11,50,12.0
+88,imported,20.0,29.0,Female,2020-02-29,onset - incubation,False,2020-03-16,community,data,2020-03-18,51,16.0
+90,imported,30.0,39.0,Male,2020-02-29,onset - incubation,False,2020-03-16,community,data,2020-03-18,51,16.0
+144,imported,30.0,39.0,Female,2020-02-29,onset - incubation,False,2020-03-19,airport,data,2020-03-21,51,19.0
+301,imported,30.0,39.0,Male,2020-02-29,onset - incubation,False,2020-03-02,community,data,2020-03-30,51,2.0
+96,imported,20.0,29.0,Female,2020-03-01,onset - incubation,False,2020-03-16,community,data,2020-03-18,52,15.0
+109,imported,80.0,89.0,Male,2020-03-01,onset - incubation,False,2020-03-07,community,data,2020-03-20,52,6.0
+125,imported,20.0,29.0,Female,2020-03-01,onset - incubation,False,2020-03-17,airport,data,2020-03-20,52,16.0
+165,imported,20.0,29.0,Female,2020-03-01,onset - incubation,False,2020-03-05,quarantine,data,2020-03-22,52,4.0
+171,imported,30.0,39.0,Male,2020-03-01,onset - incubation,False,2020-03-20,airport,data,2020-03-23,52,19.0
+174,imported,30.0,39.0,Male,2020-03-01,onset - incubation,False,2020-03-20,airport,data,2020-03-23,52,19.0
+52,imported,30.0,39.0,Male,2020-03-02,confirmation - (incubation + onset to confirmation),False,2020-03-08,community,data,2020-03-14,53,6.0
+58,imported,20.0,29.0,Female,2020-03-02,confirmation - infection to confirmation,False,2020-03-13,airport,data,2020-03-15,53,11.0
+91,imported,30.0,39.0,Male,2020-03-02,onset - incubation,False,2020-03-16,community,data,2020-03-18,53,14.0
+99,imported,20.0,29.0,Female,2020-03-02,onset - incubation,False,2020-03-16,community,data,2020-03-18,53,14.0
+136,imported,30.0,39.0,Female,2020-03-02,onset - incubation,False,2020-03-08,community,data,2020-03-21,53,6.0
+222,imported,20.0,29.0,Female,2020-03-02,recorded,True,2020-03-02,airport,data,2020-03-25,53,0.0
+255,imported,30.0,39.0,Male,2020-03-02,onset - incubation,False,2020-03-24,airport,data,2020-03-27,53,22.0
+296,imported,20.0,29.0,Female,2020-03-02,onset - incubation,False,2020-03-27,airport,data,2020-03-29,53,25.0
+208,imported,30.0,39.0,Female,2020-03-03,onset - incubation,False,2020-03-20,airport,data,2020-03-24,54,17.0
+57,imported,70.0,79.0,Female,2020-03-04,confirmation - (incubation + onset to confirmation),True,2020-03-13,community,data,2020-03-15,55,9.0
+66,imported,50.0,59.0,Female,2020-03-04,confirmation - infection to confirmation,True,2020-03-13,community,data,2020-03-16,55,9.0
+67,imported,60.0,69.0,Male,2020-03-04,confirmation - infection to confirmation,True,2020-03-13,community,data,2020-03-16,55,9.0
+68,imported,60.0,69.0,Female,2020-03-04,confirmation - infection to confirmation,False,2020-03-13,community,data,2020-03-17,55,9.0
+69,imported,50.0,59.0,Female,2020-03-04,confirmation - infection to confirmation,False,2020-03-13,community,data,2020-03-17,55,9.0
+70,imported,20.0,29.0,Male,2020-03-04,confirmation - infection to confirmation,False,2020-03-13,community,data,2020-03-17,55,9.0
+73,imported,40.0,49.0,Male,2020-03-04,confirmation - infection to confirmation,False,2020-03-13,community,data,2020-03-17,55,9.0
+77,imported,60.0,69.0,Female,2020-03-04,onset - incubation,False,2020-03-16,community,data,2020-03-17,55,12.0
+175,imported,0.0,9.0,Male,2020-03-04,onset - incubation,False,2020-03-20,airport,data,2020-03-23,55,16.0
+178,imported,30.0,39.0,Female,2020-03-04,onset - incubation,False,2020-03-20,airport,data,2020-03-23,55,16.0
+257,imported,20.0,29.0,Male,2020-03-04,onset - incubation,False,2020-03-24,airport,data,2020-03-27,55,20.0
+364,imported,30.0,39.0,Female,2020-03-04,onset - incubation,False,2020-03-30,quarantine,policy 2020-03-19,2020-04-06,55,26.0
+51,imported,30.0,39.0,Male,2020-03-05,onset - incubation,False,2020-03-10,community,data,2020-03-14,56,5.0
+53,imported,30.0,39.0,Male,2020-03-05,onset - incubation,False,2020-03-06,community,data,2020-03-14,56,1.0
+54,imported,30.0,39.0,Male,2020-03-05,onset - incubation,False,2020-03-08,community,data,2020-03-15,56,3.0
+59,imported,10.0,19.0,Male,2020-03-05,onset - incubation,True,2020-03-05,community,data,2020-03-15,56,0.0
+60,imported,20.0,29.0,Female,2020-03-05,recorded,False,2020-03-12,community,data,2020-03-16,56,7.0
+61,imported,50.0,59.0,Female,2020-03-05,confirmation - (incubation + onset to confirmation),True,2020-03-14,airport,data,2020-03-16,56,9.0
+75,imported,20.0,29.0,Male,2020-03-05,onset - incubation,False,2020-03-08,community,data,2020-03-17,56,3.0
+81,imported,50.0,59.0,Female,2020-03-05,confirmation - infection to confirmation,False,2020-03-13,community,data,2020-03-18,56,8.0
+82,imported,20.0,29.0,Female,2020-03-05,onset - incubation,False,2020-03-13,community,data,2020-03-18,56,8.0
+83,imported,40.0,49.0,Female,2020-03-05,confirmation - infection to confirmation,False,2020-03-13,community,data,2020-03-18,56,8.0
+87,imported,30.0,39.0,Male,2020-03-05,onset - incubation,False,2020-03-16,community,data,2020-03-18,56,11.0
+128,imported,20.0,29.0,Female,2020-03-05,onset - incubation,True,2020-03-17,airport,data,2020-03-20,56,12.0
+191,imported,20.0,29.0,Male,2020-03-05,onset - incubation,False,2020-03-21,airport,data,2020-03-23,56,16.0
+214,imported,20.0,29.0,Male,2020-03-05,onset - incubation,False,2020-03-21,airport,data,2020-03-24,56,16.0
+239,imported,20.0,29.0,Female,2020-03-05,onset - incubation,False,2020-03-23,airport,data,2020-03-26,56,18.0
+55,imported,50.0,59.0,Male,2020-03-06,onset - incubation,False,2020-03-12,community,data,2020-03-15,57,6.0
+76,imported,30.0,39.0,Female,2020-03-06,onset - incubation,False,2020-03-12,community,data,2020-03-17,57,6.0
+86,imported,20.0,29.0,Male,2020-03-06,onset - incubation,False,2020-03-16,community,data,2020-03-18,57,10.0
+95,imported,20.0,29.0,Female,2020-03-06,onset - incubation,True,2020-03-12,community,data,2020-03-18,57,6.0
+100,local_unknown,20.0,29.0,Female,2020-03-06,onset - incubation,False,,community,local seed,2020-03-18,57,
+106,imported,20.0,29.0,Male,2020-03-06,onset - incubation,False,2020-03-17,quarantine,data,2020-03-19,57,11.0
+113,imported,30.0,39.0,Male,2020-03-06,onset - incubation,True,2020-03-06,community,data,2020-03-20,57,0.0
+127,imported,20.0,29.0,Male,2020-03-06,onset - incubation,False,2020-03-17,airport,data,2020-03-20,57,11.0
+132,imported,20.0,29.0,Female,2020-03-06,onset - incubation,False,2020-03-18,airport,data,2020-03-20,57,12.0
+156,local_unknown,20.0,29.0,Female,2020-03-06,onset - incubation,False,,community,local seed,2020-03-22,57,
+238,imported,30.0,39.0,Male,2020-03-06,onset - incubation,False,2020-03-23,airport,data,2020-03-26,57,17.0
+265,imported,10.0,19.0,Female,2020-03-06,onset - incubation,False,2020-03-15,quarantine,data,2020-03-27,57,9.0
+271,imported,20.0,29.0,Female,2020-03-06,onset - incubation,False,2020-03-25,airport,data,2020-03-28,57,19.0
+275,imported,40.0,49.0,Female,2020-03-06,onset - incubation,True,2020-03-06,community,data,2020-03-28,57,0.0
+314,imported,20.0,29.0,Male,2020-03-06,onset - incubation,False,2020-03-18,quarantine,data,2020-03-31,57,12.0
+56,imported,40.0,49.0,Male,2020-03-07,onset - incubation,False,2020-03-13,community,data,2020-03-15,58,6.0
+62,imported,60.0,69.0,Female,2020-03-07,onset - incubation,True,2020-03-14,community,data,2020-03-16,58,7.0
+63,imported,50.0,59.0,Male,2020-03-07,onset - incubation,False,2020-03-12,community,data,2020-03-16,58,5.0
+71,imported,60.0,69.0,Male,2020-03-07,onset - incubation,False,2020-03-12,community,data,2020-03-17,58,5.0
+98,imported,20.0,29.0,Female,2020-03-07,onset - incubation,False,2020-03-16,community,data,2020-03-18,58,9.0
+102,imported,50.0,59.0,Female,2020-03-07,confirmation - (incubation + onset to confirmation),False,2020-03-11,community,data,2020-03-19,58,4.0
+105,imported,20.0,29.0,Male,2020-03-07,confirmation - (incubation + onset to confirmation),False,2020-03-17,quarantine,data,2020-03-19,58,10.0
+112,imported,20.0,29.0,Female,2020-03-07,onset - incubation,False,2020-03-17,airport,data,2020-03-20,58,10.0
+118,imported,30.0,39.0,Female,2020-03-07,confirmation - infection to confirmation,False,2020-03-16,quarantine,data,2020-03-20,58,9.0
+119,imported,60.0,69.0,Male,2020-03-07,onset - incubation,False,2020-03-11,community,data,2020-03-20,58,4.0
+142,imported,30.0,39.0,Female,2020-03-07,onset - incubation,False,2020-03-19,airport,data,2020-03-21,58,12.0
+164,imported,20.0,29.0,Female,2020-03-07,onset - incubation,False,2020-03-18,quarantine,data,2020-03-22,58,11.0
+240,imported,30.0,39.0,Female,2020-03-07,onset - incubation,False,2020-03-23,airport,data,2020-03-26,58,16.0
+64,imported,20.0,29.0,Male,2020-03-08,onset - incubation,False,2020-03-12,community,data,2020-03-16,59,4.0
+65,imported,50.0,59.0,Female,2020-03-08,onset - incubation,False,2020-03-13,community,data,2020-03-16,59,5.0
+74,imported,30.0,39.0,Male,2020-03-08,onset - incubation,False,2020-03-10,community,data,2020-03-17,59,2.0
+85,imported,30.0,39.0,Female,2020-03-08,onset - incubation,False,2020-03-16,community,data,2020-03-18,59,8.0
+89,imported,30.0,39.0,Female,2020-03-08,onset - incubation,False,2020-03-16,community,data,2020-03-18,59,8.0
+93,imported,30.0,39.0,Female,2020-03-08,onset - incubation,True,2020-03-16,community,data,2020-03-18,59,8.0
+97,imported,20.0,29.0,Male,2020-03-08,onset - incubation,False,2020-03-16,community,data,2020-03-18,59,8.0
+117,imported,40.0,49.0,Male,2020-03-08,onset - incubation,False,2020-03-10,community,data,2020-03-20,59,2.0
+120,imported,20.0,29.0,Female,2020-03-08,onset - incubation,False,2020-03-18,quarantine,data,2020-03-20,59,10.0
+131,imported,40.0,49.0,Female,2020-03-08,onset - incubation,False,2020-03-09,community,data,2020-03-20,59,1.0
+137,imported,20.0,29.0,Female,2020-03-08,onset - incubation,False,2020-03-19,airport,data,2020-03-21,59,11.0
+143,imported,50.0,59.0,Male,2020-03-08,onset - incubation,False,2020-03-19,airport,data,2020-03-21,59,11.0
+160,imported,50.0,59.0,Male,2020-03-08,onset - incubation,False,2020-03-10,community,data,2020-03-22,59,2.0
+185,imported,20.0,29.0,Male,2020-03-08,onset - incubation,False,2020-03-20,quarantine,data,2020-03-23,59,12.0
+188,imported,20.0,29.0,Female,2020-03-08,onset - incubation,False,2020-03-21,airport,data,2020-03-23,59,13.0
+253,imported,50.0,59.0,Female,2020-03-08,onset - incubation,False,2020-03-24,airport,data,2020-03-27,59,16.0
+338,imported,60.0,69.0,Male,2020-03-08,onset - incubation,False,2020-03-14,community,data,2020-04-02,59,6.0
+72,imported,70.0,79.0,Female,2020-03-09,onset - incubation,False,2020-03-14,community,data,2020-03-17,60,5.0
+78,imported,50.0,59.0,Male,2020-03-09,onset - incubation,False,2020-03-16,community,data,2020-03-18,60,7.0
+79,imported,40.0,49.0,Female,2020-03-09,onset - incubation,True,2020-03-14,community,data,2020-03-18,60,5.0
+94,imported,30.0,39.0,Male,2020-03-09,onset - incubation,False,2020-03-13,community,data,2020-03-18,60,4.0
+111,imported,50.0,59.0,Female,2020-03-09,onset - incubation,False,2020-03-12,quarantine,data,2020-03-20,60,3.0
+149,imported,70.0,79.0,Male,2020-03-09,onset - incubation,False,2020-03-14,community,data,2020-03-21,60,5.0
+152,imported,20.0,29.0,Female,2020-03-09,onset - incubation,False,2020-03-17,quarantine,data,2020-03-21,60,8.0
+180,imported,20.0,29.0,Male,2020-03-09,onset - incubation,False,2020-03-20,airport,data,2020-03-23,60,11.0
+227,imported,30.0,39.0,Female,2020-03-09,onset - incubation,False,2020-03-22,airport,data,2020-03-25,60,13.0
+309,imported,30.0,39.0,Female,2020-03-09,onset - incubation,False,2020-03-28,airport,data,2020-03-31,60,19.0
+310,imported,20.0,29.0,Female,2020-03-09,onset - incubation,False,2020-03-28,airport,data,2020-03-31,60,19.0
+333,imported,60.0,69.0,Female,2020-03-09,onset - incubation,False,2020-03-15,community,data,2020-04-02,60,6.0
+80,imported,20.0,29.0,Female,2020-03-10,onset - incubation,False,2020-03-12,community,data,2020-03-18,61,2.0
+84,imported,20.0,29.0,Male,2020-03-10,onset - incubation,False,2020-03-12,community,data,2020-03-18,61,2.0
+104,imported,40.0,49.0,Female,2020-03-10,onset - incubation,False,2020-03-14,community,data,2020-03-19,61,4.0
+126,imported,30.0,39.0,Male,2020-03-10,onset - incubation,False,2020-03-16,community,data,2020-03-20,61,6.0
+145,imported,20.0,29.0,Female,2020-03-10,onset - incubation,False,2020-03-19,airport,data,2020-03-21,61,9.0
+154,imported,30.0,39.0,Male,2020-03-10,onset - incubation,False,2020-03-16,community,data,2020-03-22,61,6.0
+172,imported,30.0,39.0,Male,2020-03-10,onset - incubation,False,2020-03-20,airport,data,2020-03-23,61,10.0
+193,imported,30.0,39.0,Male,2020-03-10,onset - incubation,False,2020-03-19,quarantine,data,2020-03-23,61,9.0
+194,imported,20.0,29.0,Female,2020-03-10,onset - incubation,False,2020-03-19,quarantine,data,2020-03-23,61,9.0
+203,imported,30.0,39.0,Male,2020-03-10,onset - incubation,False,2020-03-21,airport,data,2020-03-24,61,11.0
+204,imported,20.0,29.0,Female,2020-03-10,onset - incubation,False,2020-03-21,airport,data,2020-03-24,61,11.0
+206,imported,20.0,29.0,Female,2020-03-10,onset - incubation,False,2020-03-21,airport,data,2020-03-24,61,11.0
+207,imported,20.0,29.0,Female,2020-03-10,onset - incubation,False,2020-03-20,airport,data,2020-03-24,61,10.0
+243,imported,20.0,29.0,Female,2020-03-10,onset - incubation,False,2020-03-20,quarantine,data,2020-03-26,61,10.0
+244,imported,30.0,39.0,Male,2020-03-10,onset - incubation,False,2020-03-21,airport,data,2020-03-26,61,11.0
+249,imported,60.0,69.0,Male,2020-03-10,onset - incubation,False,2020-03-16,community,data,2020-03-26,61,6.0
+262,imported,30.0,39.0,Male,2020-03-10,onset - incubation,False,2020-03-25,airport,data,2020-03-27,61,15.0
+349,imported,20.0,29.0,Male,2020-03-10,onset - incubation,False,2020-03-15,quarantine,data,2020-04-04,61,5.0
+101,imported,70.0,79.0,Male,2020-03-11,onset - incubation,False,2020-03-12,community,data,2020-03-19,62,1.0
+107,imported,50.0,59.0,Male,2020-03-11,onset - incubation,False,2020-03-15,community,data,2020-03-19,62,4.0
+108,imported,40.0,49.0,Male,2020-03-11,onset - incubation,False,2020-03-14,community,data,2020-03-19,62,3.0
+114,imported,10.0,19.0,Male,2020-03-11,onset - incubation,False,2020-03-17,quarantine,data,2020-03-20,62,6.0
+115,imported,20.0,29.0,Female,2020-03-11,onset - incubation,False,2020-03-15,quarantine,data,2020-03-20,62,4.0
+129,imported,40.0,49.0,Male,2020-03-11,onset - incubation,True,2020-03-18,airport,data,2020-03-20,62,7.0
+134,local_unknown,30.0,39.0,Female,2020-03-11,onset - incubation,False,,community,local seed,2020-03-20,62,
+139,imported,20.0,29.0,Female,2020-03-11,onset - incubation,False,2020-03-14,community,data,2020-03-21,62,3.0
+141,imported,20.0,29.0,Female,2020-03-11,onset - incubation,False,2020-03-19,airport,data,2020-03-21,62,8.0
+163,imported,20.0,29.0,Female,2020-03-11,onset - incubation,False,2020-03-18,quarantine,data,2020-03-22,62,7.0
+166,imported,20.0,29.0,Male,2020-03-11,onset - incubation,False,2020-03-18,quarantine,data,2020-03-22,62,7.0
+218,imported,20.0,29.0,Female,2020-03-11,onset - incubation,False,2020-03-20,quarantine,data,2020-03-25,62,9.0
+242,imported,20.0,29.0,Male,2020-03-11,onset - incubation,False,2020-03-23,airport,data,2020-03-26,62,12.0
+260,imported,40.0,49.0,Male,2020-03-11,onset - incubation,False,2020-03-21,quarantine,data,2020-03-27,62,10.0
+320,imported,30.0,39.0,Female,2020-03-11,onset - incubation,False,2020-03-29,airport,data,2020-03-31,62,18.0
+336,local_unknown,50.0,59.0,Female,2020-03-11,onset - incubation,False,,community,local seed,2020-04-02,62,
+116,imported,20.0,29.0,Female,2020-03-12,onset - incubation,True,2020-03-17,airport,data,2020-03-20,63,5.0
+121,imported,20.0,29.0,Female,2020-03-12,onset - incubation,False,2020-03-16,quarantine,data,2020-03-20,63,4.0
+122,imported,60.0,69.0,Female,2020-03-12,onset - incubation,False,2020-03-13,quarantine,data,2020-03-20,63,1.0
+123,imported,40.0,49.0,Male,2020-03-12,onset - incubation,False,2020-03-18,quarantine,data,2020-03-20,63,6.0
+124,local_unknown,30.0,39.0,Male,2020-03-12,recorded,False,,community,local seed,2020-03-20,63,
+133,imported,10.0,19.0,Female,2020-03-12,onset - incubation,False,2020-03-14,quarantine,data,2020-03-20,63,2.0
+135,imported,20.0,29.0,Female,2020-03-12,onset - incubation,False,2020-03-13,community,data,2020-03-20,63,1.0
+138,imported,20.0,29.0,Male,2020-03-12,onset - incubation,False,2020-03-16,quarantine,data,2020-03-21,63,4.0
+140,imported,50.0,59.0,Female,2020-03-12,onset - incubation,True,2020-03-12,community,data,2020-03-21,63,0.0
+146,imported,50.0,59.0,Male,2020-03-12,onset - incubation,False,2020-03-18,community,data,2020-03-21,63,6.0
+151,imported,30.0,39.0,Male,2020-03-12,onset - incubation,False,2020-03-14,community,data,2020-03-21,63,2.0
+153,imported,20.0,29.0,Female,2020-03-12,onset - incubation,False,2020-03-14,quarantine,data,2020-03-21,63,2.0
+157,imported,20.0,29.0,Male,2020-03-12,onset - incubation,False,2020-03-14,community,data,2020-03-22,63,2.0
+158,imported,10.0,19.0,Female,2020-03-12,onset - incubation,False,2020-03-18,community,data,2020-03-22,63,6.0
+159,imported,60.0,69.0,Male,2020-03-12,onset - incubation,False,2020-03-16,community,data,2020-03-22,63,4.0
+161,imported,60.0,69.0,Male,2020-03-12,onset - incubation,True,2020-03-12,community,data,2020-03-22,63,0.0
+162,imported,60.0,69.0,Female,2020-03-12,onset - incubation,True,2020-03-12,community,data,2020-03-22,63,0.0
+173,imported,30.0,39.0,Female,2020-03-12,onset - incubation,False,2020-03-20,airport,data,2020-03-23,63,8.0
+183,imported,70.0,79.0,Female,2020-03-12,onset - incubation,False,2020-03-16,quarantine,data,2020-03-23,63,4.0
+221,imported,20.0,29.0,Male,2020-03-12,onset - incubation,False,2020-03-22,airport,data,2020-03-25,63,10.0
+226,imported,60.0,69.0,Male,2020-03-12,onset - incubation,True,2020-03-12,community,data,2020-03-25,63,0.0
+234,imported,20.0,29.0,Female,2020-03-12,onset - incubation,False,2020-03-20,quarantine,data,2020-03-25,63,8.0
+245,imported,20.0,29.0,Female,2020-03-12,onset - incubation,False,2020-03-17,quarantine,data,2020-03-26,63,5.0
+274,imported,30.0,39.0,Male,2020-03-12,onset - incubation,False,2020-03-15,quarantine,data,2020-03-28,63,3.0
+276,imported,10.0,19.0,Female,2020-03-12,onset - incubation,True,2020-03-12,quarantine,data,2020-03-28,63,0.0
+298,imported,30.0,39.0,Male,2020-03-12,onset - incubation,False,2020-03-27,airport,data,2020-03-29,63,15.0
+362,imported,50.0,59.0,Male,2020-03-12,onset - incubation,False,2020-03-16,quarantine,data,2020-04-05,63,4.0
+150,imported,20.0,29.0,Male,2020-03-13,onset - incubation,False,2020-03-14,quarantine,data,2020-03-21,64,1.0
+167,imported,10.0,19.0,Male,2020-03-13,onset - incubation,False,2020-03-20,airport,data,2020-03-22,64,7.0
+176,imported,20.0,29.0,Male,2020-03-13,onset - incubation,False,2020-03-15,quarantine,data,2020-03-23,64,2.0
+177,imported,40.0,49.0,Male,2020-03-13,onset - incubation,False,2020-03-18,community,data,2020-03-23,64,5.0
+184,imported,30.0,39.0,Female,2020-03-13,onset - incubation,False,2020-03-19,quarantine,data,2020-03-23,64,6.0
+190,imported,20.0,29.0,Female,2020-03-13,onset - incubation,False,2020-03-21,airport,data,2020-03-23,64,8.0
+197,imported,40.0,49.0,Male,2020-03-13,onset - incubation,False,2020-03-18,community,data,2020-03-24,64,5.0
+200,imported,20.0,29.0,Female,2020-03-13,onset - incubation,False,2020-03-19,quarantine,data,2020-03-24,64,6.0
+201,imported,30.0,39.0,Female,2020-03-13,onset - incubation,False,2020-03-17,quarantine,data,2020-03-24,64,4.0
+202,imported,40.0,49.0,Female,2020-03-13,onset - incubation,False,2020-03-18,community,data,2020-03-24,64,5.0
+212,imported,30.0,39.0,Female,2020-03-13,onset - incubation,False,2020-03-19,quarantine,data,2020-03-24,64,6.0
+213,imported,20.0,29.0,Male,2020-03-13,recorded,False,2020-03-13,community,data,2020-03-24,64,0.0
+220,imported,30.0,39.0,Female,2020-03-13,onset - incubation,False,2020-03-22,airport,data,2020-03-25,64,9.0
+248,imported,20.0,29.0,Male,2020-03-13,confirmation - infection to confirmation,False,2020-03-20,quarantine,policy 2020-03-19,2020-03-26,64,7.0
+252,imported,20.0,29.0,Male,2020-03-13,onset - incubation,False,2020-03-21,airport,data,2020-03-26,64,8.0
+273,imported,60.0,69.0,Female,2020-03-13,onset - incubation,True,2020-03-13,quarantine,data,2020-03-28,64,0.0
+285,imported,30.0,39.0,Male,2020-03-13,onset - incubation,False,2020-03-16,community,data,2020-03-29,64,3.0
+287,imported,30.0,39.0,Male,2020-03-13,onset - incubation,False,2020-03-26,airport,data,2020-03-29,64,13.0
+348,imported,20.0,29.0,Female,2020-03-13,onset - incubation,False,2020-04-01,airport,data,2020-04-03,64,19.0
+147,imported,20.0,29.0,Female,2020-03-14,onset - incubation,True,2020-03-15,community,data,2020-03-21,65,1.0
+155,imported,70.0,79.0,Male,2020-03-14,onset - incubation,False,2020-03-15,quarantine,data,2020-03-22,65,1.0
+170,imported,60.0,69.0,Male,2020-03-14,onset - incubation,False,2020-03-20,airport,data,2020-03-23,65,6.0
+179,imported,20.0,29.0,Female,2020-03-14,onset - incubation,False,2020-03-17,community,data,2020-03-23,65,3.0
+182,imported,40.0,49.0,Male,2020-03-14,onset - incubation,False,2020-03-19,quarantine,data,2020-03-23,65,5.0
+187,imported,30.0,39.0,Female,2020-03-14,onset - incubation,False,2020-03-19,quarantine,data,2020-03-23,65,5.0
+195,imported,20.0,29.0,Female,2020-03-14,onset - incubation,False,2020-03-19,quarantine,data,2020-03-23,65,5.0
+196,imported,50.0,59.0,Male,2020-03-14,onset - incubation,False,2020-03-20,airport,data,2020-03-24,65,6.0
+199,imported,20.0,29.0,Male,2020-03-14,onset - incubation,False,2020-03-19,quarantine,data,2020-03-24,65,5.0
+217,imported,10.0,19.0,Male,2020-03-14,onset - incubation,False,2020-03-15,quarantine,data,2020-03-25,65,1.0
+223,imported,20.0,29.0,Female,2020-03-14,recorded,False,2020-03-22,airport,data,2020-03-25,65,8.0
+224,imported,20.0,29.0,Female,2020-03-14,recorded,False,2020-03-22,airport,data,2020-03-25,65,8.0
+225,imported,20.0,29.0,Male,2020-03-14,recorded,False,2020-03-22,airport,data,2020-03-25,65,8.0
+229,imported,30.0,39.0,Male,2020-03-14,onset - incubation,False,2020-03-18,quarantine,data,2020-03-25,65,4.0
+250,imported,30.0,39.0,Female,2020-03-14,onset - incubation,False,2020-03-22,quarantine,data,2020-03-26,65,8.0
+254,imported,20.0,29.0,Male,2020-03-14,onset - incubation,False,2020-03-24,airport,data,2020-03-27,65,10.0
+263,imported,30.0,39.0,Male,2020-03-14,onset - incubation,False,2020-03-23,airport,data,2020-03-27,65,9.0
+267,imported,50.0,59.0,Male,2020-03-14,onset - incubation,False,2020-03-25,airport,data,2020-03-27,65,11.0
+272,imported,20.0,29.0,Male,2020-03-14,recorded,False,2020-03-25,airport,data,2020-03-28,65,11.0
+278,imported,50.0,59.0,Male,2020-03-14,onset - incubation,True,2020-03-14,quarantine,data,2020-03-28,65,0.0
+279,imported,10.0,19.0,Female,2020-03-14,onset - incubation,False,2020-03-19,quarantine,data,2020-03-28,65,5.0
+281,imported,10.0,19.0,Female,2020-03-14,onset - incubation,False,2020-03-26,airport,data,2020-03-28,65,12.0
+282,imported,20.0,29.0,Female,2020-03-14,onset - incubation,False,2020-03-26,airport,data,2020-03-28,65,12.0
+290,imported,50.0,59.0,Female,2020-03-14,onset - incubation,True,2020-03-14,community,data,2020-03-29,65,0.0
+291,imported,60.0,69.0,Male,2020-03-14,onset - incubation,True,2020-03-14,community,data,2020-03-29,65,0.0
+303,imported,50.0,59.0,Male,2020-03-14,onset - incubation,False,2020-03-19,quarantine,data,2020-03-30,65,5.0
+305,imported,70.0,79.0,Female,2020-03-14,onset - incubation,True,2020-03-14,quarantine,data,2020-03-30,65,0.0
+306,imported,30.0,39.0,Male,2020-03-14,onset - incubation,False,2020-03-19,quarantine,data,2020-03-30,65,5.0
+341,imported,60.0,69.0,Female,2020-03-14,onset - incubation,True,2020-03-14,quarantine,data,2020-04-03,65,0.0
+359,imported,60.0,69.0,Male,2020-03-14,confirmation - (incubation + onset to confirmation),True,2020-03-14,community,data,2020-04-05,65,0.0
+360,imported,60.0,69.0,Female,2020-03-14,confirmation - (incubation + onset to confirmation),True,2020-03-14,community,data,2020-04-05,65,0.0
+363,imported,40.0,49.0,Female,2020-03-14,confirmation - infection to confirmation,True,2020-03-14,community,data,2020-04-05,65,0.0
+148,imported,20.0,29.0,Female,2020-03-15,recorded,False,2020-03-16,community,data,2020-03-21,66,1.0
+189,imported,50.0,59.0,Female,2020-03-15,onset - incubation,False,2020-03-20,quarantine,policy 2020-03-19,2020-03-23,66,5.0
+198,imported,20.0,29.0,Female,2020-03-15,onset - incubation,False,2020-03-19,quarantine,data,2020-03-24,66,4.0
+205,imported,0.0,9.0,Female,2020-03-15,onset - incubation,False,2020-03-19,quarantine,data,2020-03-24,66,4.0
+209,imported,60.0,69.0,Female,2020-03-15,onset - incubation,False,2020-03-19,quarantine,data,2020-03-24,66,4.0
+210,imported,20.0,29.0,Female,2020-03-15,onset - incubation,False,2020-03-21,quarantine,data,2020-03-24,66,6.0
+228,imported,20.0,29.0,Female,2020-03-15,onset - incubation,False,2020-03-17,quarantine,data,2020-03-25,66,2.0
+232,imported,20.0,29.0,Female,2020-03-15,onset - incubation,True,2020-03-15,community,data,2020-03-25,66,0.0
+237,imported,50.0,59.0,Male,2020-03-15,onset - incubation,False,2020-03-19,quarantine,data,2020-03-25,66,4.0
+328,imported,70.0,79.0,Male,2020-03-15,onset - incubation,False,2020-03-30,airport,data,2020-04-01,66,15.0
+110,imported,30.0,39.0,Female,2020-03-16,onset - incubation,True,2020-03-16,airport,data,2020-03-20,67,0.0
+219,imported,20.0,29.0,Male,2020-03-16,onset - incubation,False,2020-03-18,quarantine,data,2020-03-25,67,2.0
+230,imported,10.0,19.0,Female,2020-03-16,onset - incubation,False,2020-03-21,quarantine,data,2020-03-25,67,5.0
+231,imported,10.0,19.0,Female,2020-03-16,onset - incubation,False,2020-03-19,quarantine,data,2020-03-25,67,3.0
+256,imported,30.0,39.0,Male,2020-03-16,onset - incubation,False,2020-03-18,quarantine,data,2020-03-27,67,2.0
+277,imported,20.0,29.0,Male,2020-03-16,onset - incubation,False,2020-03-20,quarantine,data,2020-03-28,67,4.0
+292,imported,10.0,19.0,Female,2020-03-16,onset - incubation,False,2020-03-19,quarantine,data,2020-03-29,67,3.0
+293,imported,40.0,49.0,Male,2020-03-16,onset - incubation,True,2020-03-16,community,data,2020-03-29,67,0.0
+295,imported,60.0,69.0,Male,2020-03-16,onset - incubation,False,2020-03-19,quarantine,data,2020-03-29,67,3.0
+302,imported,20.0,29.0,Male,2020-03-16,confirmation - infection to confirmation,True,2020-03-16,community,data,2020-03-30,67,0.0
+308,imported,40.0,49.0,Male,2020-03-16,onset - incubation,False,2020-03-20,quarantine,data,2020-03-31,67,4.0
+312,imported,30.0,39.0,Female,2020-03-16,onset - incubation,False,2020-03-28,airport,data,2020-03-31,67,12.0
+313,imported,40.0,49.0,Female,2020-03-16,onset - incubation,False,2020-03-28,airport,data,2020-03-31,67,12.0
+316,imported,20.0,29.0,Male,2020-03-16,onset - incubation,True,2020-03-16,quarantine,data,2020-03-31,67,0.0
+327,imported,30.0,39.0,Male,2020-03-16,onset - incubation,False,2020-03-30,airport,data,2020-04-01,67,14.0
+215,imported,10.0,19.0,Female,2020-03-17,onset - incubation,False,2020-03-22,quarantine,data,2020-03-24,68,5.0
+233,imported,20.0,29.0,Female,2020-03-17,onset - incubation,False,2020-03-21,quarantine,policy 2020-03-19,2020-03-25,68,4.0
+235,imported,20.0,29.0,Male,2020-03-17,onset - incubation,False,2020-03-20,quarantine,data,2020-03-25,68,3.0
+236,imported,20.0,29.0,Female,2020-03-17,onset - incubation,False,2020-03-19,quarantine,data,2020-03-26,68,2.0
+241,imported,40.0,49.0,Female,2020-03-17,onset - incubation,False,2020-03-23,airport,data,2020-03-26,68,6.0
+251,imported,60.0,69.0,Male,2020-03-17,onset - incubation,False,2020-03-21,quarantine,data,2020-03-26,68,4.0
+258,imported,20.0,29.0,Female,2020-03-17,onset - incubation,False,2020-03-22,airport,data,2020-03-27,68,5.0
+264,imported,50.0,59.0,Female,2020-03-17,onset - incubation,False,2020-03-25,airport,data,2020-03-27,68,8.0
+286,imported,30.0,39.0,Female,2020-03-17,onset - incubation,True,2020-03-17,quarantine,data,2020-03-29,68,0.0
+288,imported,20.0,29.0,Male,2020-03-17,onset - incubation,False,2020-03-22,quarantine,data,2020-03-29,68,5.0
+297,imported,10.0,19.0,Male,2020-03-17,onset - incubation,False,2020-03-27,airport,data,2020-03-29,68,10.0
+318,imported,20.0,29.0,Male,2020-03-17,recorded,False,2020-03-17,community,data,2020-03-31,68,0.0
+323,imported,20.0,29.0,Male,2020-03-17,onset - incubation,False,2020-03-19,quarantine,data,2020-04-01,68,2.0
+325,imported,20.0,29.0,Female,2020-03-17,onset - incubation,False,2020-03-30,airport,data,2020-04-01,68,13.0
+339,imported,50.0,59.0,Male,2020-03-17,onset - incubation,False,2020-03-31,airport,data,2020-04-02,68,14.0
+340,imported,20.0,29.0,Male,2020-03-17,onset - incubation,True,2020-03-17,quarantine,data,2020-04-03,68,0.0
+356,imported,60.0,69.0,Male,2020-03-17,confirmation - infection to confirmation,True,2020-03-17,community,data,2020-04-05,68,0.0
+369,imported,40.0,49.0,Male,2020-03-17,onset - incubation,False,2020-04-04,airport,data,2020-04-06,68,18.0
+377,imported,20.0,29.0,Female,2020-03-17,onset - incubation,False,2020-03-22,quarantine,data,2020-04-08,68,5.0
+261,imported,60.0,69.0,Female,2020-03-18,onset - incubation,False,2020-03-23,quarantine,data,2020-03-27,69,5.0
+266,imported,30.0,39.0,Male,2020-03-18,onset - incubation,False,2020-03-21,quarantine,data,2020-03-27,69,3.0
+283,imported,20.0,29.0,Female,2020-03-18,onset - incubation,False,2020-03-23,quarantine,data,2020-03-28,69,5.0
+311,imported,30.0,39.0,Female,2020-03-18,onset - incubation,False,2020-03-28,airport,data,2020-03-31,69,10.0
+317,imported,60.0,69.0,Male,2020-03-18,onset - incubation,True,2020-03-18,quarantine,data,2020-03-31,69,0.0
+321,imported,20.0,29.0,Male,2020-03-18,confirmation - infection to confirmation,False,2020-03-20,quarantine,data,2020-03-31,69,2.0
+329,imported,20.0,29.0,Female,2020-03-18,onset - incubation,False,2020-03-30,airport,data,2020-04-01,69,12.0
+330,imported,20.0,29.0,Male,2020-03-18,onset - incubation,True,2020-03-18,quarantine,data,2020-04-02,69,0.0
+350,imported,30.0,39.0,Male,2020-03-18,onset - incubation,True,2020-03-18,community,data,2020-04-04,69,0.0
+259,imported,60.0,69.0,Female,2020-03-19,onset - incubation,False,2020-03-24,airport,data,2020-03-27,70,5.0
+270,imported,20.0,29.0,Female,2020-03-19,onset - incubation,False,2020-03-25,airport,data,2020-03-28,70,6.0
+280,imported,20.0,29.0,Male,2020-03-19,onset - incubation,True,2020-03-26,airport,data,2020-03-28,70,7.0
+294,imported,20.0,29.0,Female,2020-03-19,onset - incubation,False,2020-03-20,quarantine,data,2020-03-29,70,1.0
+300,imported,20.0,29.0,Female,2020-03-19,onset - incubation,False,2020-03-22,quarantine,data,2020-03-30,70,3.0
+304,imported,40.0,49.0,Female,2020-03-19,onset - incubation,True,2020-03-19,quarantine,data,2020-03-30,70,0.0
+315,imported,20.0,29.0,Female,2020-03-19,onset - incubation,False,2020-03-22,quarantine,data,2020-03-31,70,3.0
+332,imported,10.0,19.0,Male,2020-03-19,onset - incubation,False,2020-03-30,airport,data,2020-04-02,70,11.0
+334,imported,30.0,39.0,Female,2020-03-19,onset - incubation,True,2020-03-19,quarantine,data,2020-04-02,70,0.0
+344,imported,40.0,49.0,Female,2020-03-19,onset - incubation,True,2020-03-19,quarantine,policy 2020-03-19,2020-04-03,70,0.0
+346,imported,20.0,29.0,Female,2020-03-19,onset - incubation,False,2020-03-30,quarantine,data,2020-04-03,70,11.0
+357,imported,50.0,59.0,Female,2020-03-19,onset - incubation,False,2020-03-22,quarantine,data,2020-04-05,70,3.0
+387,imported,40.0,49.0,Male,2020-03-19,onset - incubation,False,2020-04-10,airport,data,2020-04-12,70,22.0
+284,imported,20.0,29.0,Male,2020-03-20,recorded,False,2020-03-20,quarantine,data,2020-03-29,71,0.0
+322,local_unknown,20.0,29.0,Male,2020-03-20,onset - incubation,False,,community,local seed,2020-03-31,71,
+337,imported,10.0,19.0,Male,2020-03-20,onset - incubation,False,2020-03-26,quarantine,data,2020-04-02,71,6.0
+345,imported,30.0,39.0,Male,2020-03-20,onset - incubation,True,2020-03-20,quarantine,data,2020-04-03,71,0.0
+351,imported,20.0,29.0,Female,2020-03-20,onset - incubation,False,2020-03-21,quarantine,data,2020-04-04,71,1.0
+324,imported,20.0,29.0,Female,2020-03-21,onset - incubation,False,2020-03-25,quarantine,data,2020-04-01,72,4.0
+353,imported,30.0,39.0,Female,2020-03-21,onset - incubation,False,2020-03-26,quarantine,data,2020-04-04,72,5.0
+354,imported,30.0,39.0,Female,2020-03-21,onset - incubation,False,2020-04-02,airport,data,2020-04-04,72,12.0
+358,imported,40.0,49.0,Male,2020-03-21,onset - incubation,False,2020-04-02,airport,data,2020-04-05,72,12.0
+368,imported,20.0,29.0,Female,2020-03-21,onset - incubation,False,2020-04-04,airport,data,2020-04-06,72,14.0
+372,imported,30.0,39.0,Male,2020-03-21,onset - incubation,True,2020-03-21,quarantine,data,2020-04-06,72,0.0
+373,imported,30.0,39.0,Female,2020-03-21,onset - incubation,True,2020-03-21,quarantine,data,2020-04-06,72,0.0
+211,imported,40.0,49.0,Male,2020-03-22,onset - incubation,True,2020-03-22,airport,data,2020-03-24,73,0.0
+331,imported,60.0,69.0,Male,2020-03-22,onset - incubation,False,2020-03-23,quarantine,data,2020-04-02,73,1.0
+355,imported,60.0,69.0,Female,2020-03-22,confirmation - infection to confirmation,False,2020-03-25,quarantine,policy 2020-03-19,2020-04-04,73,3.0
+361,imported,30.0,39.0,Female,2020-03-23,recorded,False,2020-03-23,quarantine,policy 2020-03-19,2020-04-05,74,0.0
+393,imported,60.0,69.0,Female,2020-03-23,onset - incubation,False,2020-04-11,airport,data,2020-04-13,74,19.0
+342,imported,30.0,39.0,Female,2020-03-24,onset - incubation,True,2020-03-24,quarantine,data,2020-04-03,75,0.0
+375,imported,20.0,29.0,Female,2020-03-24,onset - incubation,False,2020-03-27,quarantine,data,2020-04-07,75,3.0
+389,imported,50.0,59.0,Female,2020-03-24,onset - incubation,False,2020-04-11,airport,data,2020-04-13,75,18.0
+383,imported,60.0,69.0,Male,2020-03-25,onset - incubation,False,2020-04-10,airport,data,2020-04-11,76,16.0
+391,imported,60.0,69.0,Female,2020-03-25,onset - incubation,False,2020-04-11,airport,data,2020-04-13,76,17.0
+392,imported,60.0,69.0,Male,2020-03-25,onset - incubation,False,2020-04-11,airport,data,2020-04-13,76,17.0
+378,imported,60.0,69.0,Female,2020-03-26,onset - incubation,False,2020-03-29,quarantine,data,2020-04-08,77,3.0
+366,imported,30.0,39.0,Female,2020-03-27,onset - incubation,False,2020-04-02,quarantine,data,2020-04-06,78,6.0
+371,imported,20.0,29.0,Male,2020-03-27,onset - incubation,False,2020-03-30,quarantine,policy 2020-03-19,2020-04-06,78,3.0
+376,imported,20.0,29.0,Female,2020-03-27,onset - incubation,False,2020-03-30,quarantine,policy 2020-03-19,2020-04-07,78,3.0
+382,imported,60.0,69.0,Male,2020-03-28,confirmation - infection to confirmation,False,2020-03-29,quarantine,policy 2020-03-19,2020-04-10,79,1.0
+384,imported,70.0,79.0,Male,2020-03-28,onset - incubation,False,2020-04-10,airport,data,2020-04-11,79,13.0
+367,imported,20.0,29.0,Male,2020-03-29,onset - incubation,False,2020-04-02,quarantine,data,2020-04-06,80,4.0
+370,imported,20.0,29.0,Male,2020-03-29,onset - incubation,False,2020-03-30,quarantine,policy 2020-03-19,2020-04-06,80,1.0
+374,imported,20.0,29.0,Male,2020-03-29,onset - incubation,True,2020-03-29,quarantine,data,2020-04-07,80,0.0
+379,local_unknown,30.0,39.0,Female,2020-03-29,onset - incubation,False,,community,local seed,2020-04-08,80,
+385,imported,20.0,29.0,Female,2020-03-29,onset - incubation,False,2020-04-03,quarantine,data,2020-04-11,80,5.0
+390,imported,50.0,59.0,Male,2020-03-29,onset - incubation,False,2020-04-11,airport,data,2020-04-13,80,13.0
+381,imported,20.0,29.0,Female,2020-03-30,onset - incubation,True,2020-03-30,quarantine,policy 2020-03-19,2020-04-10,81,0.0
+394,imported,60.0,69.0,Female,2020-03-30,onset - incubation,True,2020-03-30,quarantine,policy 2020-03-19,2020-04-15,81,0.0
+388,imported,40.0,49.0,Female,2020-03-31,confirmation - (incubation + onset to confirmation),False,2020-04-02,quarantine,data,2020-04-12,82,2.0
+421,imported,20.0,29.0,Female,2020-04-01,onset - incubation,True,2020-04-01,airport,data,2020-04-20,83,0.0
+437,imported,30.0,39.0,Female,2020-04-09,recorded,False,2020-04-09,quarantine,policy 2020-03-19,2020-05-04,91,0.0

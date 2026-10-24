@@ -100,7 +100,7 @@ def _case_matrix_row(demographic, course, contact, columns):
                                                 dummy, 1)[0]
 
 
-def _index_case_scalars(course, contact):
+def _index_case_scalars(course, contact, social=None):
     """Everything measure_outcomes() needs from one index case, as plain numbers.
 
     Each entry mirrors one block of firefly_optimizer.measure_outcomes(); the cross-case parts
@@ -137,6 +137,9 @@ def _index_case_scalars(course, contact):
     out['expected'] = contact.get('expected_outcomes')
     out['community'] = len(contact['municipality_effective_contacts'] or [])
     out['community_days'] = one_day_counts(course, contact, 'municipality')  # B63
+    # B64: mirrors measure_outcomes -- the workplace targets are over employed index cases.
+    out['employed'] = social is not None and (social.get('enterprise_size') or 0) >= 1
+    out['workplace_days'] = one_day_counts(course, contact, 'workplace')
     out['incubation_period'] = float(onset) if onset is not None else np.nan
     out['pre_onset_window'] = float(course['pre_onset_window'])
     out['positive_test_date'] = float(course['positive_test_date'])
@@ -170,14 +173,15 @@ def run_batch(seeds, P, columns):
     demographic_parameters = copy.deepcopy(_WORKER_DEMOGRAPHIC_PARAMETERS)
     out = []
     for seed in seeds:
-        demographic_list, _social, course_list, contact_list = run_covid(
+        demographic_list, social_list, course_list, contact_list = run_covid(
             seed, P, demographic_parameters, save_file=False)
         cases = []
         for j, (course, contact) in enumerate(zip(course_list, contact_list)):
             cases.append((_case_cheng_bins(course, contact),
                           _case_matrix_row(demographic_list[j], course, contact, columns),
                           not np.isnan(course['incubation_period'])))
-        index = (_index_case_scalars(course_list[0], contact_list[0])
+        index = (_index_case_scalars(course_list[0], contact_list[0],
+                                     social_list[0] if social_list else None)
                  if course_list and contact_list else None)
         out.append((index, cases))
     return out
@@ -239,6 +243,12 @@ def reduce_outcomes(scalars):
     # B63: the one-day community shape against Fu 2010, as in measure_outcomes.
     measured['community_day_zero_share'], measured['community_day_p90'] = one_day_shape(
         [s['community_days'] for s in scalars])
+    employed = [s for s in scalars if s['employed']]
+    if employed:
+        measured['daily_workplace_employed'] = float(np.mean(
+            [s['per_day_workplace'] for s in employed]))
+        measured['workplace_day_zero_share'], measured['workplace_day_p90'] = one_day_shape(
+            [s['workplace_days'] for s in employed])
 
     incubation = np.array([s['incubation_period'] for s in scalars], dtype=float)
     symptomatic = ~np.isnan(incubation)
