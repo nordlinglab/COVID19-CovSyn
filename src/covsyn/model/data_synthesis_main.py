@@ -17,7 +17,11 @@ from covsyn.model.data_synthesize import (community_event_parameters, community_
 # imported case to 2020-04-12 with restrictions that grow over time; 'feb7' only the seeds before
 # the 2020-02-07 border control, with none.
 FIRST_WAVE_SEED_FILES = {'taiwan_first_outbreak': './variable/taiwan_first_wave_seeds.csv',
-                         'taiwan_first_outbreak_feb7': './variable/taiwan_first_wave_seeds_feb7.csv'}
+                         'taiwan_first_outbreak_feb7': './variable/taiwan_first_wave_seeds_feb7.csv',
+                         'taiwan_first_outbreak_feb29': './variable/taiwan_first_wave_seeds_feb29.csv',
+                         'taiwan_first_outbreak_mar18': './variable/taiwan_first_wave_seeds_mar18.csv',
+                         'taiwan_first_outbreak_mar18_local':
+                             './variable/taiwan_first_wave_seeds_mar18_local.csv'}
 
 
 def load_first_wave_seeds(path):
@@ -42,6 +46,10 @@ def load_first_wave_seeds(path):
                 'arrival_day': (int(float(row['arrival_day_from_infection']))
                                 if row['arrival_day_from_infection'] else None),
                 'status': row['status'],
+                # B68: a local seed infected by an imported case is traced from its
+                # infector's confirmation (simulation day); empty for the other seeds.
+                'source_confirmed_day': (float(row['source_confirmed_day'])
+                                         if row.get('source_confirmed_day') else np.nan),
             })
     return seeds
 
@@ -83,9 +91,11 @@ def get_saveable_data(data, data_type):
             'negative_test_date': getattr(data, 'negative_test_date', None),
             'negative_test_status': getattr(data, 'negative_test_status', None),
             'positive_test_date': getattr(data, 'positive_test_date', None),
-            # B66: 'imported' or 'local_unknown' for a first-wave seed, None otherwise.
+            # B66: 'imported', 'local_unknown' or (B68) 'local_from_imported' for a
+            # first-wave seed, None otherwise; seed_case_id is its case number in the data.
             'seed_type': getattr(data, 'seed_type', None),
             'seed_status': getattr(data, 'seed_status', None),
+            'seed_case_id': getattr(data, 'seed_case_id', None),
         }
     elif data_type == "contact":
         # Save contact data attributes
@@ -452,6 +462,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 else:
                     source_confirmed_day = course_of_disease_data_list[
                         int(source_case_id) - 1]['positive_test_date']
+                if seed_case is not None and np.isfinite(seed_case['source_confirmed_day']):
+                    source_confirmed_day = seed_case['source_confirmed_day']
                 course_of_disease_data = Draw_course_of_disease_data(infection_day, latent_period_gamma, infectious_period_gamma, incubation_period_gamma, symptom_to_isolation_gamma,
                                                                      asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
                                                                      critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma, natural_immunity_rate, transition_p,
@@ -462,6 +474,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 if seed_case is not None:
                     course_of_disease_data.seed_type = seed_case['seed_type']
                     course_of_disease_data.seed_status = seed_case['status']
+                    course_of_disease_data.seed_case_id = seed_case['case_id']
                 natural_immunity_status_list.append(
                     course_of_disease_data.natural_immunity_status)
                 course_of_disease_data_tmp = get_saveable_data(
@@ -627,7 +640,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Data synthesis')
     parser.add_argument('--mode', type=str, default='spread_Taiwan_weight', choices=['spread_Taiwan', 'spread_Taiwan_weight', 'spread_Taitung', 'profile', 'result', 'cheng2020', 'test', 'ge2021',
                         'spread_Taitung_outbreak_weight', 'spread_Lienchiang', 'taiwan_first_outbreak',
-                                 'taiwan_first_outbreak_feb7'],
+                                 'taiwan_first_outbreak_feb7', 'taiwan_first_outbreak_feb29',
+                                 'taiwan_first_outbreak_mar18', 'taiwan_first_outbreak_mar18_local'],
                         help='Mode options include: spread, spread_demo, profile, ICIDMID, result, cheng2020, test, ge2021, Boonpatcharanon2022')
     parser.add_argument('--parameter_path', type=str,
                         default='./Firefly_result/Firefly_result_pop_size_50_alpha_1_betamin_1_gamma_0.131_max_generations_200')

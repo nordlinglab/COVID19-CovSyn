@@ -17,6 +17,13 @@ LAYER_NAMES = ('household', 'school', 'workplace', 'health_care', 'municipality'
 # of confirmation (PMC7605820); drawn as Poisson(1) so it varies between cases.
 TRACING_DELAY_MEAN = 1.0
 
+# B68: household transmission from a first-wave seed in home quarantine. Taiwan's home
+# quarantine asked the person to stay at home, wear a mask and keep apart from the family; the
+# household attack rate is multiplied by the effect of mask use at home before symptom onset in
+# the Beijing household cohort of Wang et al. (2020, BMJ Glob Health 5:e002794): OR 0.21
+# (95% CI 0.06-0.79), used as a risk ratio.
+HOME_QUARANTINE_HOUSEHOLD_FACTOR = 0.21
+
 # B31: the work group actually met inside an enterprise. Chen 2022 (BMJ Open 12:e055643)
 # Table 5 reports the cases per workplace cluster rising only from 3 to 8 (median 4) while
 # the median staff count of the enterprises runs from 16 to 650 -- a 40-fold change in the
@@ -1652,14 +1659,21 @@ class Draw_contact_data:
         A seed imported from abroad meets nobody in Taiwan before the day it arrives
         (arrival_day, counted from infection). After that its status, taken from how the case was
         detected in the Taiwan case data, decides which layers it meets: 'community' every layer;
-        'quarantine' (detected during home quarantine) only the household and health care, the
-        2020 home quarantine being spent at home with the family; 'airport' (detected by airport
-        screening, isolated on arrival) only health care. Contact days outside that are removed,
-        and a contact left without any day is dropped, so it is neither a candidate contact nor
-        an infection. The layers' own windows still end at isolation.
+        'quarantine' (detected during home quarantine) only the household, the 2020 home
+        quarantine being spent at home with the family; 'airport' (detected by airport screening,
+        isolated on arrival) nobody. Contact days outside that are removed, and a contact left
+        without any day is dropped, so it is neither a candidate contact nor an infection. The
+        layers' own windows still end at isolation.
+
+        B68: health care is closed to both, because a person in home quarantine could see a
+        doctor only through the health department, by its transport, at a designated hospital
+        whose staff wore the protection for the route of transmission (Taiwan CDC, 居家隔離或檢疫者
+        接受醫療照護時之感染管制措施, 2020-03-03); none of the 122 quarantined imported cases of the
+        data infected anyone in health care. A quarantined seed's household attack rate is
+        scaled by HOME_QUARANTINE_HOUSEHOLD_FACTOR in draw_contact_data.
         """
-        allowed = {'community': LAYER_NAMES, 'quarantine': ('household', 'health_care'),
-                   'airport': ('health_care',)}[self.seed_rule['status']]
+        allowed = {'community': LAYER_NAMES, 'quarantine': ('household',),
+                   'airport': ()}[self.seed_rule['status']]
         arrival = max(int(self.seed_rule['arrival_day']), 0)
         attributes = {'household': 'household_contacts_matrix',
                       'school': 'school_class_contacts_matrix',
@@ -1685,6 +1699,8 @@ class Draw_contact_data:
             self.apply_seed_rule()
         attack_rate_profiles = self.calculate_daily_secondary_attack_rate()
         household_attack_rate = attack_rate_profiles['household']
+        if self.seed_rule is not None and self.seed_rule['status'] == 'quarantine':
+            household_attack_rate = household_attack_rate * HOME_QUARANTINE_HOUSEHOLD_FACTOR  # B68
         school_attack_rate = attack_rate_profiles['school']
         workplace_attack_rate = attack_rate_profiles['workplace']
         health_care_attack_rate = attack_rate_profiles['health_care']

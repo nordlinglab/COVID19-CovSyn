@@ -89,6 +89,42 @@ def test_feb7_scenario_has_no_policy_and_its_reference_is_seventeen_local_cases(
     assert len(reference_local_cases(every, sources)) == 55
 
 
+def test_feb29_and_mar18_scenarios_match_their_cut_offs():
+    """Cut-offs 2020-02-29 and 2020-03-18 (case 100, Cheng 2020): 28 and 48 local cases."""
+    from covsyn.validation.compare_first_wave import reference_local_cases
+
+    sources = pd.read_csv("validation_reference/taiwan_local_case_sources.csv",
+                          dtype=str, keep_default_na=False)
+    for name, end, n_seeds, n_local in (("feb29", "2020-02-29", 26, 28),
+                                        ("mar18", "2020-03-18", 186, 48)):
+        seeds = pd.read_csv(f"variable/taiwan_first_wave_seeds_{name}.csv")
+        assert len(seeds) == n_seeds
+        assert (pd.to_datetime(seeds.arrival_date.dropna()) <= pd.Timestamp(end)).all()
+        assert (seeds.status_source != "policy 2020-03-19").all()
+        assert len(reference_local_cases(seeds, sources)) == n_local
+
+
+def test_local_start_scenario_replaces_imported_seeds_by_their_local_offspring():
+    """B68: 14 local cases infected by an imported case plus 11 unknown; same 48 local cases."""
+    from covsyn.validation.compare_first_wave import reference_local_cases
+
+    sources = pd.read_csv("validation_reference/taiwan_local_case_sources.csv",
+                          dtype=str, keep_default_na=False)
+    seeds = pd.read_csv("variable/taiwan_first_wave_seeds_mar18_local.csv")
+    assert seeds.seed_type.value_counts().to_dict() == {"local_from_imported": 14,
+                                                        "local_unknown": 11}
+    assert (seeds.status == "community").all() and seeds.arrival_date.isna().all()
+    linked = seeds[seeds.seed_type == "local_from_imported"]
+    assert linked.source_confirmed_day.notna().all()
+    assert seeds.loc[seeds.seed_type == "local_unknown", "source_confirmed_day"].isna().all()
+    assert len(reference_local_cases(seeds, sources)) == 48
+
+
+def test_home_quarantine_household_factor_is_the_wang_2020_mask_effect():
+    """B68: Wang et al. (2020) OR 0.21 for mask use at home before symptom onset."""
+    assert ds.HOME_QUARANTINE_HOUSEHOLD_FACTOR == pytest.approx(0.21)
+
+
 class _Course:
     monitor_isolation_period = 9
     incubation_period = 5.0
@@ -105,17 +141,18 @@ def _contact_data(rule):
 
 
 def test_seed_rule_removes_days_before_arrival_and_layers_the_status_forbids():
-    """No contact before arrival; quarantine keeps household, airport keeps health care."""
+    """No contact before arrival; quarantine keeps only the household, airport nobody (B68)."""
     c = _contact_data({"arrival_day": 4, "status": "quarantine"})
     c.apply_seed_rule()
     assert c.household_contacts_matrix[:, :4].sum() == 0
     assert c.household_contacts_matrix[:, 4:].all()
     assert c.workplace_contacts_matrix.shape[0] == 0
     assert c.municipality_contacts_matrix.shape[0] == 0
+    assert c.health_care_contacts_matrix.shape[0] == 0
     c = _contact_data({"arrival_day": 0, "status": "airport"})
     c.apply_seed_rule()
     assert c.household_contacts_matrix.shape[0] == 0
-    assert c.health_care_contacts_matrix.shape == (3, 10)
+    assert c.health_care_contacts_matrix.shape[0] == 0
     c = _contact_data({"arrival_day": 2, "status": "community"})
     c.apply_seed_rule()
     assert c.municipality_contacts_matrix[:, :2].sum() == 0

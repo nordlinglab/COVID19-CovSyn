@@ -37,13 +37,28 @@ def chain_root(case_id: int, infector: dict[int, int | None]) -> int:
     return case_id
 
 
+def descends_from(case_id: int, infector: dict[int, int | None], seeds: set[int]) -> bool:
+    """Whether a local case is one of the seeds or is infected, through its chain, by one."""
+    seen = set()
+    while case_id is not None and case_id not in seen:
+        if case_id in seeds:
+            return True
+        seen.add(case_id)
+        case_id = infector.get(case_id)
+    return False
+
+
 def reference_local_cases(seeds: pd.DataFrame, sources: pd.DataFrame) -> list[int]:
-    """The reported local cases whose chain of infection starts at one of these seeds."""
+    """The reported local cases whose chain of infection starts at one of these seeds.
+
+    For the local-start scenario (B68) the seeds are themselves local cases with a recorded
+    infector, so a case counts when one of its ancestors, or the case itself, is a seed.
+    """
     infector = {int(r.id): (int(r.infector_id) if str(r.infector_id).strip() not in ("", "nan")
                             else None)
                 for r in sources.itertuples()}
     roots = set(seeds.case_id.astype(int))
-    return sorted(c for c in infector if chain_root(c, infector) in roots)
+    return sorted(c for c in infector if descends_from(c, infector, roots))
 
 
 def simulated(directory: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -53,7 +68,8 @@ def simulated(directory: Path) -> tuple[np.ndarray, np.ndarray]:
         k = Path(f).stem.split("_")[-1]
         course = list(np.load(f, allow_pickle=True))
         contact = list(np.load(directory / f"contact_data_{k}.npy", allow_pickle=True))
-        local.append(sum(1 for c in course if c.get("seed_type") in (None, "local_unknown")))
+        local.append(sum(1 for c in course
+                         if c.get("seed_type") in (None, "local_unknown", "local_from_imported")))
         for c, k_ in zip(course, contact, strict=True):
             if c.get("seed_type") == "imported":
                 imported.append(sum(float(np.nansum(np.asarray(k_[f"{L}_effective_contacts"] or [],
