@@ -32,6 +32,20 @@ OUT_JSON = Path(sys.argv[3] if len(sys.argv) > 3 else 'validation_reference/phas
 # intervals off and judges on the value alone, as before B57.
 BOOTSTRAP_REPLICATES = int(sys.argv[4]) if len(sys.argv) > 4 else 200
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
+# B72: Jian et al. 2020 (Int J Infect Dis 101:348) divide all close contacts listed from two days
+# before onset to isolation by all confirmed cases: 8,051 / 487 = 16.5 (95% CI 13.9-19.1, method
+# not stated). Table 1 splits the contacts by the status of the index case: 1,435 of locally
+# acquired cases (none on a flight) and 6,616 of imported ones, 3,523 of them flight contacts.
+# The 487 cases are 55 local and 432 others (395 imported, 36 Navy, 1 unclassified; the Taiwan
+# case data, cases 1-487).
+JIAN_ALL_PER_CASE = 8051 / 487
+JIAN_ALL_NO_FLIGHT_PER_CASE = (8051 - 3523) / 487
+JIAN_LOCAL_PER_CASE = 1435 / 55
+JIAN_IMPORTED_PER_CASE = 6616 / 432
+JIAN_IMPORTED_NO_FLIGHT_PER_CASE = 3093 / 432
+# B71: Taiwan first-wave tracing records, infected contacts per case (E80, E15).
+TAIWAN_TRACING_CASES = 579
+TAIWAN_TRACING_LARGEST = 8
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix') for L in LAYERS}
 
 results = []
@@ -133,8 +147,9 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     check('B64', 'coworker contacts per day before onset, employed',
           float(np.mean(workplace_days)) if workplace_days else np.nan,
           OUTCOME_TARGETS['daily_workplace_employed'][:2],
-          note='Fu 2010 employed on a day at work, >=15 min, met daily, weighted to the 2010 '
-               'population: mean 4.96 (n=416), summarize_taiwan_contact_data.py at_work()')
+          note='B70: Fu 2010 employed, average day of the week, >=15 min, met daily, weighted '
+               'to the 2010 population: mean 2.95 (n=905; 4.96 on a day at work), '
+               'summarize_taiwan_contact_data.py average_week()')
 
     # ---------------------------------------------------------------- B25 daily contacts
     # B61: the objective's bands (they were copied here and would have drifted when B61 moved
@@ -250,8 +265,19 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                'links 0.047 and confirmed contacts 0.43 (E80)')
     check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), (0.2, 4.3), '%',
           note='B56: between Taiwan links (0.2%) and confirmed contacts (4.3%), E80')
-    check('B17', 'largest number infected by one case', counts.max(), (5, 30), interval=False,
-          note='Taiwan tracing maximum 8')
+    # B71 (2026-10-26, user): the largest count grows with the number of cases and rests on one
+    # draw, and the old band (5, 30) had no source. Compare like with like instead: the largest
+    # of 579 simulated index cases, the size of the Taiwan tracing set, whose largest is 8. The
+    # check passes when 8 is not in either 2.5% tail of the simulated largest.
+    rng = np.random.default_rng(0)
+    largest = np.array([rng.choice(counts, TAIWAN_TRACING_CASES).max() for _ in range(2000)])
+    check('B17', f'samples of {TAIWAN_TRACING_CASES} cases whose largest is at most '
+          f'{TAIWAN_TRACING_LARGEST}', 100 * np.mean(largest <= TAIWAN_TRACING_LARGEST), (2.5, 97.5),
+          '%', interval=False,
+          note=f'B71: Taiwan tracing largest {TAIWAN_TRACING_LARGEST} over {TAIWAN_TRACING_CASES} '
+               f'cases (confirmed contacts, an upper bound, E80); simulated median '
+               f'{np.median(largest):.0f}, 95% {np.percentile(largest, 2.5):.0f}-'
+               f'{np.percentile(largest, 97.5):.0f}, largest of all {counts.max():.0f}')
 
     community = np.array([len(c['municipality_effective_contacts']) for c in index_contact], dtype=float)
     # B63 (E100): informational. Under B62 it cannot coexist with the one-day Fu 2010 shape
@@ -307,10 +333,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
              'Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)',
              (zero_band, OUTCOME_TARGETS['community_day_p90'][:2])),
             ('workplace', 'workplace, employed cases', [p for p, e in zip(pairs, employed) if e],
-             'Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, '
-             'zero 27.4%, p90 13 (n=416)',
-             (tuple(100 * x for x in OUTCOME_TARGETS['workplace_day_zero_share'][:2]),
-              OUTCOME_TARGETS['workplace_day_p90'][:2]))):
+             'B70: Fu 2010, employed, average day of the week, >=15 min, met daily, weighted: '
+             'mean 2.95, zero 56.3%, p90 9 (n=905); reported only, the zero days are mostly '
+             'days off, which the model does not have',
+             (None, None))):
         d = person_days(layer, cases)
         if not len(d):
             continue
@@ -325,12 +351,15 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # contacts per confirmed case, 95% CI 13.9-19.1), which no objective term uses. E89: Jian
     # counts the contacts a tracer listed, from 2 days before onset to isolation (E7), so the
     # judged quantity uses that window; every candidate contact from infection is information.
+    # B72 (2026-10-26, user): Jian's statistic is computed the way Jian did, over every case of
+    # a simulated first wave (B72 below); the index case alone is not Jian's population, so it
+    # is information here.
     check('B56', "contacts per case in Jian's tracing window",
           float(np.mean([contacts_in_tracing_window(k, c)
                          for k, c in zip(index_course, index_contact, strict=True)])),
-          (13.9, 19.1),
-          note='Jian et al. 2020: 16.5 per case over 487 cases; window onset - 2 d to '
-               'isolation (E7, E89); independent')
+          None,
+          note=f'information: index cases only; Jian et al. 2020 locally acquired cases '
+               f'1,435 / 55 = {JIAN_LOCAL_PER_CASE:.1f}; window onset - 2 d to isolation (E7, E89)')
     check('B56', 'contacts per case, all layers, from infection',
           float(np.mean([contacts_per_case(c) for c in index_contact])), None,
           note='information: every candidate contact; CovSyn counts from infection, '
@@ -546,6 +575,34 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
               float(np.mean([contacts_in_tracing_window(c, k) for c, k in everyone])), None,
               note='Jian et al. 2020: 16.5 per case over all 487 confirmed cases, 76% of them '
                    'quarantined travellers or contacts; same mixture as this scenario (1.14)')
+        # B72 (2026-10-26, user): Jian's statistic computed as Jian did, once per simulated
+        # first wave: the contacts listed from two days before onset to isolation, summed over
+        # the cases of the group, divided by their number. The spread over the simulations is
+        # the range the model expects Taiwan to have measured. The model has no contact before
+        # arrival, so it has no flight contact.
+        def jian(selector):
+            per_run = []
+            for r in first_runs:
+                pairs = [(c, k) for c, k in zip(r['course'], r['contact'], strict=True) if selector(c)]
+                if pairs:
+                    per_run.append(sum(contacts_in_tracing_window(c, k) for c, k in pairs) / len(pairs))
+            return np.array(per_run, dtype=float)
+
+        for label, selector, reference in (
+                ('all cases', lambda c: True,
+                 f'{JIAN_ALL_PER_CASE:.1f} [13.9, 19.1]; without flight contacts '
+                 f'{JIAN_ALL_NO_FLIGHT_PER_CASE:.1f}'),
+                ('local cases', lambda c: c.get('seed_type') != 'imported',
+                 f'locally acquired 1,435 / 55 = {JIAN_LOCAL_PER_CASE:.1f}'),
+                ('imported cases', lambda c: c.get('seed_type') == 'imported',
+                 f'imported 6,616 / 432 = {JIAN_IMPORTED_PER_CASE:.1f}; without flight contacts '
+                 f'{JIAN_IMPORTED_NO_FLIGHT_PER_CASE:.1f} (Navy cases included)')):
+            v = jian(selector)
+            if len(v):
+                check('B72', f"Jian's contacts per case, {label}, per simulated first wave",
+                      float(v.mean()), None,
+                      note=f'information: simulations 2.5-97.5% {np.percentile(v, 2.5):.1f}-'
+                           f'{np.percentile(v, 97.5):.1f} (n={len(v)}); Jian et al. 2020 {reference}')
         check('B36', 'first wave deaths per simulation', deaths.mean(), None,
               note='observed 3 local deaths')
         first_ages = np.array([d['age'] for r in first_runs for d in r['demo']], dtype=float)

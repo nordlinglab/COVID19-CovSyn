@@ -22,6 +22,9 @@ FIRST_WAVE_SEED_FILES = {'taiwan_first_outbreak': './variable/taiwan_first_wave_
                          'taiwan_first_outbreak_mar18': './variable/taiwan_first_wave_seeds_mar18.csv',
                          'taiwan_first_outbreak_mar18_local':
                              './variable/taiwan_first_wave_seeds_mar18_local.csv'}
+# B69: the social-data attribute holding the other members of each shared group.
+SHARED_GROUP_SIZE = {'household': 'household_size', 'school': 'school_class_size',
+                     'workplace': 'work_group_size'}
 
 
 def load_first_wave_seeds(path):
@@ -393,6 +396,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     age = np.nan
     contact_type = np.nan
     transmission_digraph = []
+    groups = {}  # B69: group id -> {'size': members including the first case, 'infected'}
+    group_of = []  # B69: per case, {layer: group id}
     confirmed_count_per_day = {}  # Dictionary to store confirmed case count per day
     total_infections = 0  # Variable to store the total number of infections
     threshold_confirmed_day = np.nan
@@ -445,6 +450,29 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                hospital_p, hospital_size_p, hospital_sizes,
                                                work_group=work_group)
                 social_data.draw_social_data()
+                # B69: a case infected in a household, school class or work group joins its
+                # infector's group instead of a newly drawn one, so it meets the same members,
+                # some of them already infected (the infector among them). A household also
+                # keeps its municipality, a work group its enterprise.
+                inherited = (contact_type in SHARED_GROUP_LAYERS and not np.isnan(source_case_id))
+                case_groups = {}
+                group_infected = {}
+                for layer, size_name in SHARED_GROUP_SIZE.items():
+                    if inherited and contact_type == layer:
+                        gid = group_of[int(source_case_id) - 1][layer]
+                        setattr(social_data, size_name, groups[gid]['size'] - 1)
+                        infector_social = social_data_list[int(source_case_id) - 1]
+                        if layer == 'household':
+                            social_data.municipality = infector_social['municipality']
+                            social_data.municipality_size = municipality_data[social_data.municipality]
+                        if layer == 'workplace':
+                            social_data.enterprise_size = infector_social['enterprise_size']
+                        group_infected[layer] = groups[gid]['infected'] - 1
+                    else:
+                        gid = len(groups)
+                        groups[gid] = {'size': int(getattr(social_data, size_name)) + 1, 'infected': 1}
+                    case_groups[layer] = gid
+                group_of.append(case_groups)
                 social_data_tmp = get_saveable_data(social_data, 'social')
                 social_data_list.append(social_data_tmp)
 
@@ -501,9 +529,13 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                  seed_rule=(None if seed_case is None
                                                             or seed_case['arrival_day'] is None
                                                             else {'arrival_day': seed_case['arrival_day'],
-                                                                  'status': seed_case['status']}))
+                                                                  'status': seed_case['status']}),
+                                                 group_infected=group_infected)
 
                 _, population_size = contact_data.draw_contact_data(input_P)
+                for layer in SHARED_GROUP_LAYERS:  # B69: the new infections join the group
+                    groups[case_groups[layer]]['infected'] += int(
+                        np.nansum(getattr(contact_data, f'{layer}_effective_contacts') or [0]))
                 contact_data_tmp = get_saveable_data(contact_data, 'contact')
                 contact_data_list.append(contact_data_tmp)
 

@@ -520,12 +520,14 @@ OUTCOME_TARGETS = {
     # charged workplace targets are now daily_workplace_employed and the one-day shape below.
     'daily_workplace':        (1.20, 1.80, 0.0),
     # B64: coworker contacts of the employed (enterprise size >= 1) index cases per day before
-    # onset, against Fu 2010's employed weekday diaries on a day at work (416 of 616 with at least
-    # one work contact): work contacts of 15 minutes or more met daily or almost daily, weighted
-    # to the 2010 population by sex and age as Fu et al. (2012) weight their sample: mean 4.96,
-    # bootstrap 95% 4.34-5.61 (unweighted 4.84; covid19-research
-    # scripts/summarize_taiwan_contact_data.py at_work()).
-    'daily_workplace_employed': (4.34, 5.61, 1.0),
+    # onset: Fu 2010 work contacts of 15 minutes or more met daily or almost daily, weighted to
+    # the 2010 population by sex and age as Fu et al. (2012) weight their sample.
+    # B70 (2026-10-26, user): the model has no days off, so its every day stands for an average
+    # day of the week, not a day at work (4.96 [4.34, 5.61] over the 416 weekday diaries with a
+    # work contact). Every one of the 905 employed diaries counts, a day off with no coworker
+    # contact, the seven days weighted equally: mean 2.95, bootstrap 95% 2.56-3.36
+    # (covid19-research scripts/summarize_taiwan_contact_data.py average_week()).
+    'daily_workplace_employed': (2.56, 3.36, 1.0),
     # B63 (2026-10-16, E100): community upper bound 1.80 -> 7.12. Under B62's scale-free count
     # the mean is set by the tail, and Fu 2010 records at most 40 contacts per person a day
     # (3.9% of diaries at the cap), so its 1.76 is a lower bound: the same law fitted to it
@@ -661,11 +663,13 @@ OUTCOME_TARGETS = {
     # pooled (contact_measures.one_day_shape). Same data as B62's exponent.
     'community_day_zero_share': (0.598, 0.641, 1.0),
     'community_day_p90':        (5.0, 8.0, 1.0),
-    # B64: the one-day shape of the same 416 weighted diaries, which pins the work group's
-    # saturation P[205] and spread P[206]: zero share 27.4% (bootstrap 95% 23.2-31.8%), p90 13
-    # (10-16).
-    'workplace_day_zero_share': (0.232, 0.318, 1.0),
-    'workplace_day_p90':        (10.0, 16.0, 1.0),
+    # B64 / B70: the one-day shape of the same diaries, which pins the work group's saturation
+    # P[205] and spread P[206]. Average day of the week (B70): zero share 56.3% (bootstrap 95%
+    # 52.9-59.7%), p90 9 (8-10); on a day at work it was 27.4% and 13.
+    # Reported only (user, 2026-10-26): most of the zero days are days off, which the model does
+    # not have, so charging them would shrink the work group to imitate absence.
+    'workplace_day_zero_share': (0.529, 0.597, 0.0),
+    'workplace_day_p90':        (8.0, 10.0, 0.0),
     # B22: incubation back to the literature reported-mean range now that it is built as
     # latent + window rather than drawn and truncated.
     'incubation_mean':        (3.9, 8.0, 1.0),

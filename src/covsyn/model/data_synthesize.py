@@ -6,6 +6,8 @@ from scipy import stats
 
 
 LAYER_NAMES = ('household', 'school', 'workplace', 'health_care', 'municipality')
+# B69: the layers whose group a case infected there shares with its infector.
+SHARED_GROUP_LAYERS = ('household', 'school', 'workplace')
 
 # ----------------------------------------------------------------------------------------
 # Phase D constants (covsyn_decisions.md B17-B36). Everything here is either taken from a
@@ -93,9 +95,9 @@ COMMUNITY_MAX_CONTACTS = 1000       # Taiwan's largest community record is 850 (
 # is drawn around that mean with negative-binomial variance (Gamma shape k), so a large company
 # can still put many people in one room now and then; it never exceeds the n - 1 coworkers.
 # a = P[205], k = P[206], appended so older vectors keep B31's group. They are calibrated to
-# Fu 2010's coworker contacts of employed people on a day at work (mean 4.84, zero share 28%,
-# p90 12; weighted to the 2010 population 4.96, 27.4%, 13; covid19-research
-# scripts/summarize_taiwan_contact_data.py at_work()).
+# Fu 2010's coworker contacts of employed people, weighted to the 2010 population, on an
+# average day of the week (B70: mean 2.95, zero share 56.3%, p90 9; on a day at work 4.96, 27.4%,
+# 13; covid19-research scripts/summarize_taiwan_contact_data.py average_week()).
 WORK_GROUP_SATURATION_INDEX = 205
 WORK_GROUP_DISPERSION_INDEX = 206
 # B65 (2026-10-24, professor 2026-10-12): the delay between an infector's confirmation and the
@@ -960,9 +962,13 @@ class Draw_contact_data:
                  previously_infected_list, population_size, vaccine_efficacy, vaccination_rate,
                  natural_immunity_status_list, overdispersion_rate, overdispersion_weight,
                  age_risk_ratios, age_p, layer_age_p=None, community_dispersion=None,
-                 community_event=None, community_exponent=None, seed_rule=None):
+                 community_event=None, community_exponent=None, seed_rule=None,
+                 group_infected=None):
         # B66: {'arrival_day', 'status'} for a seed case of the Taiwan first wave, else None.
         self.seed_rule = seed_rule
+        # B69: {layer: members of the case's shared group already infected, itself excluded}.
+        self.group_infected = group_infected or {}
+        self.group_blocked = {layer: set() for layer in SHARED_GROUP_LAYERS}
         self.course_of_disease_data_object = course_of_disease_data_object
         self.social_data_object = social_data_object
         self.attack_rate = attack_rate
@@ -1693,10 +1699,35 @@ class Draw_contact_data:
             if layer == 'municipality' and getattr(self, 'municipality_event_mask', None) is not None:
                 self.municipality_event_mask = self.municipality_event_mask[keep]
 
+    def apply_shared_group(self):
+        """Mark the contacts that are group members already infected (B69).
+
+        A case infected in its household, school class or work group belongs to its infector's
+        group (data_synthesis_main gives it the same size), so some of the members it meets are
+        already infected: the infector and the others infected in that group so far. The met
+        members are a random subset of the group, so the number of infected ones among them is
+        hypergeometric; those contacts are still met and counted but cannot be infected again.
+        Draws random numbers only for such a case, so an index case is unchanged.
+        """
+        attributes = {'household': ('household_contacts_matrix', 'household_size'),
+                      'school': ('school_class_contacts_matrix', 'school_class_size'),
+                      'workplace': ('workplace_contacts_matrix', 'work_group_size')}
+        for layer, infected in self.group_infected.items():
+            matrix_name, size_name = attributes[layer]
+            met = np.asarray(getattr(self, matrix_name)).shape[0]
+            members = int(getattr(self.social_data_object, size_name))
+            infected = int(min(infected, members))
+            if met == 0 or infected <= 0:
+                continue
+            blocked = np.random.hypergeometric(infected, members - infected, min(met, members))
+            self.group_blocked[layer] = set(np.random.choice(met, size=blocked, replace=False).tolist())
+
     def draw_contact_data(self, P):
         self.draw_contacts_each_day(P)
         if self.seed_rule is not None:
             self.apply_seed_rule()
+        if self.group_infected:
+            self.apply_shared_group()
         attack_rate_profiles = self.calculate_daily_secondary_attack_rate()
         household_attack_rate = attack_rate_profiles['household']
         if self.seed_rule is not None and self.seed_rule['status'] == 'quarantine':
@@ -1750,6 +1781,8 @@ class Draw_contact_data:
                             self.household_previously_infected_index_list, np.nan)
                         natural_immunity_status = False
                     vaccination_status = self.draw_vaccination_status()
+                    if index in self.group_blocked['household']:
+                        natural_immunity_status = True  # B69: already infected
                     secondary_contact_age = random.choices(
                         np.arange(100+1), weights=self.layer_age_p['household'])[0]
                     self.household_contact_ages.append(secondary_contact_age)
@@ -1803,6 +1836,8 @@ class Draw_contact_data:
                             self.school_previously_infected_index_list, np.nan)
                         natural_immunity_status = False
                     vaccination_status = self.draw_vaccination_status()
+                    if index in self.group_blocked['school']:
+                        natural_immunity_status = True  # B69: already infected
                     secondary_contact_age = random.choices(
                         np.arange(100+1), weights=self.layer_age_p['school'])[0]
                     self.school_contact_ages.append(secondary_contact_age)
@@ -1854,6 +1889,8 @@ class Draw_contact_data:
                             self.workplace_previously_infected_index_list, np.nan)
                         natural_immunity_status = False
                     vaccination_status = self.draw_vaccination_status()
+                    if index in self.group_blocked['workplace']:
+                        natural_immunity_status = True  # B69: already infected
                     secondary_contact_age = random.choices(
                         np.arange(100+1), weights=self.layer_age_p['workplace'])[0]
                     self.workplace_contact_ages.append(secondary_contact_age)
