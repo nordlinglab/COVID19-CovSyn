@@ -19,12 +19,17 @@ SHARED_GROUP_LAYERS = ('household', 'school', 'workplace')
 # of confirmation (PMC7605820); drawn as Poisson(1) so it varies between cases.
 TRACING_DELAY_MEAN = 1.0
 
-# B68: household transmission from a first-wave seed in home quarantine. Taiwan's home
-# quarantine asked the person to stay at home, wear a mask and keep apart from the family; the
-# household attack rate is multiplied by the effect of mask use at home before symptom onset in
-# the Beijing household cohort of Wang et al. (2020, BMJ Glob Health 5:e002794): OR 0.21
-# (95% CI 0.06-0.79), used as a risk ratio.
-HOME_QUARANTINE_HOUSEHOLD_FACTOR = 0.21
+# B74: quarantine breach probability of a first-wave seed in home quarantine (professor,
+# 2026-10-28; replaces the B68 household-only rule with its factor 0.21). A quarantined seed
+# meets the same layers as one outside quarantine, health care excepted (B68), and every
+# infection probability is multiplied by this value. It is calibrated so that the 122
+# quarantined seeds of the 2020-04-12 scenario infect as many people as in the data:
+# 'confirmed' 3 (household infections during quarantine, 209->246, 228->247, 195->386, checked
+# against the Taiwan CDC press releases), 'with_unclear' 5 (also 277->269 and 122->307, whose
+# infection may have been before or outside the quarantine). Calibration:
+# scripts/calibrate_quarantine_breach.py with the run 18 selected vector, 1000 runs: with p = 1
+# a quarantined seed infects 0.394 people; p = 0.057 gives 2.97 and p = 0.095 gives 5.10 people.
+QUARANTINE_BREACH = {'confirmed': 0.057, 'with_unclear': 0.095}
 
 # B31: the work group actually met inside an enterprise. Chen 2022 (BMJ Open 12:e055643)
 # Table 5 reports the cases per workplace cluster rising only from 3 to 8 (median 4) while
@@ -1665,20 +1670,21 @@ class Draw_contact_data:
         A seed imported from abroad meets nobody in Taiwan before the day it arrives
         (arrival_day, counted from infection). After that its status, taken from how the case was
         detected in the Taiwan case data, decides which layers it meets: 'community' every layer;
-        'quarantine' (detected during home quarantine) only the household, the 2020 home
-        quarantine being spent at home with the family; 'airport' (detected by airport screening,
-        isolated on arrival) nobody. Contact days outside that are removed, and a contact left
-        without any day is dropped, so it is neither a candidate contact nor an infection. The
-        layers' own windows still end at isolation.
+        'quarantine' (detected during home quarantine) every layer but health care, its
+        infection probabilities being multiplied by the quarantine breach probability in
+        draw_contact_data (B74); 'airport' (detected by airport screening, isolated on arrival)
+        nobody. Contact days outside that are removed, and a contact left without any day is
+        dropped, so it is neither a candidate contact nor an infection. The layers' own windows
+        still end at isolation.
 
         B68: health care is closed to both, because a person in home quarantine could see a
         doctor only through the health department, by its transport, at a designated hospital
         whose staff wore the protection for the route of transmission (Taiwan CDC, 居家隔離或檢疫者
         接受醫療照護時之感染管制措施, 2020-03-03); none of the 122 quarantined imported cases of the
-        data infected anyone in health care. A quarantined seed's household attack rate is
-        scaled by HOME_QUARANTINE_HOUSEHOLD_FACTOR in draw_contact_data.
+        data infected anyone in health care.
         """
-        allowed = {'community': LAYER_NAMES, 'quarantine': ('household',),
+        allowed = {'community': LAYER_NAMES,
+                   'quarantine': tuple(layer for layer in LAYER_NAMES if layer != 'health_care'),
                    'airport': ()}[self.seed_rule['status']]
         arrival = max(int(self.seed_rule['arrival_day']), 0)
         attributes = {'household': 'household_contacts_matrix',
@@ -1729,9 +1735,10 @@ class Draw_contact_data:
         if self.group_infected:
             self.apply_shared_group()
         attack_rate_profiles = self.calculate_daily_secondary_attack_rate()
-        household_attack_rate = attack_rate_profiles['household']
         if self.seed_rule is not None and self.seed_rule['status'] == 'quarantine':
-            household_attack_rate = household_attack_rate * HOME_QUARANTINE_HOUSEHOLD_FACTOR  # B68
+            attack_rate_profiles = {layer: rate * self.seed_rule['breach']  # B74
+                                    for layer, rate in attack_rate_profiles.items()}
+        household_attack_rate = attack_rate_profiles['household']
         school_attack_rate = attack_rate_profiles['school']
         workplace_attack_rate = attack_rate_profiles['workplace']
         health_care_attack_rate = attack_rate_profiles['health_care']

@@ -203,7 +203,7 @@ def apply_contact_weight(input_P, contact_weight):
 
 
 def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.',
-              mode='result', contact_weight=1.0):
+              mode='result', contact_weight=1.0, quarantine_breach='confirmed'):
     """Simulate one Monte-Carlo run of the given mode.
 
     Args:
@@ -214,6 +214,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         result_path: Output directory.
         mode: Scenario (sources, population, time limit).
         contact_weight: Contact multiplier of spread_Taiwan_weight; 1 is the calibrated model.
+        quarantine_breach: First-wave modes: option of QUARANTINE_BREACH ('confirmed' or
+            'with_unclear'), or a number used as the breach probability itself (B74).
 
     Returns:
         The demographic, social, course-of-disease and contact data of every case.
@@ -302,6 +304,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         # dates of E29, which used the confirmation date as the infection date and seeded local
         # cases with a known source.
         first_wave_seeds = load_first_wave_seeds(FIRST_WAVE_SEED_FILES[mode])
+        # B74: infection probabilities of a seed in home quarantine are multiplied by this.
+        breach = (float(quarantine_breach) if not isinstance(quarantine_breach, str)
+                  else QUARANTINE_BREACH[quarantine_breach])
         population_size = 23008366 - len(first_wave_seeds)
         natural_immunity_rate = 1
     if mode == 'spread_Taiwan':
@@ -529,7 +534,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                  seed_rule=(None if seed_case is None
                                                             or seed_case['arrival_day'] is None
                                                             else {'arrival_day': seed_case['arrival_day'],
-                                                                  'status': seed_case['status']}),
+                                                                  'status': seed_case['status'],
+                                                                  'breach': breach}),
                                                  group_infected=group_infected)
 
                 _, population_size = contact_data.draw_contact_data(input_P)
@@ -682,6 +688,10 @@ if __name__ == "__main__":
     parser.add_argument('--cpu_cores', type=int, default=1)
     parser.add_argument('--contact_weight', type=float, default=1.0,
                         help='contact multiplier of spread_Taiwan_weight (1 = calibrated Taiwan)')
+    parser.add_argument('--quarantine_breach', type=str, default='confirmed',
+                        choices=['confirmed', 'with_unclear'],
+                        help='first-wave modes: breach probability of home quarantine, calibrated '
+                             'to the 3 confirmed or the 5 confirmed and unclear infections (B74)')
     parser.add_argument('--seed_start', type=int, default=0,
                         help='first Monte-Carlo seed; B60 uses 100000 for an independent set')
 
@@ -692,6 +702,7 @@ if __name__ == "__main__":
     cpu_cores = args.cpu_cores
     seed_start = args.seed_start
     contact_weight = args.contact_weight
+    quarantine_breach = args.quarantine_breach
     if contact_weight != 1.0 and mode != 'spread_Taiwan_weight':
         raise SystemExit('--contact_weight applies to spread_Taiwan_weight only')
     result_path = Path(args.result_path)
@@ -753,7 +764,8 @@ if __name__ == "__main__":
             with concurrent.futures.ProcessPoolExecutor() as executor:  # Multiprocessing
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
-                                           contact_weight=contact_weight)
+                                           contact_weight=contact_weight,
+                                           quarantine_breach=quarantine_breach)
                            for seed in seeds]
                 # A worker's exception used to stay inside its unread future, so a failed
                 # simulation left no file and no error; .result() raises it here.
@@ -767,12 +779,15 @@ if __name__ == "__main__":
             with concurrent.futures.ProcessPoolExecutor() as executor:
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
-                                           contact_weight=contact_weight)
+                                           contact_weight=contact_weight,
+                                           quarantine_breach=quarantine_breach)
                            for seed in seeds]
                 for future in futures:
                     future.result()
 
         write_run_metadata(result_path, mode=mode, contact_weight=contact_weight,
+                           quarantine_breach=(quarantine_breach if mode in FIRST_WAVE_SEED_FILES
+                                              else None),
                            seed_start=seed_start, monte_carlo_number=mc_number,
                            parameter_path=str(parameter_path))
         print("--- Done %s seconds ---" % (time.time() - start_time))

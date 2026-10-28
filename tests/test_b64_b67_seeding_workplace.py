@@ -120,9 +120,10 @@ def test_local_start_scenario_replaces_imported_seeds_by_their_local_offspring()
     assert len(reference_local_cases(seeds, sources)) == 48
 
 
-def test_home_quarantine_household_factor_is_the_wang_2020_mask_effect():
-    """B68: Wang et al. (2020) OR 0.21 for mask use at home before symptom onset."""
-    assert ds.HOME_QUARANTINE_HOUSEHOLD_FACTOR == pytest.approx(0.21)
+def test_quarantine_breach_has_the_two_calibrated_options():
+    """B74: the breach probability for 3 and for 5 infections by quarantined seeds."""
+    assert set(ds.QUARANTINE_BREACH) == {"confirmed", "with_unclear"}
+    assert 0 < ds.QUARANTINE_BREACH["confirmed"] < ds.QUARANTINE_BREACH["with_unclear"] < 1
 
 
 class _Course:
@@ -141,13 +142,13 @@ def _contact_data(rule):
 
 
 def test_seed_rule_removes_days_before_arrival_and_layers_the_status_forbids():
-    """No contact before arrival; quarantine keeps only the household, airport nobody (B68)."""
+    """No contact before arrival; quarantine closes health care only (B68, B74), airport all."""
     c = _contact_data({"arrival_day": 4, "status": "quarantine"})
     c.apply_seed_rule()
     assert c.household_contacts_matrix[:, :4].sum() == 0
     assert c.household_contacts_matrix[:, 4:].all()
-    assert c.workplace_contacts_matrix.shape[0] == 0
-    assert c.municipality_contacts_matrix.shape[0] == 0
+    assert c.workplace_contacts_matrix[:, 4:].all()
+    assert c.municipality_contacts_matrix[:, 4:].all()
     assert c.health_care_contacts_matrix.shape[0] == 0
     c = _contact_data({"arrival_day": 0, "status": "airport"})
     c.apply_seed_rule()
