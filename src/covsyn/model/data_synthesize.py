@@ -1682,11 +1682,16 @@ class Draw_contact_data:
         whose staff wore the protection for the route of transmission (Taiwan CDC, 居家隔離或檢疫者
         接受醫療照護時之感染管制措施, 2020-03-03); none of the 122 quarantined imported cases of the
         data infected anyone in health care.
+
+        B73: a 'community' seed with a quarantine_from_day (recalled into home quarantine on
+        2020-03-18) loses its health-care contacts from that day on; its infection probabilities
+        from that day are multiplied by the breach probability in draw_contact_data.
         """
         allowed = {'community': LAYER_NAMES,
                    'quarantine': tuple(layer for layer in LAYER_NAMES if layer != 'health_care'),
                    'airport': ()}[self.seed_rule['status']]
         arrival = max(int(self.seed_rule['arrival_day']), 0)
+        recall = self.seed_rule.get('quarantine_from_day')
         attributes = {'household': 'household_contacts_matrix',
                       'school': 'school_class_contacts_matrix',
                       'workplace': 'workplace_contacts_matrix',
@@ -1698,6 +1703,8 @@ class Draw_contact_data:
                 continue
             if layer in allowed:
                 matrix[:, :arrival] = False
+                if layer == 'health_care' and recall is not None:
+                    matrix[:, max(recall, 0):] = False
             else:
                 matrix[:, :] = False
             keep = matrix.any(axis=1)
@@ -1737,6 +1744,14 @@ class Draw_contact_data:
         attack_rate_profiles = self.calculate_daily_secondary_attack_rate()
         if self.seed_rule is not None and self.seed_rule['status'] == 'quarantine':
             attack_rate_profiles = {layer: rate * self.seed_rule['breach']  # B74
+                                    for layer, rate in attack_rate_profiles.items()}
+        elif self.seed_rule is not None and self.seed_rule.get('quarantine_from_day') is not None:
+            recall = max(int(self.seed_rule['quarantine_from_day']), 0)  # B73
+            factor = {}
+            for layer, rate in attack_rate_profiles.items():
+                factor[layer] = np.ones(len(rate))
+                factor[layer][recall:] = self.seed_rule['breach']
+            attack_rate_profiles = {layer: rate * factor[layer]
                                     for layer, rate in attack_rate_profiles.items()}
         household_attack_rate = attack_rate_profiles['household']
         school_attack_rate = attack_rate_profiles['school']

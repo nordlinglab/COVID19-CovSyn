@@ -53,6 +53,10 @@ def load_first_wave_seeds(path):
                 # infector's confirmation (simulation day); empty for the other seeds.
                 'source_confirmed_day': (float(row['source_confirmed_day'])
                                          if row.get('source_confirmed_day') else np.nan),
+                # B73: a 'community' seed recalled into home quarantine on 2020-03-18, counted
+                # from its infection; None for the others.
+                'quarantine_from_day': (int(float(row['quarantine_from_day_from_infection']))
+                                        if row.get('quarantine_from_day_from_infection') else None),
             })
     return seeds
 
@@ -535,7 +539,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                             or seed_case['arrival_day'] is None
                                                             else {'arrival_day': seed_case['arrival_day'],
                                                                   'status': seed_case['status'],
-                                                                  'breach': breach}),
+                                                                  'breach': breach,
+                                                                  'quarantine_from_day':
+                                                                      seed_case['quarantine_from_day']}),
                                                  group_infected=group_infected)
 
                 _, population_size = contact_data.draw_contact_data(input_P)

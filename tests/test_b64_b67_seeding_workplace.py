@@ -168,3 +168,23 @@ def test_warm_start_pads_a_run_17_vector():
     seed_vector = np.arange(208, dtype=float)
     padded = fo.pad_pre_b54_vector(np.zeros(205), seed_vector)
     assert padded.shape == (208,) and padded[205] == 205.0
+
+
+def test_seeds_recalled_into_quarantine_on_march_18():
+    """B73: 'community' arrivals from Europe etc. of Mar 5-14 are quarantined from Mar 18."""
+    seeds = pd.read_csv("variable/taiwan_first_wave_seeds.csv", parse_dates=["infection_date"])
+    recalled = seeds.dropna(subset=["quarantine_from_day_from_infection"])
+    assert len(recalled) == 49 and (recalled.status == "community").all()
+    days = (pd.Timestamp("2020-03-18") - recalled.infection_date).dt.days
+    assert (recalled.quarantine_from_day_from_infection == days).all()
+    feb29 = pd.read_csv("variable/taiwan_first_wave_seeds_feb29.csv")
+    assert feb29.quarantine_from_day_from_infection.isna().all()
+
+
+def test_recalled_seed_loses_health_care_from_the_recall_day():
+    """B73: health care is closed from the recall day on, the other layers stay open."""
+    c = _contact_data({"arrival_day": 2, "status": "community", "quarantine_from_day": 6})
+    c.apply_seed_rule()
+    assert c.health_care_contacts_matrix[:, 2:6].all()
+    assert c.health_care_contacts_matrix[:, 6:].sum() == 0
+    assert c.workplace_contacts_matrix[:, 2:].all()

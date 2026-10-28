@@ -56,6 +56,14 @@ Status after arrival
     No imported case of the data arrived from China, Hong Kong or Macau between Feb 7 and Mar 18,
     so the Feb 7 rule changes nobody. Local seeds are always 'community'.
 
+Recall into home quarantine on 2020-03-18 (B73, user decision 2026-10-28)
+    On 2020-03-18 the CECC applied home quarantine retroactively to the people who had arrived
+    from Europe, Egypt, Turkey or Dubai (transit included) between 2020-03-05 and 2020-03-14
+    (MOHW press release 2020-03-18, https://mohw.gov.tw/cp-199-52426-2.html). Such a seed whose
+    status is 'community' stays in the community until 2020-03-18 and is in home quarantine from
+    then on (``quarantine_from_day_from_infection``); the policy did not exist before, so nothing
+    changes earlier. The place is matched on the case's visited countries.
+
 Age is kept as the ten-year group; the simulation draws the year within it (professor,
 2026-10-19). Day 0 of a scenario is its earliest seed infection.
 
@@ -96,6 +104,17 @@ LOCAL_START_SCENARIOS = {
                     CHENG2020_LAST_CONFIRMATION + pd.Timedelta(days=1)),
 }
 STATUS = {"airport screening": "airport", "home quarantine": "quarantine"}
+# B73: retroactive home quarantine announced 2020-03-18 (MOHW, https://mohw.gov.tw/cp-199-52426-2.html)
+RECALL_DATE = pd.Timestamp("2020-03-18")
+RECALL_ARRIVALS = (pd.Timestamp("2020-03-05"), pd.Timestamp("2020-03-14"))
+RECALL_PLACES = ("Albania", "Andorra", "Austria", "Belarus", "Belgium", "Bosnia", "Bulgaria",
+                 "Croatia", "Cyprus", "Czech", "Denmark", "England", "Estonia", "Finland", "France",
+                 "Germany", "Greece", "Hungary", "Iceland", "Ireland", "Italy", "Latvia",
+                 "Liechtenstein", "Lithuania", "Luxembourg", "Malta", "Moldova", "Monaco",
+                 "Montenegro", "Netherlands", "Macedonia", "Norway", "Poland", "Portugal", "Romania",
+                 "Russia", "San Marino", "Serbia", "Slovakia", "Slovenia", "Spain", "Sweden",
+                 "Switzerland", "Ukraine", "United Kingdom", "UK", "Vatican", "Europe",
+                 "Egypt", "Turkey", "Dubai", "UAE", "United Arab Emirates")
 
 
 def median_days(later: pd.Series, earlier: pd.Series) -> float:
@@ -169,6 +188,9 @@ def build(cases: pd.DataFrame, sources: pd.DataFrame,
     clipped = infection.clip(upper=upper)
     clipped = clipped.where(lower.isna() | (clipped >= lower), lower.clip(upper=upper))
 
+    places = s["visited_countries/cities"].astype(str).str.lower()
+    recalled = (s_imported & s.arrival.between(*RECALL_ARRIVALS)
+                & places.apply(lambda v: any(p.lower() in v for p in RECALL_PLACES)))
     status, source = [], []
     for way, imp, arrival in zip(s.way_of_discover, s_imported, s.arrival, strict=True):
         state = STATUS.get(str(way).strip(), "community") if imp else "community"
@@ -192,6 +214,7 @@ def build(cases: pd.DataFrame, sources: pd.DataFrame,
         "arrival_date": s.arrival.where(s_imported).dt.date,
         "status": status,
         "status_source": source,
+        "recalled": recalled & (pd.Series(status, index=s.index) == "community"),
         "confirmed_date": s.confirmed_date.dt.date,
         "source_confirmed_date": pd.to_datetime(infector_confirmed.reindex(s.index)).dt.date,
     })
@@ -206,6 +229,9 @@ def build(cases: pd.DataFrame, sources: pd.DataFrame,
     out["arrival_day_from_infection"] = (pd.to_datetime(out.arrival_date)
                                          - pd.to_datetime(out.infection_date)).dt.days
     out["source_confirmed_day"] = (pd.to_datetime(out.source_confirmed_date) - day0).dt.days
+    out["quarantine_from_day_from_infection"] = (
+        (RECALL_DATE - pd.to_datetime(out.infection_date)).dt.days.where(out.recalled))
+    out = out.drop(columns="recalled")
     out = out.sort_values(["infection_day", "case_id"]).reset_index(drop=True)
     out.attrs.update(day0=str(day0.date()), incubation_median=incubation,
                      onset_to_confirmation_median=onset_to_confirmation,
