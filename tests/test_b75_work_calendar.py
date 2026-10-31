@@ -76,6 +76,8 @@ def test_at_work_handles_empty_and_rejects_invalid_lengths():
     assert calendar.at_work(0, 400).shape == (400,)
     with pytest.raises(ValueError):
         calendar.at_work(0, -1)
+    with pytest.raises(ValueError):
+        calendar.at_work(-1, 3)
 
 
 def test_first_wave_day_zero_is_read_from_the_seed_table():
@@ -228,3 +230,35 @@ def test_old_data_without_a_window_is_measured_as_before():
     contact = {"workplace_contacts_matrix": []}
     assert cm.at_work_days_before_onset(course, contact).tolist() == [0.0]
     assert cm.contacts_per_day_at_work(course, contact) == 0.0
+
+
+@pytest.mark.parametrize(("day", "expected"), [
+    (date(2020, 6, 25), wc.SUNDAY_AT_WORK),    # Dragon Boat Festival, a Thursday
+    (date(2020, 6, 26), wc.SUNDAY_AT_WORK),    # its adjusted day off, a Friday
+    (date(2020, 10, 1), wc.SUNDAY_AT_WORK),    # Moon Festival, a Thursday
+    (date(2020, 10, 2), wc.SUNDAY_AT_WORK),
+    (date(2020, 10, 9), wc.SUNDAY_AT_WORK),    # National Day observed, a Friday
+    (date(2021, 1, 1), wc.SUNDAY_AT_WORK),     # New Year, a Friday
+    (date(2020, 6, 20), wc.SATURDAY_AT_WORK),  # make-up day not confirmed: a Saturday
+    (date(2020, 6, 24), wc.WEEKDAY_AT_WORK),
+])
+def test_holidays_cover_the_whole_simulation_year(day, expected):
+    """Review: first-wave runs last 365 days from 2020-01-09, past the old 2020-05-31 table."""
+    assert wc.attendance_probability(day) == expected
+
+
+def test_cached_probabilities_match_the_dates():
+    """Review: at_work() reads a per-run probability array instead of one date per day."""
+    calendar = wc.WorkCalendar(date(2020, 1, 9), np.random.default_rng(4))
+    p = calendar.probabilities(30, 400)
+    expected = [wc.attendance_probability(date(2020, 2, 8) + wc.timedelta(days=k))
+                for k in range(400)]
+    assert p.tolist() == expected
+
+
+def test_day_zero_is_read_once_per_seed_table():
+    """Review: run_covid used to parse the seed table again on every run."""
+    wc.first_wave_day_zero.cache_clear()
+    for _ in range(3):
+        wc.first_wave_day_zero("variable/taiwan_first_wave_seeds.csv")
+    assert wc.first_wave_day_zero.cache_info().hits == 2

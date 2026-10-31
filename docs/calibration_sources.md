@@ -227,7 +227,7 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 |---|---|---|
 | `WEEKDAY_AT_WORK` | 0.691 | Fu 2010 受僱者（職業 3–6）平日日記 616 份中有任何工作接觸的比例，2010 年底人口加權、五個平日等權重，bootstrap 95% 0.653–0.727；covid19-research `scripts/summarize_taiwan_contact_data.py` |
 | `SATURDAY_AT_WORK` | 0.0199 | 勞動部職類別薪資調查動態查詢（https://pswst.mol.gov.tw/psdn/）「規定每週工作日數」109 年 7 月，工業及服務業、按勞工人數：每週六天 1.46% ＋ 隔週五天、六天 1.06% ÷ 2；covid19-research `data/external/mol_working_days_per_week/` |
-| `SUNDAY_AT_WORK`、國定假日 | 0 | 勞動部同表各種規定工作日都不含週日；放假日依內政部 109 年放假日公告（https://www.ris.gov.tw/info-liferay/app/channel/newsDetail/1575286868351）、2/15 補班、勞基法施行細則第 23 條（元旦、勞動節） |
+| `SUNDAY_AT_WORK`、國定假日 | 0 | 勞動部同表各種規定工作日都不含週日；2020 年全年與 2021-01-01 的放假日依內政部 109 年放假日公告（https://www.ris.gov.tw/info-liferay/app/channel/newsDetail/1575286868351）、2/15 補班、勞基法施行細則第 23 條（元旦、勞動節） |
 | `daily_workplace_employed` | [4.34, 5.61] | 改回有上班那天（§8），只計發病前有上班的日子 |
 | `workplace_day_zero_share` | [0.232, 0.318]，計費 | 同 §8 |
 | `workplace_day_p90` | [10, 16]，計費 | 同 §8 |

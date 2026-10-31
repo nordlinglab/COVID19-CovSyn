@@ -19,24 +19,24 @@ Probabilities (user decisions, 2026-10-31):
 * Sunday and national holidays: 0. None of the survey's schedules includes Sunday; Fu 2010's
   Sunday (67.8%, as high as a weekday) contradicts every other source and is not used.
 
-The holiday table covers 2020-01-01 to 2020-05-31, every day the first-wave scenarios need;
-later dates fall back to the day of the week, as the make-up working days of June and September
-2020 could not be confirmed from an official source.
+The holiday table covers every day off of 2020 and 2021-01-01, the 365 days a first-wave run
+can last from 2020-01-09. The make-up working Saturdays of June and September 2020 could not be
+confirmed from an official source, so they count as Saturdays; later dates fall back to the day
+of the week.
 """
 
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
+from functools import lru_cache
 
 import numpy as np
 
 WEEKDAY_AT_WORK = 0.691
 SATURDAY_AT_WORK = 0.0199
 SUNDAY_AT_WORK = 0.0
-
-LAST_TABLED_DAY = date(2020, 5, 31)
 
 
 def _days(first: date, last: date) -> frozenset[date]:
@@ -46,14 +46,19 @@ def _days(first: date, last: date) -> frozenset[date]:
 # Days off of 2020 (Ministry of the Interior, 109 年放假日, 2019-12-02,
 # https://www.ris.gov.tw/info-liferay/app/channel/newsDetail/1575286868351; Directorate-General
 # of Personnel Administration: Jan 23 adjusted off and made up on Feb 15, Apr 2 observed for
-# Children's Day and Apr 3 for Tomb Sweeping Day), plus New Year and Labour Day, days off for
-# workers by the Enforcement Rules of the Labor Standards Act, article 23.
+# Children's Day and Apr 3 for Tomb Sweeping Day), plus New Year's Day of 2020 and 2021 and
+# Labour Day, days off for workers by the Enforcement Rules of the Labor Standards Act,
+# article 23.
 HOLIDAYS_2020 = (
     _days(date(2020, 1, 1), date(2020, 1, 1))
     | _days(date(2020, 1, 23), date(2020, 1, 29))     # Lunar New Year
     | _days(date(2020, 2, 28), date(2020, 3, 1))      # Peace Memorial Day
     | _days(date(2020, 4, 2), date(2020, 4, 5))       # Children's Day and Tomb Sweeping Day
     | _days(date(2020, 5, 1), date(2020, 5, 1))       # Labour Day
+    | _days(date(2020, 6, 25), date(2020, 6, 28))     # Dragon Boat Festival
+    | _days(date(2020, 10, 1), date(2020, 10, 4))     # Moon Festival
+    | _days(date(2020, 10, 9), date(2020, 10, 11))    # National Day
+    | _days(date(2021, 1, 1), date(2021, 1, 1))
 )
 MAKE_UP_WORKDAYS_2020 = frozenset({date(2020, 2, 15)})
 
@@ -92,6 +97,20 @@ class WorkCalendar:
     day_zero: date
     rng: np.random.Generator
     holidays: bool = True
+    _p: np.ndarray = field(default_factory=lambda: np.zeros(0), repr=False)
+
+    def probabilities(self, first_day: int, n_days: int) -> np.ndarray:
+        """Attendance probability of n_days days from simulation day first_day.
+
+        The probabilities of the run's days are computed once and kept, since every case of
+        the run reads a window of the same calendar.
+        """
+        end = int(first_day) + n_days
+        if end > len(self._p):
+            self._p = np.array([attendance_probability(self.day_zero + timedelta(days=k),
+                                                       self.holidays)
+                                for k in range(max(end, 2 * len(self._p)))], dtype=float)
+        return self._p[int(first_day):end]
 
     def at_work(self, first_day: int, n_days: int) -> np.ndarray:
         """Draw, independently for each day, whether the case is at work.
@@ -108,10 +127,9 @@ class WorkCalendar:
         """
         if n_days < 0:
             raise ValueError(f"n_days must be non-negative, got {n_days}")
-        start = self.day_zero + timedelta(days=int(first_day))
-        p = np.array([attendance_probability(start + timedelta(days=k), self.holidays)
-                      for k in range(n_days)], dtype=float)
-        return self.rng.random(n_days) < p
+        if first_day < 0:
+            raise ValueError(f"first_day must be non-negative, got {first_day}")
+        return self.rng.random(n_days) < self.probabilities(first_day, n_days)
 
 
 def weekday_calendar(rng: np.random.Generator) -> WorkCalendar:
@@ -120,6 +138,7 @@ def weekday_calendar(rng: np.random.Generator) -> WorkCalendar:
                         holidays=False)
 
 
+@lru_cache(maxsize=None)
 def first_wave_day_zero(seed_path: str) -> date:
     """Calendar date of simulation day 0 of a first-wave seed table: the date of the seeds
     whose infection_day is 0 (build_first_wave_seeds counts days from the earliest seed)."""
