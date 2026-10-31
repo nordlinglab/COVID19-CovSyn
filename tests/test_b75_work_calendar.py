@@ -204,3 +204,27 @@ def test_both_objectives_measure_coworkers_on_days_at_work():
     out = fast_cost.workplace_scalars(course, contact, {"enterprise_size": 5})
     assert out["per_day_workplace_at_work"] == pytest.approx(1.5)
     assert out["workplace_days"].tolist() == [2, 1]
+
+
+def test_empty_days_at_work_give_no_day():
+    """Review: an empty at-work array used to crash in reshape."""
+    course = {"incubation_period": 3.0}
+    contact = {"workplace_contacts_matrix": [], "workplace_at_work": []}
+    assert cm.at_work_days_before_onset(course, contact).shape == (0,)
+    assert np.isnan(cm.contacts_per_day_at_work(course, contact))
+
+
+def test_mismatched_days_at_work_are_rejected():
+    """Review: a 2x3 matrix with 2 at-work days used to be reshaped silently to 3x2."""
+    course = {"incubation_period": np.nan}
+    contact = {"workplace_contacts_matrix": np.ones((2, 3)), "workplace_at_work": [True, True]}
+    with pytest.raises(ValueError):
+        cm.at_work_days_before_onset(course, contact)
+
+
+def test_old_data_without_a_window_is_measured_as_before():
+    """Review: data saved before B75 keeps B63's one zero day and B55's 0.0 per day."""
+    course = {"incubation_period": 3.0}
+    contact = {"workplace_contacts_matrix": []}
+    assert cm.at_work_days_before_onset(course, contact).tolist() == [0.0]
+    assert cm.contacts_per_day_at_work(course, contact) == 0.0

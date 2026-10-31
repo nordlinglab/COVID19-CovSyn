@@ -154,8 +154,8 @@ def at_work_days_before_onset(course: Mapping[str, Any], contact: Mapping[str, A
     """Coworker contacts on each day before onset that the case was at work (B75).
 
     Fu 2010's workplace target counts the diaries of a day at work, so the model's days off
-    (work_calendar) are left out. Data saved before B75 has no workplace_at_work, and then every
-    day was a day at work.
+    (work_calendar) are left out. Data saved before B75 has no workplace_at_work: every day was
+    a day at work, and it is measured exactly as before (one_day_counts()).
 
     Args:
         course: The case's saved course of disease.
@@ -163,20 +163,30 @@ def at_work_days_before_onset(course: Mapping[str, Any], contact: Mapping[str, A
 
     Returns:
         Contacts per day at work, one entry per such day; empty when there is none.
+
+    Raises:
+        ValueError: If the matrix has contacts but not one column per at-work day.
     """
     at_work = contact.get("workplace_at_work")
     if at_work is None:
-        return daily_contacts_before_onset(course, contact, "workplace")
+        return one_day_counts(course, contact, "workplace")
     at_work = np.asarray(at_work, dtype=bool)
-    matrix = np.asarray(contact[MATRIX_KEY["workplace"]], dtype=float).reshape(-1, len(at_work))
-    if len(at_work) == 0:
-        return np.zeros(0)
-    days = _days_before_onset(course, matrix)
+    matrix = np.asarray(contact[MATRIX_KEY["workplace"]], dtype=float)
+    if matrix.size == 0:  # no coworker met: the days at work have no contact
+        matrix = np.zeros((0, len(at_work)))
+    if matrix.ndim != 2 or matrix.shape[1] != len(at_work):
+        raise ValueError(f"workplace matrix {matrix.shape} does not match "
+                         f"{len(at_work)} at-work days")
+    days = _days_before_onset(course, matrix) if len(at_work) else 0
     return matrix[:, :days].sum(axis=0)[at_work[:days]]
 
 
 def contacts_per_day_at_work(course: Mapping[str, Any], contact: Mapping[str, Any]) -> float:
-    """Mean coworker contacts per day at work before onset (B75); nan without such a day."""
+    """Mean coworker contacts per day at work before onset (B75); nan without such a day.
+
+    Data saved before B75 gives contacts_per_day_before_onset(), its value before B75."""
+    if contact.get("workplace_at_work") is None:
+        return contacts_per_day_before_onset(course, contact, "workplace")
     days = at_work_days_before_onset(course, contact)
     return float(days.mean()) if len(days) else float("nan")
 
