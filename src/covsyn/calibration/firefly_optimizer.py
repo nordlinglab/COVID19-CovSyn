@@ -518,8 +518,9 @@ OUTCOME_TARGETS = {
     'daily_household':        (2.27, 3.28, 1.0),
     'daily_school':           (1.15, 1.72, 1.0),
     # B64 (2026-10-24): reported only. Fu 2010's 1.65 is over every diary, including the people
-    # with no job and the employed on a day off, while the model's employed work every day; the
-    # charged workplace targets are now daily_workplace_employed and the one-day shape below.
+    # with no job and the employed on a day off; when B64 set it aside the model had no days off.
+    # B75 adds them, so the two are comparable again, but the charged workplace targets remain
+    # daily_workplace_employed and the one-day shape below, from the same diaries.
     'daily_workplace':        (1.20, 1.80, 0.0),
     # B64: coworker contacts of the employed (enterprise size >= 1) index cases per day before
     # onset: Fu 2010 work contacts of 15 minutes or more met daily or almost daily, weighted to
