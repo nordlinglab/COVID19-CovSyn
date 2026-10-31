@@ -19,7 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from covsyn.model.contact_measures import (contacts_in_tracing_window, contacts_per_case,
+from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_in_tracing_window,
+                                            contacts_per_case, contacts_per_day_at_work,
                                             contacts_per_day_before_onset,
                                             offspring_dispersion, one_day_counts, one_day_shape)
 from covsyn.validation.acceptance import bootstrap_intervals, verdict
@@ -142,14 +143,14 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     check('B64', 'work group size, employed (median)',
           np.median(group[employed]) if employed.any() else np.nan, None,
           note=f'n={int(employed.sum())}; (n - 1) a / (a + n - 1) around a company of n')
-    workplace_days = [contacts_per_day_before_onset(k, c, 'workplace')
+    workplace_days = [contacts_per_day_at_work(k, c)
                       for c, k, e in zip(index_contact, index_course, employed, strict=True) if e]
     check('B64', 'coworker contacts per day before onset, employed',
-          float(np.mean(workplace_days)) if workplace_days else np.nan,
+          float(np.nanmean(workplace_days)) if workplace_days else np.nan,
           OUTCOME_TARGETS['daily_workplace_employed'][:2],
-          note='B70: Fu 2010 employed, average day of the week, >=15 min, met daily, weighted '
-               'to the 2010 population: mean 2.95 (n=905; 4.96 on a day at work), '
-               'summarize_taiwan_contact_data.py average_week()')
+          note='B75: Fu 2010 employed on a day at work, >=15 min, met daily, weighted to the '
+               '2010 population: mean 4.96 (n=416); days before onset at work only, '
+               'summarize_taiwan_contact_data.py at_work()')
 
     # ---------------------------------------------------------------- B25 daily contacts
     # B61: the objective's bands (they were copied here and would have drifted when B61 moved
@@ -323,7 +324,9 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # B63: the community zero share and p90 are charged since B63 and judged on the objective's
     # own bands, computed by the objective's own function (contact_measures.one_day_shape).
     def person_days(layer, cases):
-        days = [one_day_counts(k, c, layer) for k, c in cases]
+        # B75: a workplace diary is a day at work, so the model's days off are left out.
+        days = [at_work_days_before_onset(k, c) if layer == 'workplace' else one_day_counts(k, c, layer)
+                for k, c in cases]
         return np.concatenate(days) if days else np.zeros(0)
 
     pairs = list(zip(index_course, index_contact, strict=True))
@@ -333,10 +336,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
              'Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)',
              (zero_band, OUTCOME_TARGETS['community_day_p90'][:2])),
             ('workplace', 'workplace, employed cases', [p for p, e in zip(pairs, employed) if e],
-             'B70: Fu 2010, employed, average day of the week, >=15 min, met daily, weighted: '
-             'mean 2.95, zero 56.3%, p90 9 (n=905); reported only, the zero days are mostly '
-             'days off, which the model does not have',
-             (None, None))):
+             'B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: '
+             'mean 4.96, zero 27.4%, p90 13 (n=416); days at work only',
+             (tuple(100 * x for x in OUTCOME_TARGETS['workplace_day_zero_share'][:2]),
+              OUTCOME_TARGETS['workplace_day_p90'][:2]))):
         d = person_days(layer, cases)
         if not len(d):
             continue

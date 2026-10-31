@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from tqdm import tqdm
 from covsyn.model.data_synthesize import *
+from covsyn.model.work_calendar import WorkCalendar, first_wave_day_zero, weekday_calendar
 from covsyn.model.data_synthesize import (community_event_parameters, community_power_law_exponent,
                                           tracing_delay_mean, work_group_parameters)
 
@@ -22,6 +23,8 @@ FIRST_WAVE_SEED_FILES = {'taiwan_first_outbreak': './variable/taiwan_first_wave_
                          'taiwan_first_outbreak_mar18': './variable/taiwan_first_wave_seeds_mar18.csv',
                          'taiwan_first_outbreak_mar18_local':
                              './variable/taiwan_first_wave_seeds_mar18_local.csv'}
+# B75: second entropy word of the work calendar's generator, next to the run's seed.
+WORK_CALENDAR_STREAM = 75
 # B69: the social-data attribute holding the other members of each shared group.
 SHARED_GROUP_SIZE = {'household': 'household_size', 'school': 'school_class_size',
                      'workplace': 'work_group_size'}
@@ -153,6 +156,9 @@ def get_saveable_data(data, data_type):
                 data.municipality_event_expected_contacts)
             data_dict['municipality_event_expected_infections'] = getattr(
                 data, 'municipality_event_expected_infections', None)
+        # B75: only present when the run has a work calendar, so older output keeps its keys.
+        if getattr(data, 'workplace_at_work', None) is not None:
+            data_dict['workplace_at_work'] = data.workplace_at_work
 
     return data_dict
 
@@ -402,6 +408,18 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     case_id = 1
     source_case_id = np.nan
     previously_infected_index = np.nan
+    # B75: days off work. Only for vectors with the B64 work group, which is calibrated to
+    # Fu 2010's days at work, so older vectors (run 10) reproduce bit for bit. The draws use
+    # their own generator, seeded by the run, and leave the simulation's random stream alone.
+    # A first-wave run is dated from its seed table (2020 holidays included); any other run
+    # starts on a random weekday.
+    if work_group is None:
+        work_calendar = None
+    elif mode in FIRST_WAVE_SEED_FILES:
+        work_calendar = WorkCalendar(first_wave_day_zero(FIRST_WAVE_SEED_FILES[mode]),
+                                     np.random.default_rng([int(seed), WORK_CALENDAR_STREAM]))
+    else:
+        work_calendar = weekday_calendar(np.random.default_rng([int(seed), WORK_CALENDAR_STREAM]))
     age = np.nan
     contact_type = np.nan
     transmission_digraph = []
@@ -542,7 +560,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                                   'breach': breach,
                                                                   'quarantine_from_day':
                                                                       seed_case['quarantine_from_day']}),
-                                                 group_infected=group_infected)
+                                                 group_infected=group_infected,
+                                                 work_calendar=work_calendar)
 
                 _, population_size = contact_data.draw_contact_data(input_P)
                 for layer in SHARED_GROUP_LAYERS:  # B69: the new infections join the group

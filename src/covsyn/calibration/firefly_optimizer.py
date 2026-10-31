@@ -18,7 +18,9 @@ from tqdm import tqdm
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX)
-from covsyn.model.contact_measures import (contacts_per_day_before_onset, offspring_dispersion,
+from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
+                                           contacts_per_day_before_onset, is_employed,
+                                           offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
@@ -516,18 +518,18 @@ OUTCOME_TARGETS = {
     'daily_household':        (2.27, 3.28, 1.0),
     'daily_school':           (1.15, 1.72, 1.0),
     # B64 (2026-10-24): reported only. Fu 2010's 1.65 is over every diary, including the people
-    # with no job and the employed on a day off, while the model's employed work every day; the
-    # charged workplace targets are now daily_workplace_employed and the one-day shape below.
+    # with no job and the employed on a day off; when B64 set it aside the model had no days off.
+    # B75 adds them, so the two are comparable again, but the charged workplace targets remain
+    # daily_workplace_employed and the one-day shape below, from the same diaries.
     'daily_workplace':        (1.20, 1.80, 0.0),
     # B64: coworker contacts of the employed (enterprise size >= 1) index cases per day before
     # onset: Fu 2010 work contacts of 15 minutes or more met daily or almost daily, weighted to
     # the 2010 population by sex and age as Fu et al. (2012) weight their sample.
-    # B70 (2026-10-26, user): the model has no days off, so its every day stands for an average
-    # day of the week, not a day at work (4.96 [4.34, 5.61] over the 416 weekday diaries with a
-    # work contact). Every one of the 905 employed diaries counts, a day off with no coworker
-    # contact, the seven days weighted equally: mean 2.95, bootstrap 95% 2.56-3.36
-    # (covid19-research scripts/summarize_taiwan_contact_data.py average_week()).
-    'daily_workplace_employed': (2.56, 3.36, 1.0),
+    # B75 (2026-10-31, user) replaces B70's average day of the week (2.95 [2.56, 3.36]): the
+    # model now has days off (work_calendar), so the target is a day at work again, measured on
+    # the days before onset the case was at work: 4.96 [4.34, 5.61] over the 416 weekday diaries
+    # with a work contact (covid19-research scripts/summarize_taiwan_contact_data.py at_work()).
+    'daily_workplace_employed': (4.34, 5.61, 1.0),
     # B63 (2026-10-16, E100): community upper bound 1.80 -> 7.12. Under B62's scale-free count
     # the mean is set by the tail, and Fu 2010 records at most 40 contacts per person a day
     # (3.9% of diaries at the cap), so its 1.76 is a lower bound: the same law fitted to it
@@ -663,13 +665,12 @@ OUTCOME_TARGETS = {
     # pooled (contact_measures.one_day_shape). Same data as B62's exponent.
     'community_day_zero_share': (0.598, 0.641, 1.0),
     'community_day_p90':        (5.0, 8.0, 1.0),
-    # B64 / B70: the one-day shape of the same diaries, which pins the work group's saturation
-    # P[205] and spread P[206]. Average day of the week (B70): zero share 56.3% (bootstrap 95%
-    # 52.9-59.7%), p90 9 (8-10); on a day at work it was 27.4% and 13.
-    # Reported only (user, 2026-10-26): most of the zero days are days off, which the model does
-    # not have, so charging them would shrink the work group to imitate absence.
-    'workplace_day_zero_share': (0.529, 0.597, 0.0),
-    'workplace_day_p90':        (8.0, 10.0, 0.0),
+    # B64 / B75: the one-day shape of the same diaries on a day at work, which pins the work
+    # group's saturation P[205] and spread P[206]: zero share 27.4% (bootstrap 95% 23.2-31.8%),
+    # p90 13 (10-16). B70 reported them only, because the model had no days off and the zero days
+    # of an average day are mostly days off; B75 models those and charges the shape again.
+    'workplace_day_zero_share': (0.232, 0.318, 1.0),
+    'workplace_day_p90':        (10.0, 16.0, 1.0),
     # B22: incubation back to the literature reported-mean range now that it is built as
     # latent + window rather than drawn and truncated.
     'incubation_mean':        (3.9, 8.0, 1.0),
@@ -850,12 +851,13 @@ def measure_outcomes(index_cases):
     # B64: the workplace targets are over the employed index cases only (enterprise size >= 1,
     # read from the social data the index case carries).
     employed = [(course, contact) for course, contact, social in index_cases
-                if social is not None and (social.get('enterprise_size') or 0) >= 1]
+                if is_employed(social)]
     if employed:
-        measured['daily_workplace_employed'] = float(np.mean(
-            [contacts_per_day_before_onset(course, contact, 'workplace') for course, contact in employed]))
+        # B75: the days before onset the case was at work, as Fu 2010's diaries of a day at work.
+        measured['daily_workplace_employed'] = float(np.nanmean(
+            [contacts_per_day_at_work(course, contact) for course, contact in employed]))
         measured['workplace_day_zero_share'], measured['workplace_day_p90'] = one_day_shape(
-            [one_day_counts(course, contact, 'workplace') for course, contact in employed])
+            [at_work_days_before_onset(course, contact) for course, contact in employed])
 
     incubation = np.array([c['incubation_period'] for c, _, _ in index_cases], dtype=float)
     symptomatic = ~np.isnan(incubation)

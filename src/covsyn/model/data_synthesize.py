@@ -100,9 +100,10 @@ COMMUNITY_MAX_CONTACTS = 1000       # Taiwan's largest community record is 850 (
 # is drawn around that mean with negative-binomial variance (Gamma shape k), so a large company
 # can still put many people in one room now and then; it never exceeds the n - 1 coworkers.
 # a = P[205], k = P[206], appended so older vectors keep B31's group. They are calibrated to
-# Fu 2010's coworker contacts of employed people, weighted to the 2010 population, on an
-# average day of the week (B70: mean 2.95, zero share 56.3%, p90 9; on a day at work 4.96, 27.4%,
-# 13; covid19-research scripts/summarize_taiwan_contact_data.py average_week()).
+# Fu 2010's coworker contacts of employed people, weighted to the 2010 population, on a day at
+# work (B75, replacing B70's average day now that work_calendar gives the model days off: mean
+# 4.96, zero share 27.4%, p90 13; covid19-research scripts/summarize_taiwan_contact_data.py
+# at_work()).
 WORK_GROUP_SATURATION_INDEX = 205
 WORK_GROUP_DISPERSION_INDEX = 206
 # B65 (2026-10-24, professor 2026-10-12): the delay between an infector's confirmation and the
@@ -968,9 +969,11 @@ class Draw_contact_data:
                  natural_immunity_status_list, overdispersion_rate, overdispersion_weight,
                  age_risk_ratios, age_p, layer_age_p=None, community_dispersion=None,
                  community_event=None, community_exponent=None, seed_rule=None,
-                 group_infected=None):
+                 group_infected=None, work_calendar=None):
         # B66: {'arrival_day', 'status'} for a seed case of the Taiwan first wave, else None.
         self.seed_rule = seed_rule
+        # B75: work_calendar.WorkCalendar of the run, or None for a case at work every day.
+        self.work_calendar = work_calendar
         # B69: {layer: members of the case's shared group already infected, itself excluded}.
         self.group_infected = group_infected or {}
         self.group_blocked = {layer: set() for layer in SHARED_GROUP_LAYERS}
@@ -1735,8 +1738,24 @@ class Draw_contact_data:
             blocked = np.random.hypergeometric(infected, members - infected, min(met, members))
             self.group_blocked[layer] = set(np.random.choice(met, size=blocked, replace=False).tolist())
 
+    def apply_work_calendar(self):
+        """Remove the coworker contacts of the days this case is off work (B75).
+
+        work_calendar draws, for each day of the workplace window counted from the infection
+        day, whether the case is at work (day of the week and 2020 holidays). Only the case's own
+        attendance is drawn: Fu 2010's contacts on a day at work already reflect absent
+        coworkers. A coworker met only on days off is dropped, as apply_seed_rule() does.
+        """
+        matrix = np.array(self.workplace_contacts_matrix, dtype=bool)
+        infection_day = int(round(float(self.course_of_disease_data_object.infection_day)))
+        self.workplace_at_work = self.work_calendar.at_work(infection_day, matrix.shape[1])
+        matrix[:, ~self.workplace_at_work] = False
+        self.workplace_contacts_matrix = matrix[matrix.any(axis=1)]
+
     def draw_contact_data(self, P):
         self.draw_contacts_each_day(P)
+        if self.work_calendar is not None:
+            self.apply_work_calendar()
         if self.seed_rule is not None:
             self.apply_seed_rule()
         if self.group_infected:

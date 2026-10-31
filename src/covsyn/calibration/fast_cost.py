@@ -38,7 +38,9 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
-from covsyn.model.contact_measures import (contacts_per_day_before_onset, offspring_dispersion,
+from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
+                                           contacts_per_day_before_onset, is_employed,
+                                           offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 
@@ -100,6 +102,17 @@ def _case_matrix_row(demographic, course, contact, columns):
                                                 dummy, 1)[0]
 
 
+def workplace_scalars(course, contact, social=None):
+    """The workplace targets' per-case parts, mirroring measure_outcomes().
+
+    B64: the targets are over employed index cases. B75: they count the days before onset the
+    case was at work only, as Fu 2010's diaries of a day at work do.
+    """
+    return {'employed': is_employed(social),
+            'per_day_workplace_at_work': contacts_per_day_at_work(course, contact),
+            'workplace_days': at_work_days_before_onset(course, contact)}
+
+
 def _index_case_scalars(course, contact, social=None):
     """Everything measure_outcomes() needs from one index case, as plain numbers.
 
@@ -137,9 +150,7 @@ def _index_case_scalars(course, contact, social=None):
     out['expected'] = contact.get('expected_outcomes')
     out['community'] = len(contact['municipality_effective_contacts'] or [])
     out['community_days'] = one_day_counts(course, contact, 'municipality')  # B63
-    # B64: mirrors measure_outcomes -- the workplace targets are over employed index cases.
-    out['employed'] = social is not None and (social.get('enterprise_size') or 0) >= 1
-    out['workplace_days'] = one_day_counts(course, contact, 'workplace')
+    out.update(workplace_scalars(course, contact, social))
     out['incubation_period'] = float(onset) if onset is not None else np.nan
     out['pre_onset_window'] = float(course['pre_onset_window'])
     out['positive_test_date'] = float(course['positive_test_date'])
@@ -245,8 +256,8 @@ def reduce_outcomes(scalars):
         [s['community_days'] for s in scalars])
     employed = [s for s in scalars if s['employed']]
     if employed:
-        measured['daily_workplace_employed'] = float(np.mean(
-            [s['per_day_workplace'] for s in employed]))
+        measured['daily_workplace_employed'] = float(np.nanmean(
+            [s['per_day_workplace_at_work'] for s in employed]))
         measured['workplace_day_zero_share'], measured['workplace_day_p90'] = one_day_shape(
             [s['workplace_days'] for s in employed])
 
