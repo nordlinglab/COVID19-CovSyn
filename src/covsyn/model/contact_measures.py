@@ -150,6 +150,12 @@ def daily_contacts_before_onset(
     return matrix[:, :days].sum(axis=0)
 
 
+def is_employed(social: Mapping[str, Any] | None) -> bool:
+    """Whether an index case counts for the workplace targets: employed in an enterprise of at
+    least one person (B64). Shared by both objectives, which must agree bit for bit (E65)."""
+    return social is not None and (social.get("enterprise_size") or 0) >= 1
+
+
 def at_work_days_before_onset(course: Mapping[str, Any], contact: Mapping[str, Any]) -> np.ndarray:
     """Coworker contacts on each day before onset that the case was at work (B75).
 

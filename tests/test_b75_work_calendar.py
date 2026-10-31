@@ -262,3 +262,12 @@ def test_day_zero_is_read_once_per_seed_table():
     for _ in range(3):
         wc.first_wave_day_zero("variable/taiwan_first_wave_seeds.csv")
     assert wc.first_wave_day_zero.cache_info().hits == 2
+
+
+@pytest.mark.parametrize(("social", "expected"), [
+    (None, False), ({}, False), ({"enterprise_size": None}, False),
+    ({"enterprise_size": 0}, False), ({"enterprise_size": 1}, True), ({"enterprise_size": 250}, True),
+])
+def test_employed_is_one_predicate_for_both_objectives(social, expected):
+    """Review: fast_cost and measure_outcomes each repeated this test (E65 risk)."""
+    assert cm.is_employed(social) is expected

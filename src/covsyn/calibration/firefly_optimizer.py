@@ -19,7 +19,8 @@ from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX)
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
-                                           contacts_per_day_before_onset, offspring_dispersion,
+                                           contacts_per_day_before_onset, is_employed,
+                                           offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
@@ -849,7 +850,7 @@ def measure_outcomes(index_cases):
     # B64: the workplace targets are over the employed index cases only (enterprise size >= 1,
     # read from the social data the index case carries).
     employed = [(course, contact) for course, contact, social in index_cases
-                if social is not None and (social.get('enterprise_size') or 0) >= 1]
+                if is_employed(social)]
     if employed:
         # B75: the days before onset the case was at work, as Fu 2010's diaries of a day at work.
         measured['daily_workplace_employed'] = float(np.nanmean(

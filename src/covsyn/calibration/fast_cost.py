@@ -39,7 +39,8 @@ from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
-                                           contacts_per_day_before_onset, offspring_dispersion,
+                                           contacts_per_day_before_onset, is_employed,
+                                           offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 
@@ -107,7 +108,7 @@ def workplace_scalars(course, contact, social=None):
     B64: the targets are over employed index cases. B75: they count the days before onset the
     case was at work only, as Fu 2010's diaries of a day at work do.
     """
-    return {'employed': social is not None and (social.get('enterprise_size') or 0) >= 1,
+    return {'employed': is_employed(social),
             'per_day_workplace_at_work': contacts_per_day_at_work(course, contact),
             'workplace_days': at_work_days_before_onset(course, contact)}
 
