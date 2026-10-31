@@ -150,6 +150,37 @@ def daily_contacts_before_onset(
     return matrix[:, :days].sum(axis=0)
 
 
+def at_work_days_before_onset(course: Mapping[str, Any], contact: Mapping[str, Any]) -> np.ndarray:
+    """Coworker contacts on each day before onset that the case was at work (B75).
+
+    Fu 2010's workplace target counts the diaries of a day at work, so the model's days off
+    (work_calendar) are left out. Data saved before B75 has no workplace_at_work, and then every
+    day was a day at work.
+
+    Args:
+        course: The case's saved course of disease.
+        contact: The case's saved contact data.
+
+    Returns:
+        Contacts per day at work, one entry per such day; empty when there is none.
+    """
+    at_work = contact.get("workplace_at_work")
+    if at_work is None:
+        return daily_contacts_before_onset(course, contact, "workplace")
+    at_work = np.asarray(at_work, dtype=bool)
+    matrix = np.asarray(contact[MATRIX_KEY["workplace"]], dtype=float).reshape(-1, len(at_work))
+    if len(at_work) == 0:
+        return np.zeros(0)
+    days = _days_before_onset(course, matrix)
+    return matrix[:, :days].sum(axis=0)[at_work[:days]]
+
+
+def contacts_per_day_at_work(course: Mapping[str, Any], contact: Mapping[str, Any]) -> float:
+    """Mean coworker contacts per day at work before onset (B75); nan without such a day."""
+    days = at_work_days_before_onset(course, contact)
+    return float(days.mean()) if len(days) else float("nan")
+
+
 def one_day_counts(course: Mapping[str, Any], contact: Mapping[str, Any], layer: str) -> np.ndarray:
     """daily_contacts_before_onset(), with a case whose layer has no window counted as one day
     without contacts, so that it is not dropped from a pooled one-day distribution (B63)."""
