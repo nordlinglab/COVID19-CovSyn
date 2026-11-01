@@ -31,6 +31,19 @@ def json_band(target: Any) -> Any:
     return [x if x is not None and np.isfinite(x) else None for x in target]
 
 
+def band_from_json(target: Sequence[float | None]) -> tuple[float, float]:
+    """(lower, upper) of a band read back from JSON, where an open bound is null.
+
+    Args:
+        target: [lower, upper], either None when open.
+
+    Returns:
+        The band with an open lower bound as -inf and an open upper bound as +inf.
+    """
+    lower, upper = target
+    return (-np.inf if lower is None else float(lower), np.inf if upper is None else float(upper))
+
+
 def band_text(target: Any) -> str:
     """'[lower, upper]' for a band, 'inf' for an open bound, '(information)' for none.
 
@@ -42,8 +55,9 @@ def band_text(target: Any) -> str:
     """
     if not isinstance(target, list):
         return "(information)"
-    return "[%s]" % ", ".join("inf" if x is None or not np.isfinite(x) else "%g" % x
-                              for x in target)
+    return "[%s]" % ", ".join(
+        "inf" if x is None or not np.isfinite(x) else "%g" % x for x in target
+    )
 
 
 def verdict(

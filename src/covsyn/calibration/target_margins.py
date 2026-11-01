@@ -31,20 +31,13 @@ import json
 import sys
 from pathlib import Path
 
+from covsyn.validation.acceptance import band_from_json, json_band
+
 Z_ONE_SIDED_95 = 1.645
 Z_TWO_SIDED_95 = 1.96
 MAX_SHIFT_OF_WIDTH = 0.25
 CHARGED_TARGETS_FILE = Path(__file__).with_name("charged_targets.json")
 
-
-def _bound(x: float | None) -> float:
-    """A bound read from JSON, where an open bound is null (B76)."""
-    return float("inf") if x is None else float(x)
-
-
-def _json_bound(x: float) -> float | None:
-    """A bound ready for strict JSON, which has no Infinity: an open bound becomes null."""
-    return None if x == float("inf") else x
 
 # Objective key -> (checklist decision, checklist name, objective units per checklist unit).
 CHECK_FOR_TARGET = {
@@ -96,12 +89,15 @@ def charged_interval(lo: float, hi: float, sigma: float) -> tuple[float, float]:
     return (lo + shift if lo != 0 else lo, hi - shift)
 
 
-def compute_margins(checks: list[dict], targets: dict) -> dict[str, dict]:
+def compute_margins(
+    checks: list[dict], targets: dict, mapping: dict | None = None
+) -> dict[str, dict]:
     """Charged interval and its derivation for every mapped target.
 
     Args:
         checks: The 'checks' rows of a phaseD_checks.json.
         targets: OUTCOME_TARGETS, {key: (lo, hi, weight)}.
+        mapping: Objective key -> checklist row, CHECK_FOR_TARGET when None.
 
     Returns:
         {key: {'acceptance', 'objective', 'charged', 'sigma', 'check'}} in objective units;
@@ -109,7 +105,7 @@ def compute_margins(checks: list[dict], targets: dict) -> dict[str, dict]:
     """
     by_name = {(c["decision"], c["name"]): c for c in checks}
     out = {}
-    for key, (decision, name, unit) in CHECK_FOR_TARGET.items():
+    for key, (decision, name, unit) in (CHECK_FOR_TARGET if mapping is None else mapping).items():
         if key not in targets or targets[key][2] <= 0:
             continue
         row = by_name.get((decision, name))
@@ -117,16 +113,17 @@ def compute_margins(checks: list[dict], targets: dict) -> dict[str, dict]:
             raise ValueError(f"checklist row {decision} {name!r} with an interval is missing")
         ci_lo, ci_hi = row["ci"]
         sigma = (ci_hi - ci_lo) / (2 * Z_TWO_SIDED_95) * unit
-        accept_lo, accept_hi = (_bound(row["target"][0]) * unit, _bound(row["target"][1]) * unit)
+        accept_lo, accept_hi = (x * unit for x in band_from_json(row["target"]))
         shrunk_lo, shrunk_hi = charged_interval(accept_lo, accept_hi, sigma)
         obj_lo, obj_hi = float(targets[key][0]), float(targets[key][1])
         charged = (max(shrunk_lo, obj_lo), min(shrunk_hi, obj_hi))
         if not charged[0] < charged[1]:
             raise ValueError(f"{key}: charged interval {charged} is empty")
         out[key] = {
-            "acceptance": [accept_lo, _json_bound(accept_hi)],
-            "objective": [obj_lo, _json_bound(obj_hi)],
-            "charged": [charged[0], _json_bound(charged[1])],
+            # B76: an open bound is null, strict JSON has no Infinity.
+            "acceptance": json_band([accept_lo, accept_hi]),
+            "objective": json_band([obj_lo, obj_hi]),
+            "charged": json_band(list(charged)),
             "sigma": sigma,
             "check": f"{decision} {name}",
         }
@@ -152,14 +149,14 @@ def load_charged_bounds(
         if targets is not None:
             current = [float(targets[key][0]), float(targets[key][1])] if key in targets else None
             if current is None or any(
-                not (_bound(a) == b or abs(_bound(a) - b) <= 1e-12)
-                for a, b in zip(entry["objective"], current, strict=True)
+                not (a == b or abs(a - b) <= 1e-12)
+                for a, b in zip(band_from_json(entry["objective"]), current, strict=True)
             ):
                 raise ValueError(
                     f"{path.name} is stale for {key}: derived from {entry['objective']}, "
                     f"OUTCOME_TARGETS now {current}; re-run target_margins"
                 )
-        bounds[key] = (_bound(entry["charged"][0]), _bound(entry["charged"][1]))
+        bounds[key] = band_from_json(entry["charged"])
     return bounds
 
 
@@ -186,7 +183,7 @@ def main() -> None:
     for key, m in margins.items():
         print(
             f"{key:42s} checklist {m['acceptance']} objective {m['objective']} -> charged "
-            f"[{m['charged'][0]:.4g}, {_bound(m['charged'][1]):.4g}] (sigma {m['sigma']:.3g})"
+            "[%.4g, %.4g] (sigma %.3g)" % (*band_from_json(m["charged"]), m["sigma"])
         )
 
 

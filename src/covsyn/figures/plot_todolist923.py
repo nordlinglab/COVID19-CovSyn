@@ -37,6 +37,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from covsyn.validation.acceptance import band_from_json
+
 SPREAD = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight'
 FIREFLY = sys.argv[2] if len(sys.argv) > 2 else \
     'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200'
@@ -437,10 +439,8 @@ GROUP = {
     'B': {
         'contacts per day before onset, household': 'charged: daily_household',
         'contacts per day before onset, school': 'charged: daily_school',
-        'contacts per day before onset, workplace': 'charged: daily_workplace',
-        'contacts per day before onset, health_care': 'reported: daily_health_care (B76, measured only)',
         'contacts per day before onset, municipality': 'charged: daily_municipality',
-        'contacts per day, all layers': 'sum of the five charged daily targets',
+        'contacts per day, all layers': 'sum of the five layers (workplace, health care reported only)',
         'cumulative SAR per contact, school': 'charged: sar_school',
         'cumulative SAR per contact, workplace': 'charged: sar_workplace',
         'infections per index case, household': 'charged: Cheng 2020 0.10 (B37)',
@@ -502,17 +502,20 @@ def figure_t4(checks):
         n_in = 0
         for ax, (name, src) in zip(axes[:, 0], rows):
             c = by_name[name]
-            # B76: an open upper bound is null in the JSON (or inf in memory).
-            lo = float(c['target'][0])
-            hi = np.inf if c['target'][1] is None else float(c['target'][1])
+            # B76: an open bound is null in the JSON; the axis spans the finite ones and v.
+            lo, hi = band_from_json(c['target'])
             v = float(c['value'])
             unit = c['unit'] or ''
             inside = lo <= v <= hi
             n_in += inside
-            left, right = min(lo, v), max(hi if np.isfinite(hi) else max(lo, v) * 1.5, v)
+            finite = [x for x in (lo, hi, v) if np.isfinite(x)]
+            left, right = min(finite), max(finite)
+            if not np.isfinite(hi):
+                right = max(right, 1.5 * left)
             pad = 0.15 * (right - left) if right > left else max(abs(v), 1) * 0.2
             ax.set_xlim(left - pad, right + pad)
-            ax.axvspan(lo, min(hi, right + pad), ymin=0.25, ymax=0.75, color='#d9d9d9', zorder=1)
+            ax.axvspan(max(lo, left - pad), min(hi, right + pad), ymin=0.25, ymax=0.75,
+                       color='#d9d9d9', zorder=1)
             ax.plot([v], [0.5], 'o', ms=10, color=IN if inside else OUTC, zorder=3,
                     markeredgecolor='black')
             ax.set_ylim(0, 1)

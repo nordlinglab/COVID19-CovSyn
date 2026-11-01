@@ -88,16 +88,22 @@ def test_a_stale_charged_file_is_refused(tmp_path) -> None:
         tm.load_charged_bounds(path, {"icu_to_closure": (25.0, 40.0, 1.0)})
 
 
-
 # --- B76: a floor with no upper bound (null in JSON) -------------------------------------
 
 
 def test_a_floor_moves_up_and_stays_open() -> None:
     """The B76 floor shifts up by 1.645 sigma; the open upper bound stays open."""
-    checks = [{"decision": "B76", "name": "health care contacts per index case",
-               "target": [3.3, None], "ci": [2.4, 2.792]}]
+    checks = [
+        {
+            "decision": "B76",
+            "name": "health care contacts per index case",
+            "target": [3.3, None],
+            "ci": [2.4, 2.792],
+        }
+    ]
     m = tm.compute_margins(checks, {"health_care_contacts_per_index": (3.3, np.inf, 1.0)})[
-        "health_care_contacts_per_index"]
+        "health_care_contacts_per_index"
+    ]
     assert m["sigma"] == pytest.approx(0.1)
     assert m["charged"][0] == pytest.approx(3.4645)
     assert m["charged"][1] is None and m["objective"][1] is None
@@ -106,12 +112,24 @@ def test_a_floor_moves_up_and_stays_open() -> None:
 
 def test_a_null_bound_loads_as_infinite(tmp_path) -> None:
     path = tmp_path / "charged.json"
-    path.write_text(json.dumps({"targets": {"health_care_contacts_per_index": {
-        "objective": [3.3, None], "charged": [3.4645, None]}}}))
+    path.write_text(
+        json.dumps(
+            {
+                "targets": {
+                    "health_care_contacts_per_index": {
+                        "objective": [3.3, None],
+                        "charged": [3.4645, None],
+                    }
+                }
+            }
+        )
+    )
     assert tm.load_charged_bounds(path, {"health_care_contacts_per_index": (3.3, np.inf, 1.0)}) == {
-        "health_care_contacts_per_index": (3.4645, np.inf)}
+        "health_care_contacts_per_index": (3.4645, np.inf)
+    }
     with pytest.raises(ValueError):
         tm.load_charged_bounds(path, {"health_care_contacts_per_index": (3.3, 9.0, 1.0)})
+
 
 def test_a_missing_checklist_row_is_an_error() -> None:
     """Margins are never silently skipped for a mapped, charged target."""
@@ -173,3 +191,23 @@ def test_first_wave_seeds_beyond_the_list_wrap_around(
         mode="taiwan_first_outbreak",
     )
     assert len(courses) >= 28
+
+
+def test_an_open_lower_bound_round_trips() -> None:
+    """Second review: a null lower bound is -inf, not +inf, and is written back as null."""
+    checks = [
+        {
+            "decision": "B23",
+            "name": "health care contacts before day 4",
+            "target": [None, 70.0],
+            "ci": [35.0, 38.92],
+        }
+    ]
+    m = tm.compute_margins(
+        checks,
+        {"medical_early_share": (-np.inf, 0.7, 1.0)},
+        mapping={"medical_early_share": ("B23", "health care contacts before day 4", 0.01)},
+    )["medical_early_share"]
+    assert m["charged"][0] is None
+    assert m["charged"][1] == pytest.approx(0.68355)
+    json.dumps(m, allow_nan=False)
