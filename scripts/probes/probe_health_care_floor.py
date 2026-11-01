@@ -8,7 +8,12 @@ P[21:28] uniformly inside its bounds, and measures every index case's outcomes w
 objective's own measure_outcomes() ('result' mode, as the calibration runs). Reports how many
 draws meet the floor together with the other charged health care contact targets.
 
+Uniform draws over seven dimensions rarely land on the timing shape (B40 found 1 in 120), so
+the grid mode instead scales the contact probability P[21] and the healthy-day probability
+P[23] of the base vector up to their ceilings and keeps the shape parameters P[25:28] fixed.
+
 Usage: python scripts/probes/probe_health_care_floor.py [parameter_dir] [draws] [simulations]
+       python scripts/probes/probe_health_care_floor.py [parameter_dir] grid [simulations]
 """
 import concurrent.futures
 import pickle
@@ -58,8 +63,34 @@ def meets(measured, key):
     return lo <= measured[key] <= hi
 
 
+GRID_FACTORS = (1.0, 1.5, 2.0, 3.0, 4.0)
+
+
+def grid(base, lb, ub, demo, simulations):
+    """P[21] and P[23] times GRID_FACTORS, clipped to their bounds; the rest at the base."""
+    print('\n%7s %7s  ' % ('x P21', 'x P23') + '  '.join('%10s' % k[:10] for k in KEYS)
+          + '  all four')
+    with concurrent.futures.ProcessPoolExecutor(max_workers=24) as ex:
+        for a in GRID_FACTORS:
+            for b in GRID_FACTORS:
+                P = base.copy()
+                P[21] = min(base[21] * a, ub[0])
+                P[23] = min(base[23] * b, ub[2])
+                m = outcomes(ex, P, demo, simulations)
+                ok = all(meets(m, k) for k in KEYS[:4])
+                print('%7.1f %7.1f  ' % (a, b) + '  '.join('%10.3f' % m[k] for k in KEYS)
+                      + '  %s' % ('yes' if ok else ''))
+
+
 def main():
     directory = sys.argv[1] if len(sys.argv) > 1 else 'firefly_result/phaseD_run18'
+    if len(sys.argv) > 2 and sys.argv[2] == 'grid':
+        with open('./variable/demographic_parameters.pkl', 'rb') as f:
+            demo = pickle.load(f)
+        lb, ub = block_bounds()
+        grid(load_vector(directory), lb, ub, demo,
+             int(sys.argv[3]) if len(sys.argv) > 3 else 200)
+        return
     draws = int(sys.argv[2]) if len(sys.argv) > 2 else 120
     simulations = int(sys.argv[3]) if len(sys.argv) > 3 else 120
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
