@@ -824,6 +824,9 @@ def measure_outcomes(index_cases):
         key = f'infections_per_index_{layer}'
         if key in measured:
             measured[key] = effective / len(index_cases)
+        if layer == 'health_care':
+            # B76: every candidate health care contact per index case, zeros included.
+            measured['health_care_contacts_per_index'] = candidate / len(index_cases)
 
     # B23 / B27: the two distribution-shape targets. Both ends of the medical contact timing
     # are charged since E59 -- "early" is Cheng's first two bins (<0 and 0-3 days from onset),
@@ -844,9 +847,6 @@ def measure_outcomes(index_cases):
     if total:
         measured['medical_late_share'] = late / total
         measured['medical_early_share'] = early / total
-    # B76: every candidate health care contact per index case, zeros included.
-    measured['health_care_contacts_per_index'] = float(np.mean(
-        [len(contact['health_care_effective_contacts'] or []) for _, contact, _ in index_cases]))
 
     community = np.array([len(contact['municipality_effective_contacts'] or [])
                           for _, contact, _ in index_cases], dtype=float)

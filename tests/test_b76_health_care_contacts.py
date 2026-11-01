@@ -47,8 +47,13 @@ def test_one_pass_counts_every_layer() -> None:
     """Review finding 10: one walk of the window gives every layer; the total is their sum."""
     course, contact = _case(5.0, 8, (1, 4, 8, 10), (5,))
     counts = cm.tracing_window_counts(course, contact)
-    assert counts == {"household": 1, "school": 0, "workplace": 0, "health_care": 2,
-                      "municipality": 0}
+    assert counts == {
+        "household": 1,
+        "school": 0,
+        "workplace": 0,
+        "health_care": 2,
+        "municipality": 0,
+    }
     assert sum(counts.values()) == cm.contacts_in_tracing_window(course, contact)
 
 
@@ -79,7 +84,7 @@ def test_a_miss_is_measured_in_units_of_the_floor() -> None:
     floor = sa.health_care_contact_floor()
     charged_lo = fo.CHARGED_BOUNDS[KEY][0]
     miss = (charged_lo - 2.597) / floor
-    assert fo.outcome_penalty({KEY: 2.597}) == pytest.approx(fo.OUTCOME_PENALTY_WEIGHT * miss ** 2)
+    assert fo.outcome_penalty({KEY: 2.597}) == pytest.approx(fo.OUTCOME_PENALTY_WEIGHT * miss**2)
 
 
 def test_the_window_count_is_no_longer_an_objective_target() -> None:
@@ -109,10 +114,31 @@ def test_open_bound_is_written_as_null() -> None:
     json.dumps(json_band([3.3, np.inf]), allow_nan=False)  # raises on Infinity
 
 
-@pytest.mark.parametrize("target, text", [([1.0, 2.5], "[1, 2.5]"), ([3.3, None], "[3.3, inf]"),
-                                          ([3.3, np.inf], "[3.3, inf]"), (None, "(information)")])
+@pytest.mark.parametrize(
+    "target, text",
+    [
+        ([1.0, 2.5], "[1, 2.5]"),
+        ([3.3, None], "[3.3, inf]"),
+        ([3.3, np.inf], "[3.3, inf]"),
+        (None, "(information)"),
+    ],
+)
 def test_band_text_prints_an_open_bound(target, text: str) -> None:
     from covsyn.validation.acceptance import band_text
 
     assert band_text(target) == text
 
+
+def test_open_bounds_round_trip_on_either_side() -> None:
+    """Second review: one pair of helpers maps open bounds to null and back, both sides."""
+    from covsyn.validation.acceptance import band_from_json, json_band
+
+    assert json_band([-np.inf, 2.0]) == [None, 2.0]
+    assert band_from_json([None, 2.0]) == (-np.inf, 2.0)
+    assert band_from_json([3.0, None]) == (3.0, np.inf)
+    assert band_from_json(json_band([3.0, np.inf])) == (3.0, np.inf)
+
+
+def test_per_contact_lower_bounds_are_a_table() -> None:
+    """Second review: the health care override sits in a table next to ANCHOR_FLOOR."""
+    assert sa.PER_CONTACT_LOWER == {"health_care": sa.wilson_interval(6, 698)[0]}

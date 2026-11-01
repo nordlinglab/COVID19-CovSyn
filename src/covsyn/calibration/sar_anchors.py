@@ -70,7 +70,9 @@ ATTACK_RATE_SLICE = {'household': (33, 58), 'school': (58, 83), 'workplace': (83
 #
 #   household    10/100 index over 2.684 candidate contacts -> 3.73% (1.79-6.85).
 #                Was 5.5% under B1, and 6.62% before that.
-#   health_care   6/100 index over 2.747 -> 2.18% (0.80-4.75). This RAISES the anchor 2.5x,
+#   health_care   6/100 index over 2.747 -> 2.18% (0.80-4.75). Since the review of B76 the
+#                lower bound is Cheng's own per-contact Wilson lower bound (PER_CONTACT_LOWER).
+#                This RAISES the anchor 2.5x,
 #                which is the point of E55: CovSyn gives a case 2.75 medical contacts where
 #                Cheng traced 6.98, so reproducing Cheng's 6 infections needs a HIGHER rate
 #                per contact, not the same one. Watch the pooled age risk ratios -- this is
@@ -175,6 +177,14 @@ def wilson_interval(events: int, trials: int, z: float = 1.96) -> tuple[float, f
     return max(0.0, (centre - spread) / scale), (centre + spread) / scale
 
 
+# Review of B76 (2026-11-01, user): per-contact lower bounds that do not divide by CovSyn's
+# contact count. Cheng's lower health care infections over run 18's 2.597 contacts was 2.39%
+# cumulative, above Cheng's own upper per-contact rate of 1.86%, so once B76's floor raises the
+# contacts the search could not reach the lower half of the infections target. Cheng's Wilson
+# lower bound for 6 / 698, 0.395%, only sets the search room: the infections are charged (E56).
+PER_CONTACT_LOWER = {'health_care': wilson_interval(*CHENG2020_BY_SETTING['health_care'])[0]}
+
+
 def cheng_poisson_interval(layer):
     """(lower, centre, upper) INFECTIONS PER INDEX CASE in this layer, from Cheng 2020.
 
@@ -214,20 +224,18 @@ def infections_per_index_target(layer):
 def infections_per_index_anchor(layer):
     """(lower, centre, upper) PER CONTACT, from Cheng's count over CovSyn's contact count.
 
+    A layer in PER_CONTACT_LOWER takes its lower bound from there instead (review of B76).
+
     Still used to place the daily attack-rate BOUNDS, which have to be written per contact
     per day. It is no longer an optimisation target (E56), so the circularity noted above now
     only affects how much headroom the search has, not what it is aiming at.
     """
     lo, per_index, hi = cheng_poisson_interval(layer)
     contacts = COVSYN_CANDIDATE_CONTACTS[layer]
-    lower = max(lo / contacts, ANCHOR_FLOOR.get(layer, 0.0))
-    if layer == 'health_care':
-        # Review of B76 (2026-11-01, user): Cheng's lower infections over run 18's 2.597
-        # contacts was 2.39% cumulative, above Cheng's own upper per-contact rate of 1.86%, so
-        # once B76's floor raises the contacts the search could not reach the lower half of the
-        # infections target. The lower bound is Cheng's Wilson lower bound, 6 / 698 -> 0.395%;
-        # it only sets the search room, since the infections themselves are charged (E56).
-        lower = wilson_interval(*CHENG2020_BY_SETTING[layer])[0]
+    if layer in PER_CONTACT_LOWER:
+        lower = PER_CONTACT_LOWER[layer]
+    else:
+        lower = max(lo / contacts, ANCHOR_FLOOR.get(layer, 0.0))
     return lower, per_index / contacts, hi / contacts
 
 

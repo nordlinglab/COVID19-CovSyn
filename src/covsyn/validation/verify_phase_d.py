@@ -454,8 +454,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # B76: the objective's floor on every candidate health care contact per index case (E61),
     # and the same contacts inside Jian's tracing window as information.
     check('B76', 'health care contacts per index case',
-          float(np.mean([len(c['health_care_effective_contacts'] or []) for c in index_contact])),
-          OUTCOME_TARGETS['health_care_contacts_per_index'][:2],
+          per_index['health_care'][1], OUTCOME_TARGETS['health_care_contacts_per_index'][:2],
           note='floor: Cheng 2020 medical infections lower bound / per-contact rate upper bound')
     check('B76', "health care contacts per index case in Jian's tracing window",
           float(np.mean([w['health_care'] for w in index_window])), None,
