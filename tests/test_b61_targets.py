@@ -81,8 +81,12 @@ def test_both_objective_implementations_agree_bit_for_bit(
     fast = fast_cost.reduce_outcomes(scalars)
     assert np.isfinite(slow["offspring_k"])
     for key in ("offspring_k", "daily_household", "daily_school", "daily_municipality",
-                "community_day_zero_share", "community_day_p90"):  # B63 too
+                "community_day_zero_share", "community_day_p90",  # B63 too
+                "health_care_contacts_per_index"):  # B76
         assert fast[key] == slow[key], key
+    # B76: every candidate health care contact of the index case, zeros included.
+    assert slow["health_care_contacts_per_index"] == pytest.approx(np.mean(
+        [len(contact["health_care_effective_contacts"] or []) for _, contact, _ in cases]))
 
 
 def test_daily_counts_average_to_the_per_day_mean() -> None:

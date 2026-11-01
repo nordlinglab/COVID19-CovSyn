@@ -37,6 +37,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from covsyn.validation.acceptance import band_from_json
+
 SPREAD = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight'
 FIREFLY = sys.argv[2] if len(sys.argv) > 2 else \
     'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200'
@@ -437,10 +439,8 @@ GROUP = {
     'B': {
         'contacts per day before onset, household': 'charged: daily_household',
         'contacts per day before onset, school': 'charged: daily_school',
-        'contacts per day before onset, workplace': 'charged: daily_workplace',
-        'contacts per day before onset, health_care': 'charged: daily_health_care',
         'contacts per day before onset, municipality': 'charged: daily_municipality',
-        'contacts per day, all layers': 'sum of the five charged daily targets',
+        'contacts per day, all layers': 'sum of the five layers (workplace, health care reported only)',
         'cumulative SAR per contact, school': 'charged: sar_school',
         'cumulative SAR per contact, workplace': 'charged: sar_workplace',
         'infections per index case, household': 'charged: Cheng 2020 0.10 (B37)',
@@ -457,6 +457,7 @@ GROUP = {
         'contacts starting before symptom onset': 'Cheng 2020 contact-timing bins (cost_contact)',
         'health care contacts starting 8+ days after onset': 'charged: medical_late_share',
         'health care contacts starting before day 4': 'charged: medical_early_share',
+        'health care contacts per index case': 'charged: health_care_contacts_per_index (B76, floor only)',
         'confirmation to case closure, symptomatic':
             'charged: closure_after_confirmation_symptomatic',
         'confirmation to case closure, asymptomatic':
@@ -501,15 +502,20 @@ def figure_t4(checks):
         n_in = 0
         for ax, (name, src) in zip(axes[:, 0], rows):
             c = by_name[name]
-            lo, hi = float(c['target'][0]), float(c['target'][1])
+            # B76: an open bound is null in the JSON; the axis spans the finite ones and v.
+            lo, hi = band_from_json(c['target'])
             v = float(c['value'])
             unit = c['unit'] or ''
             inside = lo <= v <= hi
             n_in += inside
-            left, right = min(lo, v), max(hi, v)
+            finite = [x for x in (lo, hi, v) if np.isfinite(x)]
+            left, right = min(finite), max(finite)
+            if not np.isfinite(hi):
+                right = max(right, 1.5 * left)
             pad = 0.15 * (right - left) if right > left else max(abs(v), 1) * 0.2
             ax.set_xlim(left - pad, right + pad)
-            ax.axvspan(lo, hi, ymin=0.25, ymax=0.75, color='#d9d9d9', zorder=1)
+            ax.axvspan(max(lo, left - pad), min(hi, right + pad), ymin=0.25, ymax=0.75,
+                       color='#d9d9d9', zorder=1)
             ax.plot([v], [0.5], 'o', ms=10, color=IN if inside else OUTC, zorder=3,
                     markeredgecolor='black')
             ax.set_ylim(0, 1)

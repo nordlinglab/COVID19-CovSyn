@@ -29,7 +29,8 @@ def _alone(name: str, value: float) -> float:
 def test_inside_the_interval_costs_nothing(name: str) -> None:
     """Every charged target at the middle of its interval adds zero."""
     lo, hi, _ = fo.OUTCOME_TARGETS[name]
-    centre = (lo + hi) / 2 if math.isfinite(hi) else lo
+    # An open interval (B76's floor) has no middle; twice the floor is well inside it.
+    centre = (lo + hi) / 2 if math.isfinite(hi) else 2 * lo
     assert _alone(name, centre) == 0.0
 
 

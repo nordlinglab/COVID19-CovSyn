@@ -271,3 +271,18 @@ def test_day_zero_is_read_once_per_seed_table():
 def test_employed_is_one_predicate_for_both_objectives(social, expected):
     """Review: fast_cost and measure_outcomes each repeated this test (E65 risk)."""
     assert cm.is_employed(social) is expected
+
+
+def test_warm_start_reports_the_values_the_new_bounds_clip(capsys):
+    """Review: run 18's vector falls outside the bounds rebuilt for B75 in 17 places; the warm
+    start clipped them without a word."""
+    pytest.importorskip("sklearn")
+    from covsyn.calibration import firefly_optimizer as fo
+
+    lb, ub = np.zeros(4), np.ones(4)
+    clipped = fo.clip_warm_start(np.array([-1.0, 0.5, 2.0, 1.0]), lb, ub, "firefly 1")
+    assert clipped.tolist() == [0.0, 0.5, 1.0, 1.0]
+    out = capsys.readouterr().out
+    assert "firefly 1" in out and "2 of 4" in out and "P[0]" in out and "P[2]" in out
+    fo.clip_warm_start(np.array([0.2, 0.5, 0.7, 1.0]), lb, ub, "firefly 2")
+    assert capsys.readouterr().out == ""

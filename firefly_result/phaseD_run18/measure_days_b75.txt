@@ -1,0 +1,6 @@
+=== b75_spread_Taiwan_weight (400 files)
+  household     rows    1785  mean days/contact  9.68  among those met  9.68  met-share 1.00
+  school        rows    1428  mean days/contact  7.41  among those met  7.41  met-share 1.00
+  workplace     rows    2223  mean days/contact  3.15  among those met  3.15  met-share 1.00
+  health_care   rows    1546  mean days/contact  2.26  among those met  2.26  met-share 1.00
+  municipality  rows   13412  mean days/contact  1.59  among those met  1.59  met-share 1.00

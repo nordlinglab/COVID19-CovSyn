@@ -70,7 +70,9 @@ ATTACK_RATE_SLICE = {'household': (33, 58), 'school': (58, 83), 'workplace': (83
 #
 #   household    10/100 index over 2.684 candidate contacts -> 3.73% (1.79-6.85).
 #                Was 5.5% under B1, and 6.62% before that.
-#   health_care   6/100 index over 2.747 -> 2.18% (0.80-4.75). This RAISES the anchor 2.5x,
+#   health_care   6/100 index over 2.747 -> 2.18% (0.80-4.75). Since the review of B76 the
+#                lower bound is Cheng's own per-contact Wilson lower bound (PER_CONTACT_LOWER).
+#                This RAISES the anchor 2.5x,
 #                which is the point of E55: CovSyn gives a case 2.75 medical contacts where
 #                Cheng traced 6.98, so reproducing Cheng's 6 infections needs a HIGHER rate
 #                per contact, not the same one. Watch the pooled age risk ratios -- this is
@@ -121,12 +123,16 @@ CHENG2020_LOCAL_INFECTIONS = 18
 CHENG2020_ALL_INFECTIONS = 22
 CHENG2020_LOCAL_SCALE = ((CHENG2020_LOCAL_INFECTIONS / CHENG2020_LOCAL_INDEX_CASES)
                          / (CHENG2020_ALL_INFECTIONS / CHENG2020_INDEX_CASES))
-# CovSyn candidate contacts per index case, measured on the fourth Phase D run
-# (verify_phaseD.py, 1000 index cases). Re-measure and update between runs.
-COVSYN_CANDIDATE_CONTACTS = {'household': 2.605, 'school': 3.657, 'workplace': 2.144,
-                             'health_care': 4.759, 'municipality': 23.874}
-CANDIDATE_CONTACTS_MEASURED_ON = ('Phase D run 17 (phaseD_checks.txt, CovSyn candidate contacts '
-                                  'per index, 1000 index cases)')
+# CovSyn candidate contacts per index case (verify_phase_d, 1000 index cases). Re-measure and
+# update between runs.
+# 2026-11-01 (run 19 preparation, B75): run 18 candidate 80 under the B75 work calendar, 1000
+# spread_Taiwan_weight simulations, firefly_result/phaseD_run18/checks_b75.txt. Run 17 had
+# {2.605, 3.657, 2.144, 4.759, 23.874}: health care fell 4.759 -> 2.597 with run 18's vector,
+# which raises the health care anchor and its uncapped daily ceiling to 2.9x the household's (E61).
+COVSYN_CANDIDATE_CONTACTS = {'household': 2.595, 'school': 2.305, 'workplace': 3.842,
+                             'health_care': 2.597, 'municipality': 19.482}
+CANDIDATE_CONTACTS_MEASURED_ON = ('Phase D run 18 candidate 80 under B75 (checks_b75.txt, '
+                                  'CovSyn candidate contacts per index, 1000 index cases)')
 # How far these moved on run 5, which is what E56 is about: school -47.7%, health care -37.1%,
 # workplace -12.3%, municipality +9.1%, household +0.4%. Run 4 had
 # {2.684, 2.733, 1.401, 2.747, 4.115}.
@@ -141,6 +147,42 @@ ANCHOR_FLOOR = {'municipality': 0.001}
 # to keep a tail; switching the community off entirely is not an acceptable fit either.
 COMMUNITY_UPPER_MULTIPLE = 3.0
 PER_INDEX_FLOOR = {'municipality': 0.001}
+
+
+def wilson_interval(events: int, trials: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson 95% interval of events / trials, shared with the validation figures.
+
+    Cheng 2020 does not name his interval method; Wilson reproduces his Table 2 intervals for
+    household 4.6% (2.3-9.3, 7 / 151 symptomatic), family 5.3% (2.1-12.8, 4 / 76) and health
+    care 0.9% (0.4-1.9, 6 / 698).
+
+    Args:
+        events: Number of events.
+        trials: Number of trials.
+        z: Normal quantile of the interval; 1.96, as the figures have always used.
+
+    Returns:
+        (lower, upper), the lower bound clipped at 0.
+
+    Raises:
+        ValueError: trials is not positive or events is outside [0, trials].
+    """
+    if trials <= 0 or not 0 <= events <= trials:
+        raise ValueError('need 0 <= events <= trials and trials > 0, got %r / %r'
+                         % (events, trials))
+    p = events / trials
+    centre = p + z * z / (2 * trials)
+    spread = z * np.sqrt(p * (1 - p) / trials + z * z / (4 * trials * trials))
+    scale = 1 + z * z / trials
+    return max(0.0, (centre - spread) / scale), (centre + spread) / scale
+
+
+# Review of B76 (2026-11-01, user): per-contact lower bounds that do not divide by CovSyn's
+# contact count. Cheng's lower health care infections over run 18's 2.597 contacts was 2.39%
+# cumulative, above Cheng's own upper per-contact rate of 1.86%, so once B76's floor raises the
+# contacts the search could not reach the lower half of the infections target. Cheng's Wilson
+# lower bound for 6 / 698, 0.395%, only sets the search room: the infections are charged (E56).
+PER_CONTACT_LOWER = {'health_care': wilson_interval(*CHENG2020_BY_SETTING['health_care'])[0]}
 
 
 def cheng_poisson_interval(layer):
@@ -182,14 +224,19 @@ def infections_per_index_target(layer):
 def infections_per_index_anchor(layer):
     """(lower, centre, upper) PER CONTACT, from Cheng's count over CovSyn's contact count.
 
+    A layer in PER_CONTACT_LOWER takes its lower bound from there instead (review of B76).
+
     Still used to place the daily attack-rate BOUNDS, which have to be written per contact
     per day. It is no longer an optimisation target (E56), so the circularity noted above now
     only affects how much headroom the search has, not what it is aiming at.
     """
     lo, per_index, hi = cheng_poisson_interval(layer)
     contacts = COVSYN_CANDIDATE_CONTACTS[layer]
-    return (max(lo / contacts, ANCHOR_FLOOR.get(layer, 0.0)),
-            per_index / contacts, hi / contacts)
+    if layer in PER_CONTACT_LOWER:
+        lower = PER_CONTACT_LOWER[layer]
+    else:
+        lower = max(lo / contacts, ANCHOR_FLOOR.get(layer, 0.0))
+    return lower, per_index / contacts, hi / contacts
 
 
 LAYER_CUMULATIVE_SAR = {
@@ -205,6 +252,34 @@ for _layer in CHENG2020_BY_SETTING:
 # their per-contact anchors above because Cheng has no category for them.
 LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
                               for layer in CHENG2020_BY_SETTING}
+
+# ---------------------------------------------------------------------- health care contacts
+# E61, 2026-11-01: run 18's vector gives a local index case 1.40 health care contacts inside
+# Jian's tracing window (onset - 2 days to isolation), so the medical infections Cheng reports
+# can only be reached with a daily attack rate 2.5x the household's. Jian et al. 2020 (Int J
+# Infect Dis 101:348) Table 1: 544 hospital or clinic contacts of the 1,435 contacts of the 55
+# locally acquired cases (cases 1-487 of the Taiwan case data, all 55 local cases). This mean is
+# driven by a few cases with long stays before diagnosis -- case 27 alone had 115 hospital staff
+# listed -- and 30 of the 55 were found by tracing or home quarantine, so it is a reference, not
+# a bound; Jian gives no per-case distribution.
+JIAN2020_LOCAL_HEALTH_CARE_PER_CASE = 544 / 55
+
+
+def health_care_contact_floor() -> float:
+    """Fewest health care contacts per local index case that can reproduce Cheng 2020.
+
+    The lower bound of medical infections per local index case (LAYER_INFECTIONS_PER_INDEX,
+    exact Poisson of 6 infections scaled to local index cases, B67) divided by the upper Wilson
+    bound of Cheng's per-contact attack rate, 6 / 698. With fewer contacts, even every contact
+    infected at Cheng's highest plausible rate falls short of his lowest plausible count.
+    Assumes Cheng's per-contact rate, measured on all 100 index cases, holds for local ones.
+
+    Returns:
+        The floor, in contacts per index case.
+    """
+    infections, traced = CHENG2020_BY_SETTING['health_care']
+    return (LAYER_INFECTIONS_PER_INDEX['health_care'][0]
+            / wilson_interval(infections, traced)[1])
 
 # ---------------------------------------------------------------------- contact days
 # Mean number of DAYS a candidate contact is actually met, per layer: the row sums of
@@ -239,9 +314,17 @@ LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
 # Community days fell 1.88 -> 1.21 because the scale-free count makes most community contacts
 # one-off meetings; household 10.87 -> 10.27, school 8.16 -> 6.61, workplace 11.93 -> 8.87,
 # health care 3.51 -> 2.70.
-MEAN_CONTACT_DAYS = {'household': 10.27, 'school': 6.61, 'workplace': 8.87,
-                     'health_care': 2.70, 'municipality': 1.21}
-CONTACT_DAYS_MEASURED_ON = 'Phase D run 17 (spread_Taiwan_weight, 400 simulations)'
+#
+# 2026-11-01 (run 19 preparation, B75): re-measured with run 18's selected vector (candidate 80)
+# under the B75 work calendar, which removes the coworker contacts of days off. Workplace days
+# fell 8.87 -> 3.15, about the share of days at work (5 x 0.691 + 0.0199) / 7 = 0.50 plus the
+# coworkers met only on days off dropping out; household 10.27 -> 9.68, school 6.61 -> 7.41,
+# health care 2.70 -> 2.26, community 1.21 -> 1.59 move with run 18's vector, not with B75.
+# Vector and measure_days output: firefly_result/phaseD_run18/ (commit 890da02).
+MEAN_CONTACT_DAYS = {'household': 9.68, 'school': 7.41, 'workplace': 3.15,
+                     'health_care': 2.26, 'municipality': 1.59}
+CONTACT_DAYS_MEASURED_ON = ('Phase D run 18 candidate 80 under B75 '
+                            '(spread_Taiwan_weight, 400 simulations)')
 
 # How far above the upper anchor the DAILY ceiling may sit. The ceiling is a safety net, not
 # a target: the cumulative SAR itself is a measured cost term (cost_attack_rate, on 300

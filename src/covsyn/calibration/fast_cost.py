@@ -239,6 +239,9 @@ def reduce_outcomes(scalars):
     if medical_total:
         measured['medical_late_share'] = sum(s['medical_late'] for s in scalars) / medical_total
         measured['medical_early_share'] = sum(s['medical_early'] for s in scalars) / medical_total
+    # B76: as measure_outcomes, the layer's candidate count over the index cases.
+    measured['health_care_contacts_per_index'] = sum(
+        s['candidate_health_care'] for s in scalars) / n
 
     community = np.array([s['community'] for s in scalars], dtype=float)
     measured['community_zero_share'] = float(np.mean(community == 0))

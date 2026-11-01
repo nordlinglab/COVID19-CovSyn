@@ -1,6 +1,8 @@
 # Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Write the pipeline regression fixture, at the commit that produced Phase D run 10.
+"""Write the pipeline regression fixture for the Phase D run 10 vector.
+
+Run on the compute server whenever a decision changes the output (last for B75):
 
     python tests/make_pipeline_fixtures.py
 

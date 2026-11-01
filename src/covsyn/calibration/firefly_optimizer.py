@@ -17,7 +17,8 @@ from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
-                                            LAYER_INFECTIONS_PER_INDEX)
+                                            LAYER_INFECTIONS_PER_INDEX,
+                                            health_care_contact_floor)
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
                                            offspring_dispersion,
@@ -539,7 +540,12 @@ OUTCOME_TARGETS = {
     'daily_municipality':     (1.20, 7.12, 1.0),
     # Health care is not one of the survey's everyday settings; a healthy person does not
     # meet medical staff daily, so this one is bounded from above only.
-    'daily_health_care':      (0.00, 0.30, 1.0),
+    # B76 (2026-11-01, user): measured only. The 0.30 had no source (set during Phase D) and,
+    # with the timing shape held, blocks B76's health care contact floor: 3x run 18's P[21]
+    # meets the floor at 0.47 a day. Data put the pre-onset rate anywhere in 0.08-2.1 a day:
+    # 15.40 outpatient visits per person in 2019 (NHI, MOHW 110 negotiation indicators) times
+    # 2 close-contact staff or 50 traced contacts per visit (Chung et al. 2020, JKMS 35:e431).
+    'daily_health_care':      (0.00, 0.30, 0.0),
     # B33: the severity cascade recomputed from the Taiwan contact-tracing file itself
     # (579 cases): asymptomatic 23.7%, symptomatic->ICU 12.7%, ICU->death 12.5%, CFR 1.2%.
     # B61 (2026-10-15), recomputed on the public 578-row file (recompute_taiwan_targets.py):
@@ -600,6 +606,15 @@ OUTCOME_TARGETS = {
     # it. The interval is wide because CovSyn's denominator is its own candidate contacts
     # while Cheng's is the contacts Taiwan's tracers chose to record.
     'medical_early_share':    (0.40, 0.70, 1.0),
+    # B76 (2026-11-01, user, E61 option a'): every candidate health care contact of the index
+    # case, floor only. Run 18 gave 2.597, so Cheng's medical infections could only be reached
+    # with a daily attack rate 2.5x the household's. The floor, 3.335, is Cheng's lower bound of
+    # medical infections per local index case over the upper Wilson bound of his per-contact
+    # rate 6 / 698 (sar_anchors.health_care_contact_floor, calibration_sources.md section 10).
+    # Review (user, option A): the floor is counted on every contact, as Cheng's rate is (37% of
+    # his medical contacts start 8+ days after onset), not inside Jian's tracing window, which
+    # verify_phase_d reports against Jian's 9.89 for local cases. No upper bound: no data gives one.
+    'health_care_contacts_per_index': (health_care_contact_floor(), np.inf, 1.0),
     # B27: the shape of the community contact distribution. The Taiwan tracing records have a
     # median of 7 contacts per index case but a p90 of 172 and a maximum of 850; the second
     # Phase D run reproduced the median (9) and nothing else (p90 18, max 33), because
@@ -809,6 +824,9 @@ def measure_outcomes(index_cases):
         key = f'infections_per_index_{layer}'
         if key in measured:
             measured[key] = effective / len(index_cases)
+        if layer == 'health_care':
+            # B76: every candidate health care contact per index case, zeros included.
+            measured['health_care_contacts_per_index'] = candidate / len(index_cases)
 
     # B23 / B27: the two distribution-shape targets. Both ends of the medical contact timing
     # are charged since E59 -- "early" is Cheng's first two bins (<0 and 0-3 days from onset),
@@ -946,7 +964,8 @@ MAX_INTERVAL_WIDTH_OVER_CENTRE = 0.5
 # B50: targets whose band is a wide data CI (lower bound far below the centre) have their miss
 # measured in units of the lower bound instead of B43's capped width, so the target still bites
 # near its lower end. Kept to the one target that needs it.
-OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio'}
+# B76: a floor with no upper bound has no width either, so its miss is in units of the floor.
+OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio', 'health_care_contacts_per_index'}
 
 
 # B60: the intervals the objective charges, from target_margins.py; OUTCOME_TARGETS keeps the
@@ -1252,6 +1271,21 @@ def decode_metrics(P):
     return {k: float(v) for k, v in m.items()}
 
 
+def clip_warm_start(vector: np.ndarray, lb: np.ndarray, ub: np.ndarray, label: str) -> np.ndarray:
+    """Clip a starting vector to the search bounds and say which values moved.
+
+    Rebuilt bounds can exclude an earlier best vector (B75: run 18's attack rates fall outside the
+    bounds rebuilt for the work calendar in 17 places), and the firefly then starts somewhere
+    other than the vector and cost the run log names.
+    """
+    clipped = np.clip(vector, lb, ub)
+    moved = np.flatnonzero(clipped != vector)
+    if len(moved):
+        print(f'warm start: {label}: {len(moved)} of {len(vector)} values clipped to the bounds '
+              f'({", ".join(f"P[{i}]" for i in moved)})', flush=True)
+    return clipped
+
+
 def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarray:
     """Extend a pre-B54 warm-start vector with the seed values of the appended parameters.
 
@@ -1292,7 +1326,7 @@ class Firefly:
         # population random, so the run always contains the documented starting point.
         if seed_vector is not None:
             span = np.where((ub - lb) > 0, ub - lb, 1.0)
-            normalized_fireflies[0] = np.clip((np.clip(seed_vector, lb, ub) - lb) / span, 0, 1)
+            normalized_fireflies[0] = np.clip((clip_warm_start(seed_vector, lb, ub, 'seed vector') - lb) / span, 0, 1)
             fireflies[0] = normalized_fireflies[0]*(ub-lb) + lb
         # B49 (E75): fireflies 1.. start at the best vectors of earlier runs. Every run used to
         # restart from the literature seed, and run 8 finished at 3.80 while run 7's best vector
@@ -1301,7 +1335,7 @@ class Firefly:
         for k, vector in enumerate(warm_start_vectors, start=1):
             if k >= self.pop_size:
                 break
-            normalized_fireflies[k] = np.clip((np.clip(vector, lb, ub) - lb) / span, 0, 1)
+            normalized_fireflies[k] = np.clip((clip_warm_start(vector, lb, ub, f'firefly {k}') - lb) / span, 0, 1)
             fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
             print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
         # Create ONE persistent process pool reused for every evaluation in this run.

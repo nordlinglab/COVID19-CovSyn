@@ -34,9 +34,14 @@ not give. Everything this script writes is listed below with the decision it com
   P[205..206]  B64: the work group's saturation a and Gamma shape k (no cap, the share of
                  coworkers met falls with the company size).
   P[207]       B65: mean of the Poisson contact-tracing delay, locked at 1 day.
+  variable/attack_rate_contact_days.json
+               review of B76: sar_anchors.MEAN_CONTACT_DAYS, the days the attack-rate bounds
+                 were converted with, for show_bounds. Not archived by backup_once, which keeps
+                 the pre-Phase-D originals, and this file did not exist then.
 
 Usage: python -m covsyn.calibration.apply_phase_d_parameters [variable_dir]
 """
+import json
 import pickle
 import shutil
 import sys
@@ -366,6 +371,10 @@ def main():
     np.save(VAR / 'course_parameters.npy', value)
     np.save(VAR / 'course_parameters_lb.npy', lower)
     np.save(VAR / 'course_parameters_ub.npy', upper)
+    # Review of B76: the contact days the attack-rate bounds were converted with travel with
+    # them, so show_bounds can reprint an old run's bounds with that run's days.
+    (VAR / 'attack_rate_contact_days.json').write_text(json.dumps(
+        {'days': MEAN_CONTACT_DAYS, 'measured_on': CONTACT_DAYS_MEASURED_ON}, indent=1) + '\n')
 
     print('contact bounds and course-of-disease bounds rewritten for Phase D')
     print('  pre-onset window mean      %.2f days' % (value[4] * value[5]))

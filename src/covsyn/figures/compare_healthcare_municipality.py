@@ -25,6 +25,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+
+from covsyn.calibration.sar_anchors import wilson_interval
 import pandas as pd
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
@@ -84,11 +86,9 @@ def wilson(k, n, z=1.96):
     if not n:
         return np.nan, np.nan, np.nan
     p = k / n
-    d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    lo, hi = wilson_interval(k, n, z)
     # Clamped so the interval always contains p (rounding at k = 0 or k = n, see errorbar).
-    return 100 * p, 100 * min(max(c - h, 0), p), 100 * max(c + h, p)
+    return 100 * p, 100 * min(lo, p), 100 * max(hi, p)
 
 
 fig, ax = plt.subplots(2, 2, figsize=(17, 11))
