@@ -447,6 +447,15 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     check('B23', 'health care contacts starting before day 4',
           100 * med_early / max(med_total, 1), (40.0, 70.0), '%',
           note='Cheng 2020 medical: 33.9% before onset + 21.5% on days 0-3 = 55.4%')
+    # B76: the objective's floor on health care contacts in Jian's tracing window (E61).
+    from covsyn.calibration.sar_anchors import (JIAN2020_LOCAL_HEALTH_CARE_PER_CASE,
+                                                health_care_contact_floor)
+    check('B76', "health care contacts per index case in Jian's tracing window",
+          float(np.mean([contacts_in_tracing_window(k, c, layers=('health_care',))
+                         for k, c in zip(index_course, index_contact, strict=True)])),
+          (health_care_contact_floor(), np.inf),
+          note=f'floor: Cheng 2020 medical infections lower bound / per-contact rate upper bound; '
+               f'Jian et al. 2020 local cases {JIAN2020_LOCAL_HEALTH_CARE_PER_CASE:.2f} (reference)')
 
     # ---------------------------------------------------------------- B28 case closure
     # The objective's own function and bands (B58), so the checklist cannot drift from them.

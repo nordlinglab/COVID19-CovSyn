@@ -81,7 +81,8 @@ def test_both_objective_implementations_agree_bit_for_bit(
     fast = fast_cost.reduce_outcomes(scalars)
     assert np.isfinite(slow["offspring_k"])
     for key in ("offspring_k", "daily_household", "daily_school", "daily_municipality",
-                "community_day_zero_share", "community_day_p90"):  # B63 too
+                "community_day_zero_share", "community_day_p90",  # B63 too
+                "health_care_contacts_traced"):  # B76
         assert fast[key] == slow[key], key
 
 

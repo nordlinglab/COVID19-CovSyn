@@ -9,7 +9,7 @@ the definition, so all four now call contacts_per_day_before_onset().
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import numpy as np
@@ -36,7 +36,10 @@ def contacts_per_case(contact: Mapping[str, Any]) -> int:
 
 
 def contacts_in_tracing_window(
-    course: Mapping[str, Any], contact: Mapping[str, Any], lead_days: int = 2
+    course: Mapping[str, Any],
+    contact: Mapping[str, Any],
+    lead_days: int = 2,
+    layers: Iterable[str] | None = None,
 ) -> int:
     """Contacts a contact tracer would list: those met at least once inside the tracing window.
 
@@ -49,9 +52,14 @@ def contacts_in_tracing_window(
         course: The case's saved course of disease.
         contact: The case's saved contact data.
         lead_days: Days before onset (or isolation) at which the window opens.
+        layers: The layers to count (keys of MATRIX_KEY), all five when None; B76 counts the
+            health care layer alone against Jian's hospital and clinic contacts.
 
     Returns:
-        The number of contacts, over all five layers, met on a day in the window.
+        The number of contacts of those layers met on a day in the window.
+
+    Raises:
+        KeyError: A layer that is not a key of MATRIX_KEY.
     """
     isolation = int(course["monitor_isolation_period"])
     onset = course["incubation_period"]
@@ -60,7 +68,8 @@ def contacts_in_tracing_window(
         int(np.floor(onset)) if onset is not None and np.isfinite(onset) else isolation
     ) - lead_days
     count = 0
-    for key in MATRIX_KEY.values():
+    keys = list(MATRIX_KEY.values()) if layers is None else [MATRIX_KEY[L] for L in layers]
+    for key in keys:
         matrix = np.asarray(contact.get(key, np.zeros((0, 0))), dtype=bool)
         if matrix.ndim != 2 or matrix.shape[0] == 0:
             continue

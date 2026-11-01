@@ -38,7 +38,8 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
-from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
+from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_in_tracing_window,
+                                           contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
                                            offspring_dispersion,
                                            one_day_counts, one_day_shape)
@@ -113,6 +114,12 @@ def workplace_scalars(course, contact, social=None):
             'workplace_days': at_work_days_before_onset(course, contact)}
 
 
+def health_care_scalars(course, contact):
+    """B76: the index case's health care contacts in Jian's tracing window, as measure_outcomes()."""
+    return {'health_care_contacts_traced':
+            contacts_in_tracing_window(course, contact, layers=('health_care',))}
+
+
 def _index_case_scalars(course, contact, social=None):
     """Everything measure_outcomes() needs from one index case, as plain numbers.
 
@@ -151,6 +158,7 @@ def _index_case_scalars(course, contact, social=None):
     out['community'] = len(contact['municipality_effective_contacts'] or [])
     out['community_days'] = one_day_counts(course, contact, 'municipality')  # B63
     out.update(workplace_scalars(course, contact, social))
+    out.update(health_care_scalars(course, contact))
     out['incubation_period'] = float(onset) if onset is not None else np.nan
     out['pre_onset_window'] = float(course['pre_onset_window'])
     out['positive_test_date'] = float(course['positive_test_date'])
@@ -239,6 +247,8 @@ def reduce_outcomes(scalars):
     if medical_total:
         measured['medical_late_share'] = sum(s['medical_late'] for s in scalars) / medical_total
         measured['medical_early_share'] = sum(s['medical_early'] for s in scalars) / medical_total
+    measured['health_care_contacts_traced'] = float(np.mean(
+        [s['health_care_contacts_traced'] for s in scalars]))  # B76
 
     community = np.array([s['community'] for s in scalars], dtype=float)
     measured['community_zero_share'] = float(np.mean(community == 0))
