@@ -36,6 +36,16 @@ Z_TWO_SIDED_95 = 1.96
 MAX_SHIFT_OF_WIDTH = 0.25
 CHARGED_TARGETS_FILE = Path(__file__).with_name("charged_targets.json")
 
+
+def _bound(x: float | None) -> float:
+    """A bound read from JSON, where an open bound is null (B76)."""
+    return float("inf") if x is None else float(x)
+
+
+def _json_bound(x: float) -> float | None:
+    """A bound ready for strict JSON, which has no Infinity: an open bound becomes null."""
+    return None if x == float("inf") else x
+
 # Objective key -> (checklist decision, checklist name, objective units per checklist unit).
 CHECK_FOR_TARGET = {
     "daily_household": ("B25", "contacts per day before onset, household", 1.0),
@@ -67,6 +77,7 @@ CHECK_FOR_TARGET = {
     "infections_per_index_health_care": ("B9", "infections per index case, health_care", 1.0),
     "infections_per_index_municipality": ("B9", "infections per index case, municipality", 1.0),
     "offspring_k": ("B17", "offspring dispersion k", 1.0),
+    "health_care_contacts_per_index": ("B76", "health care contacts per index case", 1.0),
 }
 
 
@@ -106,16 +117,16 @@ def compute_margins(checks: list[dict], targets: dict) -> dict[str, dict]:
             raise ValueError(f"checklist row {decision} {name!r} with an interval is missing")
         ci_lo, ci_hi = row["ci"]
         sigma = (ci_hi - ci_lo) / (2 * Z_TWO_SIDED_95) * unit
-        accept_lo, accept_hi = (float(row["target"][0]) * unit, float(row["target"][1]) * unit)
+        accept_lo, accept_hi = (_bound(row["target"][0]) * unit, _bound(row["target"][1]) * unit)
         shrunk_lo, shrunk_hi = charged_interval(accept_lo, accept_hi, sigma)
         obj_lo, obj_hi = float(targets[key][0]), float(targets[key][1])
         charged = (max(shrunk_lo, obj_lo), min(shrunk_hi, obj_hi))
         if not charged[0] < charged[1]:
             raise ValueError(f"{key}: charged interval {charged} is empty")
         out[key] = {
-            "acceptance": [accept_lo, accept_hi],
-            "objective": [obj_lo, obj_hi],
-            "charged": list(charged),
+            "acceptance": [accept_lo, _json_bound(accept_hi)],
+            "objective": [obj_lo, _json_bound(obj_hi)],
+            "charged": [charged[0], _json_bound(charged[1])],
             "sigma": sigma,
             "check": f"{decision} {name}",
         }
@@ -141,13 +152,14 @@ def load_charged_bounds(
         if targets is not None:
             current = [float(targets[key][0]), float(targets[key][1])] if key in targets else None
             if current is None or any(
-                abs(a - b) > 1e-12 for a, b in zip(entry["objective"], current, strict=True)
+                not (_bound(a) == b or abs(_bound(a) - b) <= 1e-12)
+                for a, b in zip(entry["objective"], current, strict=True)
             ):
                 raise ValueError(
                     f"{path.name} is stale for {key}: derived from {entry['objective']}, "
                     f"OUTCOME_TARGETS now {current}; re-run target_margins"
                 )
-        bounds[key] = (float(entry["charged"][0]), float(entry["charged"][1]))
+        bounds[key] = (_bound(entry["charged"][0]), _bound(entry["charged"][1]))
     return bounds
 
 
@@ -174,7 +186,7 @@ def main() -> None:
     for key, m in margins.items():
         print(
             f"{key:42s} checklist {m['acceptance']} objective {m['objective']} -> charged "
-            f"[{m['charged'][0]:.4g}, {m['charged'][1]:.4g}] (sigma {m['sigma']:.3g})"
+            f"[{m['charged'][0]:.4g}, {_bound(m['charged'][1]):.4g}] (sigma {m['sigma']:.3g})"
         )
 
 

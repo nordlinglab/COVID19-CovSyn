@@ -88,6 +88,31 @@ def test_a_stale_charged_file_is_refused(tmp_path) -> None:
         tm.load_charged_bounds(path, {"icu_to_closure": (25.0, 40.0, 1.0)})
 
 
+
+# --- B76: a floor with no upper bound (null in JSON) -------------------------------------
+
+
+def test_a_floor_moves_up_and_stays_open() -> None:
+    """The B76 floor shifts up by 1.645 sigma; the open upper bound stays open."""
+    checks = [{"decision": "B76", "name": "health care contacts per index case",
+               "target": [3.3, None], "ci": [2.4, 2.792]}]
+    m = tm.compute_margins(checks, {"health_care_contacts_per_index": (3.3, np.inf, 1.0)})[
+        "health_care_contacts_per_index"]
+    assert m["sigma"] == pytest.approx(0.1)
+    assert m["charged"][0] == pytest.approx(3.4645)
+    assert m["charged"][1] is None and m["objective"][1] is None
+    json.dumps(m, allow_nan=False)  # strict JSON: no Infinity
+
+
+def test_a_null_bound_loads_as_infinite(tmp_path) -> None:
+    path = tmp_path / "charged.json"
+    path.write_text(json.dumps({"targets": {"health_care_contacts_per_index": {
+        "objective": [3.3, None], "charged": [3.4645, None]}}}))
+    assert tm.load_charged_bounds(path, {"health_care_contacts_per_index": (3.3, np.inf, 1.0)}) == {
+        "health_care_contacts_per_index": (3.4645, np.inf)}
+    with pytest.raises(ValueError):
+        tm.load_charged_bounds(path, {"health_care_contacts_per_index": (3.3, 9.0, 1.0)})
+
 def test_a_missing_checklist_row_is_an_error() -> None:
     """Margins are never silently skipped for a mapped, charged target."""
     with pytest.raises(ValueError):
@@ -104,9 +129,12 @@ def test_committed_charged_targets_agree_with_the_acceptance_intervals() -> None
     for key, m in data["targets"].items():
         lo, hi, weight = fo.OUTCOME_TARGETS[key]
         assert weight > 0
-        assert m["objective"] == pytest.approx([lo, hi])
-        assert lo <= m["charged"][0] < m["charged"][1] <= hi
-        assert m["acceptance"][0] <= m["charged"][0] < m["charged"][1] <= m["acceptance"][1]
+        open_ = [np.inf if x is None else x for x in m["objective"]]  # B76: null is open
+        charged = [np.inf if x is None else x for x in m["charged"]]
+        acceptance = [np.inf if x is None else x for x in m["acceptance"]]
+        assert open_ == pytest.approx([lo, hi])
+        assert lo <= charged[0] < charged[1] <= hi
+        assert acceptance[0] <= charged[0] < charged[1] <= acceptance[1]
 
 
 def test_checklist_counts_failures_and_noise_passes() -> None:

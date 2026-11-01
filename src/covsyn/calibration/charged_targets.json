@@ -1,5 +1,5 @@
 {
- "source": "run 14, candidate 156, checklist re-run with the E96 fix (CovSyn 7ecb1ab), 1000 simulations, 200 bootstrap replicates; B61 (2026-10-15): household, school and offspring_k acceptance intervals updated and recharged with the run-14 sigma via compute_margins; re-run target_margins on the next checklist; B63 (2026-10-16): daily_municipality acceptance [1.2, 7.12], recharged with the run-14 sigma via compute_margins; B67 (2026-10-24): the three Cheng per-index entries rescaled to local index cases (x 2.82) and recharged with their recorded run-14 sigma via charged_interval; B64 (2026-10-24): daily_workplace removed (reported only); daily_workplace_employed is charged on its acceptance interval until a checklist supplies its sigma; B76 (2026-11-01): daily_health_care removed (reported only)",
+ "source": "run 14, candidate 156, checklist re-run with the E96 fix (CovSyn 7ecb1ab), 1000 simulations, 200 bootstrap replicates; B61 (2026-10-15): household, school and offspring_k acceptance intervals updated and recharged with the run-14 sigma via compute_margins; re-run target_margins on the next checklist; B63 (2026-10-16): daily_municipality acceptance [1.2, 7.12], recharged with the run-14 sigma via compute_margins; B67 (2026-10-24): the three Cheng per-index entries rescaled to local index cases (x 2.82) and recharged with their recorded run-14 sigma via charged_interval; B64 (2026-10-24): daily_workplace removed (reported only); daily_workplace_employed is charged on its acceptance interval until a checklist supplies its sigma; B76 (2026-11-01): daily_health_care removed (reported only); B76 (2026-11-01): health_care_contacts_per_index charged with the sigma of run 18 candidate 80 under B75 (1000 spread_Taiwan_weight simulations, 200 bootstrap replicates, CovSyn a35d951) via compute_margins; its open upper bound is null",
  "z": 1.645,
  "max_shift_of_width": 0.25,
  "targets": {
@@ -306,6 +306,22 @@
    ],
    "sigma": 0.03258105083433496,
    "check": "B17 offspring dispersion k"
+  },
+  "health_care_contacts_per_index": {
+   "acceptance": [
+    3.3352297478263013,
+    null
+   ],
+   "objective": [
+    3.3352297478263013,
+    null
+   ],
+   "charged": [
+    3.445816131754873,
+    null
+   ],
+   "sigma": 0.06722576530612256,
+   "check": "B76 health care contacts per index case"
   }
  }
 }

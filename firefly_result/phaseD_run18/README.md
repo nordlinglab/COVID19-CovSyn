@@ -2,6 +2,7 @@
 
 - `firefly_best.txt`: the selected vector of run 18 (candidate 80 of the revalidation, B56), 208 parameters, the same file as run 18's `candidates/candidate_80/firefly_best.txt`.
 - `measure_days_b75.txt`: `python -m covsyn.validation.measure_days` on 400 `spread_Taiwan_weight` simulations of this vector at commit `890da02` (B75 work calendar), the source of `sar_anchors.MEAN_CONTACT_DAYS` for run 19.
+- `checks_b76.txt`: the same checklist at commit `a35d951` with 200 bootstrap replicates (`verify_phase_d b75_mc1000 none b76_checks.json 200`), the sigma of B76's charged floor in `calibration/charged_targets.json`.
 - `checks_b75.txt`: `python -m covsyn.validation.verify_phase_d` on 1000 `spread_Taiwan_weight` simulations of this vector at commit `9136f59` (bootstrap off), the source of `sar_anchors.COVSYN_CANDIDATE_CONTACTS` for run 19.
 
 Reproduce from the repository root:

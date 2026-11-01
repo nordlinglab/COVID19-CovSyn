@@ -65,18 +65,21 @@ def test_target_is_the_floor_with_no_upper_bound() -> None:
     assert weight == 1.0
 
 
-def test_meeting_the_floor_costs_nothing() -> None:
-    floor = sa.health_care_contact_floor()
-    assert fo.outcome_penalty({KEY: floor}) == 0.0
+def test_meeting_the_charged_floor_costs_nothing() -> None:
+    """B60: the charged floor is the acceptance floor moved up by its Monte-Carlo margin."""
+    charged_lo, charged_hi = fo.CHARGED_BOUNDS[KEY]
+    assert charged_lo > sa.health_care_contact_floor()
+    assert charged_hi == np.inf
+    assert fo.outcome_penalty({KEY: charged_lo}) == 0.0
     assert fo.outcome_penalty({KEY: 50.0}) == 0.0
 
 
 def test_a_miss_is_measured_in_units_of_the_floor() -> None:
-    """Run 18's 2.597 contacts miss the floor by 0.22 floors: 6 x 0.22**2 = 0.29."""
+    """From the charged floor, in units of the acceptance floor (B50, B60)."""
     floor = sa.health_care_contact_floor()
-    miss = (floor - 2.597) / floor
+    charged_lo = fo.CHARGED_BOUNDS[KEY][0]
+    miss = (charged_lo - 2.597) / floor
     assert fo.outcome_penalty({KEY: 2.597}) == pytest.approx(fo.OUTCOME_PENALTY_WEIGHT * miss ** 2)
-    assert fo.outcome_penalty({KEY: 0.0}) == pytest.approx(fo.OUTCOME_PENALTY_WEIGHT * 1.0)
 
 
 def test_the_window_count_is_no_longer_an_objective_target() -> None:
