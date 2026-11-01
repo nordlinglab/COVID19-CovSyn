@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "4e759730387dc512aeae1c36338aa891ad7a36e4",
+ "generated_at_commit": "86f385574c5747329777c977601804fd56db7eb5",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -527,8 +527,8 @@
   },
   "show_bounds": {
    "returncode": 0,
-   "stdout_head": "layer              daily [lb, ub]                  cumul % [lb, ub]\nhousehold        0.01182 [0.00552, 0.04556]     10.87  [5.21, 36.33]\nschool           0.00314 [0.00136, 0.01099]      2.30  [1.00, 7.86]\nworkplace        0.01092 [0.00479, 0.03230]      3.40  [1.50, 9.83]\nhealth_care      0.02938 [0.01066, 0.04556]      6.52  [2.39, 10.00]\nmunicipality     0.00091 [0.00063, 0.01016]      0.14  [0.",
-   "stdout_sha256": "758da6a68c745087407d3070cd2d7098cf684bc23dd064f29785619eb8f634f6"
+   "stdout_head": "contact days: Phase D run 18 candidate 80 under B75 (spread_Taiwan_weight, 400 simulations)\nlayer              daily [lb, ub]                  cumul % [lb, ub]\nhousehold        0.01182 [0.00552, 0.04556]     10.87  [5.21, 36.33]\nschool           0.00314 [0.00136, 0.01099]      2.30  [1.00, 7.86]\nworkplace        0.01092 [0.00479, 0.03230]      3.40  [1.50, 9.83]\nhealth_care      0.02938 [0.00175, ",
+   "stdout_sha256": "3ec52b3b017112f0392a598ef169ef9f4dc25c72c7082a2e94fadbc28c0e3bdb"
   },
   "show_final": {
    "returncode": 0,
@@ -543,10 +543,10 @@
   "verify_phaseD": {
    "returncode": 0,
    "stdout_head": "<WORKDIR>/spread_Taiwan_weight: 40 simulations, 50 cases\n\n--- B29\n  ok~  household: other members per case                                      3.100    [2.6, 3]         [2.27, 3.75]         \n   ok  household: living alone                                               15.000%   [11, 16]         [5, 27.5]            \n--- B30\n  FAIL class size, elementary (7-12)                                      ",
-   "stdout_sha256": "71ddfbe1059d6e1aa078c888f3ba1c2ea57de1f6d9e03dc8e0a27bea759245fb"
+   "stdout_sha256": "5126edb4eb8634ac4c4c2f99df0197c6cd5aa0a41a1b0b813a86987522ee522a"
   },
   "verify_phaseD_json": {
-   "sha256": "060fa70fd2bcf55f52473f631dc95fb1a6b5c72ef2fae6f5db66721d5ce59c1e"
+   "sha256": "557064f3071d441c1e05232ea83489cdbe5c652cb3bab8cfba1b64f2d5866094"
   }
  }
 }
