@@ -50,3 +50,28 @@ def test_wilson_interval_narrows_with_a_large_sample() -> None:
 def test_wilson_interval_rejects_impossible_counts(events: int, trials: int) -> None:
     with pytest.raises(ValueError):
         sa.wilson_interval(events, trials)
+
+
+def test_health_care_lower_bound_is_cheng_per_contact_lower_bound() -> None:
+    """Review of B76: the per-contact lower bound no longer presupposes run 18's 2.597 contacts.
+
+    Built from Cheng's lower infections over 2.597 contacts it was 2.39% cumulative, above
+    Cheng's own upper per-contact rate of 1.86%, so the floor's contacts could not reach the
+    lower half of the infections target. It is now Cheng's Wilson lower bound, 0.395%.
+    """
+    lower, _, upper = sa.LAYER_CUMULATIVE_SAR["health_care"]
+    assert lower == pytest.approx(sa.wilson_interval(6, 698)[0])
+    assert lower < upper
+
+
+def test_committed_bounds_carry_the_health_care_lower_bound() -> None:
+    """variable/course_parameters_lb.npy was rebuilt after the change (E53 discipline)."""
+    from pathlib import Path
+
+    import numpy as np
+
+    root = Path(__file__).resolve().parents[1]
+    lb = np.load(root / "variable" / "course_parameters_lb.npy")
+    a, b = sa.ATTACK_RATE_SLICE["health_care"]
+    _, expected, _ = sa.attack_rate_block("health_care")
+    assert lb[a:b] == pytest.approx(expected)

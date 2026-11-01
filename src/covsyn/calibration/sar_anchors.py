@@ -147,6 +147,34 @@ COMMUNITY_UPPER_MULTIPLE = 3.0
 PER_INDEX_FLOOR = {'municipality': 0.001}
 
 
+def wilson_interval(events: int, trials: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson 95% interval of events / trials, shared with the validation figures.
+
+    Cheng 2020 does not name his interval method; Wilson reproduces his Table 2 intervals for
+    household 4.6% (2.3-9.3, 7 / 151 symptomatic), family 5.3% (2.1-12.8, 4 / 76) and health
+    care 0.9% (0.4-1.9, 6 / 698).
+
+    Args:
+        events: Number of events.
+        trials: Number of trials.
+        z: Normal quantile of the interval; 1.96, as the figures have always used.
+
+    Returns:
+        (lower, upper), the lower bound clipped at 0.
+
+    Raises:
+        ValueError: trials is not positive or events is outside [0, trials].
+    """
+    if trials <= 0 or not 0 <= events <= trials:
+        raise ValueError('need 0 <= events <= trials and trials > 0, got %r / %r'
+                         % (events, trials))
+    p = events / trials
+    centre = p + z * z / (2 * trials)
+    spread = z * np.sqrt(p * (1 - p) / trials + z * z / (4 * trials * trials))
+    scale = 1 + z * z / trials
+    return max(0.0, (centre - spread) / scale), (centre + spread) / scale
+
+
 def cheng_poisson_interval(layer):
     """(lower, centre, upper) INFECTIONS PER INDEX CASE in this layer, from Cheng 2020.
 
@@ -192,8 +220,15 @@ def infections_per_index_anchor(layer):
     """
     lo, per_index, hi = cheng_poisson_interval(layer)
     contacts = COVSYN_CANDIDATE_CONTACTS[layer]
-    return (max(lo / contacts, ANCHOR_FLOOR.get(layer, 0.0)),
-            per_index / contacts, hi / contacts)
+    lower = max(lo / contacts, ANCHOR_FLOOR.get(layer, 0.0))
+    if layer == 'health_care':
+        # Review of B76 (2026-11-01, user): Cheng's lower infections over run 18's 2.597
+        # contacts was 2.39% cumulative, above Cheng's own upper per-contact rate of 1.86%, so
+        # once B76's floor raises the contacts the search could not reach the lower half of the
+        # infections target. The lower bound is Cheng's Wilson lower bound, 6 / 698 -> 0.395%;
+        # it only sets the search room, since the infections themselves are charged (E56).
+        lower = wilson_interval(*CHENG2020_BY_SETTING[layer])[0]
+    return lower, per_index / contacts, hi / contacts
 
 
 LAYER_CUMULATIVE_SAR = {
@@ -220,34 +255,6 @@ LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
 # listed -- and 30 of the 55 were found by tracing or home quarantine, so it is a reference, not
 # a bound; Jian gives no per-case distribution.
 JIAN2020_LOCAL_HEALTH_CARE_PER_CASE = 544 / 55
-
-
-def wilson_interval(events: int, trials: int, z: float = 1.96) -> tuple[float, float]:
-    """Wilson 95% interval of events / trials, shared with the validation figures.
-
-    Cheng 2020 does not name his interval method; Wilson reproduces his Table 2 intervals for
-    household 4.6% (2.3-9.3, 7 / 151 symptomatic), family 5.3% (2.1-12.8, 4 / 76) and health
-    care 0.9% (0.4-1.9, 6 / 698).
-
-    Args:
-        events: Number of events.
-        trials: Number of trials.
-        z: Normal quantile of the interval; 1.96, as the figures have always used.
-
-    Returns:
-        (lower, upper), the lower bound clipped at 0.
-
-    Raises:
-        ValueError: trials is not positive or events is outside [0, trials].
-    """
-    if trials <= 0 or not 0 <= events <= trials:
-        raise ValueError('need 0 <= events <= trials and trials > 0, got %r / %r'
-                         % (events, trials))
-    p = events / trials
-    centre = p + z * z / (2 * trials)
-    spread = z * np.sqrt(p * (1 - p) / trials + z * z / (4 * trials * trials))
-    scale = 1 + z * z / trials
-    return max(0.0, (centre - spread) / scale), (centre + spread) / scale
 
 
 def health_care_contact_floor() -> float:
