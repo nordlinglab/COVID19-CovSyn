@@ -79,3 +79,28 @@ def test_daily_health_care_is_measured_not_charged() -> None:
     """B76 (2026-11-01, user): the unsourced 0.30 cap no longer blocks the floor; band kept."""
     assert fo.OUTCOME_TARGETS["daily_health_care"] == (0.00, 0.30, 0.0)
     assert fo.outcome_penalty({"daily_health_care": 0.47}) == 0.0
+
+
+# --- review of B76 (2026-11-01) -----------------------------------------------------
+
+
+def test_open_bound_is_written_as_null() -> None:
+    """Strict JSON has no Infinity: the open upper bound of B76 becomes null."""
+    import json
+
+    from covsyn.validation.acceptance import json_band
+
+    assert json_band([3.3, np.inf]) == [3.3, None]
+    assert json_band([1.0, 2.0]) == [1.0, 2.0]
+    assert json_band(None) is None
+    assert json_band("text") == "text"
+    json.dumps(json_band([3.3, np.inf]), allow_nan=False)  # raises on Infinity
+
+
+@pytest.mark.parametrize("target, text", [([1.0, 2.5], "[1, 2.5]"), ([3.3, None], "[3.3, inf]"),
+                                          ([3.3, np.inf], "[3.3, inf]"), (None, "(information)")])
+def test_band_text_prints_an_open_bound(target, text: str) -> None:
+    from covsyn.validation.acceptance import band_text
+
+    assert band_text(target) == text
+

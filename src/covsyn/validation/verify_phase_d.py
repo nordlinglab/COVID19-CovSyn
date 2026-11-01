@@ -23,7 +23,8 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_i
                                             contacts_per_case, contacts_per_day_at_work,
                                             contacts_per_day_before_onset,
                                             offspring_dispersion, one_day_counts, one_day_shape)
-from covsyn.validation.acceptance import bootstrap_intervals, verdict
+from covsyn.calibration.sar_anchors import JIAN2020_LOCAL_HEALTH_CARE_PER_CASE
+from covsyn.validation.acceptance import band_text, bootstrap_intervals, json_band, verdict
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
@@ -448,12 +449,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
           100 * med_early / max(med_total, 1), (40.0, 70.0), '%',
           note='Cheng 2020 medical: 33.9% before onset + 21.5% on days 0-3 = 55.4%')
     # B76: the objective's floor on health care contacts in Jian's tracing window (E61).
-    from covsyn.calibration.sar_anchors import (JIAN2020_LOCAL_HEALTH_CARE_PER_CASE,
-                                                health_care_contact_floor)
     check('B76', "health care contacts per index case in Jian's tracing window",
           float(np.mean([contacts_in_tracing_window(k, c, layers=('health_care',))
                          for k, c in zip(index_course, index_contact, strict=True)])),
-          (health_care_contact_floor(), np.inf),
+          OUTCOME_TARGETS['health_care_contacts_traced'][:2],
           note=f'floor: Cheng 2020 medical infections lower bound / per-contact rate upper bound; '
                f'Jian et al. 2020 local cases {JIAN2020_LOCAL_HEALTH_CARE_PER_CASE:.2f} (reference)')
 
@@ -665,11 +664,7 @@ def main():
         if r['decision'] != current:
             current = r['decision']
             print(f'--- {current}')
-        target = r['target']
-        if isinstance(target, list):
-            target_text = '[%g, %g]' % (target[0], target[1])
-        else:
-            target_text = '(information)'
+        target_text = band_text(r['target'])
         if r['ok'] is None:
             mark = '    '
         elif r['ok'] and r.get('within_noise'):
@@ -693,7 +688,10 @@ def main():
     with open(OUT_JSON, 'w') as f:
         json.dump({'spread_dir': str(SPREAD), 'simulations': len(runs),
                    'cases': sum(len(r['course']) for r in runs),
-                   'bootstrap_replicates': BOOTSTRAP_REPLICATES, 'checks': results}, f, indent=1)
+                   'bootstrap_replicates': BOOTSTRAP_REPLICATES,
+                   # B76: an open bound is written as null, strict JSON has no Infinity.
+                   'checks': [{**r, 'target': json_band(r['target'])} for r in results]},
+                  f, indent=1)
     print('written', OUT_JSON)
 
 

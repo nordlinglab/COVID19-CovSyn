@@ -17,6 +17,35 @@ from typing import Any
 import numpy as np
 
 
+def json_band(target: Any) -> Any:
+    """A target band ready for strict JSON: an open (infinite) bound becomes None.
+
+    Args:
+        target: A [lower, upper] list, or anything else (None, a string), returned unchanged.
+
+    Returns:
+        The band with every non-finite bound replaced by None.
+    """
+    if not isinstance(target, list):
+        return target
+    return [x if x is not None and np.isfinite(x) else None for x in target]
+
+
+def band_text(target: Any) -> str:
+    """'[lower, upper]' for a band, 'inf' for an open bound, '(information)' for none.
+
+    Args:
+        target: A [lower, upper] list, either bound None or infinite when open, or None.
+
+    Returns:
+        The band as printed in the checklist report.
+    """
+    if not isinstance(target, list):
+        return "(information)"
+    return "[%s]" % ", ".join("inf" if x is None or not np.isfinite(x) else "%g" % x
+                              for x in target)
+
+
 def verdict(
     value: float, target: tuple[float, float], interval: tuple[float, float] | None
 ) -> str | None:

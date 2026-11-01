@@ -10,6 +10,8 @@ Usage: python -m covsyn.validation.compare_phase_d_runs old_checks.json new_chec
 import json
 import sys
 
+from covsyn.validation.acceptance import band_text
+
 
 def load(path):
     data = json.load(open(path))
@@ -59,7 +61,7 @@ def main():
         for key in entries:
             decision, name = key
             target = (new.get(key) or old[key])['target']
-            target = f'[{target[0]:g}, {target[1]:g}]' if isinstance(target, list) else '(information)'
+            target = band_text(target)
             print(f'  {decision:5s} {name:<58s} {fmt(old.get(key)):>18s} -> {fmt(new.get(key)):<18s} {target}')
         print()
 
