@@ -210,6 +210,48 @@ for _layer in CHENG2020_BY_SETTING:
 LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
                               for layer in CHENG2020_BY_SETTING}
 
+# ---------------------------------------------------------------------- health care contacts
+# E61, 2026-11-01: run 18's vector gives a local index case 1.40 health care contacts inside
+# Jian's tracing window (onset - 2 days to isolation), so the medical infections Cheng reports
+# can only be reached with a daily attack rate 2.5x the household's. Jian et al. 2020 (Int J
+# Infect Dis 101:348) Table 1: 544 hospital or clinic contacts of the 1,435 contacts of the 55
+# locally acquired cases (cases 1-487 of the Taiwan case data, all 55 local cases). This mean is
+# driven by a few cases with long stays before diagnosis -- case 27 alone had 115 hospital staff
+# listed -- and 30 of the 55 were found by tracing or home quarantine, so it is a reference, not
+# a bound; Jian gives no per-case distribution.
+JIAN2020_LOCAL_HEALTH_CARE_PER_CASE = 544 / 55
+
+
+def wilson_interval(events, trials, z=1.959964):
+    """(lower, upper) Wilson 95% interval of events / trials.
+
+    Cheng 2020 does not name his interval method; Wilson reproduces his Table 2 intervals for
+    household 4.6% (2.3-9.3, 7 / 151 symptomatic), family 5.3% (2.1-12.8, 4 / 76) and health
+    care 0.9% (0.4-1.9, 6 / 698).
+    """
+    if trials <= 0 or not 0 <= events <= trials:
+        raise ValueError('need 0 <= events <= trials and trials > 0, got %r / %r'
+                         % (events, trials))
+    p = events / trials
+    centre = p + z * z / (2 * trials)
+    spread = z * np.sqrt(p * (1 - p) / trials + z * z / (4 * trials * trials))
+    scale = 1 + z * z / trials
+    return max(0.0, (centre - spread) / scale), (centre + spread) / scale
+
+
+def health_care_contact_floor():
+    """Fewest health care contacts per local index case that can reproduce Cheng 2020.
+
+    The lower bound of medical infections per local index case (LAYER_INFECTIONS_PER_INDEX,
+    exact Poisson of 6 infections scaled to local index cases, B67) divided by the upper Wilson
+    bound of Cheng's per-contact attack rate, 6 / 698. With fewer contacts, even every contact
+    infected at Cheng's highest plausible rate falls short of his lowest plausible count.
+    Assumes Cheng's per-contact rate, measured on all 100 index cases, holds for local ones.
+    """
+    infections, traced = CHENG2020_BY_SETTING['health_care']
+    return (LAYER_INFECTIONS_PER_INDEX['health_care'][0]
+            / wilson_interval(infections, traced)[1])
+
 # ---------------------------------------------------------------------- contact days
 # Mean number of DAYS a candidate contact is actually met, per layer: the row sums of
 # `{layer}_contacts_matrix` averaged over every candidate contact. Measured on the third
