@@ -19,8 +19,7 @@ from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
                                             health_care_contact_floor)
-from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_in_tracing_window,
-                                           contacts_per_day_at_work,
+from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
                                            offspring_dispersion,
                                            one_day_counts, one_day_shape)
@@ -607,14 +606,15 @@ OUTCOME_TARGETS = {
     # it. The interval is wide because CovSyn's denominator is its own candidate contacts
     # while Cheng's is the contacts Taiwan's tracers chose to record.
     'medical_early_share':    (0.40, 0.70, 1.0),
-    # B76 (2026-11-01, user, E61 option a'): health care contacts per index case inside Jian's
-    # tracing window (2 days before onset to isolation), floor only. Run 18 gave 1.40, so Cheng's
-    # medical infections could only be reached with a daily attack rate 2.5x the household's.
-    # The floor, 3.335, is Cheng's lower bound of medical infections per local index case over
-    # the upper Wilson bound of his per-contact rate 6 / 698 (sar_anchors.health_care_contact_floor,
-    # calibration_sources.md section 10). Jian's 9.89 for local cases is a reference only: a few
-    # long hospital stays drive it. No upper bound: no data gives one.
-    'health_care_contacts_traced': (health_care_contact_floor(), np.inf, 1.0),
+    # B76 (2026-11-01, user, E61 option a'): every candidate health care contact of the index
+    # case, floor only. Run 18 gave 2.597, so Cheng's medical infections could only be reached
+    # with a daily attack rate 2.5x the household's. The floor, 3.335, is Cheng's lower bound of
+    # medical infections per local index case over the upper Wilson bound of his per-contact
+    # rate 6 / 698 (sar_anchors.health_care_contact_floor, calibration_sources.md section 10).
+    # Review (user, option A): the floor is counted on every contact, as Cheng's rate is (37% of
+    # his medical contacts start 8+ days after onset), not inside Jian's tracing window, which
+    # verify_phase_d reports against Jian's 9.89 for local cases. No upper bound: no data gives one.
+    'health_care_contacts_per_index': (health_care_contact_floor(), np.inf, 1.0),
     # B27: the shape of the community contact distribution. The Taiwan tracing records have a
     # median of 7 contacts per index case but a p90 of 172 and a maximum of 850; the second
     # Phase D run reproduced the median (9) and nothing else (p90 18, max 33), because
@@ -844,10 +844,9 @@ def measure_outcomes(index_cases):
     if total:
         measured['medical_late_share'] = late / total
         measured['medical_early_share'] = early / total
-    # B76: health care contacts per index case in Jian's tracing window, zeros included.
-    measured['health_care_contacts_traced'] = float(np.mean(
-        [contacts_in_tracing_window(course, contact, layers=('health_care',))
-         for course, contact, _ in index_cases]))
+    # B76: every candidate health care contact per index case, zeros included.
+    measured['health_care_contacts_per_index'] = float(np.mean(
+        [len(contact['health_care_effective_contacts'] or []) for _, contact, _ in index_cases]))
 
     community = np.array([len(contact['municipality_effective_contacts'] or [])
                           for _, contact, _ in index_cases], dtype=float)
@@ -966,7 +965,7 @@ MAX_INTERVAL_WIDTH_OVER_CENTRE = 0.5
 # measured in units of the lower bound instead of B43's capped width, so the target still bites
 # near its lower end. Kept to the one target that needs it.
 # B76: a floor with no upper bound has no width either, so its miss is in units of the floor.
-OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio', 'health_care_contacts_traced'}
+OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio', 'health_care_contacts_per_index'}
 
 
 # B60: the intervals the objective charges, from target_margins.py; OUTCOME_TARGETS keeps the

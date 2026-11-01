@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """B76: the objective charges health care contacts per index case below Cheng's floor.
 
-The quantity is the index case's health care contacts met inside Jian et al. 2020's tracing
-window (2 days before onset to isolation); the floor is
-sar_anchors.health_care_contact_floor(), 3.335, with no upper bound.
+The quantity is every candidate health care contact of the index case, the population Cheng
+2020's per-contact rate is measured on (review of B76, user 2026-11-01, option A); the floor is
+sar_anchors.health_care_contact_floor(), 3.335, with no upper bound. The contacts inside Jian
+et al. 2020's tracing window are reported only.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ pytest.importorskip("sklearn")  # firefly_optimizer imports it at module level
 from covsyn.calibration import fast_cost  # noqa: E402
 from covsyn.calibration import firefly_optimizer as fo  # noqa: E402
 
-KEY = "health_care_contacts_traced"
+KEY = "health_care_contacts_per_index"
 
 
 def _case(onset: float, isolation: int, health_days, household_days=()) -> tuple[dict, dict]:
@@ -42,6 +43,15 @@ def test_layers_restrict_the_tracing_window_count() -> None:
     assert cm.contacts_in_tracing_window(course, contact) == 3  # every layer, as before
 
 
+def test_one_pass_counts_every_layer() -> None:
+    """Review finding 10: one walk of the window gives every layer; the total is their sum."""
+    course, contact = _case(5.0, 8, (1, 4, 8, 10), (5,))
+    counts = cm.tracing_window_counts(course, contact)
+    assert counts == {"household": 1, "school": 0, "workplace": 0, "health_care": 2,
+                      "municipality": 0}
+    assert sum(counts.values()) == cm.contacts_in_tracing_window(course, contact)
+
+
 def test_unknown_layer_is_rejected() -> None:
     course, contact = _case(5.0, 8, (4,))
     with pytest.raises(KeyError):
@@ -62,17 +72,16 @@ def test_meeting_the_floor_costs_nothing() -> None:
 
 
 def test_a_miss_is_measured_in_units_of_the_floor() -> None:
-    """1.40 contacts miss 3.335 by 0.58 floors: 6 x 0.58**2 = 2.02."""
+    """Run 18's 2.597 contacts miss the floor by 0.22 floors: 6 x 0.22**2 = 0.29."""
     floor = sa.health_care_contact_floor()
-    miss = (floor - 1.40) / floor
-    assert fo.outcome_penalty({KEY: 1.40}) == pytest.approx(fo.OUTCOME_PENALTY_WEIGHT * miss ** 2)
+    miss = (floor - 2.597) / floor
+    assert fo.outcome_penalty({KEY: 2.597}) == pytest.approx(fo.OUTCOME_PENALTY_WEIGHT * miss ** 2)
     assert fo.outcome_penalty({KEY: 0.0}) == pytest.approx(fo.OUTCOME_PENALTY_WEIGHT * 1.0)
 
 
-def test_fast_cost_scalar_is_the_tracing_window_count() -> None:
-    """Index cases with 3, 0 and 1 traced health care contacts (window 3..8, 3..8, 7..9)."""
-    cases = [_case(5.0, 8, (3, 4, 8)), _case(5.0, 8, ()), _case(float("nan"), 9, (2, 9))]
-    assert [fast_cost.health_care_scalars(c, k)[KEY] for c, k in cases] == [3, 0, 1]
+def test_the_window_count_is_no_longer_an_objective_target() -> None:
+    assert "health_care_contacts_traced" not in fo.OUTCOME_TARGETS
+    assert not hasattr(fast_cost, "health_care_scalars")
 
 
 def test_daily_health_care_is_measured_not_charged() -> None:

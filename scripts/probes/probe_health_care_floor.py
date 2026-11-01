@@ -34,7 +34,7 @@ from covsyn.model.data_synthesis_main import run_covid
 BLOCK = slice(21, 28)
 NAMES = ['contact_p', 'contact_previous_day_p', 'healthy_p', 'symptom_p',
          'steepness', 'symptom_phase', 'recover_phase']
-KEYS = ['health_care_contacts_traced', 'daily_health_care', 'medical_early_share',
+KEYS = ['health_care_contacts_per_index', 'daily_health_care', 'medical_early_share',
         'medical_late_share', 'infections_per_index_health_care']
 
 

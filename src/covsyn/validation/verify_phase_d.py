@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_in_tracing_window,
+                                            tracing_window_counts,
                                             contacts_per_case, contacts_per_day_at_work,
                                             contacts_per_day_before_onset,
                                             offspring_dispersion, one_day_counts, one_day_shape)
@@ -358,9 +359,11 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # B72 (2026-10-26, user): Jian's statistic is computed the way Jian did, over every case of
     # a simulated first wave (B72 below); the index case alone is not Jian's population, so it
     # is information here.
+    # One pass over the window per index case serves B56 (all layers) and B76 (health care).
+    index_window = [tracing_window_counts(k, c)
+                    for k, c in zip(index_course, index_contact, strict=True)]
     check('B56', "contacts per case in Jian's tracing window",
-          float(np.mean([contacts_in_tracing_window(k, c)
-                         for k, c in zip(index_course, index_contact, strict=True)])),
+          float(np.mean([sum(w.values()) for w in index_window])),
           None,
           note=f'information: index cases only; Jian et al. 2020 locally acquired cases '
                f'1,435 / 55 = {JIAN_LOCAL_PER_CASE:.1f}; window onset - 2 d to isolation (E7, E89)')
@@ -448,13 +451,16 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     check('B23', 'health care contacts starting before day 4',
           100 * med_early / max(med_total, 1), (40.0, 70.0), '%',
           note='Cheng 2020 medical: 33.9% before onset + 21.5% on days 0-3 = 55.4%')
-    # B76: the objective's floor on health care contacts in Jian's tracing window (E61).
+    # B76: the objective's floor on every candidate health care contact per index case (E61),
+    # and the same contacts inside Jian's tracing window as information.
+    check('B76', 'health care contacts per index case',
+          float(np.mean([len(c['health_care_effective_contacts'] or []) for c in index_contact])),
+          OUTCOME_TARGETS['health_care_contacts_per_index'][:2],
+          note='floor: Cheng 2020 medical infections lower bound / per-contact rate upper bound')
     check('B76', "health care contacts per index case in Jian's tracing window",
-          float(np.mean([contacts_in_tracing_window(k, c, layers=('health_care',))
-                         for k, c in zip(index_course, index_contact, strict=True)])),
-          OUTCOME_TARGETS['health_care_contacts_traced'][:2],
-          note=f'floor: Cheng 2020 medical infections lower bound / per-contact rate upper bound; '
-               f'Jian et al. 2020 local cases {JIAN2020_LOCAL_HEALTH_CARE_PER_CASE:.2f} (reference)')
+          float(np.mean([w['health_care'] for w in index_window])), None,
+          note=f'information: Jian et al. 2020 local cases '
+               f'{JIAN2020_LOCAL_HEALTH_CARE_PER_CASE:.2f} hospital or clinic contacts')
 
     # ---------------------------------------------------------------- B28 case closure
     # The objective's own function and bands (B58), so the checklist cannot drift from them.

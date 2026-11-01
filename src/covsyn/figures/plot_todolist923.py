@@ -457,8 +457,7 @@ GROUP = {
         'contacts starting before symptom onset': 'Cheng 2020 contact-timing bins (cost_contact)',
         'health care contacts starting 8+ days after onset': 'charged: medical_late_share',
         'health care contacts starting before day 4': 'charged: medical_early_share',
-        "health care contacts per index case in Jian's tracing window":
-            'charged: health_care_contacts_traced (B76, floor only)',
+        'health care contacts per index case': 'charged: health_care_contacts_per_index (B76, floor only)',
         'confirmation to case closure, symptomatic':
             'charged: closure_after_confirmation_symptomatic',
         'confirmation to case closure, asymptomatic':
