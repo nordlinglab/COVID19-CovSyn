@@ -1,5 +1,5 @@
 {
- "source": "run 14, candidate 156, checklist re-run with the E96 fix (CovSyn 7ecb1ab), 1000 simulations, 200 bootstrap replicates; B61 (2026-10-15): household, school and offspring_k acceptance intervals updated and recharged with the run-14 sigma via compute_margins; re-run target_margins on the next checklist; B63 (2026-10-16): daily_municipality acceptance [1.2, 7.12], recharged with the run-14 sigma via compute_margins; B67 (2026-10-24): the three Cheng per-index entries rescaled to local index cases (x 2.82) and recharged with their recorded run-14 sigma via charged_interval; B64 (2026-10-24): daily_workplace removed (reported only); daily_workplace_employed is charged on its acceptance interval until a checklist supplies its sigma",
+ "source": "run 14, candidate 156, checklist re-run with the E96 fix (CovSyn 7ecb1ab), 1000 simulations, 200 bootstrap replicates; B61 (2026-10-15): household, school and offspring_k acceptance intervals updated and recharged with the run-14 sigma via compute_margins; re-run target_margins on the next checklist; B63 (2026-10-16): daily_municipality acceptance [1.2, 7.12], recharged with the run-14 sigma via compute_margins; B67 (2026-10-24): the three Cheng per-index entries rescaled to local index cases (x 2.82) and recharged with their recorded run-14 sigma via charged_interval; B64 (2026-10-24): daily_workplace removed (reported only); daily_workplace_employed is charged on its acceptance interval until a checklist supplies its sigma; B76 (2026-11-01): daily_health_care removed (reported only)",
  "z": 1.645,
  "max_shift_of_width": 0.25,
  "targets": {
@@ -50,22 +50,6 @@
    ],
    "sigma": 0.05421772803619023,
    "check": "B25 contacts per day before onset, municipality"
-  },
-  "daily_health_care": {
-   "acceptance": [
-    0.0,
-    0.3
-   ],
-   "objective": [
-    0.0,
-    0.3
-   ],
-   "charged": [
-    0.0,
-    0.2871721503423931
-   ],
-   "sigma": 0.007798084898241303,
-   "check": "B25 contacts per day before onset, health_care"
   },
   "asymptomatic_share": {
    "acceptance": [

@@ -541,7 +541,12 @@ OUTCOME_TARGETS = {
     'daily_municipality':     (1.20, 7.12, 1.0),
     # Health care is not one of the survey's everyday settings; a healthy person does not
     # meet medical staff daily, so this one is bounded from above only.
-    'daily_health_care':      (0.00, 0.30, 1.0),
+    # B76 (2026-11-01, user): measured only. The 0.30 had no source (set during Phase D) and,
+    # with the timing shape held, blocks B76's health care contact floor: 3x run 18's P[21]
+    # meets the floor at 0.47 a day. Data put the pre-onset rate anywhere in 0.08-2.1 a day:
+    # 15.40 outpatient visits per person in 2019 (NHI, MOHW 110 negotiation indicators) times
+    # 2 close-contact staff or 50 traced contacts per visit (Chung et al. 2020, JKMS 35:e431).
+    'daily_health_care':      (0.00, 0.30, 0.0),
     # B33: the severity cascade recomputed from the Taiwan contact-tracing file itself
     # (579 cases): asymptomatic 23.7%, symptomatic->ICU 12.7%, ICU->death 12.5%, CFR 1.2%.
     # B61 (2026-10-15), recomputed on the public 578-row file (recompute_taiwan_targets.py):

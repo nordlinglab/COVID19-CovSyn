@@ -73,3 +73,9 @@ def test_fast_cost_scalar_is_the_tracing_window_count() -> None:
     """Index cases with 3, 0 and 1 traced health care contacts (window 3..8, 3..8, 7..9)."""
     cases = [_case(5.0, 8, (3, 4, 8)), _case(5.0, 8, ()), _case(float("nan"), 9, (2, 9))]
     assert [fast_cost.health_care_scalars(c, k)[KEY] for c, k in cases] == [3, 0, 1]
+
+
+def test_daily_health_care_is_measured_not_charged() -> None:
+    """B76 (2026-11-01, user): the unsourced 0.30 cap no longer blocks the floor; band kept."""
+    assert fo.OUTCOME_TARGETS["daily_health_care"] == (0.00, 0.30, 0.0)
+    assert fo.outcome_penalty({"daily_health_care": 0.47}) == 0.0

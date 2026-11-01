@@ -9,11 +9,17 @@ objective's own measure_outcomes() ('result' mode, as the calibration runs). Rep
 draws meet the floor together with the other charged health care contact targets.
 
 Uniform draws over seven dimensions rarely land on the timing shape (B40 found 1 in 120), so
-the grid mode instead scales the contact probability P[21] and the healthy-day probability
-P[23] of the base vector up to their ceilings and keeps the shape parameters P[25:28] fixed.
+the grid mode instead scales the contact probability P[21] and one of the healthy-day
+probability P[23] or the symptomatic-day probability P[24] of the base vector, clipped to their
+ceilings, and keeps the shape parameters P[25:28] fixed.
 
 Usage: python scripts/probes/probe_health_care_floor.py [parameter_dir] [draws] [simulations]
-       python scripts/probes/probe_health_care_floor.py [parameter_dir] grid [simulations]
+       python scripts/probes/probe_health_care_floor.py [parameter_dir] grid [simulations] [23|24]
+       python scripts/probes/probe_health_care_floor.py [parameter_dir] shape [draws] [simulations]
+
+The shape mode raises P[21] to 2-4 times the base and draws P[24] between the base and its
+ceiling and the timing parameters P[25:28] inside their bounds, to see whether moving contacts
+after onset meets the floor without the pre-onset daily rate passing its ceiling of 0.30.
 """
 import concurrent.futures
 import pickle
@@ -63,33 +69,69 @@ def meets(measured, key):
     return lo <= measured[key] <= hi
 
 
-GRID_FACTORS = (1.0, 1.5, 2.0, 3.0, 4.0)
+def meets_charged(measured, keys):
+    """Every charged target among keys is met; measured-only ones (weight 0) are skipped."""
+    return all(meets(measured, k) for k in keys if fo.OUTCOME_TARGETS[k][2] > 0)
 
 
-def grid(base, lb, ub, demo, simulations):
-    """P[21] and P[23] times GRID_FACTORS, clipped to their bounds; the rest at the base."""
-    print('\n%7s %7s  ' % ('x P21', 'x P23') + '  '.join('%10s' % k[:10] for k in KEYS)
-          + '  all four')
+GRID_FACTORS = (1.0, 1.5, 2.0, 2.5, 3.0, 4.0)
+# Run 18's P[24] is 0.71 against a ceiling of 1, so 1.42 already reaches it.
+SECOND_FACTORS = {23: GRID_FACTORS, 24: (1.0, 1.2, 1.42)}
+
+
+def grid(base, lb, ub, demo, simulations, second=23):
+    """P[21] and P[second] scaled, clipped to their bounds; the rest at the base."""
+    print('\n%7s %7s  ' % ('x P21', 'P%d' % second) + '  '.join('%10s' % k[:10] for k in KEYS)
+          + '  charged')
     with concurrent.futures.ProcessPoolExecutor(max_workers=24) as ex:
         for a in GRID_FACTORS:
-            for b in GRID_FACTORS:
+            for b in SECOND_FACTORS[second]:
                 P = base.copy()
                 P[21] = min(base[21] * a, ub[0])
-                P[23] = min(base[23] * b, ub[2])
+                P[second] = min(base[second] * b, ub[second - 21])
                 m = outcomes(ex, P, demo, simulations)
-                ok = all(meets(m, k) for k in KEYS[:4])
-                print('%7.1f %7.1f  ' % (a, b) + '  '.join('%10.3f' % m[k] for k in KEYS)
+                ok = meets_charged(m, KEYS[:4])
+                print('%7.1f %7.4f  ' % (a, P[second]) + '  '.join('%10.3f' % m[k] for k in KEYS)
                       + '  %s' % ('yes' if ok else ''))
+
+
+def shape_search(base, lb, ub, demo, draws, simulations):
+    """Random draws of P[21] (2-4 x base), P[24] (base to ceiling) and P[25:28]."""
+    rng = np.random.default_rng(1)
+    hits = 0
+    print('\n%8s %6s %6s %6s %6s  ' % ('P21', 'P24', 'P25', 'P26', 'P27')
+          + '  '.join('%10s' % k[:10] for k in KEYS) + '  charged')
+    with concurrent.futures.ProcessPoolExecutor(max_workers=24) as ex:
+        for _ in range(draws):
+            P = base.copy()
+            P[21] = min(base[21] * rng.uniform(2.0, 4.0), ub[0])
+            P[24] = rng.uniform(base[24], ub[3])
+            P[25:28] = lb[4:7] + rng.random(3) * (ub[4:7] - lb[4:7])
+            m = outcomes(ex, P, demo, simulations)
+            ok = meets_charged(m, KEYS[:4])
+            hits += ok
+            print('%8.5f %6.3f %6.2f %6.2f %6.2f  ' % tuple(P[[21, 24, 25, 26, 27]])
+                  + '  '.join('%10.3f' % m[k] for k in KEYS) + '  %s' % ('yes' if ok else ''))
+    print('\ndraws meeting every charged target: %d of %d' % (hits, draws))
 
 
 def main():
     directory = sys.argv[1] if len(sys.argv) > 1 else 'firefly_result/phaseD_run18'
+    if len(sys.argv) > 2 and sys.argv[2] == 'shape':
+        with open('./variable/demographic_parameters.pkl', 'rb') as f:
+            demo = pickle.load(f)
+        lb, ub = block_bounds()
+        shape_search(load_vector(directory), lb, ub, demo,
+              int(sys.argv[3]) if len(sys.argv) > 3 else 120,
+              int(sys.argv[4]) if len(sys.argv) > 4 else 120)
+        return
     if len(sys.argv) > 2 and sys.argv[2] == 'grid':
         with open('./variable/demographic_parameters.pkl', 'rb') as f:
             demo = pickle.load(f)
         lb, ub = block_bounds()
         grid(load_vector(directory), lb, ub, demo,
-             int(sys.argv[3]) if len(sys.argv) > 3 else 200)
+             int(sys.argv[3]) if len(sys.argv) > 3 else 200,
+             int(sys.argv[4]) if len(sys.argv) > 4 else 23)
         return
     draws = int(sys.argv[2]) if len(sys.argv) > 2 else 120
     simulations = int(sys.argv[3]) if len(sys.argv) > 3 else 120
@@ -118,9 +160,9 @@ def main():
         print('%-34s min %.3f  median %.3f  max %.3f'
               % (k, np.nanmin(values[k]), np.nanmedian(values[k]), np.nanmax(values[k])))
     floor = np.array([meets(m, KEYS[0]) for _, m in rows])
-    shape = np.array([all(meets(m, k) for k in KEYS[1:4]) for _, m in rows])
+    shape = np.array([meets_charged(m, KEYS[1:4]) for _, m in rows])
     print('\ndraws meeting the floor              : %d of %d' % (floor.sum(), draws))
-    print('draws meeting the three contact targets: %d' % shape.sum())
+    print('draws meeting the charged contact targets: %d' % shape.sum())
     print('draws meeting the floor AND those three: %d' % (floor & shape).sum())
     for label, mask in (('floor and shape', floor & shape), ('floor', floor)):
         if mask.any():
