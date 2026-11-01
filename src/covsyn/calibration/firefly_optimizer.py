@@ -1252,6 +1252,21 @@ def decode_metrics(P):
     return {k: float(v) for k, v in m.items()}
 
 
+def clip_warm_start(vector: np.ndarray, lb: np.ndarray, ub: np.ndarray, label: str) -> np.ndarray:
+    """Clip a starting vector to the search bounds and say which values moved.
+
+    Rebuilt bounds can exclude an earlier best vector (B75: run 18's attack rates fall outside the
+    bounds rebuilt for the work calendar in 17 places), and the firefly then starts somewhere
+    other than the vector and cost the run log names.
+    """
+    clipped = np.clip(vector, lb, ub)
+    moved = np.flatnonzero(clipped != vector)
+    if len(moved):
+        print(f'warm start: {label}: {len(moved)} of {len(vector)} values clipped to the bounds '
+              f'({", ".join(f"P[{i}]" for i in moved)})', flush=True)
+    return clipped
+
+
 def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarray:
     """Extend a pre-B54 warm-start vector with the seed values of the appended parameters.
 
@@ -1292,7 +1307,7 @@ class Firefly:
         # population random, so the run always contains the documented starting point.
         if seed_vector is not None:
             span = np.where((ub - lb) > 0, ub - lb, 1.0)
-            normalized_fireflies[0] = np.clip((np.clip(seed_vector, lb, ub) - lb) / span, 0, 1)
+            normalized_fireflies[0] = np.clip((clip_warm_start(seed_vector, lb, ub, 'seed vector') - lb) / span, 0, 1)
             fireflies[0] = normalized_fireflies[0]*(ub-lb) + lb
         # B49 (E75): fireflies 1.. start at the best vectors of earlier runs. Every run used to
         # restart from the literature seed, and run 8 finished at 3.80 while run 7's best vector
@@ -1301,7 +1316,7 @@ class Firefly:
         for k, vector in enumerate(warm_start_vectors, start=1):
             if k >= self.pop_size:
                 break
-            normalized_fireflies[k] = np.clip((np.clip(vector, lb, ub) - lb) / span, 0, 1)
+            normalized_fireflies[k] = np.clip((clip_warm_start(vector, lb, ub, f'firefly {k}') - lb) / span, 0, 1)
             fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
             print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
         # Create ONE persistent process pool reused for every evaluation in this run.
