@@ -121,12 +121,16 @@ CHENG2020_LOCAL_INFECTIONS = 18
 CHENG2020_ALL_INFECTIONS = 22
 CHENG2020_LOCAL_SCALE = ((CHENG2020_LOCAL_INFECTIONS / CHENG2020_LOCAL_INDEX_CASES)
                          / (CHENG2020_ALL_INFECTIONS / CHENG2020_INDEX_CASES))
-# CovSyn candidate contacts per index case, measured on the fourth Phase D run
-# (verify_phaseD.py, 1000 index cases). Re-measure and update between runs.
-COVSYN_CANDIDATE_CONTACTS = {'household': 2.605, 'school': 3.657, 'workplace': 2.144,
-                             'health_care': 4.759, 'municipality': 23.874}
-CANDIDATE_CONTACTS_MEASURED_ON = ('Phase D run 17 (phaseD_checks.txt, CovSyn candidate contacts '
-                                  'per index, 1000 index cases)')
+# CovSyn candidate contacts per index case (verify_phase_d, 1000 index cases). Re-measure and
+# update between runs.
+# 2026-11-01 (run 19 preparation, B75): run 18 candidate 80 under the B75 work calendar, 1000
+# spread_Taiwan_weight simulations, firefly_result/phaseD_run18/checks_b75.txt. Run 17 had
+# {2.605, 3.657, 2.144, 4.759, 23.874}: health care fell 4.759 -> 2.597 with run 18's vector,
+# which raises the health care anchor and its uncapped daily ceiling to 2.9x the household's (E61).
+COVSYN_CANDIDATE_CONTACTS = {'household': 2.595, 'school': 2.305, 'workplace': 3.842,
+                             'health_care': 2.597, 'municipality': 19.482}
+CANDIDATE_CONTACTS_MEASURED_ON = ('Phase D run 18 candidate 80 under B75 (checks_b75.txt, '
+                                  'CovSyn candidate contacts per index, 1000 index cases)')
 # How far these moved on run 5, which is what E56 is about: school -47.7%, health care -37.1%,
 # workplace -12.3%, municipality +9.1%, household +0.4%. Run 4 had
 # {2.684, 2.733, 1.401, 2.747, 4.115}.

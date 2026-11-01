@@ -221,6 +221,7 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 | `MEAN_CONTACT_DAYS` | {10.27, 6.61, 8.87, 2.70, 1.21} | run 17 `phaseD_report.txt` measure_days |
 | `MEAN_CONTACT_DAYS`（B75，2026-11-01） | {9.68, 7.41, 3.15, 2.26, 1.59} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 400 次，measure_days（`firefly_result/phaseD_run18/`）；攻擊率界限已重建（`variable/course_parameters*.npy` 索引 33–157） |
 | `COVSYN_CANDIDATE_CONTACTS` | {2.605, 3.657, 2.144, 4.759, 23.874} | run 17 `phaseD_checks.txt` |
+| `COVSYN_CANDIDATE_CONTACTS`（B75，2026-11-01） | {2.595, 2.305, 3.842, 2.597, 19.482} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 1000 次，verify_phase_d（`firefly_result/phaseD_run18/checks_b75.txt`）；攻擊率界限已重建 |
 
 ## 9. 職場「今天有沒有上班」（B75，2026-10-31）
 
