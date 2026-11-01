@@ -3,7 +3,8 @@
 """Regression tests: a restructuring must reproduce Phase D run 10 exactly.
 
 The fixture ``tests/fixtures/regression_run10.json`` was written by
-``tests/make_regression_fixtures.py`` at the commit that produced run 10.
+``tests/make_regression_fixtures.py`` with the run 10 vector, at the commit recorded in the
+fixture (regenerated whenever a decision changes the output; last for B75).
 Every value is compared for exact equality: the objective is deterministic on its fixed seeds
 (finding E30), so any difference is a change in behaviour, not noise.
 """

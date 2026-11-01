@@ -4,7 +4,7 @@
 
 Run from the repository root, on the compute server's pinned environment, whenever a decision
 intentionally changes simulated output; first at the commit that produced Phase D run 10, last
-for B52 (isolation at ICU admission):
+for B75 (days off work):
 
     python tests/make_regression_fixtures.py
 

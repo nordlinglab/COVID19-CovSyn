@@ -3,7 +3,9 @@
 """Pipeline regression tests: every post-optimisation step still runs and says the same thing.
 
 The fixture ``tests/fixtures/pipeline_run10.json`` was written by
-``tests/make_pipeline_fixtures.py`` at the commit that produced run 10.
+``tests/make_pipeline_fixtures.py`` on the compute server, with the run 10 vector, at the commit
+recorded in its ``generated_at_commit`` (regenerated whenever a decision changes the output; last
+for B75).
 Data files and report output must match exactly; figure steps must succeed and write the same
 files (the images themselves are not compared).
 """
