@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "890da02b3b512cad476120ddc88a9c43b8c3834d",
+ "generated_at_commit": "5b6de68611d7abe8d90f88be27e52b8ca5ecd098",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -527,8 +527,8 @@
   },
   "show_bounds": {
    "returncode": 0,
-   "stdout_head": "layer              daily [lb, ub]                  cumul % [lb, ub]\nhousehold        0.01110 [0.00518, 0.04279]      2.21  [1.03, 8.37]\nschool           0.00351 [0.00152, 0.01231]      1.03  [0.45, 3.59]\nworkplace        0.00389 [0.00170, 0.01153]      1.56  [0.68, 4.56]\nhealth_care      0.01332 [0.00485, 0.04279]      2.63  [0.96, 8.33]\nmunicipality     0.00098 [0.00083, 0.01089]      0.38  [0.32",
-   "stdout_sha256": "3e69c3f88bcc5e1a5f1f99b56efa29c584bb56930204a8432c797dab2024a51d"
+   "stdout_head": "layer              daily [lb, ub]                  cumul % [lb, ub]\nhousehold        0.01177 [0.00549, 0.04537]     10.83  [5.19, 36.20]\nschool           0.00314 [0.00136, 0.01099]      2.30  [1.00, 7.86]\nworkplace        0.01092 [0.00479, 0.03230]      3.40  [1.50, 9.83]\nhealth_care      0.01590 [0.00580, 0.04537]      3.56  [1.31, 9.96]\nmunicipality     0.00074 [0.00063, 0.00829]      0.12  [0.1",
+   "stdout_sha256": "8b0a71962c140e40a9430dec727604830cbf04de22ae0835486855caebb2bc50"
   },
   "show_final": {
    "returncode": 0,
