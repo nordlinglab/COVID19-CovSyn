@@ -239,9 +239,17 @@ LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
 # Community days fell 1.88 -> 1.21 because the scale-free count makes most community contacts
 # one-off meetings; household 10.87 -> 10.27, school 8.16 -> 6.61, workplace 11.93 -> 8.87,
 # health care 3.51 -> 2.70.
-MEAN_CONTACT_DAYS = {'household': 10.27, 'school': 6.61, 'workplace': 8.87,
-                     'health_care': 2.70, 'municipality': 1.21}
-CONTACT_DAYS_MEASURED_ON = 'Phase D run 17 (spread_Taiwan_weight, 400 simulations)'
+#
+# 2026-11-01 (run 19 preparation, B75): re-measured with run 18's selected vector (candidate 80)
+# under the B75 work calendar, which removes the coworker contacts of days off. Workplace days
+# fell 8.87 -> 3.15, about the share of days at work (5 x 0.691 + 0.0199) / 7 = 0.50 plus the
+# coworkers met only on days off dropping out; household 10.27 -> 9.68, school 6.61 -> 7.41,
+# health care 2.70 -> 2.26, community 1.21 -> 1.59 move with run 18's vector, not with B75.
+# Compute Mac, ~/covsyn_b75 at 890da02, measure_days on b75_spread_Taiwan_weight.
+MEAN_CONTACT_DAYS = {'household': 9.68, 'school': 7.41, 'workplace': 3.15,
+                     'health_care': 2.26, 'municipality': 1.59}
+CONTACT_DAYS_MEASURED_ON = ('Phase D run 18 candidate 80 under B75 '
+                            '(spread_Taiwan_weight, 400 simulations)')
 
 # How far above the upper anchor the DAILY ceiling may sit. The ceiling is a safety net, not
 # a target: the cumulative SAR itself is a measured cost term (cost_attack_rate, on 300
