@@ -57,12 +57,17 @@ def attack_rate_rows(p: np.ndarray, lb: np.ndarray, ub: np.ndarray,
     return rows
 
 
-def main() -> None:
-    """Print the bounds of variable/course_parameters*.npy in the working directory."""
-    p = np.load('./variable/course_parameters.npy')
-    lb = np.load('./variable/course_parameters_lb.npy')
-    ub = np.load('./variable/course_parameters_ub.npy')
-    days, measured_on = bounds_contact_days('./variable')
+def main(directory: Path | str = './variable') -> None:
+    """Print the bounds in `directory` with the contact days they were built with.
+
+    Args:
+        directory: A variable/ directory, the working one by default or a run's archived copy.
+    """
+    directory = Path(directory)
+    p = np.load(directory / 'course_parameters.npy')
+    lb = np.load(directory / 'course_parameters_lb.npy')
+    ub = np.load(directory / 'course_parameters_ub.npy')
+    days, measured_on = bounds_contact_days(directory)
     print('contact days: %s' % measured_on)
     print('%-13s %10s %-22s %10s %s' % ('layer', 'daily', '[lb, ub]', 'cumul %', '[lb, ub]'))
     for row in attack_rate_rows(p, lb, ub, days):
@@ -72,4 +77,6 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+
+    main(sys.argv[1] if len(sys.argv) > 1 else './variable')

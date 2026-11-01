@@ -34,13 +34,14 @@ def test_explicit_days_override_the_current_ones():
     p = np.full(160, 0.01)
     days = {layer: 2.0 for layer in ATTACK_RATE_SLICE}
     rows = {row[0]: row for row in show_bounds.attack_rate_rows(p, p, p, days)}
-    assert rows["workplace"][4] == pytest.approx(100 * (1 - 0.99 ** 2))
+    assert rows["workplace"][4] == pytest.approx(100 * (1 - 0.99**2))
 
 
 def test_days_are_read_from_the_bounds_directory(tmp_path):
     days = {layer: 1.5 for layer in ATTACK_RATE_SLICE}
     (tmp_path / "attack_rate_contact_days.json").write_text(
-        '{"days": %s, "measured_on": "test"}' % str(days).replace("'", '"'))
+        '{"days": %s, "measured_on": "test"}' % str(days).replace("'", '"')
+    )
     assert show_bounds.bounds_contact_days(tmp_path) == (days, "test")
 
 
@@ -56,5 +57,26 @@ def test_committed_bounds_record_their_days():
     from covsyn.calibration.sar_anchors import CONTACT_DAYS_MEASURED_ON
 
     variable = Path(__file__).resolve().parents[1] / "variable"
-    assert show_bounds.bounds_contact_days(variable) == (MEAN_CONTACT_DAYS,
-                                                         CONTACT_DAYS_MEASURED_ON)
+    assert show_bounds.bounds_contact_days(variable) == (
+        MEAN_CONTACT_DAYS,
+        CONTACT_DAYS_MEASURED_ON,
+    )
+
+
+def test_main_reads_the_given_directory(tmp_path, capsys):
+    """Second review: show_bounds can print an archived run's bounds with that run's days."""
+    p = np.full(208, 0.01)
+    for name, v in (
+        ("course_parameters", p),
+        ("course_parameters_lb", p / 2),
+        ("course_parameters_ub", p * 2),
+    ):
+        np.save(tmp_path / f"{name}.npy", v)
+    days = {layer: 1.0 for layer in ATTACK_RATE_SLICE}
+    (tmp_path / "attack_rate_contact_days.json").write_text(
+        '{"days": %s, "measured_on": "archived run"}' % str(days).replace("'", '"')
+    )
+    show_bounds.main(tmp_path)
+    out = capsys.readouterr().out
+    assert "archived run" in out
+    assert "1.00" in out  # 0.01 daily over one day is 1.00% cumulative

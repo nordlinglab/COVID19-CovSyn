@@ -34,6 +34,10 @@ not give. Everything this script writes is listed below with the decision it com
   P[205..206]  B64: the work group's saturation a and Gamma shape k (no cap, the share of
                  coworkers met falls with the company size).
   P[207]       B65: mean of the Poisson contact-tracing delay, locked at 1 day.
+  variable/attack_rate_contact_days.json
+               review of B76: sar_anchors.MEAN_CONTACT_DAYS, the days the attack-rate bounds
+                 were converted with, for show_bounds. Not archived by backup_once, which keeps
+                 the pre-Phase-D originals, and this file did not exist then.
 
 Usage: python -m covsyn.calibration.apply_phase_d_parameters [variable_dir]
 """
