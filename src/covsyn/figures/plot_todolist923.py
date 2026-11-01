@@ -438,7 +438,7 @@ GROUP = {
         'contacts per day before onset, household': 'charged: daily_household',
         'contacts per day before onset, school': 'charged: daily_school',
         'contacts per day before onset, workplace': 'charged: daily_workplace',
-        'contacts per day before onset, health_care': 'charged: daily_health_care',
+        'contacts per day before onset, health_care': 'reported: daily_health_care (B76, measured only)',
         'contacts per day before onset, municipality': 'charged: daily_municipality',
         'contacts per day, all layers': 'sum of the five charged daily targets',
         'cumulative SAR per contact, school': 'charged: sar_school',
@@ -457,6 +457,8 @@ GROUP = {
         'contacts starting before symptom onset': 'Cheng 2020 contact-timing bins (cost_contact)',
         'health care contacts starting 8+ days after onset': 'charged: medical_late_share',
         'health care contacts starting before day 4': 'charged: medical_early_share',
+        "health care contacts per index case in Jian's tracing window":
+            'charged: health_care_contacts_traced (B76, floor only)',
         'confirmation to case closure, symptomatic':
             'charged: closure_after_confirmation_symptomatic',
         'confirmation to case closure, asymptomatic':
@@ -501,15 +503,17 @@ def figure_t4(checks):
         n_in = 0
         for ax, (name, src) in zip(axes[:, 0], rows):
             c = by_name[name]
-            lo, hi = float(c['target'][0]), float(c['target'][1])
+            # B76: an open upper bound is null in the JSON (or inf in memory).
+            lo = float(c['target'][0])
+            hi = np.inf if c['target'][1] is None else float(c['target'][1])
             v = float(c['value'])
             unit = c['unit'] or ''
             inside = lo <= v <= hi
             n_in += inside
-            left, right = min(lo, v), max(hi, v)
+            left, right = min(lo, v), max(hi if np.isfinite(hi) else max(lo, v) * 1.5, v)
             pad = 0.15 * (right - left) if right > left else max(abs(v), 1) * 0.2
             ax.set_xlim(left - pad, right + pad)
-            ax.axvspan(lo, hi, ymin=0.25, ymax=0.75, color='#d9d9d9', zorder=1)
+            ax.axvspan(lo, min(hi, right + pad), ymin=0.25, ymax=0.75, color='#d9d9d9', zorder=1)
             ax.plot([v], [0.5], 'o', ms=10, color=IN if inside else OUTC, zorder=3,
                     markeredgecolor='black')
             ax.set_ylim(0, 1)
