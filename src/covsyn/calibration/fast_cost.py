@@ -114,8 +114,16 @@ def workplace_scalars(course, contact, social=None):
             'workplace_days': at_work_days_before_onset(course, contact)}
 
 
-def health_care_scalars(course, contact):
-    """B76: the index case's health care contacts in Jian's tracing window, as measure_outcomes()."""
+def health_care_scalars(course: dict, contact: dict) -> dict[str, int]:
+    """B76: the index case's health care contacts in Jian's tracing window, as measure_outcomes().
+
+    Args:
+        course: The index case's course of disease.
+        contact: The index case's contact data.
+
+    Returns:
+        {'health_care_contacts_traced': count}.
+    """
     return {'health_care_contacts_traced':
             contacts_in_tracing_window(course, contact, layers=('health_care',))}
 

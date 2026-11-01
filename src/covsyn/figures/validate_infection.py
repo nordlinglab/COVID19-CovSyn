@@ -22,6 +22,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+
+from covsyn.calibration.sar_anchors import wilson_interval
 import pandas as pd
 from matplotlib.lines import Line2D
 
@@ -69,11 +71,8 @@ def load_layer_counts(result_dir):
 def wilson(k, n, z=1.96):
     if n == 0:
         return np.nan, np.nan, np.nan
-    p = k / n
-    d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return p, max(c - h, 0.0), c + h
+    lo, hi = wilson_interval(k, n, z)
+    return k / n, lo, hi
 
 
 def pct(k, n):

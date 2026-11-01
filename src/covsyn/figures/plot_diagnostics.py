@@ -15,6 +15,8 @@ it next to CovSyn results would add no independent evidence.
 import glob, sys, pickle
 from pathlib import Path
 import numpy as np
+
+from covsyn.calibration.sar_anchors import wilson_interval
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
@@ -115,12 +117,11 @@ total_eff = sum(eff[n] for n in names)
 def wilson(k, n, z=1.96):
     if not n:
         return np.nan, np.nan, np.nan
-    p = k / n; d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    p = k / n
+    lo, hi = wilson_interval(k, n, z)
     # Clamped so the interval always contains p: at k = 0 or k = n rounding can put a bound
     # a hair past p, and errorbar() rejects the negative error that gives.
-    return p, min(max(c - h, 0.0), p), max(c + h, p)
+    return p, min(lo, p), max(hi, p)
 
 
 # --------------------------------------------------------------------------- Taiwan references (D1: left half)

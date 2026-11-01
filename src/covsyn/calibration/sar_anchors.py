@@ -222,12 +222,23 @@ LAYER_INFECTIONS_PER_INDEX = {layer: infections_per_index_target(layer)
 JIAN2020_LOCAL_HEALTH_CARE_PER_CASE = 544 / 55
 
 
-def wilson_interval(events, trials, z=1.959964):
-    """(lower, upper) Wilson 95% interval of events / trials.
+def wilson_interval(events: int, trials: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson 95% interval of events / trials, shared with the validation figures.
 
     Cheng 2020 does not name his interval method; Wilson reproduces his Table 2 intervals for
     household 4.6% (2.3-9.3, 7 / 151 symptomatic), family 5.3% (2.1-12.8, 4 / 76) and health
     care 0.9% (0.4-1.9, 6 / 698).
+
+    Args:
+        events: Number of events.
+        trials: Number of trials.
+        z: Normal quantile of the interval; 1.96, as the figures have always used.
+
+    Returns:
+        (lower, upper), the lower bound clipped at 0.
+
+    Raises:
+        ValueError: trials is not positive or events is outside [0, trials].
     """
     if trials <= 0 or not 0 <= events <= trials:
         raise ValueError('need 0 <= events <= trials and trials > 0, got %r / %r'
@@ -239,7 +250,7 @@ def wilson_interval(events, trials, z=1.959964):
     return max(0.0, (centre - spread) / scale), (centre + spread) / scale
 
 
-def health_care_contact_floor():
+def health_care_contact_floor() -> float:
     """Fewest health care contacts per local index case that can reproduce Cheng 2020.
 
     The lower bound of medical infections per local index case (LAYER_INFECTIONS_PER_INDEX,
@@ -247,6 +258,9 @@ def health_care_contact_floor():
     bound of Cheng's per-contact attack rate, 6 / 698. With fewer contacts, even every contact
     infected at Cheng's highest plausible rate falls short of his lowest plausible count.
     Assumes Cheng's per-contact rate, measured on all 100 index cases, holds for local ones.
+
+    Returns:
+        The floor, in contacts per index case.
     """
     infections, traced = CHENG2020_BY_SETTING['health_care']
     return (LAYER_INFECTIONS_PER_INDEX['health_care'][0]

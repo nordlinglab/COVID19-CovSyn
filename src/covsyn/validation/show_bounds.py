@@ -10,8 +10,18 @@ import numpy as np
 from covsyn.calibration.sar_anchors import ATTACK_RATE_SLICE, MEAN_CONTACT_DAYS
 
 
-def attack_rate_rows(p, lb, ub):
-    """(layer, daily, lb, ub, cumulative %, lb %, ub %) per layer, block means of the vectors."""
+def attack_rate_rows(p: np.ndarray, lb: np.ndarray,
+                     ub: np.ndarray) -> list[tuple[str, float, float, float, float, float, float]]:
+    """Daily and cumulative attack rates per layer, block means of the three vectors.
+
+    Args:
+        p: Course parameter vector.
+        lb: Its lower bounds.
+        ub: Its upper bounds.
+
+    Returns:
+        (layer, daily, lb, ub, cumulative %, lb %, ub %) for every layer.
+    """
     rows = []
     for layer, (a, b) in ATTACK_RATE_SLICE.items():
         d, dl, du = (float(np.mean(x[a:b])) for x in (p, lb, ub))
@@ -21,7 +31,8 @@ def attack_rate_rows(p, lb, ub):
     return rows
 
 
-def main():
+def main() -> None:
+    """Print the bounds of variable/course_parameters*.npy in the working directory."""
     p = np.load('./variable/course_parameters.npy')
     lb = np.load('./variable/course_parameters_lb.npy')
     ub = np.load('./variable/course_parameters_ub.npy')
