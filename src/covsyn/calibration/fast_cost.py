@@ -153,6 +153,8 @@ def _index_case_scalars(course, contact, social=None):
     out.update(workplace_scalars(course, contact, social))
     out['incubation_period'] = float(onset) if onset is not None else np.nan
     out['pre_onset_window'] = float(course['pre_onset_window'])
+    out['infectious_after_onset'] = float(course['latent_period'] + course['infectious_period']
+                                          - course['incubation_period'])   # B80
     out['positive_test_date'] = float(course['positive_test_date'])
     out['infection_day'] = float(course['infection_day'])
     out['date_of_critically_ill'] = float(course['date_of_critically_ill'])
@@ -275,6 +277,10 @@ def reduce_outcomes(scalars):
         measured['pre_onset_window_mean'] = float(np.nanmean(pre_onset))
         # E96: over symptomatic cases only, as in firefly_optimizer.measure_outcomes.
         measured['pre_onset_zero_share'] = float(np.mean(pre_onset[np.isfinite(pre_onset)] == 0))
+    # B80: as measure_outcomes, symptomatic cases only.
+    after_onset = np.array([s['infectious_after_onset'] for s in scalars], dtype=float)
+    if np.isfinite(after_onset).any():
+        measured['infectious_after_onset_median'] = float(np.nanmedian(after_onset))
 
     positive = np.array([s['positive_test_date'] for s in scalars], dtype=float)
     infection_day = np.array([s['infection_day'] for s in scalars], dtype=float)

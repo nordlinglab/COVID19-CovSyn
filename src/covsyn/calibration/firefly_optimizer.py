@@ -697,6 +697,17 @@ OUTCOME_TARGETS = {
     # parameter that used to imply the quantity instead of the quantity itself is the same
     # mistake as E23 and E34; both bands here are the ones verify_phaseD.py already checks.
     'pre_onset_window_mean':  (1.0, 3.0, 1.0),
+    # B80 (2026-11-02, user): days a symptomatic case stays infectious after onset, median.
+    # Run 19 ended infectiousness a median 1 day after onset, with the mean infectious period at
+    # its lower bound of 4 days: Cheng 2020's day 4-5 bins hold only 3 infections, so the
+    # objective barely saw it, and the February seeds that infected people in hospital days
+    # after onset could not be reproduced. Literature: Cheng et al. (2020, JAMA Intern Med,
+    # doi:10.1001/jamainternmed.2020.2020) find infections among contacts first exposed up to
+    # day 5 after onset and none later; Cevik et al. (2021, Lancet Microbe,
+    # doi:10.1016/S2666-5247(20)30172-5) find no culturable virus after day 9 in non-severe
+    # cases. The presymptomatic share was checked first and is already in the literature range
+    # (run 19 about 50%; He et al. 2020 and Ashcroft et al. 2020 about 44%), so it is not charged.
+    'infectious_after_onset_median': (5.0, 9.0, 1.0),
     'pre_onset_zero_share':   (0.0, 0.12, 1.0),
     # B28: date_of_recovery is the day the case is CLOSED (released from isolation), not a
     # clinical recovery at 14-20 days.
@@ -891,6 +902,11 @@ def measure_outcomes(index_cases):
         # E96: over symptomatic cases only. nanmean(pre_onset == 0) counted the asymptomatic
         # cases (NaN == 0 is False, not NaN) and understated the share by about a quarter.
         measured['pre_onset_zero_share'] = float(np.mean(pre_onset[np.isfinite(pre_onset)] == 0))
+    # B80: infectious days after onset, symptomatic cases only.
+    after_onset = np.array([c['latent_period'] + c['infectious_period'] - c['incubation_period']
+                            for c, _, _ in index_cases], dtype=float)
+    if np.isfinite(after_onset).any():
+        measured['infectious_after_onset_median'] = float(np.nanmedian(after_onset))
 
     # Onset -> confirmation, realised rather than read off the parameters. It is negative for
     # a case isolated before its own onset; an index case has no tracing source so that is
