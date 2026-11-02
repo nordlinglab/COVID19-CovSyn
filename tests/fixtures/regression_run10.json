@@ -34,6 +34,7 @@
   "measured_infections_per_index_municipality": 0.02687411626180013,
   "measured_infections_per_index_school": 0.026907965342203775,
   "measured_infections_per_index_workplace": 0.03168042500813802,
+  "measured_infectious_after_onset_median": 5.0,
   "measured_medical_early_share": 0.41807044410413474,
   "measured_medical_late_share": 0.3767228177641654,
   "measured_offspring_k": 0.21064710358391645,
@@ -51,7 +52,7 @@
   "measured_workplace_day_zero_share": 0.13992869875222816
  },
  "cost_total": 67.2577818318399,
- "generated_at_commit": "c23b99ce2ba2d1aa1d83b7835ed03c42cd5a36e5",
+ "generated_at_commit": "7a771f9fda5a003e00e94cd56e3c5edeacd38b58",
  "parameter_vector": "firefly_result/phaseD_run10/firefly_best.txt (lowest-cost row)",
  "synthesis_digests": {
   "result/0": "5495efbb4e0b953aca4268fd1a2f3fec182d29fe71de6ab63b40c617601b5e93",
@@ -70,13 +71,13 @@
   "spread_Taiwan_weight/5": "1e8e631b9b2ad126ca8617cf12dec05d91083e5528f5274d0d78508f0eee6354",
   "spread_Taiwan_weight/6": "639c1f17fe543d1420039fdd5b1e1f4367048b966bec515fbe229ebdbd561a45",
   "spread_Taiwan_weight/7": "8ba62ca68dff78093bd79e6cb803b932e5d118229125e47e8267c8c8b03c21de",
-  "taiwan_first_outbreak/0": "1393344cd96bb10111d302407025052703e1a61cad284ae511fd49ce51f7e1f8",
-  "taiwan_first_outbreak/1": "247d64ec06ebe66510aadf81ed6e9227ecb1c91215cd642cc72169f2ec523a3a",
-  "taiwan_first_outbreak/2": "36fad883f73a10b9ac800e947b772d731a534fd0d19ff9bc3d174bc80b01ea81",
-  "taiwan_first_outbreak/3": "1494f7b7f69586fc2544b797d8fd58aa813b2081bc75cd371902e6052b80dce3",
-  "taiwan_first_outbreak/4": "773d005e77eceebeff4312cf77077e56df7e8cba41a5dfe92b499a573e144dfa",
-  "taiwan_first_outbreak/5": "f919256085b96b2de01442198e6c82a502db5214b35ffc59f38ac7562cf6cf04",
-  "taiwan_first_outbreak/6": "8a21cd970e8c3968177435c0cac62bef7636ad85eea3c0520563aca0669e4878",
-  "taiwan_first_outbreak/7": "926d6c69376aadb1a0e1acdf0fe0ab7535837ed56f89d877dc9e88661d1da9f5"
+  "taiwan_first_outbreak/0": "db7bcfd8dcd5228756bd4241dce7c110f6d3c90375b90ae45f8aad7438153c93",
+  "taiwan_first_outbreak/1": "ea2644bd24578740f37ef899788052de2db5041287175efae27d9746e12e4b2d",
+  "taiwan_first_outbreak/2": "9b09013f1b0919c8c79d88837e858e49f69dec4b7b7fef96a33196d34008d1cb",
+  "taiwan_first_outbreak/3": "39938938ef15a32ffdfa1c51c1afaeac00de22bbf1cdd2df023571c1854b74ac",
+  "taiwan_first_outbreak/4": "9d01470e81ef862bbd80d2470436039afc8aca39f24644b1c18d365c31645b4d",
+  "taiwan_first_outbreak/5": "b806728d5e4fdcca2f9e575e43acacdd8a00a411933c2e8d978b2880bd8a0a6c",
+  "taiwan_first_outbreak/6": "5df00a319bd5dee0c440a415eaeadb8164fc3b434d8495485c734785426cd12a",
+  "taiwan_first_outbreak/7": "ea21466219a17f4c1aa9511e2b926b6c8d37333d11c8d05e05dc830f6d34b09a"
  }
 }
