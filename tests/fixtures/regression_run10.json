@@ -51,7 +51,7 @@
   "measured_workplace_day_zero_share": 0.13992869875222816
  },
  "cost_total": 67.2577818318399,
- "generated_at_commit": "86f385574c5747329777c977601804fd56db7eb5",
+ "generated_at_commit": "c23b99ce2ba2d1aa1d83b7835ed03c42cd5a36e5",
  "parameter_vector": "firefly_result/phaseD_run10/firefly_best.txt (lowest-cost row)",
  "synthesis_digests": {
   "result/0": "5495efbb4e0b953aca4268fd1a2f3fec182d29fe71de6ab63b40c617601b5e93",
@@ -70,13 +70,13 @@
   "spread_Taiwan_weight/5": "1e8e631b9b2ad126ca8617cf12dec05d91083e5528f5274d0d78508f0eee6354",
   "spread_Taiwan_weight/6": "639c1f17fe543d1420039fdd5b1e1f4367048b966bec515fbe229ebdbd561a45",
   "spread_Taiwan_weight/7": "8ba62ca68dff78093bd79e6cb803b932e5d118229125e47e8267c8c8b03c21de",
-  "taiwan_first_outbreak/0": "ee39a90e5b992db076b933896570904c51b030147937add977b58d0f8372e489",
-  "taiwan_first_outbreak/1": "e31db07fa2fb9d69ab5e783c07ba57472db0ae8a4477c391a3f65da7c47695ff",
-  "taiwan_first_outbreak/2": "4cfef89ee037d3831a17330479f9af0d9458fd893d8297b0a93a1a2c746fb5d3",
-  "taiwan_first_outbreak/3": "87f1af7453afaf7a8c70351bc1e6ceb948f31d1750ca1390c215869b8a4b969d",
-  "taiwan_first_outbreak/4": "104d50dd4b408d17b2b4e7c0dc68960a1c1ede5401b14c5eeb6d83e7d71f393a",
-  "taiwan_first_outbreak/5": "35e23d25da4a972427cfbe96bf35082346c6667ff73c2ec15e3758cfd5bf3868",
-  "taiwan_first_outbreak/6": "d79b19e8a72e7eea58246e969c55db7638e2336a9aa0f80e9c49a70c1eeeab3a",
-  "taiwan_first_outbreak/7": "1953d7fce92236bffeb89c9a85ea6d74810f66ab7c317169079012eb65685626"
+  "taiwan_first_outbreak/0": "1393344cd96bb10111d302407025052703e1a61cad284ae511fd49ce51f7e1f8",
+  "taiwan_first_outbreak/1": "247d64ec06ebe66510aadf81ed6e9227ecb1c91215cd642cc72169f2ec523a3a",
+  "taiwan_first_outbreak/2": "36fad883f73a10b9ac800e947b772d731a534fd0d19ff9bc3d174bc80b01ea81",
+  "taiwan_first_outbreak/3": "1494f7b7f69586fc2544b797d8fd58aa813b2081bc75cd371902e6052b80dce3",
+  "taiwan_first_outbreak/4": "773d005e77eceebeff4312cf77077e56df7e8cba41a5dfe92b499a573e144dfa",
+  "taiwan_first_outbreak/5": "f919256085b96b2de01442198e6c82a502db5214b35ffc59f38ac7562cf6cf04",
+  "taiwan_first_outbreak/6": "8a21cd970e8c3968177435c0cac62bef7636ad85eea3c0520563aca0669e4878",
+  "taiwan_first_outbreak/7": "926d6c69376aadb1a0e1acdf0fe0ab7535837ed56f89d877dc9e88661d1da9f5"
  }
 }

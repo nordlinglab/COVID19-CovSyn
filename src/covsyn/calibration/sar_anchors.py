@@ -129,9 +129,13 @@ CHENG2020_LOCAL_SCALE = ((CHENG2020_LOCAL_INFECTIONS / CHENG2020_LOCAL_INDEX_CAS
 # spread_Taiwan_weight simulations, firefly_result/phaseD_run18/checks_b75.txt. Run 17 had
 # {2.605, 3.657, 2.144, 4.759, 23.874}: health care fell 4.759 -> 2.597 with run 18's vector,
 # which raises the health care anchor and its uncapped daily ceiling to 2.9x the household's (E61).
-COVSYN_CANDIDATE_CONTACTS = {'household': 2.595, 'school': 2.305, 'workplace': 3.842,
-                             'health_care': 2.597, 'municipality': 19.482}
-CANDIDATE_CONTACTS_MEASURED_ON = ('Phase D run 18 candidate 80 under B75 (checks_b75.txt, '
+# 2026-11-02 (run 20 preparation, B77): run 19's selected vector (candidate 60) under the B77
+# school calendar, 1000 spread_Taiwan_weight simulations, firefly_result/phaseD_run19/
+# checks_b77.txt. Health care rose 2.597 -> 5.807 and workplace fell 3.842 -> 2.832 with run 19's
+# vector (B76's floor charges health care contacts); school 2.305 -> 2.361.
+COVSYN_CANDIDATE_CONTACTS = {'household': 2.592, 'school': 2.361, 'workplace': 2.832,
+                             'health_care': 5.807, 'municipality': 17.968}
+CANDIDATE_CONTACTS_MEASURED_ON = ('Phase D run 19 candidate 60 under B77 (checks_b77.txt, '
                                   'CovSyn candidate contacts per index, 1000 index cases)')
 # How far these moved on run 5, which is what E56 is about: school -47.7%, health care -37.1%,
 # workplace -12.3%, municipality +9.1%, household +0.4%. Run 4 had
@@ -321,9 +325,15 @@ def health_care_contact_floor() -> float:
 # coworkers met only on days off dropping out; household 10.27 -> 9.68, school 6.61 -> 7.41,
 # health care 2.70 -> 2.26, community 1.21 -> 1.59 move with run 18's vector, not with B75.
 # Vector and measure_days output: firefly_result/phaseD_run18/ (commit 890da02).
-MEAN_CONTACT_DAYS = {'household': 9.68, 'school': 7.41, 'workplace': 3.15,
-                     'health_care': 2.26, 'municipality': 1.59}
-CONTACT_DAYS_MEASURED_ON = ('Phase D run 18 candidate 80 under B75 '
+#
+# 2026-11-02 (run 20 preparation, B77): re-measured with run 19's selected vector (candidate 60)
+# under the B77 school calendar, which closes school at weekends in undated runs. School days
+# fell 7.41 -> 5.30, a factor 0.72 against 5/7 = 0.71; household 9.68 -> 9.27, workplace
+# 3.15 -> 3.48, health care 2.26 -> 2.94, community 1.59 -> 1.77 move with run 19's vector.
+# Vector and measure_days output: firefly_result/phaseD_run19/.
+MEAN_CONTACT_DAYS = {'household': 9.27, 'school': 5.30, 'workplace': 3.48,
+                     'health_care': 2.94, 'municipality': 1.77}
+CONTACT_DAYS_MEASURED_ON = ('Phase D run 19 candidate 60 under B77 '
                             '(spread_Taiwan_weight, 400 simulations)')
 
 # How far above the upper anchor the DAILY ceiling may sit. The ceiling is a safety net, not
