@@ -577,17 +577,15 @@ class Draw_course_of_disease_data:
                  asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
                  critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma,
                  natural_immunity_rate, transition_p, age=np.nan, source_confirmed_day=np.nan, age_p=None,
-                 tracing_delay=TRACING_DELAY_MEAN, observed_isolation_day=np.nan,
+                 tracing_delay=TRACING_DELAY_MEAN,
                  onset_to_isolation_sample=None):
         self.infection_day = infection_day
         # B20 / B26: the age of the case (severity depends on it) and the day its infector
         # was confirmed (contact tracing isolates this case shortly afterwards).
         self.age = age
         self.source_confirmed_day = source_confirmed_day
-        # B78 option A: an imported first-wave seed isolated on its observed confirmation day
-        # (days from infection; 'observed'), or whose onset-to-isolation delay is drawn from the
-        # imported cases of the data ('imported_delay'). NaN / None: the model's own delay.
-        self.observed_isolation_day = observed_isolation_day
+        # B78 option A2: an imported first-wave seed whose onset-to-isolation delay is drawn
+        # from the imported cases of the data ('imported_delay'). None: the model's own delay.
         self.onset_to_isolation_sample = onset_to_isolation_sample
         self.age_p = age_p
         # B65: mean of the Poisson delay from the infector's confirmation to isolation.
@@ -897,9 +895,6 @@ class Draw_course_of_disease_data:
             # infectious period is over. Reporting is still complete (decision B18).
             isolation = infectious_end
             self.isolation_route = 'untraced'
-        if np.isfinite(self.observed_isolation_day):   # B78 option A, 'observed'
-            isolation = self.observed_isolation_day
-            self.isolation_route = 'observed'
         self.monitor_isolation_period = int(max(0, round(isolation)))
 
         # --- testing ------------------------------------------------------------------

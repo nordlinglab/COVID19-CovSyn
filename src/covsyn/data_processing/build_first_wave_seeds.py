@@ -239,6 +239,95 @@ def build(cases: pd.DataFrame, sources: pd.DataFrame,
     return out
 
 
+def copy_community_seeds(seeds: pd.DataFrame, cases: pd.DataFrame, n: int,
+                         rng: np.random.Generator) -> pd.DataFrame:
+    """The seed table with n copies of its community seeds added (B79).
+
+    Professor meeting 2026-11-02: the February scenarios infect too few local cases, so seeds
+    are added as cases the surveillance missed. Each copy is drawn uniformly from the community
+    seeds (airport cases were isolated on arrival) and keeps the copied case's properties, so a
+    copied local seed is a local case of the run; only its infection date is new, drawn from
+    the data's distribution of incubation (onset minus the drawn value) or, with no onset, of
+    infection to confirmation, then clipped as in build. Copies get ids -1, -2, ..., which no
+    reported case has, so the reference cases do not change. The draws are sequential, so the
+    same generator gives nested sets: the first n copies are the same for any larger n.
+
+    Args:
+        seeds: A seed table written by build.
+        cases: The 'Individual Data' sheet of the Taiwan case data.
+        n: Number of copies.
+        rng: Generator of the draws; fix its seed to keep the set fixed.
+    """
+    if n < 0:
+        raise ValueError("the number of copies must be >= 0")
+    out = seeds.copy()
+    if "copied_from" not in out:
+        out["copied_from"] = np.nan
+    pool = out[(out.status == "community") & out.copied_from.isna()]
+    if n and pool.empty:
+        raise ValueError("no community seed to copy")
+    d = cases.set_index("id")
+    for column in ("onset_of_symptom", "confirmed_date", "earliest_infection_date"):
+        d[column] = pd.to_datetime(d[column], errors="coerce")
+    d["departure"] = pd.to_datetime(d["date_of_departure_1"].astype(str), format="%Y-%m-%d",
+                                    errors="coerce")
+    incubation = (d.onset_of_symptom - d.earliest_infection_date).dt.days.dropna().to_numpy()
+    to_confirmation = (d.confirmed_date - d.earliest_infection_date).dt.days.dropna().to_numpy()
+
+    copies = []
+    for k in range(n):
+        row = pool.iloc[rng.integers(len(pool))].copy()
+        record = d.loc[int(row.case_id)]
+        onset, confirmed = record.onset_of_symptom, pd.Timestamp(row.confirmed_date)
+        # both draws are always made, so each copy uses the same number of draws
+        drawn_incubation, drawn_confirmation = rng.choice(incubation), rng.choice(to_confirmation)
+        if pd.notna(onset):
+            infection = onset - pd.Timedelta(days=drawn_incubation)
+            rule = "copy: onset - drawn incubation"
+        else:
+            infection = confirmed - pd.Timedelta(days=drawn_confirmation)
+            rule = "copy: confirmation - drawn infection to confirmation"
+        imported = row.seed_type == "imported"
+        arrival = pd.Timestamp(row.arrival_date) if imported else pd.NaT
+        upper = min(t for t in (onset, confirmed, arrival) if pd.notna(t))
+        clipped = min(infection, upper)
+        if imported and pd.notna(record.departure) and clipped < record.departure:
+            clipped = min(record.departure, upper)
+        row["copied_from"], row["case_id"] = row.case_id, -(k + 1)
+        row["infection_date"] = str(clipped.date())
+        row["infection_rule"], row["clipped"] = rule, clipped != infection
+        copies.append(row)
+    if copies:
+        out = pd.concat([out, pd.DataFrame(copies)], ignore_index=True)
+
+    infection = pd.to_datetime(out.infection_date)
+    day0 = infection.min()
+    out["infection_day"] = (infection - day0).dt.days
+    out["arrival_day_from_infection"] = (pd.to_datetime(out.arrival_date) - infection).dt.days
+    out["source_confirmed_day"] = (pd.to_datetime(out.source_confirmed_date) - day0).dt.days
+    out["quarantine_from_day_from_infection"] = (
+        (RECALL_DATE - infection).dt.days.where(out.quarantine_from_day_from_infection.notna()))
+    return out.sort_values(["infection_day", "case_id"]).reset_index(drop=True)
+
+
+# B79: scenarios that may get copied seeds (February only, user decision 2026-11-02), and the
+# generator seed that keeps each set fixed once drawn.
+COPY_SCENARIOS = ("feb7", "feb29")
+COPY_RNG_SEED = 20261102
+
+
+def write_copied_seeds(scenario: str, n: int, cases: pd.DataFrame,
+                       directory: Path = Path("variable")) -> Path:
+    """Write the scenario's seed table with n copied seeds (B79) and return its path."""
+    if scenario not in COPY_SCENARIOS:
+        raise ValueError(f"copied seeds are only for {COPY_SCENARIOS}")
+    seeds = pd.read_csv(SCENARIOS[scenario][0])
+    out = copy_community_seeds(seeds, cases, n, np.random.default_rng(COPY_RNG_SEED))
+    path = Path(directory) / f"{SCENARIOS[scenario][0].stem}_copies{n}.csv"
+    out.to_csv(path, index=False)
+    return path
+
+
 def main() -> None:
     """Write both scenarios' seed tables and print a summary."""
     cases_path = Path(sys.argv[1]) if len(sys.argv) > 1 else CASES

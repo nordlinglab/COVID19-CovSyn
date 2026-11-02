@@ -156,22 +156,6 @@ def test_imported_isolation_option_is_validated(run10_vector, demographic_parame
         _run(_b64_vector(run10_vector), demographic_parameters, 0, imported_isolation="whenever")
 
 
-def test_observed_isolation_is_the_confirmation_day_of_the_data(run10_vector,
-                                                                demographic_parameters):
-    seeds = pd.read_csv("variable/taiwan_first_wave_seeds_feb7.csv",
-                        parse_dates=["infection_date", "confirmed_date"]).set_index("case_id")
-    observed = (seeds.confirmed_date - seeds.infection_date).dt.days
-    _, _, courses, _ = _run(_b64_vector(run10_vector), demographic_parameters, 1,
-                            imported_isolation="observed")
-    imported = [c for c in courses if c.get("seed_type") == "imported"]
-    assert imported
-    for c in imported:
-        assert c["isolation_route"] == "observed"
-        assert c["monitor_isolation_period"] == max(0, round(observed[c["seed_case_id"]]))
-    assert all(c["isolation_route"] != "observed" for c in courses
-               if c.get("seed_type") != "imported")
-
-
 def test_imported_delay_is_drawn_from_the_data(run10_vector, demographic_parameters):
     from covsyn.model.data_synthesis_main import IMPORTED_ONSET_TO_CONFIRMATION
 

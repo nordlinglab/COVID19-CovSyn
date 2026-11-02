@@ -12,8 +12,9 @@ does for the breach probability.
 Usage (repository root):
     python scripts/calibrate_imported_factor.py <firefly_best.txt> [runs] [workers] [isolation]
 
-isolation is the B78 option A setting (model, observed or imported_delay); calibrate with the
-one that will be used, since earlier isolation leaves less for the factor to remove.
+isolation is the B78 option A setting (model or imported_delay, the default since the
+meeting of 2026-11-02); calibrate with the one that will be used, since earlier isolation
+leaves less for the factor to remove.
 """
 
 import concurrent.futures
@@ -64,7 +65,7 @@ def main():
     P = rows[np.argmin(rows[:, -1]), 1:-1]
     runs = int(sys.argv[2]) if len(sys.argv) > 2 else 400
     workers = int(sys.argv[3]) if len(sys.argv) > 3 else os.cpu_count()
-    isolation = sys.argv[4] if len(sys.argv) > 4 else "model"
+    isolation = sys.argv[4] if len(sys.argv) > 4 else "imported_delay"
     with open("variable/demographic_parameters.pkl", "rb") as f:
         dp = pickle.load(f)
     k, n = observed_offspring()
