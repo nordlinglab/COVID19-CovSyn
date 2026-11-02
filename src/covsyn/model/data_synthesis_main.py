@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from tqdm import tqdm
 from covsyn.model.data_synthesize import *
+from covsyn.model.school_calendar import SchoolCalendar
 from covsyn.model.work_calendar import WorkCalendar, first_wave_day_zero, weekday_calendar
 from covsyn.model.data_synthesize import (community_event_parameters, community_power_law_exponent,
                                           tracing_delay_mean, work_group_parameters)
@@ -25,6 +26,20 @@ FIRST_WAVE_SEED_FILES = {'taiwan_first_outbreak': './variable/taiwan_first_wave_
                              './variable/taiwan_first_wave_seeds_mar18_local.csv'}
 # B75: second entropy word of the work calendar's generator, next to the run's seed.
 WORK_CALENDAR_STREAM = 75
+# B78 options for the imported seeds, which infect about 3x the data in the community (run 19,
+# 2026-11-02), not decided yet. Isolation: 'model' (the model's onset-to-isolation delay, as
+# before), 'observed' (isolated on the confirmation day of the data), 'imported_delay' (delay
+# drawn from IMPORTED_ONSET_TO_CONFIRMATION). The transmission factor (option C) multiplies the
+# infection probabilities of an imported seed living in the community; 1.0 is off, and
+# scripts/calibrate_imported_factor.py calibrates it to the data.
+IMPORTED_ISOLATION_OPTIONS = ('model', 'observed', 'imported_delay')
+# Onset to confirmation (days: cases) of the 210 imported cases of the first wave (to
+# 2020-04-12) found in the community or in home quarantine with an onset date; mean 6.0, median
+# 5 (Taiwan case data, figshare_taiwan_covid.xlsx). Airport cases are left out: they are
+# isolated on arrival whatever their delay.
+IMPORTED_ONSET_TO_CONFIRMATION = {1: 2, 2: 25, 3: 41, 4: 30, 5: 29, 6: 17, 7: 15, 8: 9, 9: 10,
+                                  10: 11, 11: 3, 12: 3, 13: 2, 15: 3, 16: 1, 18: 2, 19: 4, 24: 1,
+                                  27: 1, 30: 1}
 # B69: the social-data attribute holding the other members of each shared group.
 SHARED_GROUP_SIZE = {'household': 'household_size', 'school': 'school_class_size',
                      'workplace': 'work_group_size'}
@@ -56,6 +71,11 @@ def load_first_wave_seeds(path):
                 # infector's confirmation (simulation day); empty for the other seeds.
                 'source_confirmed_day': (float(row['source_confirmed_day'])
                                          if row.get('source_confirmed_day') else np.nan),
+                # B78: the confirmation day of the data, counted from the infection.
+                'confirmed_day_from_infection': (
+                    float((np.datetime64(row['confirmed_date'])
+                           - np.datetime64(row['infection_date'])) / np.timedelta64(1, 'D'))
+                    if row.get('confirmed_date') and row.get('infection_date') else np.nan),
                 # B73: a 'community' seed recalled into home quarantine on 2020-03-18, counted
                 # from its infection; None for the others.
                 'quarantine_from_day': (int(float(row['quarantine_from_day_from_infection']))
@@ -213,7 +233,8 @@ def apply_contact_weight(input_P, contact_weight):
 
 
 def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.',
-              mode='result', contact_weight=1.0, quarantine_breach='confirmed'):
+              mode='result', contact_weight=1.0, quarantine_breach='confirmed',
+              imported_isolation='model', imported_factor=1.0):
     """Simulate one Monte-Carlo run of the given mode.
 
     Args:
@@ -226,6 +247,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         contact_weight: Contact multiplier of spread_Taiwan_weight; 1 is the calibrated model.
         quarantine_breach: First-wave modes: option of QUARANTINE_BREACH ('confirmed' or
             'with_unclear'), or a number used as the breach probability itself (B74).
+        imported_isolation: First-wave modes: one of IMPORTED_ISOLATION_OPTIONS (B78).
+        imported_factor: First-wave modes: transmission factor of the imported seeds living in
+            the community (B78 option C); 1.0 leaves them unchanged.
 
     Returns:
         The demographic, social, course-of-disease and contact data of every case.
@@ -319,6 +343,11 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                   else QUARANTINE_BREACH[quarantine_breach])
         population_size = 23008366 - len(first_wave_seeds)
         natural_immunity_rate = 1
+        if imported_isolation not in IMPORTED_ISOLATION_OPTIONS:
+            raise ValueError(f'imported_isolation must be one of {IMPORTED_ISOLATION_OPTIONS}')
+        onset_delays = (np.repeat(list(IMPORTED_ONSET_TO_CONFIRMATION),
+                                  list(IMPORTED_ONSET_TO_CONFIRMATION.values())).astype(float)
+                        if imported_isolation == 'imported_delay' else None)
     if mode == 'spread_Taiwan':
         time_limit = 7*52
         number_source_cases = 1
@@ -420,6 +449,13 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                      np.random.default_rng([int(seed), WORK_CALENDAR_STREAM]))
     else:
         work_calendar = weekday_calendar(np.random.default_rng([int(seed), WORK_CALENDAR_STREAM]))
+    # B77 (user, 2026-11-02): school is open only on school days, with the same day 0 and the same
+    # vectors as the work calendar (B75): the 2020 calendar in a first-wave run, weekends off in
+    # any other run, and none for the older vectors, which reproduce bit for bit.
+    if work_calendar is None:
+        school_days = None
+    else:
+        school_days = SchoolCalendar(work_calendar.day_zero, dated=mode in FIRST_WAVE_SEED_FILES)
     age = np.nan
     contact_type = np.nan
     transmission_digraph = []
@@ -519,11 +555,19 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                         int(source_case_id) - 1]['positive_test_date']
                 if seed_case is not None and np.isfinite(seed_case['source_confirmed_day']):
                     source_confirmed_day = seed_case['source_confirmed_day']
+                # B78 option A: the isolation of an imported seed from the data.
+                imported_seed = seed_case is not None and seed_case['seed_type'] == 'imported'
+                observed_isolation_day = (seed_case['confirmed_day_from_infection']
+                                          if imported_seed and imported_isolation == 'observed'
+                                          else np.nan)
+                seed_onset_delays = onset_delays if imported_seed else None
                 course_of_disease_data = Draw_course_of_disease_data(infection_day, latent_period_gamma, infectious_period_gamma, incubation_period_gamma, symptom_to_isolation_gamma,
                                                                      asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
                                                                      critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma, natural_immunity_rate, transition_p,
                                                                      age=case_age, source_confirmed_day=source_confirmed_day, age_p=age_p,
-                                                                     tracing_delay=tracing_delay)
+                                                                     tracing_delay=tracing_delay,
+                                                                     observed_isolation_day=observed_isolation_day,
+                                                                     onset_to_isolation_sample=seed_onset_delays)
                 # print('Infection day: ', infection_day)
                 course_of_disease_data.draw_course_of_disease()
                 if seed_case is not None:
@@ -557,11 +601,14 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                             or seed_case['arrival_day'] is None
                                                             else {'arrival_day': seed_case['arrival_day'],
                                                                   'status': seed_case['status'],
+                                                                  'seed_type': seed_case['seed_type'],
                                                                   'breach': breach,
+                                                                  'imported_factor': imported_factor,
                                                                   'quarantine_from_day':
                                                                       seed_case['quarantine_from_day']}),
                                                  group_infected=group_infected,
-                                                 work_calendar=work_calendar)
+                                                 work_calendar=work_calendar,
+                                                 school_calendar=school_days)
 
                 _, population_size = contact_data.draw_contact_data(input_P)
                 for layer in SHARED_GROUP_LAYERS:  # B69: the new infections join the group
@@ -717,6 +764,12 @@ if __name__ == "__main__":
                         choices=['confirmed', 'with_unclear'],
                         help='first-wave modes: breach probability of home quarantine, calibrated '
                              'to the 3 confirmed or the 5 confirmed and unclear infections (B74)')
+    parser.add_argument('--imported_isolation', type=str, default='model',
+                        choices=list(IMPORTED_ISOLATION_OPTIONS),
+                        help='B78 option A: isolation of the imported first-wave seeds')
+    parser.add_argument('--imported_factor', type=float, default=1.0,
+                        help='B78 option C: transmission factor of the imported seeds in the '
+                             'community (1 = off)')
     parser.add_argument('--seed_start', type=int, default=0,
                         help='first Monte-Carlo seed; B60 uses 100000 for an independent set')
 
@@ -728,6 +781,8 @@ if __name__ == "__main__":
     seed_start = args.seed_start
     contact_weight = args.contact_weight
     quarantine_breach = args.quarantine_breach
+    options = {'imported_isolation': args.imported_isolation,
+               'imported_factor': args.imported_factor}
     if contact_weight != 1.0 and mode != 'spread_Taiwan_weight':
         raise SystemExit('--contact_weight applies to spread_Taiwan_weight only')
     result_path = Path(args.result_path)
@@ -790,7 +845,7 @@ if __name__ == "__main__":
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight,
-                                           quarantine_breach=quarantine_breach)
+                                           quarantine_breach=quarantine_breach, **options)
                            for seed in seeds]
                 # A worker's exception used to stay inside its unread future, so a failed
                 # simulation left no file and no error; .result() raises it here.
@@ -805,7 +860,7 @@ if __name__ == "__main__":
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight,
-                                           quarantine_breach=quarantine_breach)
+                                           quarantine_breach=quarantine_breach, **options)
                            for seed in seeds]
                 for future in futures:
                     future.result()
@@ -813,6 +868,6 @@ if __name__ == "__main__":
         write_run_metadata(result_path, mode=mode, contact_weight=contact_weight,
                            quarantine_breach=(quarantine_breach if mode in FIRST_WAVE_SEED_FILES
                                               else None),
-                           seed_start=seed_start, monte_carlo_number=mc_number,
+                           **options, seed_start=seed_start, monte_carlo_number=mc_number,
                            parameter_path=str(parameter_path))
         print("--- Done %s seconds ---" % (time.time() - start_time))

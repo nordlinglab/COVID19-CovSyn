@@ -27,9 +27,10 @@ TRACING_DELAY_MEAN = 1.0
 # 'confirmed' 3 (household infections during quarantine, 209->246, 228->247, 195->386, checked
 # against the Taiwan CDC press releases), 'with_unclear' 5 (also 277->269 and 122->307, whose
 # infection may have been before or outside the quarantine). Calibration:
-# scripts/calibrate_quarantine_breach.py with the run 18 selected vector, 1000 runs: with p = 1
-# a quarantined seed infects 0.394 people; p = 0.057 gives 2.97 and p = 0.095 gives 5.10 people.
-QUARANTINE_BREACH = {'confirmed': 0.057, 'with_unclear': 0.095}
+# scripts/calibrate_quarantine_breach.py with the run 19 selected vector (B75, B76; candidate
+# 60), 1000 runs: with p = 1 a quarantined seed infects 0.392 people; p = 0.058 gives 3.03 and
+# p = 0.097 gives 5.10 people (run 18: 0.057 and 0.095). Recalibrate when the vector changes.
+QUARANTINE_BREACH = {'confirmed': 0.058, 'with_unclear': 0.097}
 
 # B31: the work group actually met inside an enterprise. Chen 2022 (BMJ Open 12:e055643)
 # Table 5 reports the cases per workplace cluster rising only from 3 to 8 (median 4) while
@@ -576,12 +577,18 @@ class Draw_course_of_disease_data:
                  asymptomatic_to_recovered_gamma, symptomatic_to_critically_ill_gamma, symptomatic_to_recovered_gamma,
                  critically_ill_to_recovered_gamma, infection_to_death_gamma, negative_to_confirmed_gamma,
                  natural_immunity_rate, transition_p, age=np.nan, source_confirmed_day=np.nan, age_p=None,
-                 tracing_delay=TRACING_DELAY_MEAN):
+                 tracing_delay=TRACING_DELAY_MEAN, observed_isolation_day=np.nan,
+                 onset_to_isolation_sample=None):
         self.infection_day = infection_day
         # B20 / B26: the age of the case (severity depends on it) and the day its infector
         # was confirmed (contact tracing isolates this case shortly afterwards).
         self.age = age
         self.source_confirmed_day = source_confirmed_day
+        # B78 option A: an imported first-wave seed isolated on its observed confirmation day
+        # (days from infection; 'observed'), or whose onset-to-isolation delay is drawn from the
+        # imported cases of the data ('imported_delay'). NaN / None: the model's own delay.
+        self.observed_isolation_day = observed_isolation_day
+        self.onset_to_isolation_sample = onset_to_isolation_sample
         self.age_p = age_p
         # B65: mean of the Poisson delay from the infector's confirmation to isolation.
         self.tracing_delay = tracing_delay
@@ -868,7 +875,11 @@ class Draw_course_of_disease_data:
             # rarely, but it must be applied before the incubation period is formed.
             self.pre_onset_window = min(self.draw_pre_onset_window(), self.infectious_period)
             self.incubation_period = int(self.latent_period + self.pre_onset_window)
-            own_isolation = self.incubation_period + self.draw_symptom_to_isolation()
+            if self.onset_to_isolation_sample is not None:   # B78 option A, 'imported_delay'
+                delay = float(np.random.choice(self.onset_to_isolation_sample))
+            else:
+                delay = self.draw_symptom_to_isolation()
+            own_isolation = self.incubation_period + delay
 
         # --- isolation: own symptoms or contact tracing, whichever comes first (B26) ---
         if np.isfinite(self.source_confirmed_day):
@@ -886,6 +897,9 @@ class Draw_course_of_disease_data:
             # infectious period is over. Reporting is still complete (decision B18).
             isolation = infectious_end
             self.isolation_route = 'untraced'
+        if np.isfinite(self.observed_isolation_day):   # B78 option A, 'observed'
+            isolation = self.observed_isolation_day
+            self.isolation_route = 'observed'
         self.monitor_isolation_period = int(max(0, round(isolation)))
 
         # --- testing ------------------------------------------------------------------
@@ -969,11 +983,13 @@ class Draw_contact_data:
                  natural_immunity_status_list, overdispersion_rate, overdispersion_weight,
                  age_risk_ratios, age_p, layer_age_p=None, community_dispersion=None,
                  community_event=None, community_exponent=None, seed_rule=None,
-                 group_infected=None, work_calendar=None):
+                 group_infected=None, work_calendar=None, school_calendar=None):
         # B66: {'arrival_day', 'status'} for a seed case of the Taiwan first wave, else None.
         self.seed_rule = seed_rule
         # B75: work_calendar.WorkCalendar of the run, or None for a case at work every day.
         self.work_calendar = work_calendar
+        # B77: school_calendar.SchoolCalendar of the run, or None for school open every day.
+        self.school_calendar = school_calendar
         # B69: {layer: members of the case's shared group already infected, itself excluded}.
         self.group_infected = group_infected or {}
         self.group_blocked = {layer: set() for layer in SHARED_GROUP_LAYERS}
@@ -1752,10 +1768,27 @@ class Draw_contact_data:
         matrix[:, ~self.workplace_at_work] = False
         self.workplace_contacts_matrix = matrix[matrix.any(axis=1)]
 
+    def apply_school_calendar(self):
+        """Remove the classmate contacts of the days school is closed (B77).
+
+        The whole class attends on a school day and nobody on a day without school (professor,
+        2026-10-27), so there is no attendance draw: school_calendar gives the open days of the
+        school window counted from the infection day. A classmate met only on closed days is
+        dropped, as apply_work_calendar() does.
+        """
+        matrix = np.array(self.school_class_contacts_matrix, dtype=bool)
+        if matrix.ndim != 2 or matrix.shape[0] == 0:
+            return
+        infection_day = int(round(float(self.course_of_disease_data_object.infection_day)))
+        matrix[:, ~self.school_calendar.open_days(infection_day, matrix.shape[1])] = False
+        self.school_class_contacts_matrix = matrix[matrix.any(axis=1)]
+
     def draw_contact_data(self, P):
         self.draw_contacts_each_day(P)
         if self.work_calendar is not None:
             self.apply_work_calendar()
+        if self.school_calendar is not None:
+            self.apply_school_calendar()
         if self.seed_rule is not None:
             self.apply_seed_rule()
         if self.group_infected:
@@ -1764,14 +1797,21 @@ class Draw_contact_data:
         if self.seed_rule is not None and self.seed_rule['status'] == 'quarantine':
             attack_rate_profiles = {layer: rate * self.seed_rule['breach']  # B74
                                     for layer, rate in attack_rate_profiles.items()}
-        elif self.seed_rule is not None and self.seed_rule.get('quarantine_from_day') is not None:
-            recall = max(int(self.seed_rule['quarantine_from_day']), 0)  # B73
-            factor = {}
-            for layer, rate in attack_rate_profiles.items():
-                factor[layer] = np.ones(len(rate))
-                factor[layer][recall:] = self.seed_rule['breach']
-            attack_rate_profiles = {layer: rate * factor[layer]
-                                    for layer, rate in attack_rate_profiles.items()}
+        elif self.seed_rule is not None and self.seed_rule['status'] == 'community':
+            # B78 option C: an imported seed living in the community has its infection
+            # probabilities multiplied by the imported transmission factor (1.0 = off). B73: from
+            # the day a recalled seed enters home quarantine the breach probability applies.
+            imported = (self.seed_rule.get('imported_factor', 1.0)
+                        if self.seed_rule.get('seed_type') == 'imported' else 1.0)
+            recall = self.seed_rule.get('quarantine_from_day')
+            if imported != 1.0 or recall is not None:
+                factor = {}
+                for layer, rate in attack_rate_profiles.items():
+                    factor[layer] = np.full(len(rate), float(imported))
+                    if recall is not None:
+                        factor[layer][max(int(recall), 0):] = self.seed_rule['breach']
+                attack_rate_profiles = {layer: rate * factor[layer]
+                                        for layer, rate in attack_rate_profiles.items()}
         household_attack_rate = attack_rate_profiles['household']
         school_attack_rate = attack_rate_profiles['school']
         workplace_attack_rate = attack_rate_profiles['workplace']
