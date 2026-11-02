@@ -30,7 +30,9 @@ TRACING_DELAY_MEAN = 1.0
 # scripts/calibrate_quarantine_breach.py with the run 19 selected vector (B75, B76; candidate
 # 60), 1000 runs: with p = 1 a quarantined seed infects 0.392 people; p = 0.058 gives 3.03 and
 # p = 0.097 gives 5.10 people (run 18: 0.057 and 0.095). Recalibrate when the vector changes.
-QUARANTINE_BREACH = {'confirmed': 0.058, 'with_unclear': 0.097}
+# 2026-11-02, under B78 A2 (imported_delay), 400 runs: with p = 1 a quarantined seed infects
+# 0.360 people; p = 0.061 gives 2.97 and p = 0.099 gives 4.92 people.
+QUARANTINE_BREACH = {'confirmed': 0.061, 'with_unclear': 0.099}
 
 # B31: the work group actually met inside an enterprise. Chen 2022 (BMJ Open 12:e055643)
 # Table 5 reports the cases per workplace cluster rising only from 3 to 8 (median 4) while

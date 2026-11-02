@@ -164,7 +164,8 @@ def test_imported_delay_is_drawn_from_the_data(run10_vector, demographic_paramet
         _, _, courses, _ = _run(_b64_vector(run10_vector), demographic_parameters, seed,
                                 imported_isolation="imported_delay")
         for c in courses:
-            if c.get("seed_type") == "imported" and np.isfinite(c["incubation_period"]):
+            # isolated on their symptoms; an ICU admission isolates earlier (B52)
+            if c.get("seed_type") == "imported" and c["isolation_route"] == "symptom":
                 delays.add(c["monitor_isolation_period"] - c["incubation_period"])
     assert delays and delays <= set(IMPORTED_ONSET_TO_CONFIRMATION)
 

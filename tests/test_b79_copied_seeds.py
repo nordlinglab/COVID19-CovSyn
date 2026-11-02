@@ -140,3 +140,12 @@ def test_run_covid_reads_the_copied_seed_file(tmp_path, cases, run10_vector,
     seeded = [c for c in courses if c.get("seed_type") is not None]
     assert len(seeded) == len(pd.read_csv(path))
     assert any(c["seed_case_id"] < 0 for c in seeded)
+
+
+def test_calibrated_q_and_p_are_the_defaults_under_imported_delay():
+    """Run 19 candidate 60 under A2, 400 runs each (Mac, 2026-11-02): q 0.294, p 0.061 / 0.099."""
+    import covsyn.model.data_synthesize as ds
+    from covsyn.model.data_synthesis_main import IMPORTED_FACTOR, run_covid
+    assert IMPORTED_FACTOR == pytest.approx(0.294)
+    assert inspect.signature(run_covid).parameters["imported_factor"].default == IMPORTED_FACTOR
+    assert ds.QUARANTINE_BREACH == {"confirmed": 0.061, "with_unclear": 0.099}

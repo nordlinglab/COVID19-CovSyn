@@ -33,6 +33,10 @@ WORK_CALENDAR_STREAM = 75
 # transmission factor (option C) multiplies the infection probabilities of an imported seed
 # living in the community; 1.0 is off, and scripts/calibrate_imported_factor.py calibrates it.
 IMPORTED_ISOLATION_OPTIONS = ('model', 'imported_delay')
+# B78 C: q calibrated under A2 with run 19 candidate 60, 400 runs (2026-11-02): with q = 1 the
+# 118 imported community seeds of the 2020-04-12 scenario infect 36.2 people, q = 0.294 gives
+# 12.1 (data 12). Recalibrate when the vector or the isolation changes.
+IMPORTED_FACTOR = 0.294
 # Onset to confirmation (days: cases) of the 210 imported cases of the first wave (to
 # 2020-04-12) found in the community or in home quarantine with an onset date; mean 6.0, median
 # 5 (Taiwan case data, figshare_taiwan_covid.xlsx). Airport cases are left out: they are
@@ -229,7 +233,7 @@ def apply_contact_weight(input_P, contact_weight):
 
 def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.',
               mode='result', contact_weight=1.0, quarantine_breach='with_unclear',
-              imported_isolation='imported_delay', imported_factor=1.0, seed_file=None):
+              imported_isolation='imported_delay', imported_factor=IMPORTED_FACTOR, seed_file=None):
     """Simulate one Monte-Carlo run of the given mode.
 
     Args:
@@ -763,7 +767,7 @@ if __name__ == "__main__":
     parser.add_argument('--imported_isolation', type=str, default='imported_delay',
                         choices=list(IMPORTED_ISOLATION_OPTIONS),
                         help='B78 option A: isolation of the imported first-wave seeds')
-    parser.add_argument('--imported_factor', type=float, default=1.0,
+    parser.add_argument('--imported_factor', type=float, default=IMPORTED_FACTOR,
                         help='B78 option C: transmission factor of the imported seeds in the '
                              'community (1 = off)')
     parser.add_argument('--seed_file', type=str, default=None,
