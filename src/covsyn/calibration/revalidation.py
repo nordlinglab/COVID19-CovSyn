@@ -65,17 +65,29 @@ def validation_seed_blocks(blocks: int, simulations: int) -> list[range]:
 def load_candidates(firefly_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     """The final population and every personal best of a run, without duplicates.
 
+    B81: firefly_archive.txt (generation, params..., cost) holds one snapshot per sampled
+    generation and is added when present, so the pool spans the search and not only its end.
+    Its costs come from different seed blocks and are not comparable with each other; they
+    order the rows and nothing else, because every candidate is re-scored below.
+
     Args:
-        firefly_dir: Directory holding firefly_result.txt (params..., cost) and
-            firefly_best.txt (iteration, params..., cost).
+        firefly_dir: Directory holding firefly_result.txt (params..., cost),
+            firefly_best.txt (iteration, params..., cost) and optionally firefly_archive.txt.
 
     Returns:
         (vectors, training costs), sorted by training cost.
     """
     population = np.atleast_2d(np.loadtxt(Path(firefly_dir) / "firefly_result.txt"))
     bests = np.atleast_2d(np.loadtxt(Path(firefly_dir) / "firefly_best.txt"))
-    vectors = np.vstack([population[:, :-1], bests[:, 1:-1]])
-    costs = np.concatenate([population[:, -1], bests[:, -1]])
+    rows = [population[:, :-1], bests[:, 1:-1]]
+    values = [population[:, -1], bests[:, -1]]
+    archive_path = Path(firefly_dir) / "firefly_archive.txt"
+    if archive_path.exists() and archive_path.stat().st_size:
+        archive = np.atleast_2d(np.loadtxt(archive_path))
+        rows.append(archive[:, 1:-1])
+        values.append(archive[:, -1])
+    vectors = np.vstack(rows)
+    costs = np.concatenate(values)
     _, first = np.unique(vectors, axis=0, return_index=True)
     order = sorted(first, key=lambda i: costs[i])
     return vectors[order], costs[order]

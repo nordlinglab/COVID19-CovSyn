@@ -1059,6 +1059,21 @@ FAILED_EVALUATION_COST = 1e6
 # generation count comes down from 200 to 120 to pay for it -- the second run's cost curve was
 # already nearly flat after 150 (1.36 -> 1.27).
 SIMULATIONS_PER_EVALUATION = 300
+# B81 (2026-11-03): every generation scores the population on its own block of seeds. Run 20
+# selected a vector whose workplace SAR was 0.024 on the fixed block 0..299 and 0.070 over ten
+# unseen blocks -- below the lowest of the ten -- while an unoptimised vector sat 9th of eleven,
+# so the search was fitting the fixed sample (winner's curse over 664,435 evaluations). The
+# initial population keeps block 0; generation g takes the next one. 120 generations end at
+# 36,299, clear of revalidation's blocks from 100,000 (E87).
+# Costs from different blocks are NOT comparable, so nothing keeps a running minimum across
+# generations: the attraction, the elite and the progress row all use this generation's scores,
+# and the candidates are re-scored on one common set of blocks afterwards.
+ARCHIVE_EVERY = 5
+
+
+def generation_seed_offset(generation):
+    """First simulation seed of a generation's own block (B81)."""
+    return SIMULATIONS_PER_EVALUATION * (generation + 1)
 
 # E86: the objective summed the contact bins of all 300 simulated cases and compared them
 # with Cheng et al. 2020's totals for 100 cases (the original 100 cases x 3 repeats lost its
@@ -1079,10 +1094,11 @@ def cheng_contact_scale(symptomatic_cases: int) -> float:
     return CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic_cases
 
 
-def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights):
+def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
+                  norm_weights, seed_offset=0):
     try:
         return _cost_function(P, demographic_parameters, executor, Cheng_contact_array,
-                              Cheng_attack_rate, norm_weights)
+                              Cheng_attack_rate, norm_weights, seed_offset)
     except Exception:
         traceback.print_exc()
         print('cost_function: simulation failed for this parameter vector, charging '
@@ -1096,10 +1112,11 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
         return FAILED_EVALUATION_COST
 
 
-def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights):
+def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
+                   norm_weights, seed_offset=0):
     source_case_number = SIMULATIONS_PER_EVALUATION
     repeat_number = 1
-    seeds = range(source_case_number * repeat_number)
+    seeds = range(seed_offset, seed_offset + source_case_number * repeat_number)
 
     # Submit simulations to the SHARED (persistent) process pool passed in by firefly().
     # Downstream convert_synthetic_data_to_test_matrix()/generate_contact_result() call
@@ -1370,20 +1387,19 @@ class Firefly:
               f'({SIMULATIONS_PER_EVALUATION} simulations each)...', flush=True)
         intensities = np.empty(self.pop_size)
         cost_parts = [{} for _ in range(self.pop_size)]
-        best_parts = [{} for _ in range(self.pop_size)]
         for k in range(self.pop_size):
             intensities[k] = function(
-                fireflies[k], demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights)
+                fireflies[k], demographic_parameters, executor, Cheng_contact_array,
+                Cheng_attack_rate, norm_weights, seed_offset=0)
             cost_parts[k] = dict(LAST_COST_PARTS)
             print(f'  initial firefly {k+1}/{self.pop_size}: cost={intensities[k]:.4f}', flush=True)
         print(f'initial population evaluated: best_cost={np.min(intensities):.4f}', flush=True)
         # B49 / E78: the initial population counts. It used to start from 10e10 and was only
         # updated after a firefly MOVED, so an initial point -- a warm start of 2.49 in the test
         # of run 9 -- was never recorded as the best.
-        best_fireflies = np.array(fireflies, dtype=float)
-        best_intensities = np.array(intensities, dtype=float)
-        best_iteration = np.arange(1, self.pop_size + 1, dtype=float)
-        best_parts = [dict(parts) for parts in cost_parts]
+        # B81: no running minimum over generations -- see generation_seed_offset. The archive
+        # below carries positions from across the search into the candidate pool instead.
+        archive = []
         worst_fireflies = np.zeros(np.shape(fireflies))
         worst_intensities = np.zeros(np.shape(intensities))
         worst_iteration = np.zeros(np.shape(intensities))
@@ -1397,6 +1413,15 @@ class Firefly:
         # search_range = ub - lb
 
         for generation in tqdm(range(max_generations)):
+            # B81: this generation's block, and every firefly re-scored on it -- the brightest
+            # included, since its score came from another block and cannot be compared here.
+            offset = generation_seed_offset(generation)
+            for k in range(self.pop_size):
+                intensities[k] = function(
+                    fireflies[k], demographic_parameters, executor, Cheng_contact_array,
+                    Cheng_attack_rate, norm_weights, seed_offset=offset)
+                cost_parts[k] = dict(LAST_COST_PARTS)
+                evaluations += 1
             new_alpha *= 0.97
             for i in range(self.pop_size):
                 if i % 10 == 0:
@@ -1427,30 +1452,31 @@ class Firefly:
                         fireflies[i] = normalized_fireflies[i]*(ub-lb) + lb
                         # print(fireflies[i])
                         intensities[i] = function(
-                            fireflies[i], demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate, norm_weights)
+                            fireflies[i], demographic_parameters, executor, Cheng_contact_array,
+                            Cheng_attack_rate, norm_weights, seed_offset=offset)
                         evaluations += 1
                         # (per-evaluation print removed; see per-generation summary below)
                         cost_parts[i] = dict(LAST_COST_PARTS)
-                        if intensities[i] < best_intensities[i]:
-                            best_fireflies[i] = fireflies[i]
-                            best_intensities[i] = intensities[i]
-                            best_iteration[i] = evaluations
-                            best_parts[i] = dict(cost_parts[i])
                         if intensities[i] > worst_intensities[i]:
                             worst_fireflies[i] = fireflies[i]
                             worst_intensities[i] = intensities[i]
                             worst_iteration[i] = evaluations
-            # Per-generation progress for live monitoring: lower best_cost = better fit
-            print(f'generation {generation}: best_cost={np.min(best_intensities):.4f} '
-                  f'pop_best={np.min(intensities):.4f} evals={evaluations}', flush=True)
+            # Per-generation progress for live monitoring: lower best_cost = better fit.
+            # B81: this generation's own block, so the column is not a convergence curve --
+            # a rise can be the block, not the search.
+            print(f'generation {generation}: best_cost={np.min(intensities):.4f} '
+                  f'offset={offset} evals={evaluations}', flush=True)
 
-            # Append the current global-best solution's decoded metrics to a CSV so the
+            # Append this generation's best solution's decoded metrics to a CSV so the
             # run can be plotted/inspected live (and aborted early if values look wrong).
-            best_idx = int(np.argmin(best_intensities))
-            row = {'generation': generation,
-                   'best_cost': float(np.min(best_intensities))}
-            row.update(best_parts[best_idx])
-            row.update(decode_metrics(best_fireflies[best_idx]))
+            best_idx = int(np.argmin(intensities))
+            if generation % ARCHIVE_EVERY == 0:
+                archive.append(np.concatenate(
+                    ([generation], fireflies[best_idx], [intensities[best_idx]])))
+            row = {'generation': generation, 'seed_offset': offset,
+                   'best_cost': float(np.min(intensities))}
+            row.update(cost_parts[best_idx])
+            row.update(decode_metrics(fireflies[best_idx]))
             csv_path = result_path / 'progress_metrics.csv'
             with open(csv_path, 'w' if generation == 0 else 'a', newline='') as cf:
                 writer = csv.DictWriter(cf, fieldnames=list(row.keys()))
@@ -1459,7 +1485,16 @@ class Firefly:
                 writer.writerow(row)
 
         executor.shutdown()
-        return (best_fireflies, best_intensities, best_iteration, worst_fireflies, worst_intensities, worst_iteration, fireflies, intensities)
+        # B81: firefly_best.txt keeps one row per firefly -- reproduce_wu2025 and
+        # firefly_txt_to_csv require the four result files to have equal row counts -- so the
+        # final population fills it, and the snapshots go to firefly_archive.txt, which
+        # revalidation.load_candidates adds to the candidate pool when it exists.
+        np.savetxt(result_path/'firefly_archive.txt', np.atleast_2d(np.array(archive)),
+                   fmt='%.7f')
+        best_iteration = np.full(self.pop_size, float(evaluations))
+        return (np.array(fireflies, dtype=float), np.array(intensities, dtype=float),
+                best_iteration, worst_fireflies, worst_intensities, worst_iteration,
+                fireflies, intensities)
 
 
 if __name__ == "__main__":
