@@ -11,6 +11,7 @@ Usage:
 spread_dir          synthetic_data_results_spread_Taiwan_weight (single seed, 84 days)
 first_outbreak_dir  synthetic_data_results_taiwan_first_outbreak (B66 first-wave seeds), optional
 """
+import concurrent.futures
 import glob
 import json
 import os
@@ -25,7 +26,9 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_i
                                             contacts_per_day_before_onset,
                                             offspring_dispersion, one_day_counts, one_day_shape)
 from covsyn.calibration.sar_anchors import JIAN2020_LOCAL_HEALTH_CARE_PER_CASE
-from covsyn.validation.acceptance import band_text, bootstrap_intervals, json_band, verdict
+from covsyn.validation.acceptance import (band_text, bootstrap_index_sets,
+                                          bootstrap_intervals, collect_replicates,
+                                          json_band, percentile_intervals, verdict)
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
@@ -65,6 +68,64 @@ def check(decision, name, value, target, unit='', ok=None, note='', ci=None, int
                     # False for order statistics such as a maximum, which a bootstrap
                     # resample can only lower, so their interval would mislead (B57).
                     'interval': interval})
+
+
+# S1 (2026-11-03): the 200 bootstrap replicates are independent, and on run 20 they were 68 of
+# the checklist's 66-69 minutes (20.4 s each, measured) on one core of 32. They now run in
+# a
+# pool. The values do not change: every index set is drawn in the parent, in the order
+# acceptance.bootstrap_index_sets defines, and compute_checks is pure with respect to its
+# arguments -- its only generator, below, is built fresh on every call, and the permutation
+# test's generator is not reached with permutations=False. Each worker LOADS the
+# simulations
+# itself (15.8 s, measured) instead of receiving them: one process holds 4.9 GB of
+# them, so
+# sending them to every worker would cost more than the replicates do. Memory is the
+# binding
+# constraint, not cores: VERIFY_WORKERS workers hold VERIFY_WORKERS * 4.9 GB.
+WORKER_COUNT = int(os.environ.get('VERIFY_WORKERS', 0)) or min(os.cpu_count() or 1, 32)
+_WORKER_RUNS: list | None = None
+_WORKER_FIRST: list | None = None
+
+
+def init_replicate_worker(spread_dir, first_dir):
+    """Load this worker's own copy of the simulations, once per worker."""
+    global _WORKER_RUNS, _WORKER_FIRST
+    _WORKER_RUNS = load(Path(spread_dir))
+    _WORKER_FIRST = load(Path(first_dir)) if Path(first_dir).exists() else []
+
+
+def replicate_checks(task):
+    """One bootstrap replicate: resample by index, then the checklist without the city test.
+
+    Args:
+        task: (replicate number, spread indices, first-outbreak indices).
+
+    Returns:
+        (replicate number, {(decision, name): value}) with the same filtering the serial
+        bootstrap applies.
+    """
+    number, spread_index, first_index = task
+    spread_sample = [_WORKER_RUNS[i] for i in spread_index]
+    first_sample = [_WORKER_FIRST[i] for i in first_index]
+    rows = compute_checks(spread_sample, first_sample, permutations=False)
+    return number, {(r['decision'], r['name']): r['value']
+                    for r in rows if r['value'] is not None}
+
+
+def bootstrap_in_parallel(spread_dir, first_dir, sizes, replicates, workers):
+    """The bootstrap intervals, with the replicates evaluated in a worker pool.
+
+    A worker that dies fails the whole checklist: collect_replicates rejects a gap rather
+    than quietly shortening the bootstrap.
+    """
+    index_sets = bootstrap_index_sets(sizes, replicates=replicates)
+    tasks = [(n, spread, first) for n, (spread, first) in enumerate(index_sets)]
+    with concurrent.futures.ProcessPoolExecutor(
+            workers, initializer=init_replicate_worker,
+            initargs=(str(spread_dir), str(first_dir))) as pool:
+        values = dict(pool.map(replicate_checks, tasks))
+    return percentile_intervals(collect_replicates(values))
 
 
 def load(directory):
@@ -647,8 +708,12 @@ def main():
 
         # The spread and first-outbreak runs are resampled independently: they are separate
         # scenarios and need not be equal in number.
-        intervals = bootstrap_intervals(replicate, runs, first_runs,
-                                        replicates=BOOTSTRAP_REPLICATES)
+        if WORKER_COUNT > 1:
+            intervals = bootstrap_in_parallel(SPREAD, FIRST, (len(runs), len(first_runs)),
+                                              BOOTSTRAP_REPLICATES, WORKER_COUNT)
+        else:
+            intervals = bootstrap_intervals(replicate, runs, first_runs,
+                                            replicates=BOOTSTRAP_REPLICATES)
         for r in point:
             if (r['ci'] is None and r['interval']
                     and (r['decision'], r['name']) in intervals):

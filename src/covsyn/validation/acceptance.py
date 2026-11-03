@@ -106,16 +106,75 @@ def bootstrap_intervals(
     Returns:
         {key: (lower, upper)} for every key with at least two finite replicates.
     """
-    rng = np.random.default_rng(seed)
-    collected: dict[Hashable, list[float]] = {}
-    for _ in range(replicates):
+    index_sets = bootstrap_index_sets(
+        tuple(len(units) for units in unit_lists), replicates=replicates, seed=seed
+    )
+    values = {}
+    for replicate, indices in enumerate(index_sets):
         samples = [
-            [units[i] for i in rng.integers(0, len(units), len(units))] if len(units) else []
-            for units in unit_lists
+            [units[i] for i in index]
+            for units, index in zip(unit_lists, indices, strict=True)
         ]
-        for key, value in compute(*samples).items():
+        values[replicate] = compute(*samples)
+    return percentile_intervals(collect_replicates(values), level=level)
+
+
+def bootstrap_index_sets(
+    sizes: Sequence[int], replicates: int = 200, seed: int = 0
+) -> list[tuple[np.ndarray, ...]]:
+    """The resampling indices of every replicate, in the order the bootstrap draws them.
+
+    One definition of the draw order, used by bootstrap_intervals itself and by a caller that
+    evaluates the replicates in a worker pool (S1): drawing every index set in the parent, in
+    this order, is what makes the parallel run give the serial run's values. An empty unit list
+    consumes no draw, as the serial loop's conditional did.
+
+    Args:
+        sizes: Length of each unit list, in the order they are resampled.
+        replicates: Number of bootstrap samples.
+        seed: Seed of the resampling.
+
+    Returns:
+        One tuple of index arrays per replicate, one array per unit list.
+    """
+    rng = np.random.default_rng(seed)
+    empty = np.empty(0, dtype=np.int64)
+    return [
+        tuple(rng.integers(0, n, n) if n else empty for n in sizes) for _ in range(replicates)
+    ]
+
+
+def collect_replicates(
+    values: dict[int, dict[Hashable, float]],
+) -> dict[Hashable, list[float]]:
+    """The finite value of every key, gathered in replicate order.
+
+    A pool returns the replicates in whatever order they finish, so they are keyed by replicate
+    number and sorted here; the serial loop's own rule -- a value is kept only when it is
+    neither None nor non-finite -- is applied unchanged.
+
+    Args:
+        values: {replicate number: {key: value}}, numbered from 0 without gaps.
+
+    Raises:
+        ValueError: A replicate is missing, which would silently shorten the bootstrap.
+    """
+    expected = set(range(len(values)))
+    if set(values) != expected:
+        missing = sorted(expected - set(values))
+        raise ValueError(f'replicates missing from the bootstrap: {missing}')
+    collected: dict[Hashable, list[float]] = {}
+    for replicate in sorted(values):
+        for key, value in values[replicate].items():
             if value is not None and np.isfinite(value):
                 collected.setdefault(key, []).append(float(value))
+    return collected
+
+
+def percentile_intervals(
+    collected: dict[Hashable, list[float]], level: float = 0.95
+) -> dict[Hashable, tuple[float, float]]:
+    """Percentile intervals of the collected bootstrap values, for keys with at least two."""
     tail = 100 * (1 - level) / 2
     return {
         key: (float(np.percentile(v, tail)), float(np.percentile(v, 100 - tail)))
