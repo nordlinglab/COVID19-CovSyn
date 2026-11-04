@@ -116,9 +116,13 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
       http://ieeexplore.ieee.org/abstract/document/4310090/
     """
 
-    force_all_finite = 'allow-nan' if is_scalar_nan(missing_values) else True
+    # B87: 'ensure_all_finite' replaced 'force_all_finite', which scikit-learn 1.6 deprecated
+    # and 1.9 removed. The project declares scikit-learn>=1.9.1, so the old name raised
+    # TypeError on the declared environment and every call through estat failed; 1.6 accepts
+    # both, so the compute server kept working and hid it.
+    ensure_all_finite = 'allow-nan' if is_scalar_nan(missing_values) else True
     X, Y = check_pairwise_arrays(X, Y, accept_sparse=False,
-                                 force_all_finite=force_all_finite, copy=copy)
+                                 ensure_all_finite=ensure_all_finite, copy=copy)
     # Get missing mask for X
     missing_X = _get_mask(X, missing_values)
 

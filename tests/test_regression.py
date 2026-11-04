@@ -7,6 +7,13 @@ The fixture ``tests/fixtures/regression_run10.json`` was written by
 fixture (regenerated whenever a decision changes the output; last for B75).
 Every value is compared for exact equality: the objective is deterministic on its fixed seeds
 (finding E30), so any difference is a change in behaviour, not noise.
+
+The fixture therefore also pins the environment it was written in, which
+``make_regression_fixtures.py`` requires to be the compute server's. Exact equality does not
+survive a different platform, BLAS or scikit-learn: after B87 the cost reproduces bit for bit
+on the server, 72.9278694577941, while the same commit gives 72.9305393810959 under WSL on
+x86 with scikit-learn 1.9.1, a relative difference of 4e-5. A failure here on another machine
+is that, not a regression; run it on the server before reading anything into it.
 """
 
 from __future__ import annotations
