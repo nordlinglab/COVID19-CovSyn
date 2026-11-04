@@ -28,7 +28,8 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_i
 from covsyn.calibration.sar_anchors import JIAN2020_LOCAL_HEALTH_CARE_PER_CASE
 from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootstrap_index_sets,
                                           bootstrap_intervals, collect_replicates,
-                                          json_band, percentile_intervals, verdict)
+                                          json_band, percentile_intervals, verdict,
+                                          worker_count)
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
@@ -83,7 +84,7 @@ def check(decision, name, value, target, unit='', ok=None, note='', ci=None, int
 # sending them to every worker would cost more than the replicates do. Memory is the
 # binding
 # constraint, not cores: VERIFY_WORKERS workers hold VERIFY_WORKERS * 4.9 GB.
-WORKER_COUNT = int(os.environ.get('VERIFY_WORKERS', 0)) or min(os.cpu_count() or 1, 32)
+WORKER_COUNT = worker_count(os.environ)
 _WORKER_RUNS: list | None = None
 _WORKER_FIRST: list | None = None
 

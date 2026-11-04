@@ -10,6 +10,9 @@
 #   WARM_START       space-separated firefly_best.txt files whose best vectors seed the initial
 #                    population (B49); default: the committed run 10 result
 #   PREVIOUS_CHECKS  phaseD_checks.json of the previous run, for the chain's comparison step
+#   VERIFY_WORKERS   bootstrap workers for the checklist (B86, E98); each holds about 4.9 GB,
+#                    so the default of min(cores, 32) needs about 157 GB and swaps when the
+#                    machine is shared. Unset means that default.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,7 +32,8 @@ tmux new-session -d -s firefly \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1"
 sleep 2
 tmux new-session -d -s chain \
-  "cd '$ROOT' && PYTHON='$PYTHON' PREVIOUS_CHECKS='${PREVIOUS_CHECKS:-}' bash scripts/phase_d_chain.sh"
+  "cd '$ROOT' && PYTHON='$PYTHON' PREVIOUS_CHECKS='${PREVIOUS_CHECKS:-}' \
+   VERIFY_WORKERS='${VERIFY_WORKERS:-}' bash scripts/phase_d_chain.sh"
 sleep 1
 tmux ls
 echo "--- firefly log head ---"
