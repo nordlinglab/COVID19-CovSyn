@@ -32,14 +32,20 @@ def nb_share_ge3(mean: float, k: float) -> float:
 
 
 def test_the_band_is_the_local_cases_two_definitions():
-    """1.82% = 1 of the 55 local cases by recorded links, 12.73% = 7 of 55 by confirmed
-    contacts (recompute_taiwan_targets, taiwan_case_timeline case_type == 'Local')."""
+    """The band is the two case definitions over the local cases.
+
+    1.82% = 1 of the 55 local cases by recorded links, 12.73% = 7 of 55 by confirmed contacts
+    (recompute_taiwan_targets, taiwan_case_timeline case_type == 'Local').
+    """
     assert OFFSPRING_SHARE_GE3 == (1.8, 12.8)
 
 
 def test_the_old_band_was_unreachable_at_the_accepted_r():
-    """The defect B83 fixes: at B67's R the old 4.3% ceiling fails for every accepted k, so no
-    parameter vector could pass the check."""
+    """The defect B83 fixes: the old ceiling was unsatisfiable.
+
+    At B67's R the old 4.3% ceiling fails for every accepted k, so no parameter vector could
+    pass the check.
+    """
     for k in (OUTCOME_TARGETS['offspring_k'][0], 0.286, OUTCOME_TARGETS['offspring_k'][1]):
         assert nb_share_ge3(0.62, k) > 4.3        # the point estimate of B67's band
         assert nb_share_ge3(0.98, k) > 4.3        # and its upper end
@@ -50,8 +56,11 @@ def test_the_old_band_was_unreachable_at_the_accepted_r():
 
 @pytest.mark.parametrize("k", [0.20, 0.267, 0.286, 0.35])
 def test_the_new_band_holds_at_the_r_of_its_own_source(k):
-    """Cheng 2020's local index cases infected 0.62 each, the estimate B67's R band is built on;
-    the share implied there must sit inside the band, which is what the old one failed."""
+    """The band holds at the estimate its own R band is built on.
+
+    Cheng 2020's local index cases infected 0.62 each, so the share implied there must sit
+    inside the band, which is what the old one failed.
+    """
     assert OFFSPRING_SHARE_GE3[0] <= nb_share_ge3(0.62, k) <= OFFSPRING_SHARE_GE3[1]
 
 
@@ -64,16 +73,22 @@ def test_the_new_band_holds_over_most_of_the_r_interval(k):
 
 @pytest.mark.parametrize("k", [0.286, 0.35])
 def test_the_residual_mismatch_at_the_very_top_of_the_r_interval(k):
-    """Documented limit, not a defect to paper over: R's band is an exact Poisson interval on
-    18 of 29 cases, while this band is the range between two case definitions, so the two are
-    not the same kind of quantity and cannot agree everywhere. At R = 0.98, the very top of
-    that interval, the implied share passes 12.8%. The gap is small, no parameter vector has
-    come near that corner (run 21 measured R = 0.602), and closing it would mean replacing an
-    empirical endpoint, 7 of the 55 local cases, with an extrapolation."""
+    """A documented limit, not a defect to paper over.
+
+    R's band is an exact Poisson interval on 18 of 29 cases, while this band is the range
+    between two case definitions, so the two are not the same kind of quantity and cannot agree
+    everywhere. At R = 0.98, the very top of that interval, the implied share passes 12.8%. The
+    gap is small, no parameter vector has come near that corner (run 21 measured R = 0.602),
+    and closing it would mean replacing an empirical endpoint, 7 of the 55 local cases, with an
+    extrapolation.
+    """
     assert 12.8 < nb_share_ge3(0.98, k) < 13.5
 
 
 def test_the_dispersion_target_stays_on_the_579_case_estimate():
-    """The 55 local cases give k = 5.69 by confirmed contacts, so a local band would not
-    constrain the dispersion at all; k keeps the first-wave MLE (B61)."""
+    """The dispersion target stays on the 579-case estimate.
+
+    The 55 local cases give k = 5.69 by confirmed contacts, so a local band would not constrain
+    the dispersion at all; k keeps the first-wave MLE (B61).
+    """
     assert OUTCOME_TARGETS['offspring_k'][:2] == (0.20, 0.35)

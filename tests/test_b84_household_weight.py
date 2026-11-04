@@ -19,6 +19,7 @@ LAYER_TARGETS = ('daily_household', 'daily_school', 'daily_workplace_employed',
 
 
 def test_the_household_target_is_weighted_above_the_other_layers():
+    """The point of B84: the one layer still outside its band outweighs the four inside."""
     household = OUTCOME_TARGETS['daily_household'][2]
     assert household > 1.0
     for name in LAYER_TARGETS:
@@ -38,6 +39,7 @@ def test_the_target_is_still_reachable_inside_the_measured_ceiling():
 
 
 def test_the_other_layer_weights_are_untouched():
+    """Only the household weight moves; the rest keep the values B64 and B76 set."""
     assert OUTCOME_TARGETS['daily_school'][2] == 1.0
     assert OUTCOME_TARGETS['daily_workplace_employed'][2] == 1.0
     assert OUTCOME_TARGETS['daily_municipality'][2] == 1.0

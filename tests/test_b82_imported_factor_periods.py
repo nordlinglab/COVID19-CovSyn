@@ -18,8 +18,12 @@ import copy
 import numpy as np
 import pytest
 
-from covsyn.model.data_synthesis_main import (BORDER_CONTROL_DATE, FIRST_WAVE_SEED_FILES,
-                                              imported_factor_for, load_first_wave_seeds)
+from covsyn.model.data_synthesis_main import (
+    BORDER_CONTROL_DATE,
+    FIRST_WAVE_SEED_FILES,
+    imported_factor_for,
+    load_first_wave_seeds,
+)
 
 FEB7 = "taiwan_first_outbreak_feb7"
 ALL = "taiwan_first_outbreak"
@@ -33,6 +37,7 @@ def _run(vector, demographic_parameters, seed, mode=FEB7, **options):
 
 
 def test_the_border_control_date_is_the_2020_02_07_entry_ban():
+    """The regime boundary is Taiwan's entry ban, not an arbitrary cut."""
     assert BORDER_CONTROL_DATE == "2020-02-07"
 
 
@@ -45,22 +50,28 @@ def test_the_border_control_date_is_the_2020_02_07_entry_ban():
     ("2020-04-11", 0.25),    # the latest seed of the 2020-04-12 scenario
 ])
 def test_the_factor_applies_only_from_the_border_control_date(arrival, expected):
+    """A seed that arrived before the ban keeps 1.0; one that arrived from it takes q."""
     assert imported_factor_for(arrival, 0.25) == expected
 
 
 def test_a_seed_without_an_arrival_date_keeps_the_calibrated_factor():
-    """A local seed of unknown source has no arrival date; it is not an imported seed, so the
-    value is never read, and the function must not fail or silently return the pre-ban 1.0."""
+    """A seed with no arrival date keeps the calibrated factor.
+
+    A local seed of unknown source has no arrival date; it is not an imported seed, so the
+    value is never read, and the function must not fail or silently return the pre-ban 1.0.
+    """
     assert imported_factor_for(None, 0.25) == 0.25
     assert imported_factor_for("", 0.25) == 0.25
 
 
 def test_a_factor_of_one_is_unchanged_in_both_periods():
+    """A factor of 1.0 turns the whole mechanism off, as B78 documents."""
     assert imported_factor_for("2020-01-20", 1.0) == 1.0
     assert imported_factor_for("2020-03-20", 1.0) == 1.0
 
 
 def test_the_seed_table_keeps_the_arrival_date():
+    """Without the date the regime cannot be decided, so the loader must keep it."""
     seeds = load_first_wave_seeds(FIRST_WAVE_SEED_FILES[ALL])
     dated = [s for s in seeds if s["arrival_date"]]
     assert len(dated) == 341
@@ -70,8 +81,11 @@ def test_the_seed_table_keeps_the_arrival_date():
 
 
 def test_every_february_community_seed_arrived_before_the_ban():
-    """The feb7 scenario's engine: 16 imported community seeds, every one of them pre-ban, so
-    the regime factor leaves all of them untouched."""
+    """Every February community seed arrived before the ban.
+
+    These 16 imported community seeds are the feb7 scenario's engine, so the regime factor
+    leaves all of them untouched.
+    """
     seeds = load_first_wave_seeds(FIRST_WAVE_SEED_FILES[FEB7])
     community = [s for s in seeds if s["seed_type"] == "imported" and s["status"] == "community"]
     assert len(community) == 16
@@ -79,6 +93,7 @@ def test_every_february_community_seed_arrived_before_the_ban():
 
 
 def test_the_april_scenario_splits_its_community_seeds_across_the_two_periods():
+    """The factor was fitted on 118 community seeds, only 16 of which are pre-ban."""
     seeds = load_first_wave_seeds(FIRST_WAVE_SEED_FILES[ALL])
     community = [s for s in seeds if s["seed_type"] == "imported" and s["status"] == "community"]
     before = [s for s in community if imported_factor_for(s["arrival_date"], 0.25) == 1.0]
@@ -88,8 +103,11 @@ def test_the_april_scenario_splits_its_community_seeds_across_the_two_periods():
 
 def test_february_seeds_still_infect_when_the_factor_is_zero(run10_vector,
                                                              demographic_parameters):
-    """The regression B82 fixes: with imported_factor = 0 the old code silenced every February
-    community seed. They arrived before the ban, so they must still infect."""
+    """The regression B82 fixes.
+
+    With imported_factor = 0 the old code silenced every February community seed. They arrived
+    before the ban, so they must still infect.
+    """
     infected = 0.0
     for seed in range(6):
         _, _, courses, contacts = _run(run10_vector, demographic_parameters, seed,
