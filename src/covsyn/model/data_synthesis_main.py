@@ -36,7 +36,26 @@ IMPORTED_ISOLATION_OPTIONS = ('model', 'imported_delay')
 # B78 C: q calibrated under A2 with run 19 candidate 60, 400 runs (2026-11-02): with q = 1 the
 # 118 imported community seeds of the 2020-04-12 scenario infect 36.2 people, q = 0.294 gives
 # 12.1 (data 12). Recalibrate when the vector or the isolation changes.
-IMPORTED_FACTOR = 0.294
+# B82 (2026-11-04): recalibrated with the run 21 selected vector, and now the POST-BAN value
+# only, since the 16 seeds that arrived before BORDER_CONTROL_DATE are held at 1.0. With q = 1
+# the 118 community seeds infect 46.93; the relation is m(q) = A + B*q with A measured at 7.27
+# (q = 0, 800 runs), so those 16 seeds alone produce 61% of the 12 infections in the data, and
+# q = 0.107 gives 11.9-12.5. Steps measured at 800 runs: q = 0 -> 7.27, 0.090 -> 11.27,
+# 0.104 -> 11.86, 0.120 -> 12.54. Recalibrate when the vector or the isolation changes; the
+# proportional update in calibrate_imported_factor.py is biased by the constant A, so solve
+# A + B*q = 12 from two low-q measurements instead of reading its last line.
+IMPORTED_FACTOR = 0.107
+# B82 (2026-11-04, professor meeting of 2026-11-02): the factor stands for the home quarantine,
+# which did not exist before Taiwan's 2020-02-07 entry ban, so it applies only from that date.
+# The professor's rule for the quarantine terms is the same one: nothing in February, the home
+# quarantine probability in March, a new factor for the quarantine that replaced it. Applying one
+# value to every period suppressed exactly the seeds the February scenarios run on: 16 of the
+# feb7 scenario's 21 seeds arrived before the ban, while 102 of the 118 community seeds the
+# factor was fitted on arrived after it. The data puts the local cases per seed 7.1x higher
+# before the ban (17 from 21 seeds) than after (38 from the remaining 333), which no single
+# factor can hold. The breach probability is NOT split: its five events are 2 of the 44 seeds
+# quarantined before 2020-03-19 and 3 of the 78 after, which cannot tell the two periods apart.
+BORDER_CONTROL_DATE = '2020-02-07'
 # Onset to confirmation (days: cases) of the 210 imported cases of the first wave (to
 # 2020-04-12) found in the community or in home quarantine with an onset date; mean 6.0, median
 # 5 (Taiwan case data, figshare_taiwan_covid.xlsx). Airport cases are left out: they are
@@ -47,6 +66,23 @@ IMPORTED_ONSET_TO_CONFIRMATION = {1: 2, 2: 25, 3: 41, 4: 30, 5: 29, 6: 17, 7: 15
 # B69: the social-data attribute holding the other members of each shared group.
 SHARED_GROUP_SIZE = {'household': 'household_size', 'school': 'school_class_size',
                      'workplace': 'work_group_size'}
+
+
+def imported_factor_for(arrival_date, factor):
+    """The imported transmission factor of a seed that arrived on this date (B82).
+
+    Args:
+        arrival_date: The seed's arrival date as 'YYYY-MM-DD', or None/'' when it has none
+            (a local seed, which is never an imported seed and so never reads this).
+        factor: The calibrated factor, which stands for the home quarantine.
+
+    Returns:
+        1.0 for an arrival before BORDER_CONTROL_DATE, when there was no screening and no
+        quarantine to reduce the seed's contacts, and `factor` from that date on.
+    """
+    if not arrival_date:
+        return factor
+    return 1.0 if str(arrival_date) < BORDER_CONTROL_DATE else factor
 
 
 def load_first_wave_seeds(path):
@@ -70,6 +106,9 @@ def load_first_wave_seeds(path):
                 'infection_day': int(row['infection_day']),
                 'arrival_day': (int(float(row['arrival_day_from_infection']))
                                 if row['arrival_day_from_infection'] else None),
+                # B82: the calendar arrival date, which decides the border-control regime the
+                # seed arrived under; empty for a local seed.
+                'arrival_date': row.get('arrival_date') or None,
                 'status': row['status'],
                 # B68: a local seed infected by an imported case is traced from its
                 # infector's confirmation (simulation day); empty for the other seeds.
@@ -125,6 +164,9 @@ def get_saveable_data(data, data_type):
             'seed_type': getattr(data, 'seed_type', None),
             'seed_status': getattr(data, 'seed_status', None),
             'seed_case_id': getattr(data, 'seed_case_id', None),
+            # B82: the arrival date decides which border-control regime the seed arrived under,
+            # so a scenario's output can be split by period.
+            'seed_arrival_date': getattr(data, 'seed_arrival_date', None),
         }
     elif data_type == "contact":
         # Save contact data attributes
@@ -574,6 +616,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                     course_of_disease_data.seed_type = seed_case['seed_type']
                     course_of_disease_data.seed_status = seed_case['status']
                     course_of_disease_data.seed_case_id = seed_case['case_id']
+                    # B82: kept so a scenario's output can be split by border-control regime.
+                    course_of_disease_data.seed_arrival_date = seed_case['arrival_date']
                 natural_immunity_status_list.append(
                     course_of_disease_data.natural_immunity_status)
                 course_of_disease_data_tmp = get_saveable_data(
@@ -603,7 +647,11 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                                                                   'status': seed_case['status'],
                                                                   'seed_type': seed_case['seed_type'],
                                                                   'breach': breach,
-                                                                  'imported_factor': imported_factor,
+                                                                  # B82: by arrival regime
+                                                                  'imported_factor':
+                                                                      imported_factor_for(
+                                                                          seed_case['arrival_date'],
+                                                                          imported_factor),
                                                                   'quarantine_from_day':
                                                                       seed_case['quarantine_from_day']}),
                                                  group_infected=group_infected,

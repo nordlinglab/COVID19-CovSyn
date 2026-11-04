@@ -16,6 +16,20 @@ from typing import Any
 
 import numpy as np
 
+# B83 (2026-11-04): acceptance band for the share of cases infecting three or more, measured on
+# the population R is measured on. B56 took the band from all 579 first-wave cases, between the
+# recorded infector links (0.17%) and the confirmed contacts (4.32%); B67 then moved R onto the
+# local index cases (Cheng 2020, 0.62 each, band [0.37, 0.98]) because CovSyn's index case is a
+# local case living in the community, but left this share on a population 84% of which was
+# imported. The two could not both hold: with R = 0.62 and k = 0.286 a negative binomial puts
+# 7.8% at three or more, and no R above 0.40 stays under 4.3% at any accepted k, so the check
+# was unsatisfiable whatever the model did. The same two definitions over the 55 local cases of
+# validation_reference/taiwan_case_timeline.csv (case_type 'Local') give 1 of 55 = 1.82% by
+# links and 7 of 55 = 12.73% by confirmed contacts. The dispersion k keeps the 579-case MLE
+# (B61): the local subset gives k = 5.69 by confirmed contacts, which would not constrain the
+# dispersion at all.
+OFFSPRING_SHARE_GE3 = (1.8, 12.8)
+
 
 def json_band(target: Any) -> Any:
     """A target band ready for strict JSON: an open (infinite) bound becomes None.

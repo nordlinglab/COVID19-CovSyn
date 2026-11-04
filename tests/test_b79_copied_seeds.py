@@ -143,9 +143,16 @@ def test_run_covid_reads_the_copied_seed_file(tmp_path, cases, run10_vector,
 
 
 def test_calibrated_q_and_p_are_the_defaults_under_imported_delay():
-    """Run 19 candidate 60 under A2, 400 runs each (Mac, 2026-11-02): q 0.294, p 0.061 / 0.099."""
+    """The calibrated constants, with the measurement each one came from.
+
+    p: run 19 candidate 60 under A2, 400 runs (Mac, 2026-11-02), 0.061 / 0.099.
+    q: B82 (2026-11-04) recalibrated it on the run 21 selected vector and made it the POST-BAN
+    value, the 16 seeds that arrived before the 2020-02-07 entry ban being held at 1.0. The
+    relation is then m(q) = A + B*q with A measured at 7.27 of the data's 12 infections, so
+    the old proportional calibration no longer applies and 0.294 became 0.107.
+    """
     import covsyn.model.data_synthesize as ds
     from covsyn.model.data_synthesis_main import IMPORTED_FACTOR, run_covid
-    assert IMPORTED_FACTOR == pytest.approx(0.294)
+    assert IMPORTED_FACTOR == pytest.approx(0.107)
     assert inspect.signature(run_covid).parameters["imported_factor"].default == IMPORTED_FACTOR
     assert ds.QUARANTINE_BREACH == {"confirmed": 0.061, "with_unclear": 0.099}

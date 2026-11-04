@@ -516,7 +516,14 @@ OUTCOME_TARGETS = {
     #   model reaches about 2.66, inside the band.
     # * school [1.15, 1.72]: 1.15 is the 2020 survey split by Fu 2012's setting shares.
     # * workplace and community keep [1.20, 1.80]; Fu 2010 (1.65, 1.76) falls inside.
-    'daily_household':        (2.27, 3.28, 1.0),
+    # B84 (2026-11-04, user): weight 1.0 -> 3.0. Run 21 measured 2.115 against this band, its
+    # bootstrap interval reaching only 2.216, while the other four layer targets were already
+    # inside theirs, so the search had no reason to spend on this one. The shortfall is a
+    # calibration one: the 1,000 index cases have 2.656 household members on average (14.2%
+    # live alone), so the ceiling is 2.656 contacts a day when every member is met every day
+    # and 2.523 at the upper bound of household_healthy_p, both above the 2.27 lower bound.
+    # No bound moves; only the weight.
+    'daily_household':        (2.27, 3.28, 3.0),
     'daily_school':           (1.15, 1.72, 1.0),
     # B64 (2026-10-24): reported only. Fu 2010's 1.65 is over every diary, including the people
     # with no job and the employed on a day off; when B64 set it aside the model had no days off.

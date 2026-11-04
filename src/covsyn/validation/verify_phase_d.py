@@ -26,7 +26,7 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_i
                                             contacts_per_day_before_onset,
                                             offspring_dispersion, one_day_counts, one_day_shape)
 from covsyn.calibration.sar_anchors import JIAN2020_LOCAL_HEALTH_CARE_PER_CASE
-from covsyn.validation.acceptance import (band_text, bootstrap_index_sets,
+from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootstrap_index_sets,
                                           bootstrap_intervals, collect_replicates,
                                           json_band, percentile_intervals, verdict)
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
@@ -327,8 +327,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     check('B17', 'R (mean offspring of an index case)', counts.mean(), (0.37, 0.98),
           note='B67: Cheng 2020 local index cases 18 / 29 = 0.62; all cases between Taiwan '
                'links 0.047 and confirmed contacts 0.43 (E80)')
-    check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), (0.2, 4.3), '%',
-          note='B56: between Taiwan links (0.2%) and confirmed contacts (4.3%), E80')
+    check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), OFFSPRING_SHARE_GE3, '%',
+          note='B83: the 55 local cases, between recorded links (1 of 55) and confirmed '
+               'contacts (7 of 55); the all-case band (0.2%, 4.3%) of B56 belonged to a '
+               'population 84% imported and could not hold with B67\'s R')
     # B71 (2026-10-26, user): the largest count grows with the number of cases and rests on one
     # draw, and the old band (5, 30) had no source. Compare like with like instead: the largest
     # of 579 simulated index cases, the size of the Taiwan tracing set, whose largest is 8. The

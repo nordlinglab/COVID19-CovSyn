@@ -179,17 +179,34 @@ def test_imported_onset_to_confirmation_is_the_210_cases():
 
 def test_imported_factor_scales_only_imported_seeds_in_the_community(run10_vector,
                                                                      demographic_parameters):
+    """The factor reaches imported community seeds and no other seed type.
+
+    B82 (2026-11-04) moved the scenario from feb7 to the 2020-04-12 one: every feb7 seed
+    arrived before the 2020-02-07 entry ban, so the factor no longer applies to any of them and
+    the old version of this test asserted the pre-B82 behaviour. The seeds the factor does
+    reach are the imported community ones that arrived from the ban on and were not recalled
+    into home quarantine (B73 gives a recalled seed the breach probability from its recall
+    day); test_b82_imported_factor_periods covers the regime split itself.
+    """
+    from covsyn.model.data_synthesis_main import (FIRST_WAVE_SEED_FILES, imported_factor_for,
+                                                  load_first_wave_seeds)
+
     layers = ("household", "school", "workplace", "health_care", "municipality")
-    infected = {"imported": 0.0, "other seeds": 0.0}
-    for seed in range(10):
+    seeds = load_first_wave_seeds(FIRST_WAVE_SEED_FILES["taiwan_first_outbreak"])
+    scaled = {s["case_id"] for s in seeds
+              if s["seed_type"] == "imported" and s["status"] == "community"
+              and s["quarantine_from_day"] is None
+              and imported_factor_for(s["arrival_date"], 0.0) == 0.0}
+    infected = {"scaled imported": 0.0, "other seeds": 0.0}
+    for seed in range(3):
         _, _, courses, contacts = _run(_b64_vector(run10_vector), demographic_parameters, seed,
-                                       imported_factor=0.0)
+                                       mode="taiwan_first_outbreak", imported_factor=0.0)
         for c, x in zip(courses, contacts):
             n = sum(float(np.nansum(np.asarray(x[f"{L}_effective_contacts"] or [], dtype=float)))
                     for L in layers)
-            if c.get("seed_type") == "imported":
-                infected["imported"] += n
-            elif c.get("seed_type") is not None:
+            if c.get("seed_case_id") in scaled:
+                infected["scaled imported"] += n
+            elif c.get("seed_type") is not None and c.get("seed_type") != "imported":
                 infected["other seeds"] += n
-    assert infected["imported"] == 0.0
+    assert infected["scaled imported"] == 0.0
     assert infected["other seeds"] > 0.0
