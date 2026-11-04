@@ -61,6 +61,45 @@ def reference_local_cases(seeds: pd.DataFrame, sources: pd.DataFrame) -> list[in
     return sorted(c for c in infector if descends_from(c, infector, roots))
 
 
+def reference_percentile(local: np.ndarray, reference: int) -> float | None:
+    """Where the one observed count falls among the simulated runs, as a percentage.
+
+    Taiwan's first wave happened once, so the comparison that matters is not the simulated mean
+    but the position of the observation in the simulated distribution (B85, the rule B71 already
+    applies to the offspring maximum). The counts are discrete and tie often, so a tie counts as
+    half a run, which keeps a heavily tied sample off the tail edges.
+
+    Args:
+        local: Simulated local cases, one entry per run.
+        reference: The reported local cases of this scenario.
+
+    Returns:
+        The percentile, or None when there are no runs.
+    """
+    if len(local) == 0:
+        return None
+    below = float(np.mean(local < reference))
+    equal = float(np.mean(local == reference))
+    return 100 * (below + equal / 2)
+
+
+def reference_verdict(local: np.ndarray, reference: int, tail: float = 2.5) -> str | None:
+    """'ok' when the observation is in neither tail of the simulated runs, 'fail' otherwise.
+
+    Args:
+        local: Simulated local cases, one entry per run.
+        reference: The reported local cases of this scenario.
+        tail: Size of each excluded tail, in percent; B71's rule uses 2.5.
+
+    Returns:
+        'ok', 'fail', or None when there are no runs.
+    """
+    percentile = reference_percentile(local, reference)
+    if percentile is None:
+        return None
+    return "ok" if tail <= percentile <= 100 - tail else "fail"
+
+
 def simulated(directory: Path) -> tuple[np.ndarray, np.ndarray]:
     """Local cases per run, and infections caused by every imported seed."""
     local, imported = [], []
@@ -90,9 +129,20 @@ def main() -> None:
           f"{np.percentile(boot, 2.5):.1f}-{np.percentile(boot, 97.5):.1f}), median "
           f"{np.median(local):.0f}, 5-95% of runs {np.percentile(local, 5):.0f}-"
           f"{np.percentile(local, 95):.0f}; n = {len(local)}")
+    # B85: the verdict, which the mean cannot give for a single observed realisation.
+    percentile = reference_percentile(local, len(reference))
+    if percentile is not None:
+        print(f"reference {len(reference)} sits at the {percentile:.1f} percentile of the "
+              f"simulated runs: {reference_verdict(local, len(reference))} "
+              f"(B85/B71: it must be in neither 2.5% tail)")
     if len(imported):
-        print(f"infections per imported seed: {imported.mean():.3f} "
-              f"(Cheng 2020: 0.056, exact Poisson 95% 0.015-0.14)")
+        # B82: the Cheng 2020 figure is the whole study period, 15 Jan to 18 Mar 2020, whose
+        # imported cases are mostly post-border-control; it is not a band for a February subset.
+        note = ("Cheng 2020: 0.056, exact Poisson 95% 0.015-0.14"
+                if "feb" not in seed_csv.name else
+                "Cheng 2020's 0.056 covers the whole first wave, most of it after the "
+                "2020-02-07 ban, so it is not a band for this subset (B82)")
+        print(f"infections per imported seed: {imported.mean():.3f} ({note})")
 
 
 if __name__ == "__main__":
