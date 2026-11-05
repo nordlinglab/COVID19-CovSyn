@@ -23,10 +23,10 @@ from covsyn.calibration.firefly_optimizer import rw_nan_euclidean_distances
 def test_a_pair_with_a_missing_coordinate_uses_the_present_ones_unscaled():
     """The row-weighted variant drops sklearn's rescaling, so this is not sklearn's answer.
 
-    Beware the docstring: it still carries sklearn's formula and example, with the weight
-    "total coordinates / present coordinates", but the two lines that applied it are commented
-    out in the body. Here only coordinate 0 is present in both rows, so the distance is
-    |0 - 1| = 1, where sklearn's rescaled version would give sqrt(2).
+    The two lines that would apply sklearn's weight, "total coordinates / present
+    coordinates", are commented out in the body; B90 measured what restoring them would do and
+    left them, correcting the docstring instead. Here only coordinate 0 is present in both
+    rows, so the distance is |0 - 1| = 1, where sklearn's rescaled version would give sqrt(2).
     """
     nan = float("nan")
     x = [[0, 1], [1, nan]]

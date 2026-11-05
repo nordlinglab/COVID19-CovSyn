@@ -46,26 +46,32 @@ simplefilter(action='ignore', category=FutureWarning)
 @_deprecate_positional_args
 def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
                                missing_values=np.nan, copy=True):
-    """Calculate the euclidean distances in the presence of missing values.
+    """Euclidean distance over the coordinates present in both samples, NOT rescaled.
 
-    Compute the euclidean distance between each pair of samples in X and Y,
-    where Y=X is assumed if Y=None. When calculating the distance between a
-    pair of samples, this formulation ignores feature coordinates with a
-    missing value in either sample and scales up the weight of the remaining
-    coordinates:
+    Compute the distance between each pair of samples in X and Y, where Y=X is assumed if
+    Y=None, ignoring any coordinate missing in either sample:
 
-        dist(x,y) = sqrt(weight * sq. distance from present coordinates)
-        where,
-        weight = Total # of coordinates / # of present coordinates
+        dist(x, y) = sqrt(sq. distance over the coordinates present in both)
 
-    For example, the distance between ``[3, na, na, 6]`` and ``[1, na, 4, 5]``
-    is:
+    For example, the distance between ``[3, na, na, 6]`` and ``[1, na, 4, 5]`` is
+    ``sqrt((3-1)^2 + (6-5)^2)``.
 
-        .. math::
-            \\sqrt{\\frac{4}{2}((3-1)^2 + (6-5)^2)}
+    This is where it departs from sklearn's ``nan_euclidean_distances``, which this function
+    was copied from: sklearn multiplies the squared distance by
+    ``total coordinates / present coordinates``, so that pairs observed on different numbers of
+    coordinates are comparable. Those two lines are present below but commented out, and have
+    been since the first commit, so the behaviour is inherited rather than decided here.
 
-    If all the coordinates are missing or if there are no common present
-    coordinates then NaN is returned for that pair.
+    B90 (2026-11-06) measured what restoring them would do, because it is not obvious: the
+    objective's data matrix is only 36% present, its rows carry 3 to 6 of 9 coordinates, and
+    pairs share 1 to 5, while the synthetic side is about 94% present, so the two sides are not
+    alike and the asymmetry does not cancel. Restoring the rescaling moved all five of run 23's
+    shortlisted candidates by the same +0.105 and changed no ranking, because the energy term is
+    -0.249 against a total of 9.3 with an sd of 0.046 against 4.2. It was therefore left alone,
+    and this docstring was corrected to describe what the code does instead.
+
+    If all the coordinates are missing, or there are no common present coordinates, NaN is
+    returned for that pair.
 
     Read more in the :ref:`User Guide <metrics>`.
 
