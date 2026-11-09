@@ -390,12 +390,19 @@ COST_PARTS = [
 def evaluate_cost_parts(
     vectors: dict[str, np.ndarray], table: Path, workers: int = 32
 ) -> list[dict]:
-    """Objective and its parts for every firefly at every stage, also written to a CSV table.
+    """Objective and its parts for every firefly at every stage, written to a CSV table.
 
-    Computed on every call and never read back: a cache had to know when its rows were stale,
-    which depends on the vectors, every module the objective imports and the model data, and
-    each round of the 2026-11-09 code review found another case it missed. Recomputing costs
-    about the time of a few optimizer generations, once per drawn Fig 4.
+    Computed on every call; the table is an output and is never read back, since whether a
+    stored table still matched would depend on the vectors, every module the objective imports
+    and the model data.
+
+    Args:
+        vectors: The parameter vectors of each stage, one row per firefly.
+        table: The CSV the rows are written to; an existing file is replaced.
+        workers: Processes evaluating the objective.
+
+    Returns:
+        One row per stage and firefly: stage, firefly, total, and each cost part.
     """
     import concurrent.futures
     import pickle
@@ -409,23 +416,23 @@ def evaluate_cost_parts(
         ct = pickle.load(f)
     cheng = (ct["Cheng_contact_array"], ct["Cheng_attack_rate"], ct["norm_weights"])
     columns = np.load("./variable/Taiwan_data_matrix.npy").shape[1]
-    pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns)
-    )
     rows: list[dict[str, Any]] = []
-    for stage, matrix in vectors.items():
-        for firefly, vector in enumerate(matrix):
-            total = float(fast_cost.cost_function(vector, demo, pool, *cheng))
-            rows.append(
-                {
-                    "stage": stage,
-                    "firefly": firefly,
-                    "total": total,
-                    **{k: float(LAST.get(k, np.nan)) for k, _ in COST_PARTS[:-1]},
-                }
-            )
-            print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
-    pool.shutdown()
+    # The with-block closes the workers on an exception or interrupt too.
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns)
+    ) as pool:
+        for stage, matrix in vectors.items():
+            for firefly, vector in enumerate(matrix):
+                total = float(fast_cost.cost_function(vector, demo, pool, *cheng))
+                rows.append(
+                    {
+                        "stage": stage,
+                        "firefly": firefly,
+                        "total": total,
+                        **{k: float(LAST.get(k, np.nan)) for k, _ in COST_PARTS[:-1]},
+                    }
+                )
+                print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
     _write_csv(table, rows)
     return rows
 
@@ -529,6 +536,10 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
                     linewidth=width,
                 )
 
+    # Tables of an earlier fig4 into out_dir would otherwise sit beside this run's figure when
+    # this one does not evaluate.
+    for name in ("wu2025_fig4_cost_parts.csv", "wu2025_fig4_reproducibility.csv"):
+        (out_dir / name).unlink(missing_ok=True)
     rows = (
         evaluate_cost_parts(
             {k: v for k, (v, _) in stages.items()},

@@ -100,14 +100,56 @@ def test_a_converged_pre_b81_run_keeps_its_best_stage():
     assert not wu.best_repeats_final(best, final)
 
 
-def test_cost_parts_are_recomputed_even_when_a_previous_table_exists(tmp_path, monkeypatch):
-    """No cache: a table left by an earlier run is overwritten, never read back."""
+def _stub_objective(monkeypatch):
+    """fast_cost stand-in: the total and every part are functions of the vector."""
     from covsyn.calibration import fast_cost
+    from covsyn.calibration.cost_parts import LAST
+
+    def cost_function(vector, *args):
+        LAST.clear()
+        LAST.update({key: float(np.sum(vector)) + i for i, (key, _) in enumerate(wu.COST_PARTS[:-1])})
+        return float(np.sum(vector))
 
     monkeypatch.setattr(fast_cost, "init_worker", lambda *a: None)
-    monkeypatch.setattr(fast_cost, "cost_function", lambda vector, *a: float(np.sum(vector)))
+    monkeypatch.setattr(fast_cost, "cost_function", cost_function)
+
+
+def test_cost_parts_are_recomputed_even_when_a_previous_table_exists(tmp_path, monkeypatch):
+    """No cache: a table left by an earlier run is replaced, its total and every part."""
+    _stub_objective(monkeypatch)
     table = tmp_path / "wu2025_fig4_cost_parts.csv"
-    wu._write_csv(table, [{"stage": "Final", "firefly": 0, "total": 999.0}])
+    stale = {"stage": "Final", "firefly": 0, "total": 999.0}
+    stale.update({key: 999.0 for key, _ in wu.COST_PARTS[:-1]})
+    wu._write_csv(table, [stale])
     rows = wu.evaluate_cost_parts({"Final": np.array([[1.0, 2.0]])}, table, workers=1)
-    assert [r["total"] for r in rows] == [3.0]
+    assert rows[0]["total"] == 3.0
+    assert [rows[0][key] for key, _ in wu.COST_PARTS[:-1]] == [
+        3.0 + i for i in range(len(wu.COST_PARTS) - 1)]
     assert "999" not in table.read_text()
+
+
+def test_fig4_writes_its_tables_beside_the_figure(tmp_path, monkeypatch):
+    _stub_objective(monkeypatch)
+    run = tmp_path / "run"
+    run.mkdir()
+    _optimizer_run(run, rotated=True)
+    out = tmp_path / "figures"
+    out.mkdir()
+    wu.fig4(run, out, evaluate=True)
+    assert (out / "wu2025_fig4_cost_parts.csv").exists()
+    assert (out / "wu2025_fig4_reproducibility.csv").exists()
+    assert not any(p.name.startswith("wu2025_fig4_cost_parts") for p in run.iterdir())
+
+
+def test_fig4_without_evaluation_removes_an_earlier_run_s_tables(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    _optimizer_run(run, rotated=False)
+    out = tmp_path / "figures"
+    out.mkdir()
+    for name in ("wu2025_fig4_cost_parts.csv", "wu2025_fig4_reproducibility.csv"):
+        (out / name).write_text("another run")
+    wu.fig4(run, out, evaluate=False)
+    assert (out / "wu2025_fig4_firefly_convergence.png").exists()
+    assert not (out / "wu2025_fig4_cost_parts.csv").exists()
+    assert not (out / "wu2025_fig4_reproducibility.csv").exists()
