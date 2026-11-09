@@ -656,9 +656,14 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
               if len(imported_offspring) else np.nan, (0.015, 0.14),
               note='Cheng 2020 imported index cases 4 / 71 = 0.056 (exact Poisson 95% '
                    '0.015-0.14); the case data give 17 local cases infected by imported cases')
-        everyone = [(c, k) for r in first_runs for c, k in zip(r['course'], r['contact'], strict=True)]
+        # Each case's tracing-window count, once: B66 and the three B72 groups below all read
+        # it, and computing it per use repeated the work four times in every bootstrap
+        # replicate (code review 2026-11-09, F8). The counts are integers, so the sums and
+        # means are bit-identical to computing them in place.
+        window = [[contacts_in_tracing_window(c, k) for c, k in zip(r['course'], r['contact'], strict=True)]
+                  for r in first_runs]
         check('B66', "contacts per confirmed case in Jian's tracing window, all cases",
-              float(np.mean([contacts_in_tracing_window(c, k) for c, k in everyone])), None,
+              float(np.mean([n for counts in window for n in counts])), None,
               note='Jian et al. 2020: 16.5 per case over all 487 confirmed cases, 76% of them '
                    'quarantined travellers or contacts; same mixture as this scenario (1.14)')
         # B72 (2026-10-26, user): Jian's statistic computed as Jian did, once per simulated
@@ -668,10 +673,10 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
         # arrival, so it has no flight contact.
         def jian(selector):
             per_run = []
-            for r in first_runs:
-                pairs = [(c, k) for c, k in zip(r['course'], r['contact'], strict=True) if selector(c)]
-                if pairs:
-                    per_run.append(sum(contacts_in_tracing_window(c, k) for c, k in pairs) / len(pairs))
+            for r, counts in zip(first_runs, window, strict=True):
+                chosen = [n for c, n in zip(r['course'], counts, strict=True) if selector(c)]
+                if chosen:
+                    per_run.append(sum(chosen) / len(chosen))
             return np.array(per_run, dtype=float)
 
         for label, selector, reference in (
