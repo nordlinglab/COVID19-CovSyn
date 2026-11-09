@@ -85,3 +85,15 @@ def test_no_runs_gives_no_verdict():
     """An empty directory must give no verdict rather than a spurious one."""
     assert reference_percentile(np.array([]), 10) is None
     assert reference_verdict(np.array([]), 10) is None
+
+
+def test_a_largest_tied_at_the_observation_is_not_pushed_into_the_upper_tail():
+    """B71's largest of 579: P(<= 7) = 0.90, P(= 8) = 0.08, P(>= 9) = 0.02 (code review F4).
+
+    8 is in neither 2.5% tail (P(max >= 8) = 10%), but counting every tie as below gave 98,
+    which failed (2.5, 97.5). With a tie as half a sample the check passes.
+    """
+    largest = np.array([7] * 900 + [8] * 80 + [9] * 20)
+    assert 100 * np.mean(largest <= 8) > 97.5
+    assert reference_percentile(largest, 8) == pytest.approx(94.0)
+    assert reference_verdict(largest, 8) == "ok"

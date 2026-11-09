@@ -31,6 +31,7 @@ from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootst
                                           json_band, percentile_intervals, verdict,
                                           worker_count)
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
+from covsyn.validation.compare_first_wave import reference_percentile
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
@@ -335,11 +336,14 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # B71 (2026-10-26, user): the largest count grows with the number of cases and rests on one
     # draw, and the old band (5, 30) had no source. Compare like with like instead: the largest
     # of 579 simulated index cases, the size of the Taiwan tracing set, whose largest is 8. The
-    # check passes when 8 is not in either 2.5% tail of the simulated largest.
+    # check passes when 8 is not in either 2.5% tail of the simulated largest. The largest is
+    # discrete and ties at 8 often, so a tie counts as half a sample, as in B85's
+    # reference_percentile; counting every tie as below failed an 8 that sat in neither tail
+    # (code review 2026-11-09, F4).
     rng = np.random.default_rng(0)
     largest = np.array([rng.choice(counts, TAIWAN_TRACING_CASES).max() for _ in range(2000)])
     check('B17', f'samples of {TAIWAN_TRACING_CASES} cases whose largest is at most '
-          f'{TAIWAN_TRACING_LARGEST}', 100 * np.mean(largest <= TAIWAN_TRACING_LARGEST), (2.5, 97.5),
+          f'{TAIWAN_TRACING_LARGEST}', reference_percentile(largest, TAIWAN_TRACING_LARGEST), (2.5, 97.5),
           '%', interval=False,
           note=f'B71: Taiwan tracing largest {TAIWAN_TRACING_LARGEST} over {TAIWAN_TRACING_CASES} '
                f'cases (confirmed contacts, an upper bound, E80); simulated median '
