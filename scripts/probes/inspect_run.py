@@ -34,12 +34,34 @@ DEFAULT_WATCH = (
     "contacts per day before onset, household",
     "cases infecting 3 or more",
     "samples of 579 cases, percentile of a largest of 8",
-    # the same check's name before the code review of 2026-11-09 (F4), for older runs; its
-    # value was then P(largest <= 8), not the mid-rank percentile
-    "samples of 579 cases whose largest is at most 8",
     "offspring dispersion k",
     "R (mean offspring of an index case)",
 )
+
+
+# A check renamed when its statistic changed, mapped to its former name and what that measured,
+# so an older run is read under the current name and marked, rather than as a second row that
+# is blank on every run (code review 2026-11-09, F4).
+FORMER_NAMES = {
+    "samples of 579 cases, percentile of a largest of 8":
+        ("samples of 579 cases whose largest is at most 8", "older run: P(largest <= 8)"),
+}
+
+
+def watched_value(checks: list[dict], name: str) -> tuple[float | None, str]:
+    """The value of a watched check, read under its former name in an older run.
+
+    Returns:
+        The value, or None when absent, and a note saying what an older run's value measured,
+        or an empty string.
+    """
+    value = value_of(checks, name)
+    if value is None and name in FORMER_NAMES:
+        former, note = FORMER_NAMES[name]
+        value = value_of(checks, former)
+        if value is not None:
+            return value, note
+    return value, ""
 
 
 def stage_timings(run: Path) -> list[tuple[str, str]]:
@@ -91,6 +113,7 @@ def candidate_table(run: Path, watch: tuple[str, ...]) -> list[dict]:
         if checks is None:
             continue
         index = d.name.removeprefix("candidate_")
+        watched = {name: watched_value(checks, name) for name in watch}
         c = costs.get(index, {})
         rows.append({
             "candidate": index,
@@ -98,7 +121,8 @@ def candidate_table(run: Path, watch: tuple[str, ...]) -> list[dict]:
             "validation": c.get("validation_mean"),
             "sd": c.get("validation_sd"),
             "failed": failing(checks),
-            "watch": {name: value_of(checks, name) for name in watch},
+            "watch": {name: watched[name][0] for name in watch},
+            "notes": {name: watched[name][1] for name in watch},
         })
     return rows
 
@@ -133,7 +157,8 @@ def main() -> None:
         print("\n  watched values")
         for name in watch:
             line = "  ".join(f'{r["candidate"]} {_fmt(r["watch"].get(name), 8)}' for r in rows)
-            print(f"    {name[:46]:<46} {line}")
+            notes = sorted({r["notes"][name] for r in rows if r["notes"].get(name)})
+            print(f"    {name[:46]:<46} {line}" + (f'  ({"; ".join(notes)})' if notes else ""))
     else:
         print("\n(no selected/candidates/*/checks.json: an older run, or the chain is unfinished)")
 
@@ -146,9 +171,9 @@ def main() -> None:
         within = [c["name"] for c in checks if c.get("within_noise")]
         print(f'  only within the 95% interval: {"; ".join(within) or "none"}')
         for name in watch:
-            v = value_of(checks, name)
+            v, note = watched_value(checks, name)
             if v is not None:
-                print(f"    {name[:46]:<46} {_fmt(v)}")
+                print(f"    {name[:46]:<46} {_fmt(v)}" + (f"  ({note})" if note else ""))
 
 
 if __name__ == "__main__":

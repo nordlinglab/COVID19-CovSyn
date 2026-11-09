@@ -25,10 +25,11 @@ class _Recorder:
     """Stands in for the objective: a deterministic cost, and every call recorded."""
 
     def __init__(self):
-        self.calls: list[tuple[float, int]] = []
+        # each vector by its bytes, so two different vectors can never be taken for one
+        self.calls: list[tuple[bytes, int]] = []
 
     def __call__(self, P, demo, executor, contacts, attack, weights, seed_offset=0):
-        self.calls.append((float(np.sum(P)), int(seed_offset)))
+        self.calls.append((np.asarray(P, dtype=float).tobytes(), int(seed_offset)))
         # the offset shifts the cost, so a stale score from another generation is visible
         return float(np.sum(P)) % 1.0 + seed_offset / 1e9
 
@@ -48,11 +49,12 @@ def run(monkeypatch, tmp_path):
 
 
 def test_offset_of_each_generation_is_its_own_block():
-    """Generation g scores on its own 300 seeds; the initial population scores on 0..299."""
-    assert fo.generation_seed_offset(0) == fo.SIMULATIONS_PER_EVALUATION
-    assert fo.generation_seed_offset(5) == 6 * fo.SIMULATIONS_PER_EVALUATION
+    """Generation g scores on its own 300 seeds; generation 0 shares 0..299 with the initial
+    population (F7)."""
+    assert fo.generation_seed_offset(0) == 0
+    assert fo.generation_seed_offset(5) == 5 * fo.SIMULATIONS_PER_EVALUATION
     offsets = {fo.generation_seed_offset(g) for g in range(120)}
-    assert len(offsets) == 120 and 0 not in offsets
+    assert len(offsets) == 120
 
 
 def test_training_seeds_never_reach_the_validation_blocks():
@@ -74,10 +76,29 @@ def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):
     assert seen == sorted(seen)
 
 
-def test_the_whole_population_is_rescored_when_the_block_changes(run):
-    """Including the brightest: a score from another block cannot be compared with this one."""
+def test_generation_0_starts_from_the_initial_scores_without_rescoring(run):
+    """The initial population is scored on block 0, generation 0's block, once only (F7).
+
+    Generation 0 evaluates only moved fireflies, on block 0: the first call after the initial
+    population is a move on block 0 (it was a re-score on block 300), and no initial vector is
+    evaluated on block 0 a second time.
+    """
+    from collections import Counter
+
     recorder, _, _ = run
-    for g in range(GENERATIONS):
+    initial = [P for P, _ in recorder.calls[:POP]]
+    assert recorder.calls[POP][1] == 0
+    on_block_0 = Counter(P for P, o in recorder.calls if o == 0)
+    assert all(on_block_0[P] == initial.count(P) for P in initial)
+
+
+def test_the_whole_population_is_rescored_when_the_block_changes(run):
+    """Including the brightest: a score from another block cannot be compared with this one.
+
+    From generation 1 on; generation 0 shares the initial population's block (F7).
+    """
+    recorder, _, _ = run
+    for g in range(1, GENERATIONS):
         offset = fo.generation_seed_offset(g)
         rescored = [P for P, o in recorder.calls if o == offset]
         assert len(rescored) >= POP

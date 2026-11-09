@@ -41,9 +41,9 @@ IMPORTED_ISOLATION_OPTIONS = ('model', 'imported_delay')
 # the 118 community seeds infect 46.93; the relation is m(q) = A + B*q with A measured at 7.27
 # (q = 0, 800 runs), so those 16 seeds alone produce 61% of the 12 infections in the data, and
 # q = 0.107 gives 11.9-12.5. Steps measured at 800 runs: q = 0 -> 7.27, 0.090 -> 11.27,
-# 0.104 -> 11.86, 0.120 -> 12.54. Recalibrate when the vector or the isolation changes; the
-# proportional update in calibrate_imported_factor.py is biased by the constant A, so solve
-# A + B*q = 12 from two low-q measurements instead of reading its last line.
+# 0.104 -> 11.86, 0.120 -> 12.54. Recalibrate when the vector or the isolation changes with
+# calibrate_imported_factor.py, which since the code review of 2026-11-09 (F9) solves
+# A + B*q = 12 from two low-q measurements, as these were solved by hand.
 IMPORTED_FACTOR = 0.107
 # B82 (2026-11-04, professor meeting of 2026-11-02): the factor stands for the home quarantine,
 # which did not exist before Taiwan's 2020-02-07 entry ban, so it applies only from that date.

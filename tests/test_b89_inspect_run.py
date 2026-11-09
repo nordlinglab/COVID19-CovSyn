@@ -130,7 +130,6 @@ def test_the_watch_list_names_the_checks_a_review_returns_to(run):
     """The default watch list covers the checks this review kept asking about."""
     for name in ("contacts per day before onset, household",
                  "samples of 579 cases, percentile of a largest of 8",
-                 "samples of 579 cases whose largest is at most 8",
                  "cases infecting 3 or more"):
         assert name in ir.DEFAULT_WATCH
 
@@ -139,3 +138,13 @@ def test_value_of_returns_none_for_an_absent_check(run):
     """A watched name the run does not have must read as absent, not as zero."""
     checks = ir.read_checks(run / "validation_reference" / "phaseD_checks.json")
     assert ir.value_of(checks, "a check that does not exist") is None
+
+
+def test_an_older_run_is_read_under_the_current_name_and_marked():
+    """B71 was renamed when its statistic changed (F4); one row, never a blank twin."""
+    old = [_check("samples of 579 cases whose largest is at most 8", 98.0, [2.5, 97.5], False)]
+    new = [_check("samples of 579 cases, percentile of a largest of 8", 94.0, [2.5, 97.5], True)]
+    name = "samples of 579 cases, percentile of a largest of 8"
+    assert ir.watched_value(old, name) == (98.0, "older run: P(largest <= 8)")
+    assert ir.watched_value(new, name) == (94.0, "")
+    assert "samples of 579 cases whose largest is at most 8" not in ir.DEFAULT_WATCH
