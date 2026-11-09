@@ -70,10 +70,45 @@ def test_calibration_converges_on_a_curve_from_a_distant_start(script):
     assert calls[:2] == [0.0, 0.9]
 
 
-def test_a_start_near_the_root_needs_three_batches(script):
+def test_a_starting_factor_already_within_tolerance_is_returned_after_two_batches(script):
+    """IMPORTED_FACTOR was calibrated, so re-running must not drift it by another batch."""
     calls = []
-    script.calibrate(lambda x: calls.append(x) or _curve(x), 12, 0.0605)
+    q0 = 0.107
+    assert script.calibrate(lambda x: calls.append(x) or 7.27 + 44.0 * x, 12, q0) == q0
+    assert calls == [0.0, q0]
+
+
+def test_a_linear_response_converges_in_one_step(script):
+    """m(0.05) = 9.25 is 2.75 from the data, so one step is needed and it lands on 12."""
+    calls = []
+    q = script.calibrate(lambda x: calls.append(x) or 7.27 + 39.66 * x, 12, 0.05)
     assert len(calls) == 3
+    assert 7.27 + 39.66 * q == pytest.approx(12)
+
+
+def test_noisy_measurements_stay_inside_the_bracket(script):
+    """Once m(q) is seen above and below the data, every step lies between those factors."""
+    responses = iter([7.27, 9.25, 12.8, 11.0, 12.2])
+    calls = []
+    q = script.calibrate(lambda x: calls.append(x) or next(responses), 12, 0.05)
+    above, below = calls[2], calls[3]
+    assert below < above
+    assert below < calls[4] < above
+    assert q == calls[4]
+
+
+def test_two_close_measurements_inverted_by_noise_do_not_stop_the_calibration(script):
+    """m(q0) = 11.3, then a slightly larger q gives 11.1: a line through just those two falls."""
+    responses = iter([7.27, 11.3, 11.1, 12.1])
+    calls = []
+    q = script.calibrate(lambda x: calls.append(x) or next(responses), 12, 0.1)
+    assert calls[2] > calls[1]
+    assert q == calls[3]
+
+
+def test_max_steps_below_one_is_refused(script):
+    with pytest.raises(ValueError, match="max_steps"):
+        script.calibrate(_curve, 12, 0.1, max_steps=0)
 
 
 @pytest.mark.parametrize("q0", [0.0, -0.1, 1.5, float("nan")])
@@ -90,7 +125,7 @@ def test_seeds_held_at_one_that_already_reach_the_data_are_an_error(script):
 
 
 def test_a_target_beyond_q_1_is_an_error_not_a_clipped_factor(script):
-    with pytest.raises(ValueError, match="outside"):
+    with pytest.raises(ValueError, match="above 1"):
         script.calibrate(lambda x: 7.0 + 2.0 * x, 12, 0.5)
 
 

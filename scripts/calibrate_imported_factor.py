@@ -12,7 +12,8 @@ q = 12 / m(1) this script used to make overshot (0.256 against about 0.11 on run
 code review 2026-11-09, F9). The script now measures m(0) and m(q0) at a low starting factor q0,
 the current IMPORTED_FACTOR unless given, solves the line through them for 12 -- two low-q
 measurements, as B82 found necessary, since m(q) is not quite linear far from the root -- and
-repeats secant steps through the last two measurements until one is within 0.5 people of 12.
+repeats false-position steps inside the bracket of measurements until one is within 0.5 people
+of 12.
 A factor that cannot reach the data stops the script with a non-zero exit.
 
 Usage (repository root):
@@ -86,40 +87,54 @@ def solve_line(q_low, m_low, q_high, m_high, target):
 
 
 def calibrate(measure, target, q0, tolerance=0.5, max_steps=4):
-    """The factor whose measured mean reaches target within tolerance, by secant steps.
+    """The factor whose measured mean reaches target within tolerance.
 
-    The first line runs through m(0) and m(q0); every later one through the last two
-    measurements, so a starting factor far from the root still converges on the curve rather
-    than on one extrapolated line (code review 2026-11-09). Each step's measurement is also its
-    check, so a converged calibration costs m(0), m(q0) and one batch per step.
+    Each step solves the line through the measured point just below target with the largest q
+    and, once one exists, the point just above it with the smallest q (false position), so the
+    step stays inside a bracket and a noisy pair of close measurements cannot turn the slope
+    negative. Until a point lies above target, the line runs from m(0) through the highest point
+    below it (code review 2026-11-09). Every measurement is also its own check: a converged
+    calibration costs m(0), m(q0) and one batch per step, and q0 itself is returned when it is
+    already within tolerance.
 
     Args:
         measure: Function of q returning the mean people infected over the runs.
         target: The people infected in the data.
         q0: Starting factor, in (0, 1].
         tolerance: Accepted distance of the measured mean from target, in people.
-        max_steps: Secant steps before giving up.
+        max_steps: Steps before giving up, at least 1.
 
     Returns:
         The calibrated factor.
 
     Raises:
-        ValueError: q0 is outside (0, 1], the seeds held at 1.0 alone reach target, a step
-            leaves [0, 1], two measurements do not rise with q, or no step converges.
+        ValueError: q0 or max_steps is out of range, the seeds held at 1.0 alone reach target,
+            the line needs a q above 1, the measurements below target do not rise with q, or
+            no step converges.
     """
     if not 0.0 < q0 <= 1.0:
         raise ValueError(f"starting factor {q0} is outside (0, 1]")
+    if max_steps < 1:
+        raise ValueError(f"max_steps {max_steps} must be at least 1")
     m0 = measure(0.0)
     if m0 >= target:
         raise ValueError(f"the seeds held at 1.0 alone infect {m0:.2f} >= {target}; "
                          "no q in [0, 1] reaches the data")
-    points = [(0.0, m0), (q0, measure(q0))]
+    m = measure(q0)
+    if abs(m - target) <= tolerance:
+        return q0
+    points = [(0.0, m0), (q0, m)]
     for _ in range(max_steps):
-        (q_a, m_a), (q_b, m_b) = sorted(points[-2:])
-        q = solve_line(q_a, m_a, q_b, m_b, target)
-        if not 0.0 <= q <= 1.0:
-            raise ValueError(f"the line through q = {q_a:.4f} and {q_b:.4f} reaches {target} at "
-                             f"q = {q:.4f}, outside [0, 1]; no factor reaches the data")
+        below = max((p for p in points if p[1] < target), key=lambda p: p[0])
+        above = [p for p in points if p[1] > target]
+        high = min(above, key=lambda p: p[0]) if above else below
+        low = below if above else (0.0, m0)
+        if high[0] <= low[0]:   # noise put a point above target left of one below it
+            low, high = (0.0, m0), below
+        q = solve_line(low[0], low[1], high[0], high[1], target)
+        if q > 1.0:
+            raise ValueError(f"the line through q = {low[0]:.4f} and {high[0]:.4f} reaches "
+                             f"{target} at q = {q:.4f}, above 1; no factor reaches the data")
         m = measure(q)
         if abs(m - target) <= tolerance:
             return q
