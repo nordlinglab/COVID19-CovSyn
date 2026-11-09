@@ -114,6 +114,9 @@ tail -3 phaseD_checks.txt | tee -a "$LOG"
 # objective (0..299), the chain (0..999), revalidation (100000 + 300 per block) and the probes
 # (300000+). The directory names must not start with synthetic_data_results_: tw_check.py
 # lists those as earlier runs.
+# The reported checklist (B60) and, since E97, every reported figure read these directories,
+# so a failed synthesis stops the chain here with its cause in the log, instead of a warning
+# that step 5 later turned into a stop (code review 2026-11-09, F6).
 say 'running the checklist again on independent seeds from 500000 (B60)'
 for mode in spread_Taiwan_weight taiwan_first_outbreak; do
     rm -rf "independent_$mode"
@@ -121,7 +124,7 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
     run covsyn.model.data_synthesis_main --mode "$mode" --monte_carlo_number 1000 \
         --result_path "independent_$mode" --cpu_cores "${CPU_CORES:-24}" \
         --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
-        || say "WARNING: independent data synthesis failed for $mode"
+        || { say "ERROR: independent data synthesis failed for $mode, stopping"; exit 1; }
 done
 run covsyn.validation.verify_phase_d independent_spread_Taiwan_weight \
     independent_taiwan_first_outbreak validation_reference/phaseD_checks_independent.json \
