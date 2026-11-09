@@ -1,0 +1,149 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Compare a first-wave scenario (B66) with the local cases it should reproduce.
+
+The reference is the set of reported local cases whose chain of infection starts at one of the
+scenario's seeds: following each local case's infector in
+validation_reference/taiwan_local_case_sources.csv until it reaches an imported case or a local
+case of unknown source (the root). For the 'all' scenario every root is a seed, so the reference
+is all 55 local cases; for 'feb7' only the chains rooted before 2020-02-07 count.
+The simulated local cases of a run are its non-seed cases plus its local seeds.
+
+Usage (repository root, PYTHONPATH=src):
+    python -m covsyn.validation.compare_first_wave RESULT_DIR SEED_CSV
+"""
+
+from __future__ import annotations
+
+import glob
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+SOURCES = Path("validation_reference/taiwan_local_case_sources.csv")
+LAYERS = ("household", "school", "workplace", "health_care", "municipality")
+
+
+def chain_root(case_id: int, infector: dict[int, int | None]) -> int:
+    """Follow the recorded infectors of a local case back to its root."""
+    seen = {case_id}
+    while infector.get(case_id) is not None:
+        case_id = infector[case_id]
+        if case_id in seen:
+            break
+        seen.add(case_id)
+    return case_id
+
+
+def descends_from(case_id: int, infector: dict[int, int | None], seeds: set[int]) -> bool:
+    """Whether a local case is one of the seeds or is infected, through its chain, by one."""
+    seen = set()
+    while case_id is not None and case_id not in seen:
+        if case_id in seeds:
+            return True
+        seen.add(case_id)
+        case_id = infector.get(case_id)
+    return False
+
+
+def reference_local_cases(seeds: pd.DataFrame, sources: pd.DataFrame) -> list[int]:
+    """The reported local cases whose chain of infection starts at one of these seeds.
+
+    For the local-start scenario (B68) the seeds are themselves local cases with a recorded
+    infector, so a case counts when one of its ancestors, or the case itself, is a seed.
+    """
+    infector = {int(r.id): (int(r.infector_id) if str(r.infector_id).strip() not in ("", "nan")
+                            else None)
+                for r in sources.itertuples()}
+    roots = set(seeds.case_id.astype(int))
+    return sorted(c for c in infector if descends_from(c, infector, roots))
+
+
+def reference_percentile(local: np.ndarray, reference: int) -> float | None:
+    """Where the one observed count falls among the simulated runs, as a percentage.
+
+    Taiwan's first wave happened once, so the comparison that matters is not the simulated mean
+    but the position of the observation in the simulated distribution (B85, the rule B71 already
+    applies to the offspring maximum). The counts are discrete and tie often, so a tie counts as
+    half a run, which keeps a heavily tied sample off the tail edges.
+
+    Args:
+        local: Simulated local cases, one entry per run.
+        reference: The reported local cases of this scenario.
+
+    Returns:
+        The percentile, or None when there are no runs.
+    """
+    if len(local) == 0:
+        return None
+    below = float(np.mean(local < reference))
+    equal = float(np.mean(local == reference))
+    return 100 * (below + equal / 2)
+
+
+def reference_verdict(local: np.ndarray, reference: int, tail: float = 2.5) -> str | None:
+    """'ok' when the observation is in neither tail of the simulated runs, 'fail' otherwise.
+
+    Args:
+        local: Simulated local cases, one entry per run.
+        reference: The reported local cases of this scenario.
+        tail: Size of each excluded tail, in percent; B71's rule uses 2.5.
+
+    Returns:
+        'ok', 'fail', or None when there are no runs.
+    """
+    percentile = reference_percentile(local, reference)
+    if percentile is None:
+        return None
+    return "ok" if tail <= percentile <= 100 - tail else "fail"
+
+
+def simulated(directory: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Local cases per run, and infections caused by every imported seed."""
+    local, imported = [], []
+    for f in sorted(glob.glob(str(directory / "course_of_disease_data_*.npy"))):
+        k = Path(f).stem.split("_")[-1]
+        course = list(np.load(f, allow_pickle=True))
+        contact = list(np.load(directory / f"contact_data_{k}.npy", allow_pickle=True))
+        local.append(sum(1 for c in course
+                         if c.get("seed_type") in (None, "local_unknown", "local_from_imported")))
+        for c, k_ in zip(course, contact, strict=True):
+            if c.get("seed_type") == "imported":
+                imported.append(sum(float(np.nansum(np.asarray(k_[f"{L}_effective_contacts"] or [],
+                                                                dtype=float))) for L in LAYERS))
+    return np.array(local, dtype=float), np.array(imported, dtype=float)
+
+
+def main() -> None:
+    """Print the simulated local cases and the imported seeds' offspring against the reference."""
+    directory, seed_csv = Path(sys.argv[1]), Path(sys.argv[2])
+    seeds = pd.read_csv(seed_csv)
+    reference = reference_local_cases(seeds, pd.read_csv(SOURCES, dtype=str, keep_default_na=False))
+    local, imported = simulated(directory)
+    rng = np.random.default_rng(0)
+    boot = [rng.choice(local, len(local)).mean() for _ in range(2000)] if len(local) else [np.nan]
+    print(f"{seed_csv.name}: {len(seeds)} seeds; reference local cases {len(reference)}")
+    print(f"simulated local cases per run: mean {local.mean():.1f} (95% of the mean "
+          f"{np.percentile(boot, 2.5):.1f}-{np.percentile(boot, 97.5):.1f}), median "
+          f"{np.median(local):.0f}, 5-95% of runs {np.percentile(local, 5):.0f}-"
+          f"{np.percentile(local, 95):.0f}; n = {len(local)}")
+    # B85: the verdict, which the mean cannot give for a single observed realisation.
+    percentile = reference_percentile(local, len(reference))
+    if percentile is not None:
+        print(f"reference {len(reference)} sits at the {percentile:.1f} percentile of the "
+              f"simulated runs: {reference_verdict(local, len(reference))} "
+              f"(B85/B71: it must be in neither 2.5% tail)")
+    if len(imported):
+        # B82: the Cheng 2020 figure is the whole study period, 15 Jan to 18 Mar 2020, whose
+        # imported cases are mostly post-border-control; it is not a band for a February subset.
+        note = ("Cheng 2020: 0.056, exact Poisson 95% 0.015-0.14"
+                if "feb" not in seed_csv.name else
+                "Cheng 2020's 0.056 covers the whole first wave, most of it after the "
+                "2020-02-07 ban, so it is not a band for this subset (B82)")
+        print(f"infections per imported seed: {imported.mean():.3f} ({note})")
+
+
+if __name__ == "__main__":
+    main()

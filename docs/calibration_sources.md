@@ -1,0 +1,289 @@
+---
+title: Sources of every CovSyn calibration value
+author: Rex Lee
+date: 2026-10-15
+purpose: Lists every value that calibrates or constrains CovSyn, where it is used, the source the code claims, and whether that source is stored in lit/ with the supporting sentence or table quoted, so that no value rests on our own judgement.
+---
+
+# CovSyn 校正數值來源總表
+
+**規則（使用者 2026-10-15）**：每個數值都要有明確來源。
+來源是論文時，論文要存進 `lit/`（依 `.agents/guides/lit-sources.md`），並在本表「原文證據」欄摘錄支持該數值的字句或圖表、標明頁碼／表號。
+來源是資料時，要寫出資料檔與計算程式。
+沒有來源的值必須標為「假設」。
+
+**2026-10-15 採用（B61，見 `covsyn_decisions.md`）**：1.2 家戶 [2.27, 3.28]、1.3 學校 [1.15, 1.72]、1.8 採 12.6% 定義（58/460）、3.12 冪律指數 1.67、4.8 三項都檢查（推算的感染→隔離 [8, 14]、台灣直接量的感染→確診 [11.4, 14.6]、潛伏期對台灣 [4.96, 7.57] 與文獻 [3.9, 8.0]）、新增社區與職場單日分布對 Fu 2010（只量）、k 改用 MLE。
+未採用、待後續：3.8–3.10 與 4.13–4.14（職場重新設計，待工商普查行業別表）；city term 不需改程式（B27 起已不影響接觸數）。
+
+**證據狀態**
+
+- ✅ 論文已存、原文已摘錄、數值已對照
+- 🟡 論文已存，但原文尚未摘錄或尚未對照
+- ⬜ 論文未存，或尚未查證
+- ❗ 已查證，來源不支持此值
+- 📐 由資料計算（需列資料檔與程式）
+- 🔧 假設或調參，沒有外部來源
+
+程式位置縮寫：`FO` = `calibration/firefly_optimizer.py`，`SA` = `calibration/sar_anchors.py`，`AP` = `calibration/apply_phase_d_parameters.py`，`DS` = `model/data_synthesize.py`，`VP` = `validation/verify_phase_d.py`。
+
+---
+
+## 1. 目標函數的校準目標（`FO` `OUTCOME_TARGETS`，共 29 項）
+
+| # | 量 | 區間 | 程式宣稱的來源 | 狀態 | 原文證據／計算 | 待辦 | 建議新值 |
+|---|---|---|---|---|---|---|---|
+| 1.1 | offspring_k | 0.20–0.35 | 台灣疫調 NegBin MLE k = 0.29 | 📐 | 資料：Wu & Nordling 2024 疫調資料集；程式待指認 | 找出計算 0.29 的程式與輸入 | 重算 MLE 0.286（上界定義，n = 579）；下界定義 0.108。維持 0.20–0.35。⚠ `verify_phase_d` 的 k 用動差法（0.262），與目標的 MLE 不同，應統一 |
+| 1.2 | daily_household | 1.50–2.20 | 2020 全國調查 6.03 × Fu 2012 場所比例 | ❗ | 兩篇已存（`2026-10-15-a9f5a2a6`、`2026-10-07-4c8c5035`）；2020 調查 Table 4：家戶 2.27 ± 0.03、非家戶 4.28 ± 0.06；與相乘值 1.86 不一致 | 重新決定目標的來源與算法 | Fu 2010 ≥15 分鐘：3.28（全部接觸 3.83）；2020 調查 2.27。建議 [2.27, 3.28]：疫情期調查為下界、疫情前全國樣本為上界（待決定） |
+| 1.3 | daily_school | 0.90–1.40 | 同上 | ⬜ | | 同上 | Fu 2010 ≥15 分鐘：1.72（全部接觸 2.36）。現行區間偏低；建議依同一定義改為約 1.7（待決定） |
+| 1.4 | daily_workplace | 1.20–1.80 | 同上 | ❗ | 2020 調查每人最多記 12 位接觸、問「昨天」（含週末）；職場目標可能偏低 | 職場重新設計時一併處理 | Fu 2010 ≥15 分鐘：1.65（全部接觸 2.99；平日 1.92）。落在現行區間內；建議保留區間，來源改為 Fu 2010 |
+| 1.5 | daily_municipality | 1.20–1.80 | 同上 | ⬜ | | 同上 | Fu 2010 ≥15 分鐘：1.76（全部接觸 3.23；平日 1.49）。落在現行區間內（近上限）；建議保留區間，來源改為 Fu 2010 |
+| 1.6 | daily_health_care | 0–0.30，**只量**（B76） | 假設（健康者幾乎不接觸醫護），Phase D 時由 AI 訂定，無來源 | 🔧 | 資料只能界定 0.08–2.1／日（§10） | — | — |
+| 1.7 | asymptomatic_share | 0.20–0.28 | 台灣疫調：無發病日 137/579 = 23.7%；嚴格定義 119/579 = 20.6%（E47） | 📐 | | 列出計算程式 | 重算 20.4%（嚴格，118/578）至 23.5%（寬鬆，136/578）。維持 [0.20, 0.28] |
+| 1.8 | icu_share_of_symptom | 0.06–0.20（只量） | 台灣疫調 56/442 = 12.7%（B33） | 📐 | | 同上 | 重算：要求發病日 9.05%（40/442）；ICU 視為有症狀 12.6%（58/460）。舊值 56/442 的分子含無發病日的 ICU 病例、分母不含，需選定定義；現行區間兩者都涵蓋 |
+| 1.9 | death_share_of_icu | 0.08–0.18（只量） | 台灣疫調 7/56 = 12.5% | 📐 | | 同上 | 重算 12.1%（7/58）。維持 |
+| 1.10 | case_fatality | 0.008–0.018（只量） | 台灣疫調 7/579 = 1.2% | 📐 | | 同上 | 重算 1.21%（7/578）。維持 |
+| 1.11 | sar_household | 4.6–10.1% | Cheng 2020 每例感染 10/100 ÷ CovSyn 候選接觸數（`SA`，E55） | 🟡 | `lit/markdown/cheng2020_TracingSymptomJAMAInternMed.md` 已存；Table 2 數字待摘錄 | 摘錄 Table 2 | — |
+| 1.12 | sar_school | 1–4% | 「出處本身尚未釐清」（`SA` 註解，B4） | ❗ | | 找出處，找不到就改 | — |
+| 1.13 | sar_workplace | 1.5–5%，中心 3.4% | 同上；3.4% 等於 Chen 2022 英格蘭職場攻擊率中位數，但未記錄 | ❗ | | 同上 | — |
+| 1.14 | sar_health_care | 0.1–1.6% | Cheng 2020 6/100 ÷ CovSyn 候選接觸數 | 🟡 | 同 1.11 | 同 1.11 | — |
+| 1.15 | sar_municipality | 0.1–1.0% | Cheng 2020 1/100；下限 0.1% 為設定 | 🟡／🔧 | 同 1.11 | 同 1.11 | — |
+| 1.16 | medical_late_share | 25–50% | Cheng 2020 醫療接觸：發病 8 天後 256/697 = 36.7% | 🟡 | 同 1.11 | 同 1.11 | — |
+| 1.17 | medical_early_share | 40–70% | Cheng 2020：發病前 33.9% + 0–3 天 21.5% = 55.4% | 🟡 | 同 1.11 | 同 1.11 | — |
+| 1.18 | community_median | 3–15 | 台灣疫調 38 筆（friend + other） | 📐 | `validation_reference/taiwan_tracing_contacts_per_case.csv` | 列出程式；M3 要求改為 community-only | 重算 7.5（bootstrap 95% 3.5–32.5，n = 38，每例整段追蹤期）。Fu 2010 單日：中位數 2（≥15 分鐘為 0）。維持 [3, 15]，須註明是每例累積 |
+| 1.19 | community_p90 | 20–200（只量） | 同上 | 📐 | | 同上 | 重算 195（68–822）。只量，維持 |
+| 1.20 | community_tail_ratio | 5.5–93.1 | 同上，bootstrap 95% CI（E77、B50） | 📐 | | 同上 | 重算 26.0（5.5–93.9，20,000 次）。與現行一致 |
+| 1.21 | community_zero_share | 0–0.30（只量） | 未記錄 | ⬜ | | 找依據 | 疫調資料無法計算（38 筆依定義皆非零）。Fu 2010 單日：40.7%（≥15 分鐘 62.0%）。建議以 Fu 2010 為來源，需換算成每例累積 |
+| 1.22 | incubation_mean | 3.9–8.0 天 | 文獻報告平均值範圍 | ⬜ | E45：清單在 `plot_result/plot_synthetic_data.ipynb` 的 `report_*` 字典（15 篇；3.9 來自 Ki） | 列出每個端點的論文、存檔並摘錄原文 | — |
+| 1.23 | pre_onset_window_mean | 1–3 天 | 未記錄（Cheng 2020「傳播集中在發病前後」） | ⬜ | | 找依據 | — |
+| 1.24 | pre_onset_zero_share | 0–12% | 未記錄 | ⬜ | | 找依據或標為假設 | — |
+| 1.25 | closure_after_confirmation_symptomatic | 22–32 天 | 台灣疫調 確診→解除隔離 平均 27.0（n = 56，E91） | 📐 | | 列出程式 | 重算 27.0（22.1–32.2，n = 56，含 ICU 病例）。一致 |
+| 1.26 | closure_after_confirmation_asymptomatic | 17–31 天 | 台灣疫調 平均 23.3（n = 23） | 📐 | | 同上 | 重算 23.3（16.9–31.0，n = 23）。一致 |
+| 1.27 | icu_to_closure | 29–44 天 | 台灣疫調 平均 36.2（n = 28，E93） | 📐 | | 同上 | 重算 36.2（29.0–44.1，n = 28）。一致 |
+| 1.28 | onset_to_icu | 5.4–9.2 天 | 台灣疫調 平均 7.2（n = 40，E92） | 📐 | | 同上 | 重算 7.2（5.4–9.2，n = 40）。一致 |
+| 1.29 | onset_to_confirmation | 5–7 天（中位數） | 台灣疫調 中位數 6（n = 442）；Ge 2021 發病→隔離 5 天 | 📐／🟡 | `lit/markdown/ge2021_CohortZhejiangJAMAInternMed.md` 已存 | 摘錄 Ge 2021 原文 | 重算中位數 6（n = 442），平均 7.9（7.3–8.6）。一致 |
+
+## 2. 目標函數的其他部分
+
+| # | 項目 | 數值 | 程式宣稱的來源 | 狀態 | 待辦 | 建議新值 |
+|---|---|---|---|---|---|---|
+| 2.1 | Cheng 2020 接觸分箱擬合（`cost_contact`） | Table 2 各層各時段接觸數與攻擊率 | Cheng 2020 | 🟡 | 摘錄 Table 2 全表 | — |
+| 2.2 | 與台灣個案資料的能量距離 | — | Wu & Nordling 2024 資料集 | 📐 | 列出資料檔 | 資料檔：`figshare_taiwan_covid.xlsx`（578 列，缺案 530） |
+| 2.3 | latent 平均 | 4.1–5.5 天（`physiology_penalty`） | 4.1 = Cheng 2020 中位數；5.5 = Xin 2022 平均（E45：兩端統計量不同） | 🟡 | 兩篇都已存；摘錄原文；處理「中位數 vs 平均」混用 | — |
+| 2.4 | infectious 平均 | 3.45–20 天 | 文獻報告平均值範圍 | ⬜ | 列出端點論文 | — |
+| 2.5 | pre-onset 窗口（參數） | 1–3 天 | 同 1.23 | ⬜ | 同 1.23 | — |
+| 2.6 | onset→confirmation（參數） | 1–12 天 | 原論文模型上限 12.02 天 | 🟡 | 對照 Wu 2023 原文 | — |
+
+## 3. 固定常數與鎖定參數
+
+| # | 常數 | 值 | 程式位置 | 程式宣稱的來源 | 狀態 | 待辦 | 建議新值 |
+|---|---|---|---|---|---|---|---|
+| 3.1 | `TRACING_DELAY_MEAN` | 1 天（Poisson） | `DS` | PMC7605820：台灣疾管署約一天內匡列 | ⬜ | 存論文、摘錄原文；M6 要求改成可調參數 | — |
+| 3.2 | 疫調涵蓋率 | 100%（感染源確診後，所有被他感染的人都會被追到） | `DS` 第 716–731 行 | 未記錄（隱含假設） | 🔧 | 標為假設；找文獻 | — |
+| 3.3 | `HEALTH_CARE_POST_ISOLATION_DAYS` | 14 天 | `DS` | 程式註解：假設，無台灣來源 | 🔧 | | — |
+| 3.4 | `HEALTH_CARE_POST_ISOLATION_PROTECTION` | 0.25 | `DS` | 同上 | 🔧 | | — |
+| 3.5 | `SYMPTOM_TO_ICU_AGE_RR` | 0.05、1、2.8、6.4 | `DS` | Verity 2020 Table 1（有症狀→住院比例） | ⬜ | 存論文、對照 Table 1 推算 | — |
+| 3.6 | `ICU_TO_DEATH_AGE_RR` | 0.10、1、2.3、12.8 | `DS` | Verity 2020 Table 1（IFR ÷ 住院） | ⬜ | 同上 | — |
+| 3.7 | `AGE_RISK_RATIOS`（感受性） | 0.39、1、1.90、1.44 | `AP` | B2／B14；來源待查 | ⬜ | 找出處 | — |
+| 3.8 | `WORK_GROUP_EXPONENT` | 0.27 | `DS` | Chen 2022 Table 5 | ❗ | 2026-10-12 查證：Table 5 依行業，16→650 與 3→8 不是同一列；逐列迴歸指數約 0.06。2026-10-15：沒有找到任何依公司規模的職場接觸研究；文獻模型用固定約 20 人的工作群組，見 [`source_quotes.md`](source_quotes.md) §2 | 移除。Timpka 2016：群組由 1 人增至 50 人以上，每人身體接觸只從約 1 增至 2。群組大小改依工商普查行業別（Epicast 做法，上限 86），固定 20 人做敏感度分析（Timpka、FluTE） |
+| 3.9 | `WORK_GROUP_COEFFICIENT` | 3.0 | `DS` | 對齊台灣疫調同事接觸中位數 2–2.5（n = 6） | 📐／❗ | 樣本極小；職場重新設計 | 重算疫調同事接觸中位數 2（n = 8，不是 6）。Fu 2010 平日受僱者每天見面的職場接觸：中位數 2、平均 4.79；建議以 Fu 2010 為驗證目標 |
+| 3.10 | `WORK_GROUP_LOG_SIGMA` | 0.6 | `DS` | 未記錄 | 🔧 | | 職場重新設計後決定 |
+| 3.11 | 大型事件機率下限 P[199] | 0.05 | `AP`（B59） | 探測：0–0.05 期望成本無差異 | 🔧 | M3 要求改成每人直接抽 power-law，此項可能取消 | — |
+| 3.12 | 大型事件冪律指數 P[200] | 1.49 | `AP` | 38 筆尾部 MLE（Clauset 2009） | ❗ | 2026-10-12 重算得 1.67（KS 0.081–0.113），1.49 無法重現 | 重算 1.668（x_min 21，尾巴 17 筆），重現 1.67；程式用的 1.49 應改為 1.67。參考：Danon 2012 為 2.45（英國，含群體接觸） |
+| 3.13 | 大型事件規模 21–1000 | 21、1000 | `AP` | 21 = KS 選出的 k_min（已重現）；1000 = 上限設定 | 📐／🔧 | | 重算 x_min = 21。一致 |
+| 3.14 | 事件接觸攻擊率倍數 P[203] | 1 | `AP` | 教授 2026-09-29「先只改接觸數分布」 | 🔧 | | — |
+| 3.15 | 傳染力倍數 Gamma 形狀範圍 | 0.15–0.8 | `AP` | 調參（避免退化） | 🔧 | | — |
+| 3.16 | 社區接觸計數離散度 P[198] | 0.05–1.0 | `AP` | 調參 | 🔧 | | — |
+| 3.17 | 依發病日的攻擊率形狀 | 25 個時段 | `SA` | Ge 2021 Figure 2（調整後相對風險） | 🟡 | 已存；摘錄 Fig 2 與原文三個數值 | — |
+| 3.18 | 各層接觸機率範圍（`CONTACT_BOUNDS`） | 見程式 | `AP` | 調參，依每日接觸目標推算 | 🔧 | | — |
+| 3.19 | 嚴重度參數範圍 P[195]–P[197] | 見程式 | `AP` | 台灣疫調（同 1.7–1.9） | 📐 | | 同 1.7–1.9 的重算值 |
+
+## 4. 只用於驗收的參考值（`VP`）
+
+| # | 量 | 區間 | 宣稱來源 | 狀態 | 待辦 | 建議新值 |
+|---|---|---|---|---|---|---|
+| 4.1 | 家戶其他成員、獨居 | 2.6–3.0、11–16% | 內政部 2021 戶籍 | ⬜ | 存資料表與出處 | — |
+| 4.2 | 各學制班級人數 | 見清單 | 教育部學生數 | ⬜ | 同上 | — |
+| 4.3 | 公司規模 | — | 2016 工商普查 Table 18、18-2 | ⬜ | 同上；範圍與單位問題見 B4 | 110 年工商普查：1,549,583 個場所、9,605,372 人（平均約 6.2 人，我的推算）；行業別表待下載 |
+| 4.4 | Jian 2020 追蹤窗口接觸數 | 13.9–19.1 | Jian 2020 每例 16.5 | 🟡 | Markdown 已存（`jian2020_TracingCOVIDIntJInfectDis.md`），PDF 在 Downloads；摘錄原文 | — |
+| 4.5 | 0–19 歲年齡風險比 | 0.34–0.77 | Zhang 2020 0.34、Viner 2021 0.56、Uthman 2024 0.58、Madewell 2020 0.59 | 🟡／⬜ | Zhang 已存；其他三篇未存；0.77 上限出處待查 | — |
+| 4.6 | 40–59、60+ 年齡風險比 | 1.63–2.03、1.12–1.52 | Cheng 2020 1.83、1.32 | 🟡 | 摘錄原文 | — |
+| 4.7 | R、感染 3 人以上、最多感染數 | 0.047–0.43、0.2–4.3%、5–30 | 台灣疫調兩種定義（E80） | 📐 | | 重算：上界 R 0.428、≥3 人 4.32%、最多 8；下界 R 0.047、0.17%、3。一致 |
+| 4.8 | 感染→隔離 | 8–14 天 | 潛伏期約 5.3 天 + 發病→確診 5–7 天（推算） | 📐／⬜ | 5.3 天的出處待查 | 直接由資料算：感染→確診平均 12.9（11.4–14.6，n = 33），中位數 13；潛伏期平均 6.2（n = 28）。建議改用直接量，區間約 [11, 15] |
+| 4.9 | 家人每天被接觸的比例 | ≥ 50% | Fu 2012 | 🟡 | 已存（`2026-10-07-4c8c5035`）；待摘錄支持 50% 的原文 | — |
+| 4.10 | 縣市效應置換檢定 | p ≥ 0.05 | 設計要求（E4、E83） | 🔧 | 2026-10-15 文獻：面對面調查多為無差異或方向不一；手機資料每人指數約 0.12。原文見 [`source_quotes.md`](source_quotes.md) §1；處理方式待決定 | ISSP 2017 與 Fu 2010 都不支持城市效應（`source_quotes.md` §3.3） |
+| 4.11 | ICU 比例 60+ ÷ 20–39 | 3–12 | Verity 2020 梯度 | ⬜ | 同 3.5 | — |
+| 4.12 | 台灣首波情境平均年齡 | 33–42 | 28 個源頭病例年齡 | 📐 | | 重算 37.6（組中點，36.3–38.9，n = 577）；舊 37.1 為組內依人口分配。維持 [33, 42] |
+| 4.13 | 職場：大公司／小公司每例感染比 | 1–3 | Chen 2022「2.7 倍」 | ❗ | 誤讀，見 3.8；論文已存（`2026-10-07-74078dfd`） | 移除（Chen 2022 誤讀） |
+| 4.14 | 職場：每員工感染比 | 4–60 | Chen 2022 17.8% ÷ 1.1% = 16 倍 | 🟡 | 原文已核對（攻擊率中位數依企業規模）；論文已存（`2026-10-07-74078dfd`），待把原文摘入 `source_quotes.md` | — |
+| 4.15 | 病程時間文獻範圍（潛伏期、傳染期、世代時間、序列間隔等） | 見 `reproduce_wu2025.literature_ranges` | 原 notebook 的文獻表 | ⬜ | 逐一列出論文（與 M10 的 SI／GT 文獻表一起做） | — |
+
+## 5. 各情境每日接觸：Fu 2010 台灣全國接觸日誌
+
+資料：`2026-10-15-467602c6`（Zenodo 10.5281/zenodo.6385759，CC BY 4.0），存於 `covid19-research/data/external/fu2010_taiwan_contact_zenodo6385759/`。
+程式：`covid19-research/scripts/summarize_taiwan_contact_data.py`（`by_setting`）。
+每人每日平均；一筆接觸若標了多個地點（24,265 筆中 947 筆），依疫調擷取的優先順序（家 > 學校 > 工作 > 社區）只算一次。
+「≥15 分鐘」是 `duration_multi` 代碼 3–5（15–59 分鐘、1–4 小時、4 小時以上），對齊 2020 調查與疫調的密切接觸定義；佔全部接觸的 67.6%。
+
+| 母體 | 定義 | 家戶 | 學校 | 職場 | 社區 | 合計 |
+|---|---|---|---|---|---|---|
+| 全部日（n = 1,954） | 全部接觸 | 3.83 | 2.36 | 2.99 | 3.23 | 12.42 |
+| 全部日（n = 1,954） | ≥15 分鐘 | 3.28 | 1.72 | 1.65 | 1.76 | 8.40 |
+| 平日（n = 1,343） | 全部接觸 | 3.75 | 2.94 | 3.42 | 2.86 | 12.97 |
+| 平日（n = 1,343） | ≥15 分鐘 | 3.20 | 2.10 | 1.92 | 1.49 | 8.72 |
+
+≥15 分鐘的社區接觸：平均 1.76、0 次 62.0%、P90 6、P99 17、最大 37。
+限制：2010 年（疫情前）；每人最多記 40 筆（3.9% 觸頂）；2020 調查（疫情期、每人最多 12 位）的家戶為 2.27、非家戶 4.28。
+
+## 6. 由資料計算的數值：重新計算結果（2026-10-15）
+
+程式：`src/covsyn/data_processing/recompute_taiwan_targets.py`（在 CovSyn 根目錄執行 `python -m covsyn.data_processing.recompute_taiwan_targets`），輸出 `validation_reference/recomputed_targets.csv`。
+區間是 bootstrap 95%（20,000 次、種子 0）。
+個案資料是 Wu & Nordling 資料集（`wu2024DatasetTracingSciData`）的公開版 `figshare_taiwan_covid.xlsx`（578 列，缺案 530）；疫調接觸的三個 CSV 由 `extract_tracing_reference.py` 與 `extract_coworker_contacts.py` 從 forecasting repo 的活頁簿擷取，該活頁簿不在本機，所以擷取這一步本次沒有重跑。
+
+| # | 量 | 值 | n | 95% 區間 | 定義與算法 |
+|---|---|---|---|---|---|
+| 1.7 | asymptomatic share, broad (no onset date) | 0.2353 | 578 |  | cases without onset_of_symptom / all cases |
+| 1.7 | asymptomatic share, strict (no onset date and symptom = X) | 0.2042 | 578 |  | cases with neither an onset date nor a symptom / all cases (E47) |
+| 1.8 | ICU share of symptomatic, onset date required | 0.0905 | 442 |  | ICU cases with an onset date / cases with an onset date |
+| 1.8 | ICU share of symptomatic, ICU counted as symptomatic | 0.1261 | 460 |  | all ICU cases / (cases with an onset date + ICU cases without one); an ICU case without an onset date is taken as a missing date, not as asymptomatic |
+| 1.8 | ICU cases without an onset date | 18 | 578 |  | count, reported so the ICU numerator can be checked |
+| 1.9 | death share of ICU | 0.1207 | 58 |  | ICU cases with a death date / ICU cases |
+| 1.9 | deaths without an ICU date | 0 | 578 |  | count |
+| 1.1 | case fatality | 0.01211 | 578 |  | cases with a death date / all cases |
+| 1.25 | confirmation -> recovery, symptomatic, mean (days) | 20.19 | 36 | 15.81–25.06 | recovery - confirmed_date, cases with an onset date and no ICU; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 1.25 | confirmation -> recovery, symptomatic, median (days) | 16 | 36 |  | recovery - confirmed_date, cases with an onset date and no ICU |
+| 1.25 | confirmation -> recovery, symptomatic incl. ICU, mean (days) | 26.96 | 56 | 22.05–32.18 | recovery - confirmed_date, cases with an onset date; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 1.25 | confirmation -> recovery, symptomatic incl. ICU, median (days) | 23 | 56 |  | recovery - confirmed_date, cases with an onset date |
+| 1.26 | confirmation -> recovery, asymptomatic, mean (days) | 23.35 | 23 | 16.87–30.96 | recovery - confirmed_date, cases without an onset date; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 1.26 | confirmation -> recovery, asymptomatic, median (days) | 15 | 23 |  | recovery - confirmed_date, cases without an onset date |
+| 1.27 | ICU -> recovery, mean (days) | 36.21 | 28 | 29–44.11 | recovery - icu; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 1.27 | ICU -> recovery, median (days) | 29.5 | 28 |  | recovery - icu |
+| 1.28 | onset -> ICU, mean (days) | 7.2 | 40 | 5.35–9.225 | icu - onset_of_symptom; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 1.28 | onset -> ICU, median (days) | 5.5 | 40 |  | icu - onset_of_symptom |
+| 1.29 | onset -> confirmation, mean (days) | 7.93 | 442 | 7.335–8.552 | confirmed_date - onset_of_symptom; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 1.29 | onset -> confirmation, median (days) | 6 | 442 |  | confirmed_date - onset_of_symptom |
+| 4.8 | infection -> confirmation, mean (days) | 12.91 | 33 | 11.36–14.58 | confirmed_date - earliest_infection_date, cases with a recorded infection date; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 4.8 | infection -> confirmation, median (days) | 13 | 33 |  | confirmed_date - earliest_infection_date, cases with a recorded infection date |
+| 4.8 | infection -> onset (incubation), mean (days) | 6.214 | 28 | 4.964–7.571 | onset_of_symptom - earliest_infection_date, cases with both dates; negative intervals dropped; interval = bootstrap 95% of the mean |
+| 4.8 | infection -> onset (incubation), median (days) | 5.5 | 28 |  | onset_of_symptom - earliest_infection_date, cases with both dates |
+| 4.12 | mean case age (band midpoints) | 37.56 | 577 | 36.25–38.9 | mean of the midpoints of the 10-year age bands; bands not of that form are left out (['nan']) |
+| 1.1 | offspring k, upper definition, MLE | 0.2859 | 579 |  | infected contacts per case summed over layers, cases with no record = 0 (E80 upper definition) |
+| 1.1 | offspring k, upper definition, method of moments | 0.2623 | 579 |  | infected contacts per case summed over layers, cases with no record = 0 (E80 upper definition); estimator used by verify_phase_d |
+| 4.7 | R, upper definition | 0.4283 | 579 |  | infected contacts per case summed over layers, cases with no record = 0 (E80 upper definition) |
+| 4.7 | share infecting >= 3, upper definition | 0.04318 | 579 |  | infected contacts per case summed over layers, cases with no record = 0 (E80 upper definition) |
+| 4.7 | max infected, upper definition | 8 | 579 |  | infected contacts per case summed over layers, cases with no record = 0 (E80 upper definition) |
+| 1.1 | offspring k, lower definition, MLE | 0.1079 | 579 |  | recorded infector -> infectee links per case, 0 otherwise (E80 lower definition) |
+| 4.7 | R, lower definition | 0.04663 | 579 |  | recorded infector -> infectee links per case, 0 otherwise (E80 lower definition) |
+| 4.7 | share infecting >= 3, lower definition | 0.001727 | 579 |  | recorded infector -> infectee links per case, 0 otherwise (E80 lower definition) |
+| 4.7 | max infected, lower definition | 3 | 579 |  | recorded infector -> infectee links per case, 0 otherwise (E80 lower definition) |
+| 1.18 | community median | 7.5 | 38 | 4–32 | municipality-layer total contacts per index case, rows with a known uninfected count and total > 0 (E77); interval = bootstrap 95% |
+| 1.19 | community p90 | 195.1 | 38 | 68–822 | municipality-layer total contacts per index case, rows with a known uninfected count and total > 0 (E77); numpy linear percentile |
+| 1.2 | community p90 / median | 26.01 | 38 | 5.565–93.13 | municipality-layer total contacts per index case, rows with a known uninfected count and total > 0 (E77); interval = bootstrap 95% (E77) |
+| 1.21 | community zero share among rows with a known uninfected count | 0 | 38 |  | municipality-layer rows with total = 0 / rows with a known uninfected count |
+| 3.12 | community tail power-law exponent (discrete) | 1.668 | 17 |  | Clauset 2009 discrete MLE above x_min, KS = 0.083 |
+| 3.13 | community tail x_min | 21 | 38 |  | x_min minimising the KS distance (Clauset 2009) |
+| 3.9 | coworker close contacts per index case, median | 2 | 8 |  | infected + uninfected coworkers per index case with any coworker record |
+
+## 7. 社區接觸改為 scale-free（B62、B63，2026-10-16）
+
+依教授 2026-10-12 指示（todolist M3），社區接觸數改為每位病例從單一分布 P(N = n) ∝ (n + s)^−α 抽一次，取消「是否參加大型活動」。
+
+| # | 量 | 舊值 | 新值 | 來源 | 狀態 |
+|---|---|---|---|---|---|
+| 3.12' | 社區接觸冪律指數 α（P[204]，新參數） | —（舊模型為大型活動規模指數 1.67） | **1.74**（鎖定） | Fu 2010 community-only、≥15 分鐘、每人每日的最大概似估計（bootstrap 95% 1.62–1.88）；疫調尾巴 1.67 在區間內 | 📐 |
+| 3.11、3.13–3.16 | 大型活動 P[199..203]、Gamma 離散度 P[198] | 校準／鎖定 | 鎖定不用（P[199] = 0） | B62 取消二元活動 | 🔧 |
+| P[28] | 社區平移量 s | 平均接觸數 [1, 40] | 平移量 **[0.5, 20]** | 中位數約等於 s | 🔧 |
+| P[29] | 社區接觸隔天再碰面機率下限 | 0.5（無來源） | **0** | Fu 2010：社區接觸只有 28.9% 天天碰面 | 📐 |
+| 1.5 | daily_municipality | [1.20, 1.80] | **[1.20, 7.12]** | 上限為同一擬合分布去掉日誌 40 筆上限的平均（日誌上限時 2.08） | 📐 |
+| 新 | community_day_zero_share | — | **[0.598, 0.641]** | Fu 2010 單日 0 次 62.0% 的 bootstrap 95% | 📐 |
+| 新 | community_day_p90 | — | **[5, 8]** | Fu 2010 單日 P90 6（5–6），去掉上限為 8 | 📐 |
+| 1.18、1.20 | community_median、community_tail_ratio | 計費 | **只量** | 疫調 38 筆為選擇樣本（E88） | — |
+
+計算：covid19-research `scripts/summarize_taiwan_contact_data.py`（`by_setting`、`fit_shifted_power_law`）；可達性：`scripts/probes/probe_community_b62.py`（E100、B63）。
+
+---
+
+## 8. run 18 的修改（B64–B67，2026-10-24）
+
+| 項目 | 新值 | 來源 |
+|---|---|---|
+| `daily_workplace_employed` | [4.34, 5.61] | Fu 2010（Zenodo 10.5281/zenodo.6385759）平日受僱者中當天有上班者 416 人，每天見面且 ≥15 分鐘的工作接觸；依 2010 年底人口（內政部統計年報 02-01，`covid19-research/data/external/moi_statistical_yearbook_y02-01/`）做性別 × 十歲年齡組加權，平均 4.96（未加權 4.84），bootstrap 95%；`covid19-research/scripts/summarize_taiwan_contact_data.py` 的 `at_work()` |
+| `workplace_day_zero_share` | [0.232, 0.318] | 同上，0 人比例 27.4% |
+| `workplace_day_p90` | [10, 16] | 同上，P90 13 |
+| `daily_workplace` | 只量 | 全人口 1.65 包含無工作者與沒上班的日子 |
+| P[205] 群組飽和 a | 種子 10，[2, 60] | 教授 2026-10-19「平常約碰到 10 人」；Timpka 2016 工作區段中位數 20；Lowery-North 2013 醫護每班 13.5 位不同同事 |
+| P[206] 群組形狀 k | 種子 1，[0.2, 5] | 由上面三個目標校準 |
+| P[207] 疫調延遲 | 鎖定 1 天 | PMC7605820；目標函數無法辨識，見 B65 |
+| Cheng 每例傳染數 | ×2.82（家戶 0.28、醫療 0.17、社區 0.028） | Cheng 2020 表 2（本土 18、境外移入 4）＋figshare 1–100 號（本土 29、境外移入 71），見 B67、E102 |
+| R 驗收 | [0.37, 0.98] | Cheng 2020 本土 18 / 29，精確 Poisson |
+| 第一波種子 | 354 例 | figshare 個案資料＋本土感染源分類，見 B66 |
+| 境外移入種子傳染數 | [0.015, 0.14] | Cheng 2020 境外移入 4 / 71 |
+| `MEAN_CONTACT_DAYS` | {10.27, 6.61, 8.87, 2.70, 1.21} | run 17 `phaseD_report.txt` measure_days |
+| `MEAN_CONTACT_DAYS`（B75，2026-11-01） | {9.68, 7.41, 3.15, 2.26, 1.59} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 400 次，measure_days（`firefly_result/phaseD_run18/`）；攻擊率界限已重建（`variable/course_parameters*.npy` 索引 33–157） |
+| `MEAN_CONTACT_DAYS`（B77，2026-11-02） | {9.27, 5.30, 3.48, 2.94, 1.77} | run 19 候選 60 在 B77 程式下 `spread_Taiwan_weight` 400 次，measure_days（`firefly_result/phaseD_run19/`）；學校 7.41 → 5.30（0.72 倍，週末關閉 5/7）；攻擊率界限已重建（`variable/course_parameters*.npy` 索引 33–157） |
+| `COVSYN_CANDIDATE_CONTACTS` | {2.605, 3.657, 2.144, 4.759, 23.874} | run 17 `phaseD_checks.txt` |
+| `COVSYN_CANDIDATE_CONTACTS`（B75，2026-11-01） | {2.595, 2.305, 3.842, 2.597, 19.482} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 1000 次，verify_phase_d（`firefly_result/phaseD_run18/checks_b75.txt`）；攻擊率界限已重建 |
+| `COVSYN_CANDIDATE_CONTACTS`（B77，2026-11-02） | {2.592, 2.361, 2.832, 5.807, 17.968} | run 19 候選 60 在 B77 程式下 `spread_Taiwan_weight` 1000 次，verify_phase_d（`firefly_result/phaseD_run19/checks_b77.txt`）；醫療 2.597 → 5.807（run 19 向量，B76 下限）；攻擊率界限已重建 |
+
+## 9. 職場「今天有沒有上班」（B75，2026-10-31）
+
+| 項目 | 新值 | 來源 |
+|---|---|---|
+| `WEEKDAY_AT_WORK` | 0.691 | Fu 2010 受僱者（職業 3–6）平日日記 616 份中有任何工作接觸的比例，2010 年底人口加權、五個平日等權重，bootstrap 95% 0.653–0.727；covid19-research `scripts/summarize_taiwan_contact_data.py` |
+| `SATURDAY_AT_WORK` | 0.0199 | 勞動部職類別薪資調查動態查詢（https://pswst.mol.gov.tw/psdn/）「規定每週工作日數」109 年 7 月，工業及服務業、按勞工人數：每週六天 1.46% ＋ 隔週五天、六天 1.06% ÷ 2；covid19-research `data/external/mol_working_days_per_week/` |
+| `SUNDAY_AT_WORK`、國定假日 | 0 | 勞動部同表各種規定工作日都不含週日；2020 年全年與 2021-01-01 的放假日依內政部 109 年放假日公告（https://www.ris.gov.tw/info-liferay/app/channel/newsDetail/1575286868351）、2/15 補班、勞基法施行細則第 23 條（元旦、勞動節） |
+| `daily_workplace_employed` | [4.34, 5.61] | 改回有上班那天（§8），只計發病前有上班的日子 |
+| `workplace_day_zero_share` | [0.232, 0.318]，計費 | 同 §8 |
+| `workplace_day_p90` | [10, 16]，計費 | 同 §8 |
+
+不用的值：Fu 2010 週日 67.8%（與平日一樣高，辦公室職員週日 65%、週六 22%，與所有其他來源矛盾；星期編碼已用日期核對無誤）。勞動部 99 年週六上班 28.6% 與 Fu 週六 27.7% 一致。
+
+## 10. 醫療接觸數下限（B76，2026-11-01）
+
+量的對象：每個本土 index case 的**全部**醫療候選接觸數（`health_care_contacts_per_index`）。最初量的是 Jian 追蹤窗口（發病前 2 天到隔離）內的醫療接觸；code review 指出下限是用 Cheng 全部 698 個醫療接觸（36.7% 在發病 8 天後才開始）的攻擊率推得，套在窗口內的接觸會嚴格 1.4–1.6 倍，2026-11-01 使用者裁決改為全部接觸（選項 A）。窗口內的數字改為只報告，對照 Jian 的 9.89。
+
+| 項目 | 值 | 來源與算法 |
+|---|---|---|
+| Cheng 醫療每接觸攻擊率 | 6 / 698 = 0.860%，Wilson 95% [0.395%, 1.863%] | Cheng 2020 Table 2（印 0.9%，0.4–1.9）；Wilson 法同時重現他印的家戶 7/151 = 4.6%（2.3–9.3）與家人 4/76 = 5.3%（2.1–12.8），所以採用 Wilson；`sar_anchors.wilson_interval` |
+| 本土病例醫療感染數下限 | 0.06212 | Cheng 6 例醫療感染的 exact Poisson 95% 下限 2.2019 ÷ 100 例 × B67 本土換算 (18/29)/(22/100) = 2.8213；即 `LAYER_INFECTIONS_PER_INDEX['health_care']` 的下限 |
+| **醫療接觸數下限** | **0.06212 ÷ 0.018626 = 3.335** | 少於這個數，即使每個接觸都以 Cheng 攻擊率的上限被感染，也達不到 Cheng 醫療感染數的下限；`sar_anchors.health_care_contact_floor()` |
+| 計費下限（B60 內縮） | 3.335 + 1.645 × 0.0672 = **3.446** | σ 取自 run 18 候選 80 在 B75 下 1000 次模擬、200 次 bootstrap 的驗收（2.597，95% [2.47, 2.73]，`firefly_result/phaseD_run18/checks_b76.txt`）；`calibration/charged_targets.json` |
+| 醫療每接觸累積攻擊率下界 | 0.395%（原 2.39%） | Cheng 6 / 698 的 Wilson 下限。原下界是 Cheng 感染數下限 ÷ run 18 的 2.597 個接觸，高於 Cheng 每接觸攻擊率的上限 1.86%，下限把接觸數推高後就達不到感染數區間的下半段（code review，2026-11-01 使用者同意）；只改 `course_parameters_lb.npy` 索引 108–132，每日下界平均 0.01066 → 0.00175 |
+| 參考值（不計費） | 544 / 55 = 9.89 | Jian 2020 Table 1：本土病例的 1,435 個密切接觸中 544 個為醫院／診所接觸；55 例即台灣病例資料 1–487 號中全部本土病例（2020-01-28 至 04-12 確診） |
+| CovSyn run 18 候選 80（B75） | 全部 2.597；Jian 窗口內 1.40（41.3% 為 0，p90 = 4） | 1000 次 `spread_Taiwan_weight` 的 index case；從感染到隔離 1.69 |
+
+假設與限制：Cheng 的每接觸攻擊率是 100 例（71 例境外移入）合算，假設本土病例的醫療接觸同樣適用；Cheng 的醫療接觸日期在缺漏時以入院日計，窗口與 Jian 不完全相同。Jian 的 9.89 被少數確診前長期就醫或住院的病例拉高（案 27 一例匡列醫院工作人員 115 人，占 544 的 21%；55 例中 25 例由接觸者追蹤、5 例由居家檢疫發現），且沒有逐例分布，所以只作參考、不作下限。不設上限：沒有資料。
+
+不用的值：四捨五入後的 1.9% 會得到 3.27；Ge 2021 浙江 459 / 730 = 0.63（中國病例很快隔離，且有適當防護的醫護不算接觸者）。
+
+**與 `daily_health_care` 的衝突（2026-11-01）。** `scripts/probes/probe_health_care_floor.py` 以 run 18 候選 80 為基準、每點 120–300 次 calibration 模式模擬：
+
+- 醫療七個參數在界限內均勻抽 120 組：57 組達下限，但沒有一組同時達到原有三個醫療接觸目標（B40 也只有 1/120）。
+- 只放大 P[21]（醫療接觸機率），時間形狀不動：P[21] × 3 達下限（4.13），但發病前每日醫療接觸 0.45，超過 0.30；P[24] 調到上限幫助很小。
+- P[21] × 2–4、P[24] 與時間形狀 P[25:28] 隨機抽 120 組：19 組同時達下限且每日 ≤ 0.30，但晚期比例全部 0.00–0.12。
+- 結論：下限、晚期比例 [0.25, 0.50] 與每日 ≤ 0.30 三者在界限內互相衝突；0.30 是唯一沒有來源的一項，改為只量（使用者裁決 2026-11-01，選 (b)，之後看影響）。
+- 改為只量後（commit `a8c7c84`，每點 300 次）：P[21] × 4（0.00793，上限 0.008）時所有計費目標同時達成（窗口內醫療接觸 5.52、早期 0.618、晚期 0.258、每例醫療感染 0.229）；× 2.5–3 時晚期 0.248–0.249，差下界一點。
+- 以上四項都是量 Jian 窗口內的接觸。改為全部接觸後（commit `a35d951`，每點 300 次）：P[21] × 1.5 時所有計費目標同時達成（全部醫療接觸 3.85，高於計費下限 3.446；早期 0.636、晚期 0.252、每例醫療感染 0.097）；P[24] 不影響接觸數。
+
+`daily_health_care` 的資料範圍：
+
+| 項目 | 值 | 來源 |
+|---|---|---|
+| 每人每年門診次數 | 2019 年 15.40（西醫含透析 12.24、牙醫 1.46、中醫 1.70），2020 年 14.23 | 衛福部全民健康保險會〈110 年全民健康保險醫療給付費用總額協商參考指標要覽〉醫療服務利用概況，健保署倉儲資料；分母為四季季中保險對象人數均數 |
+| 每次就診接觸人數 | 嚴格密切接觸的醫護約 2（18 / 9 次就診）；每位病人接觸的醫護（Table 1，密切＋一般）92、127、16、12、10、11、36、13，中位數 14.5；所有匡列接觸者 453 / 9 ≈ 50 | Chung et al. 2020, *J Korean Med Sci* 35(50):e431, https://doi.org/10.3346/jkms.2020.35.e431：首爾峨山醫院 8 位 COVID 門診病人（至少 9 次就診，院內停留中位數 164 分鐘），匡列 317 位醫護與 136 位病人或陪病家屬，其中 18 位醫護符合 6 呎 15 分鐘或無適當防護直接接觸 |
+| 發病前每日醫療接觸 | 0.0422 × 2 = 0.084 至 0.0422 × 50 = 2.12（2019 年就診率）；以醫護中位數 14.5 計為 0.61 | 上兩列相乘；0.30 相當於每次就診 7.1 人、0.47 相當於 11.1 人 |
+
+限制：沒有找到台灣每次門診的接觸人數；韓國資料來自醫學中心、停留時間長，且其嚴格定義（15 分鐘）比 Cheng 的醫療接觸定義（2 公尺內、無適當防護、不限時間）嚴格。
+
+## 查證紀錄
+
+| 日期 | 項目 | 結果 |
+|---|---|---|
+| 2026-10-12 | 3.8、4.13（Chen 2022） | 全文（PMC9296995）與補充資料查證：沒有依公司規模的群聚大小；「2.7 倍」是跨行業極值錯配 |
+| 2026-10-12 | 3.12（冪律指數） | 38 筆資料以 Clauset 方法重算：k_min = 21、尾巴 17 筆、指數 1.67（離散）／1.68（連續） |
+| 2026-10-12 | 1.2、1.4（每日接觸） | 2020 調查原文：每人最多記 12 位、問昨天、密切接觸定義為 2 公尺內交談或互動 15 分鐘以上 |
+| 2026-10-12 | B5（city term） | Fu 2012 Results 一句話：北 12.4、南 12.3、東 9.5（全場所，無區域定義、無樣本數） |
+| 2026-10-15 | 3.8、4.10、B4、B5 | 存入 13 篇論文（`lit/`），全部引文經程式比對確認存在於存檔；城市效應與職場的原文與小結見 [`source_quotes.md`](source_quotes.md) |
+| 2026-10-15 | 全部 📐 項目 | 以 `recompute_taiwan_targets.py` 重算（§6）。重現：1.1、1.7、1.9、1.10、1.18–1.20、1.25–1.29、3.12–3.13、4.7。新發現：1.8 舊值分子分母母體不一致；3.9 樣本是 8 不是 6；4.8 可直接由資料算（12.9 天）；`verify_phase_d` 的 k 用動差法 |
+| 2026-10-15 | 1.2–1.5、1.21 | Fu 2010 依情境與 ≥15 分鐘重算（§5）；職場、社區落在現行區間內，家戶、學校高於現行區間 |
+| 2026-10-16 | 社區（B62、B63） | 社區接觸改為 scale-free，α = 1.74 來自 Fu 2010；社區計費目標改為 Fu 2010 單日 0 次比例與 P90；可達性通過（§7） |

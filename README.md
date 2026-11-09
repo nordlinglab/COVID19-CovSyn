@@ -24,47 +24,73 @@ To run our code, we recommend you follow the following steps:
    ```
     
 
+## Repository layout
+
+The code is a Python package under `src/covsyn/`.
+Every command below runs from the repository root, because the modules read their inputs through paths relative to it (`./variable/`, `./data/`).
+
+| Path | Contents |
+|---|---|
+| `src/covsyn/model/` | The simulation: `data_synthesize.py` (demographics, social contexts, course of disease, contacts), `data_synthesis_main.py` (one simulation and the Monte Carlo driver), `r0_network.py` |
+| `src/covsyn/calibration/` | Fitting: `firefly_optimizer.py` (optimizer and reference objective), `fast_cost.py` (the objective the optimizer runs), `cost_parts.py`, `sar_anchors.py` (attack-rate anchors), `apply_phase_d_parameters.py` (search bounds and seed vector), `rebuild_school_pmf.py` |
+| `src/covsyn/data_processing/` | Model inputs and validation references: `rw_data_processing.py`, `taiwan_reference.py`, the `extract_*.py` scripts that build `validation_reference/` |
+| `src/covsyn/validation/` | Acceptance checklist and run reports: `verify_phase_d.py`, `check_constraints.py` (per-case constraint table), `measure_age_rr.py`, `measure_days.py`, `rr_exact.py`, `tw_check.py`, `show_final.py`, `show_bounds.py`, `check_gap.py`, `compare_phase_d_runs.py` |
+| `src/covsyn/figures/` | Validation figures, including `plot_todolist923.py` |
+| `src/covsyn/upstream/` | Upstream code the preprint describes, not used by the Phase D pipeline |
+| `scripts/` | `launch_phase_d.sh`, `phase_d_chain.sh`, `data_synthesis.sh`; `gates/` (checks before a run), `probes/` and `benchmarks/` (the tools behind findings in the decision register) |
+| `tests/` | Regression, pipeline and unit tests; fixtures in `tests/fixtures/` |
+| `variable/`, `data/`, `validation_reference/` | Fitted parameters, raw inputs, and reference distributions |
+| `firefly_result/phaseD_run10/` | Best vector, bounds and progress of Phase D run 10 |
+| `docs/` | `covsyn_decisions.md` (every modelling decision and finding) and Phase D notes |
+| `notebooks/` | Analysis notebooks |
+
 ## Usage
 
-The simulation pipeline consists of three main stages:
+Put `src/` on the Python path, or install the package in editable mode:
 
-### 1. Initial Parameter Setting
-
-Run `parameters_for_initialization.py` to generate the required initial parameters and search boundaries for the Taiwan main island simulation.
-Run `parameters_for_training.py` to generate the required training data for firefly optimization.
-
-### 2. Parameter Optimization (Optional)
-
-Run the firefly optimization algorithm to find optimal simulation parameters:
 ```bash
-python firefly_optimizer.py
+export PYTHONPATH="$PWD/src"
 ```
-This will generate optimized parameter files in `firefly_result/Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200/`.
 
-### 3. Data Synthesis
+Modules run as `python -m covsyn.<package>.<module>`.
+The shell scripts set `PYTHONPATH` themselves and take the interpreter from `PYTHON` (default `python3`).
 
-Run the main data synthesis script:
+### 1. Search bounds and seed vector
+
 ```bash
-./data_synthesis.sh
+python -m covsyn.calibration.apply_phase_d_parameters
 ```
-Note: We recommend Windows users to use Git Bash to run this script.
 
-## Core Components
+### 2. Checks before an optimisation run
 
-### Simulation Scripts
-- `Data_synthesis_main.py`: Main simulation implementation
-- `Data_synthesize.py`: Core simulation functions
-- `data_synthesis.sh`: Simulation execution script
+```bash
+python -m pytest tests/
+python scripts/gates/verify_fast_cost.py --workers 8 --vectors 4
+python scripts/gates/smoke_test.py
+```
 
-### Analysis Tools
-- `plot_results.py`: Visualization functions for optimization and results
-- `rw_data_processing.py`: Data processing utilities
-- `transition_probability_estimation.py`: Disease state transition calculations
-- `Course_synthesis.ipynb`: Analysis notebook for generating state transition K-M plots
-- `example_data_mapping.ipynb`: Examples of mapping synthetic data to common COVID-19 simulation model formats
+The first reproduces Phase D run 10 exactly; the second checks that the fast objective equals the reference one; the third evaluates the seed vector once.
 
-<!-- ### Testing
-- `test_data_synthesize.py`: Unit tests for simulation functions -->
+### 3. Parameter optimisation
+
+```bash
+PYTHON=python3 scripts/launch_phase_d.sh
+```
+
+This starts the Firefly optimizer and then `scripts/phase_d_chain.sh` in two tmux sessions.
+`WARM_START` names the `firefly_best.txt` files that seed the initial population (default: run 10), and `PREVIOUS_CHECKS` the previous run's `phaseD_checks.json` for the comparison step.
+
+### 4. Data synthesis
+
+```bash
+PARAMETER_PATH=firefly_result/phaseD_run10 scripts/data_synthesis.sh
+```
+
+## Tests
+
+`tests/test_regression.py` and `tests/test_pipeline.py` require every commit to reproduce the output of the commit that produced Phase D run 10 (`799fb15`): the objective and its 40 cost parts, simulation output for fixed seeds, and every step of the post-optimisation pipeline.
+The other tests check the rules in `docs/covsyn_decisions.md`.
+The slow tests are marked `slow`; `-m "not slow"` skips them.
 
 ## Data Structure
 

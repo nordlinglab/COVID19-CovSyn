@@ -1,0 +1,772 @@
+"""Check every post-simulation item recorded against decisions B14 and B17-B36.
+
+Each decision in covsyn_decisions.md ends with a list of things to verify once the model has
+been rerun. This script runs that list against the Monte-Carlo output and prints one line per
+item with its target, the measured value and a verdict, so the rerun can be accepted or
+rejected on the record rather than on impressions.
+
+Usage:
+    python -m covsyn.validation.verify_phase_d [spread_dir] [first_outbreak_dir] [out_json]
+
+spread_dir          synthetic_data_results_spread_Taiwan_weight (single seed, 84 days)
+first_outbreak_dir  synthetic_data_results_taiwan_first_outbreak (B66 first-wave seeds), optional
+"""
+import concurrent.futures
+import glob
+import json
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_in_tracing_window,
+                                            tracing_window_counts,
+                                            contacts_per_case, contacts_per_day_at_work,
+                                            contacts_per_day_before_onset,
+                                            offspring_dispersion, one_day_counts, one_day_shape)
+from covsyn.calibration.sar_anchors import JIAN2020_LOCAL_HEALTH_CARE_PER_CASE
+from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootstrap_index_sets,
+                                          bootstrap_intervals, collect_replicates,
+                                          json_band, percentile_intervals, verdict,
+                                          worker_count)
+from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
+
+SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
+FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
+OUT_JSON = Path(sys.argv[3] if len(sys.argv) > 3 else 'validation_reference/phaseD_checks.json')
+# B57: bootstrap replicates over the simulations for each check's 95% interval; 0 turns the
+# intervals off and judges on the value alone, as before B57.
+BOOTSTRAP_REPLICATES = int(sys.argv[4]) if len(sys.argv) > 4 else 200
+LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
+# B72: Jian et al. 2020 (Int J Infect Dis 101:348) divide all close contacts listed from two days
+# before onset to isolation by all confirmed cases: 8,051 / 487 = 16.5 (95% CI 13.9-19.1, method
+# not stated). Table 1 splits the contacts by the status of the index case: 1,435 of locally
+# acquired cases (none on a flight) and 6,616 of imported ones, 3,523 of them flight contacts.
+# The 487 cases are 55 local and 432 others (395 imported, 36 Navy, 1 unclassified; the Taiwan
+# case data, cases 1-487).
+JIAN_ALL_PER_CASE = 8051 / 487
+JIAN_ALL_NO_FLIGHT_PER_CASE = (8051 - 3523) / 487
+JIAN_LOCAL_PER_CASE = 1435 / 55
+JIAN_IMPORTED_PER_CASE = 6616 / 432
+JIAN_IMPORTED_NO_FLIGHT_PER_CASE = 3093 / 432
+# B71: Taiwan first-wave tracing records, infected contacts per case (E80, E15).
+TAIWAN_TRACING_CASES = 579
+TAIWAN_TRACING_LARGEST = 8
+MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix') for L in LAYERS}
+
+results = []
+
+
+def check(decision, name, value, target, unit='', ok=None, note='', ci=None, interval=True):
+    """Record one checklist line. target is (lo, hi), a string, or None for information."""
+    if ok is None and isinstance(target, tuple) and value is not None and np.isfinite(value):
+        ok = target[0] <= value <= target[1]
+    results.append({'decision': decision, 'name': name, 'value': None if value is None else float(value),
+                    'target': list(target) if isinstance(target, tuple) else target,
+                    'unit': unit, 'ok': None if ok is None else bool(ok), 'note': note,
+                    'ci': None if ci is None else [float(ci[0]), float(ci[1])],
+                    # False for order statistics such as a maximum, which a bootstrap
+                    # resample can only lower, so their interval would mislead (B57).
+                    'interval': interval})
+
+
+# S1 (2026-11-03): the 200 bootstrap replicates are independent, and on run 20 they were 68 of
+# the checklist's 66-69 minutes (20.4 s each, measured) on one core of 32. They now run in
+# a
+# pool. The values do not change: every index set is drawn in the parent, in the order
+# acceptance.bootstrap_index_sets defines, and compute_checks is pure with respect to its
+# arguments -- its only generator, below, is built fresh on every call, and the permutation
+# test's generator is not reached with permutations=False. Each worker LOADS the
+# simulations
+# itself (15.8 s, measured) instead of receiving them: one process holds 4.9 GB of
+# them, so
+# sending them to every worker would cost more than the replicates do. Memory is the
+# binding
+# constraint, not cores: VERIFY_WORKERS workers hold VERIFY_WORKERS * 4.9 GB.
+WORKER_COUNT = worker_count(os.environ)
+_WORKER_RUNS: list | None = None
+_WORKER_FIRST: list | None = None
+
+
+def init_replicate_worker(spread_dir, first_dir):
+    """Load this worker's own copy of the simulations, once per worker."""
+    global _WORKER_RUNS, _WORKER_FIRST
+    _WORKER_RUNS = load(Path(spread_dir))
+    _WORKER_FIRST = load(Path(first_dir)) if Path(first_dir).exists() else []
+
+
+def replicate_checks(task):
+    """One bootstrap replicate: resample by index, then the checklist without the city test.
+
+    Args:
+        task: (replicate number, spread indices, first-outbreak indices).
+
+    Returns:
+        (replicate number, {(decision, name): value}) with the same filtering the serial
+        bootstrap applies.
+    """
+    number, spread_index, first_index = task
+    spread_sample = [_WORKER_RUNS[i] for i in spread_index]
+    first_sample = [_WORKER_FIRST[i] for i in first_index]
+    rows = compute_checks(spread_sample, first_sample, permutations=False)
+    return number, {(r['decision'], r['name']): r['value']
+                    for r in rows if r['value'] is not None}
+
+
+def bootstrap_in_parallel(spread_dir, first_dir, sizes, replicates, workers):
+    """The bootstrap intervals, with the replicates evaluated in a worker pool.
+
+    A worker that dies fails the whole checklist: collect_replicates rejects a gap rather
+    than quietly shortening the bootstrap.
+    """
+    index_sets = bootstrap_index_sets(sizes, replicates=replicates)
+    tasks = [(n, spread, first) for n, (spread, first) in enumerate(index_sets)]
+    with concurrent.futures.ProcessPoolExecutor(
+            workers, initializer=init_replicate_worker,
+            initargs=(str(spread_dir), str(first_dir))) as pool:
+        values = dict(pool.map(replicate_checks, tasks))
+    return percentile_intervals(collect_replicates(values))
+
+
+def load(directory):
+    """Load every Monte-Carlo file of a run, case by case."""
+    files = sorted(glob.glob(str(directory / 'course_of_disease_data_*.npy')),
+                   key=lambda p: int(Path(p).stem.split('_')[-1]))
+    runs = []
+    for f in files:
+        k = int(Path(f).stem.split('_')[-1])
+        try:
+            course = np.load(f, allow_pickle=True)
+            contact = np.load(directory / f'contact_data_{k}.npy', allow_pickle=True)
+            social = np.load(directory / f'social_data_{k}.npy', allow_pickle=True)
+            demo = np.load(directory / f'demographic_data_{k}.npy', allow_pickle=True)
+        except (FileNotFoundError, ValueError):
+            continue
+        runs.append({'k': k, 'course': list(course), 'contact': list(contact),
+                     'social': list(social), 'demo': list(demo)})
+    return runs
+
+
+def offspring_counts(contacts):
+    return np.array([sum(np.nansum(np.asarray(c[f'{L}_effective_contacts'], dtype=float)) for L in LAYERS)
+                     for c in contacts], dtype=float)
+
+
+def negative_binomial_k(counts):
+    """B61: the objective's maximum-likelihood k (was the method of moments)."""
+    return offspring_dispersion(counts)
+
+
+def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> list:
+    """Every check on these spread simulations (and first-outbreak runs), as result rows.
+
+    permutations=False skips the city permutation test, which is a test of its own and too slow
+    to repeat inside the bootstrap.
+    """
+    results.clear()
+    # Imported, not copied (lesson 5): checks of a charged quantity use the objective's bands.
+    # Imported here, at the top, because a function-level import makes the name local to the
+    # whole function, and B25 below is the first check to read it.
+    from covsyn.calibration.firefly_optimizer import OUTCOME_TARGETS
+    course = [c for r in runs for c in r['course']]
+    contact = [c for r in runs for c in r['contact']]
+    social = [s for r in runs for s in r['social']]
+    demo = [d for r in runs for d in r['demo']]
+    index_course = [r['course'][0] for r in runs]
+    index_contact = [r['contact'][0] for r in runs]
+    index_social = [r['social'][0] for r in runs]
+    index_demo = [r['demo'][0] for r in runs]
+    def field(key, source, cast=float):
+        return np.array([x.get(key, np.nan) for x in source], dtype=cast)
+
+    # ---------------------------------------------------------------- B29 household
+    others = field('household_size', index_social)
+    check('B29', 'household: other members per case', others.mean(), (2.6, 3.0))
+    check('B29', 'household: living alone', 100 * np.mean(others == 0), (11.0, 16.0), '%')
+
+    # ---------------------------------------------------------------- B30 school
+    ages = field('age', index_demo)
+    classes = field('school_class_size', index_social)
+    for label, lo, hi, target in [('elementary (7-12)', 7, 12, (21, 27)),
+                                  ('junior high (13-15)', 13, 15, (24, 31)),
+                                  ('senior high (16-18)', 16, 18, (29, 36)),
+                                  ('university (19-22)', 19, 22, (75, 100))]:
+        band = (ages >= lo) & (ages <= hi) & (classes > 0)
+        check('B30', f'class size, {label}', classes[band].mean() if band.sum() else np.nan,
+              target, note=f'n={int(band.sum())}')
+
+    # ---------------------------------------------------------------- B64 workplace
+    # B64 (2026-10-24) replaces B31's work group, so B31's company-size checks (Chen 2022 cases per
+    # cluster by company size, items 4.13 and 4.14) are removed: Chen 2022 Table 5 is by industry,
+    # not by company size (A3), and the professor asked to drop them (2026-10-12). Employed means
+    # an enterprise size of at least 1, as in the objective.
+    enterprise = field('enterprise_size', index_social)
+    group = field('work_group_size', index_social)
+    employed = enterprise >= 1
+    check('B64', 'work group size, employed (median)',
+          np.median(group[employed]) if employed.any() else np.nan, None,
+          note=f'n={int(employed.sum())}; (n - 1) a / (a + n - 1) around a company of n')
+    workplace_days = [contacts_per_day_at_work(k, c)
+                      for c, k, e in zip(index_contact, index_course, employed, strict=True) if e]
+    check('B64', 'coworker contacts per day before onset, employed',
+          float(np.nanmean(workplace_days)) if workplace_days else np.nan,
+          OUTCOME_TARGETS['daily_workplace_employed'][:2],
+          note='B75: Fu 2010 employed on a day at work, >=15 min, met daily, weighted to the '
+               '2010 population: mean 4.96 (n=416); days before onset at work only, '
+               'summarize_taiwan_contact_data.py at_work()')
+
+    # ---------------------------------------------------------------- B25 daily contacts
+    # B61: the objective's bands (they were copied here and would have drifted when B61 moved
+    # the household and school targets).
+    targets = {L: OUTCOME_TARGETS[f'daily_{L}'][:2] for L in LAYERS}
+    total = 0.0
+    for L in LAYERS:
+        # B55: ordinary contacts only, the same function the objective uses.
+        per_day = [contacts_per_day_before_onset(k, c, L)
+                   for c, k in zip(index_contact, index_course, strict=True)]
+        value = float(np.mean(per_day))
+        total += value
+        # B64: the workplace band over every case is reported only; the employed version is
+        # judged under B64 above.
+        check('B25', f'contacts per day before onset, {L}', value,
+              targets[L] if OUTCOME_TARGETS[f'daily_{L}'][2] > 0 else None)
+    # B61: same rule as the layers -- the 2020 survey below, Fu 2010 (>=15 min) above. The old
+    # (5.0, 7.0) could not hold the new layer bands, whose lower bounds already sum to 5.82.
+    check('B25', 'contacts per day, all layers', total, (6.03, 8.40),
+          note='2020 national survey 6.03; Fu 2010 diaries, >=15 min, 8.40')
+
+    # household: how often is each member actually met
+    met = []
+    for c in index_contact:
+        m = np.asarray(c['household_contacts_matrix'], dtype=float)
+        if m.size:
+            met.append(m.mean())
+    check('B25', 'household: share of days each member is met', 100 * np.mean(met) if met else np.nan,
+          (50.0, 100.0), '%', note='was 27% before Phase D')
+
+    # ---------------------------------------------------------------- B32 / E5
+    anomalies = 0
+    zero_contact = 0
+    for c in contact:
+        any_candidate = any(np.asarray(c[MATRIX[L]], dtype=float).size for L in LAYERS)
+        any_effective = any(len(c[f'{L}_effective_contacts']) for L in LAYERS)
+        if not any_candidate:
+            zero_contact += 1
+        elif not any_effective:
+            anomalies += 1
+    check('B32', 'cases with candidate contacts but no effective-contact record', anomalies, (0, 0),
+          note='was the E5 signature')
+    check('B32', 'cases with no contact in any layer', 100 * zero_contact / len(contact), (0.0, 4.0), '%',
+          note='was 6.4% before Phase D')
+
+    # ------------------------------------------------- B8 / B9 / B13 per-layer cumulative SAR
+    # Infections per candidate contact over the whole window, which is the quantity the
+    # calibration anchors are written in. Measured on index cases, matching the design of
+    # the tracing studies the anchors come from.
+    # Taken from sar_anchors.py so that the acceptance test and the search bounds cannot
+    # state different anchors, which they did until 2026-09-25 (household was checked
+    # against 4.6-10.1 while the bounds were built from a different pair of numbers again).
+    from covsyn.calibration.sar_anchors import LAYER_CUMULATIVE_SAR, LAYER_INFECTIONS_PER_INDEX
+    anchors = {layer: (100 * centre, 100 * lo, 100 * hi)
+               for layer, (lo, centre, hi) in LAYER_CUMULATIVE_SAR.items()}
+    per_index = {}
+    for layer, (anchor, lo, hi) in anchors.items():
+        candidate = effective = 0
+        for c in index_contact:
+            eff = list(c[f'{layer}_effective_contacts'] or [])
+            candidate += len(eff)
+            effective += sum(1 for x in eff if x == 1)
+        per_index[layer] = (effective / len(index_contact), candidate / len(index_contact))
+        # E56: for the three layers Cheng reports this rate is now REPORTED, not accepted on.
+        # Dividing his infection count by CovSyn's own candidate-contact count made the target
+        # a ratio whose denominator the search controls, and run 5 met the health care rate
+        # while medical infections per index case fell further below Cheng's 0.06. The rate is
+        # still worth printing -- it is what places the daily attack-rate bounds -- but the
+        # acceptance test is the absolute count below.
+        charged = layer not in LAYER_INFECTIONS_PER_INDEX
+        check('B9', f'cumulative SAR per contact, {layer}',
+              100 * effective / candidate if candidate else np.nan,
+              (lo, hi) if charged else None, '%',
+              note=f'calibration anchor {anchor}%; n={candidate} candidate contacts'
+                   + ('' if charged else '; informational since E56, accepted on the count'))
+
+    # E56 / E57: what one index case actually infects in each layer, which is the quantity
+    # Cheng measured. The objective charges its expectation (E95: sums of infection
+    # probabilities, with expected event contacts); this checklist counts the realised
+    # infections over the Monte-Carlo runs, so the two agree on average. Every layer is printed; the
+    # three Cheng reports are the ones with an acceptance interval.
+    for layer, (infections, contacts) in per_index.items():
+        target = LAYER_INFECTIONS_PER_INDEX.get(layer)
+        cheng = {'household': 0.10, 'health_care': 0.06, 'municipality': 0.01}.get(layer)
+        note = f'CovSyn candidate contacts per index {contacts:.3f}'
+        if cheng is not None:
+            note += (f'; Cheng 2020 {cheng:.2f} per index case'
+                     f' -> CovSyn is {infections / cheng:.2f}x')
+            if layer == 'municipality':
+                note += '; upper capped at 3x the centre (E57), not the Poisson CI'
+        else:
+            note += '; Cheng has no category for this layer, reported only'
+        check('B9', f'infections per index case, {layer}', infections,
+              (target[0], target[2]) if target else None, '', note=note)
+
+    # ---------------------------------------------------------------- B17 / B27 dispersion
+    counts = offspring_counts(index_contact)
+    k_hat = negative_binomial_k(counts)
+    # B61: the band is the objective's, read from OUTCOME_TARGETS. The upper bound was raised to
+    # 0.35 earlier so the two agreed, but the lower bound stayed 0.10 after the objective's went
+    # to 0.20 (E38), so they disagreed again. The estimator is now also the objective's (MLE).
+    check('B17', 'offspring dispersion k', k_hat, OUTCOME_TARGETS['offspring_k'][:2],
+          note='Taiwan tracing NegBin MLE k = 0.286 (n = 579), recompute_taiwan_targets.py')
+    # B56 (E80): Taiwan's R = 0.43 counts contacts who were later confirmed, including people
+    # exposed together with the case (same tour group, flight, ship), so it is an upper bound;
+    # the recorded infector -> infectee links give 0.047, a lower bound. CovSyn counts the people
+    # this case infected, so the acceptance interval runs between the two definitions.
+    # B67 (2026-10-24): CovSyn's index case is a local case living in the community. Cheng
+    # 2020's 29 local index cases infected 18 people, 0.62 each (exact Poisson 95% 0.37-0.98);
+    # the earlier band (0.047, 0.43) came from all cases, 71% of them imported.
+    check('B17', 'R (mean offspring of an index case)', counts.mean(), (0.37, 0.98),
+          note='B67: Cheng 2020 local index cases 18 / 29 = 0.62; all cases between Taiwan '
+               'links 0.047 and confirmed contacts 0.43 (E80)')
+    check('B17', 'cases infecting 3 or more', 100 * np.mean(counts >= 3), OFFSPRING_SHARE_GE3, '%',
+          note='B83: the 55 local cases, between recorded links (1 of 55) and confirmed '
+               'contacts (7 of 55); the all-case band (0.2%, 4.3%) of B56 belonged to a '
+               'population 84% imported and could not hold with B67\'s R')
+    # B71 (2026-10-26, user): the largest count grows with the number of cases and rests on one
+    # draw, and the old band (5, 30) had no source. Compare like with like instead: the largest
+    # of 579 simulated index cases, the size of the Taiwan tracing set, whose largest is 8. The
+    # check passes when 8 is not in either 2.5% tail of the simulated largest.
+    rng = np.random.default_rng(0)
+    largest = np.array([rng.choice(counts, TAIWAN_TRACING_CASES).max() for _ in range(2000)])
+    check('B17', f'samples of {TAIWAN_TRACING_CASES} cases whose largest is at most '
+          f'{TAIWAN_TRACING_LARGEST}', 100 * np.mean(largest <= TAIWAN_TRACING_LARGEST), (2.5, 97.5),
+          '%', interval=False,
+          note=f'B71: Taiwan tracing largest {TAIWAN_TRACING_LARGEST} over {TAIWAN_TRACING_CASES} '
+               f'cases (confirmed contacts, an upper bound, E80); simulated median '
+               f'{np.median(largest):.0f}, 95% {np.percentile(largest, 2.5):.0f}-'
+               f'{np.percentile(largest, 97.5):.0f}, largest of all {counts.max():.0f}')
+
+    community = np.array([len(c['municipality_effective_contacts']) for c in index_contact], dtype=float)
+    # B63 (E100): informational. Under B62 it cannot coexist with the one-day Fu 2010 shape
+    # judged under B63 below, and the tracing records are a selected sample (E88).
+    check('B27', 'community contacts per case, median', np.median(community), None,
+          note='Taiwan tracing friend+other median 7.5 (n=38, selected sample, E88); '
+               'informational since B63')
+    # The maximum over 1000 cases is a single order statistic and says almost nothing; the
+    # p90 and the shape do. The tracing records have a median of 7 and a p90 of 172.
+    nonzero = community[community > 0]
+    # B47 made the p90 informational (its band's centre, 110, is out of the model's reach) and
+    # B50 checks the ratio on the band the objective charges -- imported, not copied (lesson 5).
+    check('B27', 'community contacts per case, p90',
+          np.percentile(nonzero, 90) if len(nonzero) else np.nan, None,
+          note='Taiwan tracing 2020 first wave p90 = 195 (n=38); informational since B47')
+    # B56 (E88): reported as a known limitation, no longer accepted on. The 38 records are the
+    # first-wave cases whose community count was published; reported cases average 52 contacts
+    # against 16.5 for all 487 cases of Jian et al. 2020, so their tail is not the population's.
+    # The objective still charges OUTCOME_TARGETS['community_tail_ratio'].
+    check('B50', 'community contacts, p90 / median',
+          (np.percentile(nonzero, 90) / np.median(nonzero)) if len(nonzero) and np.median(nonzero) > 0 else np.nan,
+          None,
+          note='B56: limitation, selected sample (E88); Taiwan reported cases 26.0 (n=38), '
+               'CI [5.5, 93.1]')
+    check('B27', 'community contacts per case, maximum', community.max(), None,
+          note='Taiwan tracing maximum 850 (informational: one order statistic)')
+    # decoupled from city population (finding E4)
+    # B56 (E83): max / min over ~15 small city samples is mostly noise; the check asks whether
+    # the cities differ more than they do with the city labels shuffled.
+    city = np.array([s['municipality'] for s in index_social])
+    check('B27', 'largest / smallest city mean community contacts',
+          max_min_city_ratio(community, city), None,
+          note='informational since B56; was 12x, proportional to city population (E4)')
+    city_p = permutation_p_value(community, city) if permutations else np.nan
+    check('B27', 'city effect on community contacts, permutation p-value', city_p, (0.05, 1.0),
+          note='B56: passes when no city effect is detectable (p >= 0.05, 2000 label shuffles)')
+
+    # ---------------------------------------------------------------- B61 one-day shapes
+    # A contact diary records one person's one day, so the model's days before onset are
+    # pooled and compared with Fu 2010's national diaries (contacts of 15 minutes or more;
+    # 2010, before the pandemic). Reported, not charged. A case whose layer has no contact
+    # window at all counts as one day without contacts, so it is not silently dropped.
+    # B63: the community zero share and p90 are charged since B63 and judged on the objective's
+    # own bands, computed by the objective's own function (contact_measures.one_day_shape).
+    def person_days(layer, cases):
+        # B75: a workplace diary is a day at work, so the model's days off are left out.
+        days = [at_work_days_before_onset(k, c) if layer == 'workplace' else one_day_counts(k, c, layer)
+                for k, c in cases]
+        return np.concatenate(days) if days else np.zeros(0)
+
+    pairs = list(zip(index_course, index_contact, strict=True))
+    zero_band = tuple(100 * x for x in OUTCOME_TARGETS['community_day_zero_share'][:2])
+    for layer, label, cases, ref, bands in (
+            ('municipality', 'community', pairs,
+             'Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)',
+             (zero_band, OUTCOME_TARGETS['community_day_p90'][:2])),
+            ('workplace', 'workplace, employed cases', [p for p, e in zip(pairs, employed) if e],
+             'B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: '
+             'mean 4.96, zero 27.4%, p90 13 (n=416); days at work only',
+             (tuple(100 * x for x in OUTCOME_TARGETS['workplace_day_zero_share'][:2]),
+              OUTCOME_TARGETS['workplace_day_p90'][:2]))):
+        d = person_days(layer, cases)
+        if not len(d):
+            continue
+        zero_share, p90 = one_day_shape([d])
+        check('B61', f'{label} contacts on one day, mean', d.mean(), None, note=ref)
+        check('B61', f'{label} contacts on one day, zero share', 100 * zero_share, bands[0], '%',
+              note=ref)
+        check('B61', f'{label} contacts on one day, median', np.median(d), None, note=ref)
+        check('B61', f'{label} contacts on one day, p90', p90, bands[1], note=ref)
+
+    # B56: independent validation against all 487 cases of Jian et al. 2020 (16.5 close
+    # contacts per confirmed case, 95% CI 13.9-19.1), which no objective term uses. E89: Jian
+    # counts the contacts a tracer listed, from 2 days before onset to isolation (E7), so the
+    # judged quantity uses that window; every candidate contact from infection is information.
+    # B72 (2026-10-26, user): Jian's statistic is computed the way Jian did, over every case of
+    # a simulated first wave (B72 below); the index case alone is not Jian's population, so it
+    # is information here.
+    # One pass over the window per index case serves B56 (all layers) and B76 (health care).
+    index_window = [tracing_window_counts(k, c)
+                    for k, c in zip(index_course, index_contact, strict=True)]
+    check('B56', "contacts per case in Jian's tracing window",
+          float(np.mean([sum(w.values()) for w in index_window])),
+          None,
+          note=f'information: index cases only; Jian et al. 2020 locally acquired cases '
+               f'1,435 / 55 = {JIAN_LOCAL_PER_CASE:.1f}; window onset - 2 d to isolation (E7, E89)')
+    check('B56', 'contacts per case, all layers, from infection',
+          float(np.mean([contacts_per_case(c) for c in index_contact])), None,
+          note='information: every candidate contact; CovSyn counts from infection, '
+               'tracing does not')
+
+    # ---------------------------------------------------------------- B22 / B26 timing
+    incubation = field('incubation_period', index_course)
+    window = field('pre_onset_window', index_course)
+    latent = field('latent_period', index_course)
+    isolation = field('monitor_isolation_period', index_course)
+    positive = field('positive_test_date', index_course)
+    infection_day = field('infection_day', index_course)
+    symptomatic = ~np.isnan(incubation)
+    check('B22', 'incubation period, mean', np.nanmean(incubation), (3.9, 8.0),
+          note='literature reported-mean range, 15 studies (E45)')
+    # B61: Taiwan's own incubation, checked next to the literature range: the model produces
+    # both, and no single source reports every period (the latent / generation time lesson).
+    check('B61', 'incubation period, mean, Taiwan data', np.nanmean(incubation), (4.96, 7.57),
+          note='Taiwan first wave: onset - earliest infection date, mean 6.2 d (n=28), bootstrap '
+               '95% of the mean; recompute_taiwan_targets.py')
+    check('B22', 'pre-onset infectious window, mean', np.nanmean(window), (1.0, 3.0))
+    # E96: over symptomatic cases; nanmean(window == 0) also counted the asymptomatic ones.
+    check('B22', 'pre-onset window of zero days',
+          100 * np.mean(window[np.isfinite(window)] == 0), (0.0, 12.0), '%',
+          note='symptomatic cases (E96); was 20% before Phase D')
+    check('B22', 'latent period, mean', latent.mean(), (4.1, 5.5),
+          note='B3: widened to the whole literature reported-mean range')
+    onset_to_confirm = positive - infection_day - incubation
+    check('B2', 'onset to confirmation, median', np.nanmedian(onset_to_confirm[symptomatic]), (5.0, 7.0),
+          note='Taiwan tracing median 6 d (n=442); Ge 2021 onset to isolation 5 d; published CovSyn fits 8.17 d')
+    # Re-derived for B2 (2026-09-26). The old ceiling of 10.5 was simply "what the model did
+    # before Phase D", set while onset -> confirmation was fitted at 1 day. With B2 putting
+    # that median at 5-7 days on top of a 5.3-day incubation, infection -> isolation has to
+    # land near 11-12 days; the fourth run gave 10.939 and was marked FAIL against a bound
+    # that its own decision had already invalidated.
+    # B61: the 5.3-day incubation this band was derived from has no traceable source; the
+    # band stays as the sum of the literature incubation range (3.9-8.0) and Taiwan's
+    # onset-to-confirmation median (5-7), and Taiwan's directly measured interval is checked
+    # on its own below.
+    check('B26', 'infection to isolation, mean', isolation.mean(), (8.0, 14.0),
+          note='derived: incubation (literature 3.9-8.0 d; Taiwan 6.2 d) plus Taiwan '
+               'onset-to-confirmation median 5-7 d')
+    check('B61', 'infection to confirmation, mean, Taiwan data', np.nanmean(positive - infection_day),
+          (11.4, 14.6),
+          note='Taiwan first wave: confirmation - earliest infection date, mean 12.9 d (n=33), '
+               'bootstrap 95% of the mean; recompute_taiwan_targets.py')
+    routes = [c.get('isolation_route') for c in course]
+    for route in ('symptom', 'traced', 'untraced', 'critical'):  # 'critical': B52
+        check('B26', f'isolation route: {route}', 100 * routes.count(route) / len(routes), None, '%')
+
+    # share of contacts that happen before onset (Cheng: 27.5%)
+    before = after8 = totalc = 0
+    med_before = med_after8 = med_early = med_total = 0
+    for c, k in zip(index_contact, index_course):
+        onset = k['incubation_period']
+        if onset is None or np.isnan(onset):
+            continue
+        for L in LAYERS:
+            m = np.asarray(c[MATRIX[L]], dtype=float)
+            if m.size == 0:
+                continue
+            first = np.argmax(m > 0, axis=1) - onset
+            totalc += len(first)
+            before += int((first < 0).sum())
+            after8 += int((first >= 8).sum())
+            if L == 'health_care':
+                med_total += len(first)
+                med_before += int((first < 0).sum())
+                med_after8 += int((first >= 8).sum())
+                med_early += int((first < 4).sum())
+    # B56 (E84): informational. Cheng's 27.5% reflects how the tracing recorded contacts (only
+    # 66% of his household contacts start before onset), not when contacts really began.
+    check('B26', 'contacts starting before symptom onset', 100 * before / max(totalc, 1), None, '%',
+          note='B56: informational, Cheng 2020 27.5% is a recording artefact (E84)')
+    check('B23', 'health care contacts starting 8+ days after onset',
+          100 * med_after8 / max(med_total, 1), (20.0, 50.0), '%',
+          note='Cheng 2020 medical: 256/697 = 36.7%; was ~1-3% before Phase D')
+    # E59: the other end of the same distribution. Cheng's medical contacts are mostly EARLY
+    # (his <0 and 0-3 bins hold 33.9% and 21.5%, so 55.4% start before day 4), and charging
+    # only the late tail let run 5 reverse the shape -- 9.0% early, 50.7% late -- without any
+    # acceptance item noticing. Same bin edge as firefly_optimizer's medical_early_share.
+    check('B23', 'health care contacts starting before day 4',
+          100 * med_early / max(med_total, 1), (40.0, 70.0), '%',
+          note='Cheng 2020 medical: 33.9% before onset + 21.5% on days 0-3 = 55.4%')
+    # B76: the objective's floor on every candidate health care contact per index case (E61),
+    # and the same contacts inside Jian's tracing window as information.
+    check('B76', 'health care contacts per index case',
+          per_index['health_care'][1], OUTCOME_TARGETS['health_care_contacts_per_index'][:2],
+          note='floor: Cheng 2020 medical infections lower bound / per-contact rate upper bound')
+    check('B76', "health care contacts per index case in Jian's tracing window",
+          float(np.mean([w['health_care'] for w in index_window])), None,
+          note=f'information: Jian et al. 2020 local cases '
+               f'{JIAN2020_LOCAL_HEALTH_CARE_PER_CASE:.2f} hospital or clinic contacts')
+
+    # ---------------------------------------------------------------- B28 case closure
+    # The objective's own function and bands (B58), so the checklist cannot drift from them.
+    from covsyn.calibration.firefly_optimizer import course_timing
+    timing = course_timing(field('date_of_recovery', index_course),
+                           field('positive_test_date', index_course),
+                           field('date_of_critically_ill', index_course), infection_day,
+                           field('incubation_period', index_course), symptomatic)
+    for key, name, note in (
+            ('closure_after_confirmation_symptomatic', 'confirmation to case closure, symptomatic',
+             'E91: Taiwan confirmed to release, mean 27.0 (n=56)'),
+            ('closure_after_confirmation_asymptomatic',
+             'confirmation to case closure, asymptomatic', 'E91: Taiwan mean 23.3 (n=23)'),
+            ('icu_to_closure', 'ICU to case closure', 'E93: Taiwan mean 36.2 (n=28)'),
+            ('onset_to_icu', 'onset to ICU', 'E92: Taiwan mean 7.2 (n=40), median 5.5')):
+        check('B28', name, timing.get(key, np.nan), OUTCOME_TARGETS[key][:2], note=note)
+
+    # ---------------------------------------------------------------- B33 / B20 severity
+    icu = ~np.isnan(field('date_of_critically_ill', index_course))
+    dead = ~np.isnan(field('date_of_death', index_course))
+    check('B33', 'asymptomatic share', 100 * np.mean(~symptomatic), (20.0, 28.0), '%',
+          note='B61: Taiwan 20.4% (no onset date and no ICU, 118/578); 23.5% if every case '
+               'without an onset date counts (136/578)')
+    check('B33', 'symptomatic to ICU', 100 * icu.sum() / max(symptomatic.sum(), 1), (9.0, 17.0), '%',
+          note='B61: Taiwan 12.6% (58/460, an ICU case without an onset date counts as '
+               'symptomatic); the cascade then reproduces the observed CFR exactly')
+    check('B33', 'ICU to death', 100 * dead.sum() / max(icu.sum(), 1), (7.0, 19.0), '%',
+          note='Taiwan 12.1% (7/58)')
+    check('B33', 'case fatality', 100 * dead.mean(), (0.7, 2.0), '%', note='Taiwan 1.21% (7/578)')
+    band = np.digitize(ages, [20, 40, 60])
+    icu_by_band = []
+    for b, label in enumerate(['0-19', '20-39', '40-59', '60+']):
+        m = band == b
+        rate = 100 * icu[m].sum() / max((symptomatic & m).sum(), 1) if m.sum() else np.nan
+        icu_by_band.append(rate)
+        check('B20', f'symptomatic to ICU, {label}', rate, None, '%', note=f'n={int(m.sum())}')
+    if np.isfinite(icu_by_band[1]) and icu_by_band[1] > 0:
+        check('B20', 'ICU rate 60+ / 20-39', icu_by_band[3] / icu_by_band[1], (3.0, 12.0),
+              note='Verity 2020 gradient')
+
+    # ---------------------------------------------------------------- B14 age risk ratio
+    contact_ages, infected_ages = [], []
+    for c in index_contact:
+        for L in LAYERS:
+            contact_ages.extend(np.asarray(c[f'{L}_contact_ages'], dtype=float).tolist())
+            infected_ages.extend([a for a in np.asarray(c[f'{L}_secondary_contact_ages'], dtype=float)
+                                  if np.isfinite(a)])
+    contact_ages = np.array(contact_ages)
+    infected_ages = np.array(infected_ages)
+    if len(contact_ages) and len(infected_ages):
+        rr = []
+        for lo, hi in [(0, 20), (20, 40), (40, 60), (60, 200)]:
+            denom = ((contact_ages >= lo) & (contact_ages < hi)).sum()
+            numer = ((infected_ages >= lo) & (infected_ages < hi)).sum()
+            rr.append(numer / denom if denom else np.nan)
+        rr = np.array(rr) / rr[1] if rr[1] else np.array(rr)
+        # E68 / E70: these five-layer numbers are measured on the ~1000 index cases of this run,
+        # which held 226 infections over four bands on run 6 -- health care 60+ rested on a single
+        # infection. They are kept as INFORMATION; the acceptance test is the high-N,
+        # Cheng-comparable measurement below, from measure_age_rr.py.
+        for value, label in zip(rr, ['0-19', '20-39', '40-59', '60+']):
+            check('B14', f'age risk ratio, all five layers, {label}', value, None,
+                  note='information: this run only, all layers pooled. Cheng has no school or '
+                       'workplace category, and CovSyn school carries a 2.3% attack rate '
+                       'concentrated in 0-19, so this pooling is not comparable to his (E70)')
+
+    # B60: the checklist-based selection measures each candidate into its own file.
+    age_rr_file = Path(os.environ.get('AGE_RR_FILE', 'validation_reference/age_rr.json'))
+    if age_rr_file.exists():
+        measurement = json.loads(age_rr_file.read_text())
+        layers = ', '.join(measurement.get('cheng_comparable_layers', []))
+        n_cases = measurement.get('n_index_cases')
+        infections = measurement.get('cheng_comparable_infections')
+        for label, band in measurement.get('bands', {}).items():
+            lo, hi = band['target']
+            ci_lo, ci_hi = band['ci']
+            check('B14', f'measured age risk ratio, {label}', band['rr'], (lo, hi),
+                  ci=(ci_lo, ci_hi),
+                  note=(f'{n_cases} index cases, {infections} infections over {layers} '
+                        f'(the settings Cheng traced); 95% CI [{ci_lo:.3f}, {ci_hi:.3f}]; '
+                        f'{band["precision"]}; reference: '
+                        + band.get('band_source', 'see measure_age_rr.py')))
+        # E70 / N3: the layer-by-layer ratios are an INPUT-REPRODUCTION check -- the reference is
+        # the model's own locked setting, so agreement says the sampler works, not that the model
+        # matches reality. Kept apart from the acceptance rows above, which compare against
+        # external estimates. todolist923 1.10 asks for exactly this split.
+        locked = measurement.get('locked_input')
+        if locked:
+            check('B14', 'locked age risk ratio input', None,
+                  '[%s]' % ', '.join('%.2f' % v for v in locked),
+                  note='read from variable/course_parameters.npy; NOT a validation target -- the '
+                       'rows below check that the sampler reproduces it (input reproduction, N3)')
+        for layer, gap in measurement.get('layer_input_reproduction_gap', {}).items():
+            check('B14', f'input reproduction, {layer}', gap, None,
+                  note='largest |measured RR - locked input| over the age bands this layer has; '
+                       'implementation check, not independent validation (N3)')
+        for value, label in zip(measurement.get('all_layer_rr', []),
+                                ['0-19', '20-39', '40-59', '60+']):
+            check('B14', f'age risk ratio, all five layers (high N), {label}', value, None,
+                  note='information: the same high-N measurement pooled over all five layers, '
+                       'for the size of the composition effect (E70)')
+    else:
+        check('B14', 'high-N age risk ratio measurement', None, 'measure_age_rr.py has not run',
+              note='B14 is accepted on that measurement since E68; without it only the '
+                   'informational rows above are available')
+
+    # ---------------------------------------------------------------- B66 Taiwan first wave
+    # B66: the first-wave scenario starts from every imported case of the first wave and the 13
+    # local cases of unknown source (variable/taiwan_first_wave_seeds.csv); course['seed_type']
+    # marks them. The local cases of a simulation are its non-seed cases plus the local seeds,
+    # which is what the 55 reported local cases are.
+    if first_runs:
+        def seeds_of(r, kind):
+            return [i for i, c in enumerate(r['course']) if c.get('seed_type') == kind]
+        local = np.array([sum(1 for c in r['course'] if not c.get('seed_type'))
+                          + len(seeds_of(r, 'local_unknown')) for r in first_runs], dtype=float)
+        deaths = np.array([sum(1 for c in r['course'] if not np.isnan(c['date_of_death']))
+                           for r in first_runs], dtype=float)
+        check('B66', 'first wave local cases per simulation', local.mean(), None,
+              note=f'observed 55 local cases (13 of unknown source); n={len(local)}')
+        imported_offspring = np.concatenate([
+            offspring_counts([r['contact'][i] for i in seeds_of(r, 'imported')]) for r in first_runs])
+        check('B66', 'infections per imported seed', imported_offspring.mean()
+              if len(imported_offspring) else np.nan, (0.015, 0.14),
+              note='Cheng 2020 imported index cases 4 / 71 = 0.056 (exact Poisson 95% '
+                   '0.015-0.14); the case data give 17 local cases infected by imported cases')
+        everyone = [(c, k) for r in first_runs for c, k in zip(r['course'], r['contact'], strict=True)]
+        check('B66', "contacts per confirmed case in Jian's tracing window, all cases",
+              float(np.mean([contacts_in_tracing_window(c, k) for c, k in everyone])), None,
+              note='Jian et al. 2020: 16.5 per case over all 487 confirmed cases, 76% of them '
+                   'quarantined travellers or contacts; same mixture as this scenario (1.14)')
+        # B72 (2026-10-26, user): Jian's statistic computed as Jian did, once per simulated
+        # first wave: the contacts listed from two days before onset to isolation, summed over
+        # the cases of the group, divided by their number. The spread over the simulations is
+        # the range the model expects Taiwan to have measured. The model has no contact before
+        # arrival, so it has no flight contact.
+        def jian(selector):
+            per_run = []
+            for r in first_runs:
+                pairs = [(c, k) for c, k in zip(r['course'], r['contact'], strict=True) if selector(c)]
+                if pairs:
+                    per_run.append(sum(contacts_in_tracing_window(c, k) for c, k in pairs) / len(pairs))
+            return np.array(per_run, dtype=float)
+
+        for label, selector, reference in (
+                ('all cases', lambda c: True,
+                 f'{JIAN_ALL_PER_CASE:.1f} [13.9, 19.1]; without flight contacts '
+                 f'{JIAN_ALL_NO_FLIGHT_PER_CASE:.1f}'),
+                ('local cases', lambda c: c.get('seed_type') != 'imported',
+                 f'locally acquired 1,435 / 55 = {JIAN_LOCAL_PER_CASE:.1f}'),
+                ('imported cases', lambda c: c.get('seed_type') == 'imported',
+                 f'imported 6,616 / 432 = {JIAN_IMPORTED_PER_CASE:.1f}; without flight contacts '
+                 f'{JIAN_IMPORTED_NO_FLIGHT_PER_CASE:.1f} (Navy cases included)')):
+            v = jian(selector)
+            if len(v):
+                check('B72', f"Jian's contacts per case, {label}, per simulated first wave",
+                      float(v.mean()), None,
+                      note=f'information: simulations 2.5-97.5% {np.percentile(v, 2.5):.1f}-'
+                           f'{np.percentile(v, 97.5):.1f} (n={len(v)}); Jian et al. 2020 {reference}')
+        check('B36', 'first wave deaths per simulation', deaths.mean(), None,
+              note='observed 3 local deaths')
+        first_ages = np.array([d['age'] for r in first_runs for d in r['demo']], dtype=float)
+        check('B34', 'Taiwan scenario mean case age', np.nanmean(first_ages), (33.0, 42.0),
+              note='observed tracing mean 37.1')
+
+    return [dict(r) for r in results]
+
+
+def main():
+    """Run the checklist on SPREAD_DIR and FIRST_DIR and write the JSON report."""
+    runs = load(SPREAD)
+    if not runs:
+        raise SystemExit(f'no Monte-Carlo output found in {SPREAD}')
+    first_runs = load(FIRST) if FIRST.exists() else []
+    point = compute_checks(runs, first_runs)
+    print(f'{SPREAD}: {len(runs)} simulations, '
+          f'{sum(len(r["course"]) for r in runs)} cases\n')
+
+    # B57: 95% bootstrap intervals over the simulations.
+    if BOOTSTRAP_REPLICATES > 0:
+        def replicate(spread_sample, first_sample):
+            rows = compute_checks(spread_sample, first_sample, permutations=False)
+            return {(r['decision'], r['name']): r['value'] for r in rows
+                    if r['value'] is not None}
+
+        # The spread and first-outbreak runs are resampled independently: they are separate
+        # scenarios and need not be equal in number.
+        if WORKER_COUNT > 1:
+            intervals = bootstrap_in_parallel(SPREAD, FIRST, (len(runs), len(first_runs)),
+                                              BOOTSTRAP_REPLICATES, WORKER_COUNT)
+        else:
+            intervals = bootstrap_intervals(replicate, runs, first_runs,
+                                            replicates=BOOTSTRAP_REPLICATES)
+        for r in point:
+            if (r['ci'] is None and r['interval']
+                    and (r['decision'], r['name']) in intervals):
+                r['ci'] = list(intervals[(r['decision'], r['name'])])
+    for r in point:
+        if isinstance(r['target'], list):
+            judged = verdict(r['value'] if r['value'] is not None else np.nan,
+                             tuple(r['target']), tuple(r['ci']) if r['ci'] else None)
+            r['ok'] = None if judged is None else judged != 'fail'
+            r['within_noise'] = judged == 'within'
+    results[:] = point
+
+    # ---------------------------------------------------------------- report
+    width = max(len(r['name']) for r in results)
+    current = None
+    passed = failed = within = 0
+    for r in results:
+        if r['decision'] != current:
+            current = r['decision']
+            print(f'--- {current}')
+        target_text = band_text(r['target'])
+        if r['ok'] is None:
+            mark = '    '
+        elif r['ok'] and r.get('within_noise'):
+            mark = 'ok~ '
+            passed += 1
+            within += 1
+        elif r['ok']:
+            mark = ' ok '
+            passed += 1
+        else:
+            mark = 'FAIL'
+            failed += 1
+        value = 'n/a' if r['value'] is None or not np.isfinite(r['value']) else '%9.3f' % r['value']
+        interval = f"[{r['ci'][0]:.3g}, {r['ci'][1]:.3g}]" if r.get('ci') else ''
+        print(f"  {mark} {r['name']:<{width}} {value}{r['unit']:<2}  {target_text:<16} "
+              f"{interval:<20} {r['note']}")
+    print(f'\n{passed} checks passed ({within} of them only within the 95% interval, marked ok~), '
+          f'{failed} failed, {len(results) - passed - failed} informational')
+
+    OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUT_JSON, 'w') as f:
+        json.dump({'spread_dir': str(SPREAD), 'simulations': len(runs),
+                   'cases': sum(len(r['course']) for r in runs),
+                   'bootstrap_replicates': BOOTSTRAP_REPLICATES,
+                   # B76: an open bound is written as null, strict JSON has no Infinity.
+                   'checks': [{**r, 'target': json_band(r['target'])} for r in results]},
+                  f, indent=1)
+    print('written', OUT_JSON)
+
+
+if __name__ == '__main__':
+    main()

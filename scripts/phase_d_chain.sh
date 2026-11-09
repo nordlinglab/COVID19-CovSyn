@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Phase D: wait for the firefly run to finish, then synthesise the data and produce every
+# validation output in one go, so the whole chain can run unattended overnight.
+#
+#   1. wait for the firefly tmux session to end
+#   1b. re-score the candidates on unseen seed blocks and use the best of those (B56, E87)
+#   2. archive the previous synthetic data, then generate spread_Taiwan_weight and
+#      taiwan_first_outbreak with 1000 Monte-Carlo runs each (decisions A4, A5, B36)
+#   1c. run the checklist for the best revalidated candidates and keep the best (B60)
+#   3. run the checklist of every post-simulation item of B14 / B17-B36
+#   3b. run the checklist again on independent seeds from 500000 (B60), the one to report
+#   4. run the standard run report (show_final, check_gap, rr_exact, tw_check, show_bounds)
+#   5. redraw the full validation figure set from the independent seeds (E97)
+#   6. re-measure the contact days
+#   7. compare with the previous run, when PREVIOUS_CHECKS names its phaseD_checks.json
+#   8. draw the todolist923 figures and check the per-case constraints on the independent seeds
+#   9. redraw the Wu & Nordling 2025 comparison figures from the independent seeds (E90, E97)
+#
+# Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
+# Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional), REVALIDATE (default 1),
+#              REVALIDATION_BLOCKS (default 10; E95: 4 blocks left the choice noisy).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+PYTHON="${PYTHON:-python3}"
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+LOG=phaseD_chain.log
+# The firefly names its output directory after its settings, while the report scripts read the
+# optimizer output from one fixed name. The run directory is copied onto that name below.
+FIREFLY=Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200
+FIREFLY_RUN="${FIREFLY_RUN:-Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.03_max_generations_120}"
+FIGS=validation_figures_phaseD
+SPREAD=synthetic_data_results_spread_Taiwan_weight
+FIRST=synthetic_data_results_taiwan_first_outbreak
+# E97: every reported number comes from the independent seeds (B60), so every reported figure
+# does too; the seed 0..999 data above stays for choosing the candidate and the run report.
+REPORT_SPREAD=independent_spread_Taiwan_weight
+REPORT_FIRST=independent_taiwan_first_outbreak
+REPORT_CHENG=independent_cheng2020
+REPORT_CHECKS=validation_reference/phaseD_checks_independent.json
+
+say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+run() { "$PYTHON" -m "$@"; }
+
+say 'waiting for the firefly session to finish'
+while tmux has-session -t firefly 2>/dev/null; do sleep 120; done
+# B56 (E87): the objective's 300 fixed seeds pick a vector that sits on the edge of several
+# targets; re-score the final population and every personal best on unseen seed blocks and
+# report the lowest mean instead. REVALIDATE=0 skips it, e.g. for a directory that already
+# holds a revalidated choice.
+if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
+    say "re-scoring the candidates of $FIREFLY_RUN on unseen seeds (E87)"
+    run covsyn.calibration.revalidation "$FIREFLY_RUN" revalidation "${REVALIDATION_BLOCKS:-10}" >> "$LOG" 2>&1 \
+        || { say 'ERROR: revalidation failed, stopping'; exit 1; }
+    say "$(grep 'validation best' "$LOG" | tail -1)"
+    OPTIMIZER_RUN="$FIREFLY_RUN"
+    FIREFLY_RUN=revalidation
+    # B60: run the full checklist for the best revalidated candidates and keep the one with
+    # the fewest failures. Only right after this chain's own revalidation; SELECT=0 skips it,
+    # SELECT_TOP sets how many candidates (default 5).
+    if [ "${SELECT:-1}" = 1 ]; then
+        say "running the checklist on the best ${SELECT_TOP:-5} revalidated candidates (B60)"
+        run covsyn.calibration.select_by_checklist revalidation selected "${SELECT_TOP:-5}" \
+            "${CPU_CORES:-24}" >> "$LOG" 2>&1 \
+            || { say 'ERROR: checklist selection failed, stopping'; exit 1; }
+        say "$(grep 'checklist choice' "$LOG" | tail -1)"
+        FIREFLY_RUN=selected
+    fi
+fi
+if [ -f "$FIREFLY_RUN/firefly_best.txt" ]; then
+    rm -rf "$FIREFLY"
+    cp -R "$FIREFLY_RUN" "$FIREFLY"
+    say "copied $FIREFLY_RUN to $FIREFLY for the report scripts"
+fi
+if [ ! -f "$FIREFLY/firefly_best.txt" ]; then
+    say "ERROR: $FIREFLY/firefly_best.txt missing, stopping"
+    exit 1
+fi
+say "firefly finished: $(grep -v 'it/s]' firefly_phaseD.log | tail -1 || true)"
+
+# ---------------------------------------------------------------- 2. synthetic data
+for mode in spread_Taiwan_weight taiwan_first_outbreak; do
+    if [ -d "synthetic_data_results_$mode" ]; then
+        mv "synthetic_data_results_$mode" "synthetic_data_results_${mode}_prev_$(date +%Y%m%d_%H%M)"
+        say "archived the previous synthetic_data_results_$mode"
+    fi
+done
+say 'generating synthetic data (2 modes x 1000 Monte-Carlo runs)'
+bash scripts/data_synthesis.sh >> "$LOG" 2>&1 || { say 'ERROR: data synthesis failed'; exit 1; }
+say 'synthetic data done'
+
+# ---------------------------------------------------------------- 2b. age risk ratio
+# B14 is accepted on this, not on the 1000-simulation spread output: that held 226
+# infections over four age bands on run 6, with health care 60+ resting on a single one,
+# and the interval was wider than the acceptance band (E68). 20000 index cases take about
+# 30 s and give ~4300 infections. It must run BEFORE verify_phase_d, which reads the JSON.
+say 'measuring the age risk ratio on 20000 index cases'
+run covsyn.validation.measure_age_rr "$FIREFLY" 20000 >> phaseD_report.txt 2>&1 \
+  || say 'WARNING: the age risk ratio measurement failed, B14 falls back to the spread output'
+
+# ---------------------------------------------------------------- 3. checklist
+say 'running the Phase D checklist'
+run covsyn.validation.verify_phase_d "$SPREAD" "$FIRST" validation_reference/phaseD_checks.json \
+    > phaseD_checks.txt 2>&1 || say 'WARNING: the checklist exited with an error'
+tail -3 phaseD_checks.txt | tee -a "$LOG"
+
+# ---------------------------------------------------------------- 3b. independent checklist
+# B60: the candidate was chosen on the checklist of seeds 0..999, so the same checklist is run
+# again on an independent seed set; this is the one to report. 500000 is clear of the
+# objective (0..299), the chain (0..999), revalidation (100000 + 300 per block) and the probes
+# (300000+). The directory names must not start with synthetic_data_results_: tw_check.py
+# lists those as earlier runs.
+say 'running the checklist again on independent seeds from 500000 (B60)'
+for mode in spread_Taiwan_weight taiwan_first_outbreak; do
+    rm -rf "independent_$mode"
+    mkdir -p "independent_$mode"
+    run covsyn.model.data_synthesis_main --mode "$mode" --monte_carlo_number 1000 \
+        --result_path "independent_$mode" --cpu_cores "${CPU_CORES:-24}" \
+        --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
+        || say "WARNING: independent data synthesis failed for $mode"
+done
+run covsyn.validation.verify_phase_d independent_spread_Taiwan_weight \
+    independent_taiwan_first_outbreak validation_reference/phaseD_checks_independent.json \
+    > phaseD_checks_independent.txt 2>&1 \
+    || say 'WARNING: the independent checklist exited with an error'
+tail -3 phaseD_checks_independent.txt | tee -a "$LOG"
+
+# ---------------------------------------------------------------- 4. standard run report
+say 'running the standard run report'
+{
+  echo '=== show_final ==='   ; run covsyn.validation.show_final
+  echo '=== check_gap ==='    ; run covsyn.validation.check_gap
+  echo '=== rr_exact ==='     ; run covsyn.validation.rr_exact "$SPREAD"
+  echo '=== tw_check ==='     ; run covsyn.validation.tw_check "$FIRST"
+  echo '=== show_bounds ===' ; run covsyn.validation.show_bounds
+} > phaseD_report.txt 2>&1 || say 'WARNING: a run-report step failed'
+say 'run report written to phaseD_report.txt'
+
+# ---------------------------------------------------------------- 5. figures
+for d in "$REPORT_SPREAD" "$REPORT_FIRST"; do
+    if ! ls "$d"/social_data_*.npy >/dev/null 2>&1; then
+        say "ERROR: $d holds no simulation, so the report figures cannot be drawn; stopping"
+        exit 1
+    fi
+done
+mkdir -p "$FIGS"
+say "drawing the validation figures into $FIGS from $REPORT_SPREAD and $REPORT_FIRST (E97)"
+{
+  run covsyn.figures.validate_layers               "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.validate_infection            "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_diagnostics              "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_10panel                  "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_cheng_attackrate         "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_vs_notebook_literature   "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_validation               "$FIREFLY" "$FIGS"
+  run covsyn.figures.workplace_sampling_options    "$REPORT_SPREAD" "$FIGS" "$FIREFLY"
+  run covsyn.figures.plot_reality_vs_covsyn        "$REPORT_SPREAD" "$REPORT_FIRST" "$FIGS"
+  run covsyn.figures.plot_violin_reality_vs_covsyn "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.compare_healthcare_municipality "$REPORT_SPREAD" "$FIGS"
+} >> "$LOG" 2>&1 || say 'WARNING: a figure step failed'
+say "figures: $(find "$FIGS" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ') files"
+
+# ---------------------------------------------------------------- 6. re-measure contact days
+# MEAN_CONTACT_DAYS in sar_anchors.py converts the literature CUMULATIVE attack rates into
+# per-day probabilities, and it is a model OUTPUT: it moved from {2.82, 3.17, 3.69, 4.16,
+# 1.71} on the second run to {3.71, 4.45, 6.81, 2.23, 2.49} on the third. If it is not
+# re-measured after every run the conversion silently stops holding, which is how the
+# anchors came to exist in three places with three different sets of numbers (E53).
+say 're-measuring the contact days for the next round of anchors'
+{
+  echo '=== measure_days (update MEAN_CONTACT_DAYS in sar_anchors.py with this) ==='
+  run covsyn.validation.measure_days "$SPREAD"
+} >> phaseD_report.txt 2>&1 || say 'WARNING: measure_days failed'
+tail -8 phaseD_report.txt | tee -a "$LOG"
+
+# ---------------------------------------------------------------- 7. compare with the previous run
+if [ -n "${PREVIOUS_CHECKS:-}" ] && [ -f "$PREVIOUS_CHECKS" ]; then
+  say "comparing against $PREVIOUS_CHECKS"
+  run covsyn.validation.compare_phase_d_runs "$PREVIOUS_CHECKS" validation_reference/phaseD_checks.json \
+    > phaseD_previous_vs_current.txt 2>&1 || say 'WARNING: the run comparison failed'
+  tail -5 phaseD_previous_vs_current.txt | tee -a "$LOG"
+fi
+
+# ---------------------------------------------------------------- 8. todolist923 figures and Table A
+# The figures rebuilt to the 2026-09-23 meeting (actual values against intervals, input /
+# calibration / independent split) and the per-case constraint check (N2). Both read files the
+# steps above wrote, so they must stay after the checklist.
+say 'drawing the todolist923 figures and checking the per-case constraints'
+run covsyn.figures.plot_todolist923 "$REPORT_SPREAD" "$FIREFLY_RUN" "$REPORT_CHECKS" \
+    "$FIGS/todolist923" >> "$LOG" 2>&1 || say 'WARNING: plot_todolist923 failed'
+run covsyn.validation.check_constraints "$REPORT_SPREAD" "$REPORT_FIRST" --out constraint_check >> "$LOG" 2>&1 \
+  || say 'WARNING: check_constraints failed'
+tail -4 "$LOG"
+
+# ---------------------------------------------------------------- 9. Wu & Nordling 2025 figures
+# E90 redraws every comparison figure of the published paper; E97 draws them from the
+# independent seeds like everything else that is reported. Fig 6 needs its own scenario
+# (100 index cases, Cheng 2020), generated here on the same independent seeds.
+say 'drawing the Wu & Nordling 2025 figures from the independent seeds (E97)'
+rm -rf "$REPORT_CHENG"
+mkdir -p "$REPORT_CHENG"
+run covsyn.model.data_synthesis_main --mode cheng2020 --monte_carlo_number 1000 \
+    --result_path "$REPORT_CHENG" --cpu_cores "${CPU_CORES:-24}" \
+    --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
+    || say 'WARNING: independent cheng2020 synthesis failed'
+{
+  for figure in fig3 fig5 fig7; do
+    run covsyn.figures.reproduce_wu2025 "$figure" "$REPORT_FIRST" wu2025_figures
+  done
+  run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures
+  # Fig 4 plots the optimizer's own history, so it reads the optimizer output directory, not
+  # the revalidated or selected copy.
+  run covsyn.figures.reproduce_wu2025 fig4 "${OPTIMIZER_RUN:-$FIREFLY_RUN}" wu2025_figures
+} >> "$LOG" 2>&1 || say 'WARNING: a Wu 2025 figure failed'
+say 'ALL DONE'

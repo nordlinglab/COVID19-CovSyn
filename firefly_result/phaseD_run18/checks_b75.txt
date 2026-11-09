@@ -1,0 +1,122 @@
+b75_mc1000: 1000 simulations, 1520 cases
+
+--- B29
+   ok  household: other members per case                                 2.726    [2.6, 3]                              
+   ok  household: living alone                                          13.100%   [11, 16]                              
+--- B30
+   ok  class size, elementary (7-12)                                    25.245    [21, 27]                              n=53
+   ok  class size, junior high (13-15)                                  28.000    [24, 31]                              n=26
+   ok  class size, senior high (16-18)                                  32.581    [29, 36]                              n=31
+   ok  class size, university (19-22)                                   88.510    [75, 100]                             n=49
+--- B64
+       work group size, employed (median)                                7.000    (information)                         n=468; (n - 1) a / (a + n - 1) around a company of n
+   ok  coworker contacts per day before onset, employed                  5.309    [4.34, 5.61]                          B75: Fu 2010 employed on a day at work, >=15 min, met daily, weighted to the 2010 population: mean 4.96 (n=416); days before onset at work only, summarize_taiwan_contact_data.py at_work()
+--- B25
+   ok  contacts per day before onset, household                          2.285    [2.27, 3.28]                          
+   ok  contacts per day before onset, school                             1.488    [1.15, 1.72]                          
+       contacts per day before onset, workplace                          1.303    (information)                         
+   ok  contacts per day before onset, health_care                        0.144    [0, 0.3]                              
+   ok  contacts per day before onset, municipality                       2.498    [1.2, 7.12]                           
+   ok  contacts per day, all layers                                      7.719    [6.03, 8.4]                           2020 national survey 6.03; Fu 2010 diaries, >=15 min, 8.40
+   ok  household: share of days each member is met                      91.171%   [50, 100]                             was 27% before Phase D
+--- B32
+   ok  cases with candidate contacts but no effective-contact record     0.000    [0, 0]                                was the E5 signature
+   ok  cases with no contact in any layer                                0.461%   [0, 4]                                was 6.4% before Phase D
+--- B9
+   ok  cumulative SAR per contact, school                                2.343%   [1, 4]                                calibration anchor 2.3%; n=2305 candidate contacts
+  FAIL cumulative SAR per contact, workplace                             1.275%   [1.5, 5]                              calibration anchor 3.4000000000000004%; n=3842 candidate contacts
+       cumulative SAR per contact, household                             6.936%   (information)                         calibration anchor 10.830390074549186%; n=2595 candidate contacts; informational since E56, accepted on the count
+       cumulative SAR per contact, health_care                           2.233%   (information)                         calibration anchor 3.557028721689509%; n=2597 candidate contacts; informational since E56, accepted on the count
+       cumulative SAR per contact, municipality                          0.277%   (information)                         calibration anchor 0.11817527914970524%; n=19482 candidate contacts; informational since E56, accepted on the count
+       infections per index case, school                                 0.054    (information)                         CovSyn candidate contacts per index 2.305; Cheng has no category for this layer, reported only
+       infections per index case, workplace                              0.049    (information)                         CovSyn candidate contacts per index 3.842; Cheng has no category for this layer, reported only
+   ok  infections per index case, household                              0.180    [0.135293, 0.51885]                      CovSyn candidate contacts per index 2.595; Cheng 2020 0.10 per index case -> CovSyn is 1.80x
+  FAIL infections per index case, health_care                            0.058    [0.0621224, 0.368449]                      CovSyn candidate contacts per index 2.597; Cheng 2020 0.06 per index case -> CovSyn is 0.97x
+   ok  infections per index case, municipality                           0.054    [0.001, 0.0846395]                      CovSyn candidate contacts per index 19.482; Cheng 2020 0.01 per index case -> CovSyn is 5.40x; upper capped at 3x the centre (E57), not the Poisson CI
+--- B17
+   ok  offspring dispersion k                                            0.287    [0.2, 0.35]                           Taiwan tracing NegBin MLE k = 0.286 (n = 579), recompute_taiwan_targets.py
+   ok  R (mean offspring of an index case)                               0.395    [0.37, 0.98]                          B67: Cheng 2020 local index cases 18 / 29 = 0.62; all cases between Taiwan links 0.047 and confirmed contacts 0.43 (E80)
+   ok  cases infecting 3 or more                                         4.100%   [0.2, 4.3]                            B56: between Taiwan links (0.2%) and confirmed contacts (4.3%), E80
+  FAIL samples of 579 cases whose largest is at most 8                 100.000%   [2.5, 97.5]                           B71: Taiwan tracing largest 8 over 579 cases (confirmed contacts, an upper bound, E80); simulated median 8, 95% 5-8, largest of all 8
+--- B27
+       community contacts per case, median                               3.000    (information)                         Taiwan tracing friend+other median 7.5 (n=38, selected sample, E88); informational since B63
+       community contacts per case, p90                                 60.000    (information)                         Taiwan tracing 2020 first wave p90 = 195 (n=38); informational since B47
+--- B50
+       community contacts, p90 / median                                 12.000    (information)                         B56: limitation, selected sample (E88); Taiwan reported cases 26.0 (n=38), CI [5.5, 93.1]
+--- B27
+       community contacts per case, maximum                            955.000    (information)                         Taiwan tracing maximum 850 (informational: one order statistic)
+       largest / smallest city mean community contacts                   9.826    (information)                         informational since B56; was 12x, proportional to city population (E4)
+   ok  city effect on community contacts, permutation p-value            0.191    [0.05, 1]                             B56: passes when no city effect is detectable (p >= 0.05, 2000 label shuffles)
+--- B61
+       community contacts on one day, mean                               2.409    (information)                         Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)
+   ok  community contacts on one day, zero share                        60.407%   [59.8, 64.1]                          Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)
+       community contacts on one day, median                             0.000    (information)                         Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)
+   ok  community contacts on one day, p90                                5.000    [5, 8]                                Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)
+       workplace, employed cases contacts on one day, mean               5.583    (information)                         B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only
+   ok  workplace, employed cases contacts on one day, zero share        23.723%   [23.2, 31.8]                          B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only
+       workplace, employed cases contacts on one day, median             2.000    (information)                         B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only
+   ok  workplace, employed cases contacts on one day, p90               16.000    [10, 16]                              B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only
+--- B56
+       contacts per case in Jian's tracing window                       23.068    (information)                         information: index cases only; Jian et al. 2020 locally acquired cases 1,435 / 55 = 26.1; window onset - 2 d to isolation (E7, E89)
+       contacts per case, all layers, from infection                    30.821    (information)                         information: every candidate contact; CovSyn counts from infection, tracing does not
+--- B22
+   ok  incubation period, mean                                           6.252    [3.9, 8]                              literature reported-mean range, 15 studies (E45)
+--- B61
+   ok  incubation period, mean, Taiwan data                              6.252    [4.96, 7.57]                          Taiwan first wave: onset - earliest infection date, mean 6.2 d (n=28), bootstrap 95% of the mean; recompute_taiwan_targets.py
+--- B22
+   ok  pre-onset infectious window, mean                                 1.548    [1, 3]                                
+   ok  pre-onset window of zero days                                     7.189%   [0, 12]                               symptomatic cases (E96); was 20% before Phase D
+   ok  latent period, mean                                               4.797    [4.1, 5.5]                            B3: widened to the whole literature reported-mean range
+--- B2
+   ok  onset to confirmation, median                                     6.000    [5, 7]                                Taiwan tracing median 6 d (n=442); Ge 2021 onset to isolation 5 d; published CovSyn fits 8.17 d
+--- B26
+   ok  infection to isolation, mean                                     12.338    [8, 14]                               derived: incubation (literature 3.9-8.0 d; Taiwan 6.2 d) plus Taiwan onset-to-confirmation median 5-7 d
+--- B61
+   ok  infection to confirmation, mean, Taiwan data                     12.342    [11.4, 14.6]                          Taiwan first wave: confirmation - earliest infection date, mean 12.9 d (n=33), bootstrap 95% of the mean; recompute_taiwan_targets.py
+--- B26
+       isolation route: symptom                                         50.263%   (information)                         
+       isolation route: traced                                          32.237%   (information)                         
+       isolation route: untraced                                        14.539%   (information)                         
+       isolation route: critical                                         2.961%   (information)                         
+       contacts starting before symptom onset                           57.982%   (information)                         B56: informational, Cheng 2020 27.5% is a recording artefact (E84)
+--- B23
+   ok  health care contacts starting 8+ days after onset                28.438%   [20, 50]                              Cheng 2020 medical: 256/697 = 36.7%; was ~1-3% before Phase D
+   ok  health care contacts starting before day 4                       59.037%   [40, 70]                              Cheng 2020 medical: 33.9% before onset + 21.5% on days 0-3 = 55.4%
+--- B28
+   ok  confirmation to case closure, symptomatic                        28.161    [22, 32]                              E91: Taiwan confirmed to release, mean 27.0 (n=56)
+   ok  confirmation to case closure, asymptomatic                       25.416    [17, 31]                              E91: Taiwan mean 23.3 (n=23)
+   ok  ICU to case closure                                              41.524    [29, 44]                              E93: Taiwan mean 36.2 (n=28)
+   ok  onset to ICU                                                      8.649    [5.4, 9.2]                            E92: Taiwan mean 7.2 (n=40), median 5.5
+--- B33
+   ok  asymptomatic share                                               22.100%   [20, 28]                              B61: Taiwan 20.4% (no onset date and no ICU, 118/578); 23.5% if every case without an onset date counts (136/578)
+   ok  symptomatic to ICU                                                9.884%   [9, 17]                               B61: Taiwan 12.6% (58/460, an ICU case without an onset date counts as symptomatic); the cascade then reproduces the observed CFR exactly
+   ok  ICU to death                                                     18.182%   [7, 19]                               Taiwan 12.1% (7/58)
+   ok  case fatality                                                     1.400%   [0.7, 2]                              Taiwan 1.21% (7/578)
+--- B20
+       symptomatic to ICU, 0-19                                          0.000%   (information)                         n=184
+       symptomatic to ICU, 20-39                                         3.448%   (information)                         n=266
+       symptomatic to ICU, 40-59                                         9.016%   (information)                         n=312
+       symptomatic to ICU, 60+                                          25.397%   (information)                         n=238
+   ok  ICU rate 60+ / 20-39                                              7.365    [3, 12]                               Verity 2020 gradient
+--- B14
+       age risk ratio, all five layers, 0-19                             0.985    (information)                         information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)
+       age risk ratio, all five layers, 20-39                            1.000    (information)                         information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)
+       age risk ratio, all five layers, 40-59                            1.642    (information)                         information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)
+       age risk ratio, all five layers, 60+                              1.546    (information)                         information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)
+   ok  measured age risk ratio, 0-19                                     0.453    [0.34, 0.77]     [0.0605, 3.39]       400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [0.060, 3.389]; TOO NOISY; reference: Zhang 2020 0.34 / Viner 2021 0.56 / Uthman 2024 wild-type 0.58 / Madewell 2020 0.59; range [0.34, 0.77]. NOT Cheng 2020, whose 0-19 is 1 infection in 281 contacts and cannot validate this band (todolist 1.13, decision N5)
+   ok  measured age risk ratio, 20-39                                    1.000    [1, 1]           [0.236, 4.24]        400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [0.236, 4.240]; resolvable; reference: reference band, fixed to 1 by construction
+  ok~  measured age risk ratio, 40-59                                    3.559    [1.63, 2.03]     [1.22, 10.4]         400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [1.216, 10.422]; TOO NOISY; reference: Cheng 2020 all-infection 1.83 +/- 0.10
+  ok~  measured age risk ratio, 60+                                      2.737    [1.12, 1.52]     [0.854, 8.77]        400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [0.854, 8.769]; TOO NOISY; reference: Cheng 2020 all-infection 1.32 +/- 0.10
+       locked age risk ratio input                                   n/a    (information)                         read from variable/course_parameters.npy; NOT a validation target -- the rows below check that the sampler reproduces it (input reproduction, N3)
+       input reproduction, household                                     5.902    (information)                         largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)
+       input reproduction, school                                        0.302    (information)                         largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)
+       input reproduction, workplace                                     1.048    (information)                         largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)
+       input reproduction, health_care                                   0.121    (information)                         largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)
+       input reproduction, municipality                                  0.208    (information)                         largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)
+       age risk ratio, all five layers (high N), 0-19                    0.799    (information)                         information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)
+       age risk ratio, all five layers (high N), 20-39                   1.000    (information)                         information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)
+       age risk ratio, all five layers (high N), 40-59                   1.950    (information)                         information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)
+       age risk ratio, all five layers (high N), 60+                     1.472    (information)                         information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)
+
+49 checks passed (2 of them only within the 95% interval, marked ok~), 3 failed, 41 informational
+written b75_checks.json

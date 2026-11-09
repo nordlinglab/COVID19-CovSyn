@@ -1,0 +1,23 @@
+# Tool configuration for the CovSyn repository.
+# Runtime dependencies stay in requirements.txt until the package layout is restructured.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: runs simulations or the full objective (about a minute each on 8 workers)",
+]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# The pre-Phase-D modules are linted as they are moved into the package layout;
+# until then only new code under tests/ is held to the rules.
+extend-include = ["tests/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "D"]
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
