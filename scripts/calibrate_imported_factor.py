@@ -12,8 +12,8 @@ q = 12 / m(1) this script used to make overshot (0.256 against about 0.11 on run
 code review 2026-11-09, F9). The script now measures m(0) and m(q0) at a low starting factor q0,
 the current IMPORTED_FACTOR unless given, solves the line through them for 12 -- two low-q
 measurements, as B82 found necessary, since m(q) is not quite linear far from the root -- and
-checks the result with a last set of runs. A factor that cannot reach the data stops the script
-with a non-zero exit.
+repeats secant steps through the last two measurements until one is within 0.5 people of 12.
+A factor that cannot reach the data stops the script with a non-zero exit.
 
 Usage (repository root):
     python scripts/calibrate_imported_factor.py <firefly_best.txt> [runs] [workers] [isolation] [q0]
@@ -85,6 +85,49 @@ def solve_line(q_low, m_low, q_high, m_high, target):
     return float(q_low + (target - m_low) * (q_high - q_low) / (m_high - m_low))
 
 
+def calibrate(measure, target, q0, tolerance=0.5, max_steps=4):
+    """The factor whose measured mean reaches target within tolerance, by secant steps.
+
+    The first line runs through m(0) and m(q0); every later one through the last two
+    measurements, so a starting factor far from the root still converges on the curve rather
+    than on one extrapolated line (code review 2026-11-09). Each step's measurement is also its
+    check, so a converged calibration costs m(0), m(q0) and one batch per step.
+
+    Args:
+        measure: Function of q returning the mean people infected over the runs.
+        target: The people infected in the data.
+        q0: Starting factor, in (0, 1].
+        tolerance: Accepted distance of the measured mean from target, in people.
+        max_steps: Secant steps before giving up.
+
+    Returns:
+        The calibrated factor.
+
+    Raises:
+        ValueError: q0 is outside (0, 1], the seeds held at 1.0 alone reach target, a step
+            leaves [0, 1], two measurements do not rise with q, or no step converges.
+    """
+    if not 0.0 < q0 <= 1.0:
+        raise ValueError(f"starting factor {q0} is outside (0, 1]")
+    m0 = measure(0.0)
+    if m0 >= target:
+        raise ValueError(f"the seeds held at 1.0 alone infect {m0:.2f} >= {target}; "
+                         "no q in [0, 1] reaches the data")
+    points = [(0.0, m0), (q0, measure(q0))]
+    for _ in range(max_steps):
+        (q_a, m_a), (q_b, m_b) = sorted(points[-2:])
+        q = solve_line(q_a, m_a, q_b, m_b, target)
+        if not 0.0 <= q <= 1.0:
+            raise ValueError(f"the line through q = {q_a:.4f} and {q_b:.4f} reaches {target} at "
+                             f"q = {q:.4f}, outside [0, 1]; no factor reaches the data")
+        m = measure(q)
+        if abs(m - target) <= tolerance:
+            return q
+        points.append((q, m))
+    raise ValueError(f"no factor within {tolerance} of {target} after {max_steps} steps; "
+                     f"last q = {q:.4f} gave {m:.2f}")
+
+
 def main():
     rows = np.atleast_2d(np.loadtxt(sys.argv[1]))
     P = rows[np.argmin(rows[:, -1]), 1:-1]
@@ -103,19 +146,11 @@ def main():
         return m
 
     print(f"isolation {isolation}; starting factor {q0:.4f}")
-    m0 = measure(0.0)
-    if m0 >= k:
-        sys.exit(f"the seeds held at 1.0 alone infect {m0:.2f} >= {k}; no q in [0, 1] reaches "
-                 "the data")
     try:
-        q = solve_line(0.0, m0, q0, measure(q0), k)
+        q = calibrate(measure, k, q0)
     except ValueError as error:
-        sys.exit(f"no calibration: {error}; raise the runs or the starting factor")
-    if not 0.0 <= q <= 1.0:
-        sys.exit(f"the line through q = 0 and {q0:.4f} reaches {k} at q = {q:.4f}, outside [0, 1]; "
-                 "no factor reaches the data")
-    print(f"calibrated q = {q:.4f}")
-    measure(q)
+        sys.exit(f"no calibration: {error}")
+    print(f"calibrated q = {q:.4f} (its runs above are the check)")
 
 
 if __name__ == "__main__":
