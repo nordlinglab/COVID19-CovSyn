@@ -19,10 +19,10 @@ import pytest
 CHAIN = Path(__file__).resolve().parent.parent / "scripts" / "phase_d_chain.sh"
 STEP_9 = "# ---------------------------------------------------------------- 9. Wu"
 
-# The bash on PATH, by full path. On Windows the one in System32 is the WSL launcher, which
-# does not pass the environment through, so only another bash, such as Git's, will do.
+# The bash on PATH, by full path. On Windows the ones in System32 and WindowsApps are WSL's
+# launcher, which does not pass the environment through, so only another bash will do.
 BASH = shutil.which("bash")
-if BASH is not None and "system32" in BASH.lower():
+if BASH is not None and any(part in BASH.lower() for part in ("system32", "windowsapps")):
     BASH = None
 pytestmark = pytest.mark.skipif(BASH is None, reason="needs a bash that is not WSL's launcher")
 
@@ -34,7 +34,8 @@ def _step_9() -> str:
 
 def _environment(failing: str) -> dict[str, str]:
     """Only what bash needs, so a developer's BASH_ENV or chain variables cannot leak in."""
-    keep = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "TMP", "TEMP") if k in os.environ}
+    names = ("PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TMP", "TEMP", "LANG", "LC_ALL")
+    keep = {k: os.environ[k] for k in names if k in os.environ}
     return {**keep, "FAILING": failing}
 
 
