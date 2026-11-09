@@ -386,7 +386,7 @@ r_p = (1 + int(np.sum(r_null >= r))) / (1 + len(r_null))
 # E97: the mean includes the mass events of B54, which P[28] alone leaves out.
 # B62: with P[204] present P[28] is the shift of the scale-free count and no mass event is
 # drawn, so the mean is that distribution's own (code review 2026-11-09, F3).
-expected_mean, mean_label = model_community_mean(P, min(MUNICIPALITY_POP.values()))
+expected_mean, mean_label = model_community_mean(list(P), min(MUNICIPALITY_POP.values()))
 fig, ax = plt.subplots(figsize=(9, 6))
 ax.scatter(by_city_index['pop'] / 1e6, by_city_index['cand'], color='#1f4e79', label='index cases')
 ax.scatter(by_city['pop'] / 1e6, by_city['cand'], color=SIM_COLOR, marker='x', label=f'spread cases ({len(spread):,})')

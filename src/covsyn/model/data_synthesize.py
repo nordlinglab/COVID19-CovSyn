@@ -343,7 +343,7 @@ def model_community_mean(P: Sequence[float], room: float) -> tuple[float, str]:
     if event is None or event['probability'] == 0:
         return float(P[28]), f'lambda {P[28]:.2f}'
     return (P[28] + event['probability'] * expected_event_size(
-        event['exponent'], event['min_size'], event['max_size'], room),
+        event['exponent'], int(event['min_size']), int(event['max_size']), room),
         f'lambda {P[28]:.2f} + mass events')
 
 
