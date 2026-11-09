@@ -430,6 +430,11 @@ def evaluate_cost_parts(
     return rows
 
 
+def has_rotated_seed_blocks(run_dir: Path) -> bool:
+    """True for an optimizer run under B81, which writes firefly_archive.txt."""
+    return (run_dir / "firefly_archive.txt").exists()
+
+
 def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     """Fig 4: convergence of the firefly run.
 
@@ -450,12 +455,19 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     best = _load_rows(run_dir / "firefly_best.txt")
     worst = _load_rows(run_dir / "firefly_worst.txt")
     final = _load_rows(run_dir / "firefly_result.txt")
+    # B81 rotates the seed block every generation, so firefly_best.txt holds the final
+    # population with one iteration number and a separate "Best" stage would repeat the final
+    # points; such a run writes firefly_archive.txt (code review 2026-11-09, F2).
+    rotated = has_rotated_seed_blocks(run_dir)
     stages = {
         "Initial": (initial[:, :-1], initial[:, -1]),
         "Worst": (worst[:, 1:-1], worst[:, -1]),
         "Best": (best[:, 1:-1], best[:, -1]),
         "Final": (final[:, :-1], final[:, -1]),
     }
+    if rotated:
+        del stages["Best"]
+    names = list(stages)
     if not (len(initial) == len(best) == len(worst) == len(final)):
         raise ValueError(
             f"{run_dir} is not an optimizer run with one row per firefly in each file "
@@ -477,7 +489,8 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
             label="Initial guess",
         )
         ax.plot(distance["Worst"], cost["Worst"], "kX", markersize=8, label="Worst fireflies")
-        ax.plot(distance["Best"], cost["Best"], "k^", markersize=8, label="Best fireflies")
+        if "Best" in stages:
+            ax.plot(distance["Best"], cost["Best"], "k^", markersize=8, label="Best fireflies")
         ax.plot(
             distance["Final"],
             cost["Final"],
@@ -487,11 +500,14 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
             label="Final fireflies",
         )
         for i in range(len(best)):
-            order = (
-                ["Initial", "Worst", "Best", "Final"]
-                if worst_first[i]
-                else ["Initial", "Best", "Worst", "Final"]
-            )
+            if rotated:
+                order = ["Initial", "Worst", "Final"]
+            else:
+                order = (
+                    ["Initial", "Worst", "Best", "Final"]
+                    if worst_first[i]
+                    else ["Initial", "Best", "Worst", "Final"]
+                )
             width, alpha = (1.0, 1.0) if i == best_index else (0.3, 0.2)
             for a, b in zip(order[:-1], order[1:], strict=True):
                 ax.plot(
@@ -520,7 +536,7 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     ax.set_yscale("log")
     ax.legend(loc="upper left", fontsize=8, numpoints=1)
     zoom_x = (distance["Final"].min(), distance["Final"].max())
-    zoom_y = (min(cost["Final"].min(), cost["Best"].min()), cost["Final"].max())
+    zoom_y = (min(cost[s].min() for s in ("Final", "Best") if s in cost), cost["Final"].max())
     pad_x, pad_y = 0.05 * (zoom_x[1] - zoom_x[0]) + 1e-3, 0.05 * (zoom_y[1] - zoom_y[0]) + 1e-3
     inset = ax.inset_axes((0.55, 0.55, 0.42, 0.4))
     trajectories(inset)
@@ -547,14 +563,14 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
 
     summary = []
     if rows:
-        names = ["Initial", "Worst", "Best", "Final"]
         for p, (key, label) in enumerate(COST_PARTS):
             ax = fig.add_subplot(grid[1 + p // 2, p % 2])
             values = np.array([[r[key] for r in rows if r["stage"] == s] for s in names])
             for i in range(values.shape[1]):
-                ax.plot(range(4), values[:, i], "*--", linewidth=0.5, markersize=3, alpha=0.6)
-            ax.plot(range(4), values.mean(axis=1), "k^-", markersize=8)
-            ax.set_xticks(range(4))
+                ax.plot(range(len(names)), values[:, i], "*--", linewidth=0.5, markersize=3,
+                        alpha=0.6)
+            ax.plot(range(len(names)), values.mean(axis=1), "k^-", markersize=8)
+            ax.set_xticks(range(len(names)))
             ax.set_xticklabels(names)
             ax.set_ylabel(label)
             if np.all(values > 0):

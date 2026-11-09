@@ -45,3 +45,41 @@ def test_a_run_with_compacted_case_ids_is_skipped_not_mispaired() -> None:
     courses = [_case(0, 5), _case(3, 2)]
     digraph = np.array([["nan", "1", "0", "nan"], ["1", "3", "3", "household"]], dtype="<U32")
     assert wu.transmission_intervals(courses, digraph) == ([], [])
+
+
+def _optimizer_run(directory, rotated: bool) -> None:
+    """The four result files of a 5-firefly, 3-parameter run, plus B81's archive if rotated."""
+    rng = np.random.default_rng(0)
+    pop, dim = 5, 3
+    np.savetxt(directory / "bound.txt", np.array([np.zeros(dim), np.ones(dim)]))
+    np.savetxt(directory / "firefly_result_first_initial_guess.txt",
+               np.column_stack([rng.random((pop, dim)), rng.random(pop) + 2]))
+    final = np.column_stack([rng.random((pop, dim)), rng.random(pop) + 1])
+    np.savetxt(directory / "firefly_result.txt", final)
+    iteration = np.full(pop, 500.0) if rotated else rng.integers(100, 500, pop).astype(float)
+    np.savetxt(directory / "firefly_best.txt", np.column_stack([iteration, final]))
+    np.savetxt(directory / "firefly_worst.txt",
+               np.column_stack([np.full(pop, 50.0), rng.random((pop, dim)), rng.random(pop) + 3]))
+    if rotated:
+        np.savetxt(directory / "firefly_archive.txt", final)
+
+
+def test_a_b81_run_draws_no_separate_best_stage(tmp_path, monkeypatch) -> None:
+    """Under B81 firefly_best.txt is the final population, so Best would repeat Final (F2)."""
+    plotted = []
+    original = wu.plt.Axes.plot
+
+    def spy(self, *args, **kwargs):
+        plotted.append(kwargs.get("label"))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(wu.plt.Axes, "plot", spy)
+    for rotated in (True, False):
+        run = tmp_path / f"run_{rotated}"
+        run.mkdir()
+        _optimizer_run(run, rotated)
+        plotted.clear()
+        assert wu.has_rotated_seed_blocks(run) is rotated
+        wu.fig4(run, run, evaluate=False)
+        assert (run / "wu2025_fig4_firefly_convergence.png").exists()
+        assert ("Best fireflies" in plotted) is not rotated
