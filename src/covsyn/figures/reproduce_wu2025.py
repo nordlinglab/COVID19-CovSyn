@@ -387,34 +387,23 @@ COST_PARTS = [
 ]
 
 
-def read_cost_parts_cache(cache: Path, stages: set[str]) -> list[dict] | None:
-    """The cached cost parts, or None when there is no cache or it holds other stages.
+def evaluate_cost_parts(
+    vectors: dict[str, np.ndarray], table: Path, workers: int = 32
+) -> list[dict]:
+    """Objective and its parts for every firefly at every stage, written to a CSV table.
 
-    A B81 run has no Best stage, so a cache written for the other kind of run into the same
-    directory has the wrong stages and must not be reused (code review 2026-11-09).
+    Computed on every call; the table is an output and is never read back, since whether a
+    stored table still matched would depend on the vectors, every module the objective imports
+    and the model data.
 
     Args:
-        cache: The CSV evaluate_cost_parts writes.
-        stages: The stages the figure needs.
+        vectors: The parameter vectors of each stage, one row per firefly.
+        table: The CSV the rows are written to; an existing file is replaced.
+        workers: Processes evaluating the objective.
 
     Returns:
-        The rows, or None.
+        One row per stage and firefly: stage, firefly, total, and each cost part.
     """
-    if not cache.exists():
-        return None
-    with open(cache) as f:
-        rows = [{k: (v if k == "stage" else float(v)) for k, v in r.items()}
-                for r in csv.DictReader(f)]
-    return rows if {r["stage"] for r in rows} == stages else None
-
-
-def evaluate_cost_parts(
-    vectors: dict[str, np.ndarray], cache: Path, workers: int = 32
-) -> list[dict]:
-    """Objective and its parts for every firefly at every stage, cached in a CSV."""
-    cached = read_cost_parts_cache(cache, set(vectors))
-    if cached is not None:
-        return cached
     import concurrent.futures
     import pickle
 
@@ -427,24 +416,28 @@ def evaluate_cost_parts(
         ct = pickle.load(f)
     cheng = (ct["Cheng_contact_array"], ct["Cheng_attack_rate"], ct["norm_weights"])
     columns = np.load("./variable/Taiwan_data_matrix.npy").shape[1]
+    rows: list[dict[str, Any]] = []
     pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns)
     )
-    rows: list[dict[str, Any]] = []
-    for stage, matrix in vectors.items():
-        for firefly, vector in enumerate(matrix):
-            total = float(fast_cost.cost_function(vector, demo, pool, *cheng))
-            rows.append(
-                {
-                    "stage": stage,
-                    "firefly": firefly,
-                    "total": total,
-                    **{k: float(LAST.get(k, np.nan)) for k, _ in COST_PARTS[:-1]},
-                }
-            )
-            print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
-    pool.shutdown()
-    _write_csv(cache, rows)
+    try:
+        for stage, matrix in vectors.items():
+            for firefly, vector in enumerate(matrix):
+                total = float(fast_cost.cost_function(vector, demo, pool, *cheng))
+                rows.append(
+                    {
+                        "stage": stage,
+                        "firefly": firefly,
+                        "total": total,
+                        **{k: float(LAST.get(k, np.nan)) for k, _ in COST_PARTS[:-1]},
+                    }
+                )
+                print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
+    finally:
+        # Cancels the batches not yet queued for a worker; batches already in the executor's
+        # call queue or running finish or fail before shutdown returns.
+        pool.shutdown(cancel_futures=True)
+    _write_csv(table, rows)
     return rows
 
 
@@ -452,16 +445,28 @@ def best_repeats_final(best: np.ndarray, final: np.ndarray) -> bool:
     """True when firefly_best.txt holds the final population, as every B81 run's does.
 
     Checked on the files themselves rather than on firefly_archive.txt, which
-    revalidation.copy_run_files copies into other directories.
+    revalidation.copy_run_files copies into other directories. A B81 run writes one iteration
+    number for every row, while a pre-B81 run records when each firefly reached its own best,
+    so a converged pre-B81 run whose bests equal its final positions keeps its Best stage. A
+    failed evaluation's NaN cost counts as equal to itself (code review 2026-11-09).
 
     Args:
         best: Rows of firefly_best.txt (iteration, params..., cost).
         final: Rows of firefly_result.txt (params..., cost).
 
     Returns:
-        True when the best rows equal the final rows, parameters and cost.
+        True when the iteration column is constant and the best rows equal the final rows.
     """
-    return best.shape[0] == final.shape[0] and np.allclose(best[:, 1:], final)
+    return (best.shape[0] == final.shape[0]
+            and bool(np.all(best[:, 0] == best[0, 0]))
+            and np.allclose(best[:, 1:], final, equal_nan=True))
+
+
+FIG4_OUTPUTS = {
+    "figure": "wu2025_fig4_firefly_convergence.png",
+    "cost_parts": "wu2025_fig4_cost_parts.csv",
+    "reproducibility": "wu2025_fig4_reproducibility.csv",
+}
 
 
 def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
@@ -470,7 +475,17 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     Cost against distance from the best firefly, the clustered distance matrix of the final
     fireflies, and each cost part at the initial, worst, best and final positions. A B81 run
     has no separate best positions, so its stages are initial, worst and final.
+
+    Every file in FIG4_OUTPUTS is deleted from out_dir first, so a failed or non-evaluating
+    call never leaves an earlier run's figure or tables beside this run's.
+
+    Args:
+        run_dir: The optimizer run directory, with its four result files and bound.txt.
+        out_dir: Where the figure and tables are written.
+        evaluate: Recompute the cost parts (hours); False draws the convergence panels only.
     """
+    for name in FIG4_OUTPUTS.values():
+        (out_dir / name).unlink(missing_ok=True)
     from scipy.spatial import distance_matrix
 
     _style()
@@ -544,7 +559,8 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
 
     rows = (
         evaluate_cost_parts(
-            {k: v for k, (v, _) in stages.items()}, out_dir / "wu2025_fig4_cost_parts.csv"
+            {k: v for k, (v, _) in stages.items()},
+            out_dir / FIG4_OUTPUTS["cost_parts"],
         )
         if evaluate
         else []
@@ -609,14 +625,14 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
                     "max_abs_difference_from_stored_cost": float(np.max(np.abs(again - stored))),
                 }
             )
-        _write_csv(out_dir / "wu2025_fig4_reproducibility.csv", summary)
+        _write_csv(out_dir / FIG4_OUTPUTS["reproducibility"], summary)
         for r in summary:
             print(
                 f"{r['stage']:8s} re-evaluated cost vs stored: max |difference| "
                 f"{r['max_abs_difference_from_stored_cost']:.3g}"
             )
     plt.tight_layout()
-    fig.savefig(out_dir / "wu2025_fig4_firefly_convergence.png", dpi=200, bbox_inches="tight")
+    fig.savefig(out_dir / FIG4_OUTPUTS["figure"], dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(
         f"best firefly {best_index}, cost {best[best_index, -1]:.4f}; final cost range "

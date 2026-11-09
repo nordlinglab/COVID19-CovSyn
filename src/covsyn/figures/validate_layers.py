@@ -26,8 +26,7 @@ import pandas as pd
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
-from covsyn.model.data_synthesize import (community_event_parameters, community_power_law_exponent,
-                                          expected_community_contact_count, expected_event_size)
+from covsyn.model.data_synthesize import model_community_mean
 from covsyn.data_processing.taiwan_reference import (EFF_COLOR, IMPORTED_COLOR, LEVELS, MARKER_NOTE, REF_COLOR, RNG, SIM_COLOR,
                               half_points, half_violin, household_pmfs, load_demographics,
                               municipality_population, pmf_samples, school_classmates_all, school_reference,
@@ -387,15 +386,7 @@ r_p = (1 + int(np.sum(r_null >= r))) / (1 + len(r_null))
 # E97: the mean includes the mass events of B54, which P[28] alone leaves out.
 # B62: with P[204] present P[28] is the shift of the scale-free count and no mass event is
 # drawn, so the mean is that distribution's own (code review 2026-11-09, F3).
-community_exponent = community_power_law_exponent(P)
-if community_exponent is not None:
-    expected_mean = expected_community_contact_count(community_exponent, P[28])
-    mean_label = f'shift {P[28]:.2f}, alpha {community_exponent:.2f}'
-else:
-    event = community_event_parameters(P)
-    expected_mean = P[28] + (0.0 if event is None else event['probability'] * expected_event_size(
-        event['exponent'], event['min_size'], event['max_size'], min(MUNICIPALITY_POP.values())))
-    mean_label = f'lambda {P[28]:.2f}' + ('' if event is None else ' + mass events')
+expected_mean, mean_label = model_community_mean(list(P), min(MUNICIPALITY_POP.values()))
 fig, ax = plt.subplots(figsize=(9, 6))
 ax.scatter(by_city_index['pop'] / 1e6, by_city_index['cand'], color='#1f4e79', label='index cases')
 ax.scatter(by_city['pop'] / 1e6, by_city['cand'], color=SIM_COLOR, marker='x', label=f'spread cases ({len(spread):,})')

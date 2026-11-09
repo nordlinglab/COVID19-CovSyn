@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from covsyn.figures import reproduce_wu2025 as wu
 
@@ -81,15 +82,127 @@ def test_a_b81_run_draws_no_separate_best_stage(tmp_path, monkeypatch) -> None:
         best = np.loadtxt(run / "firefly_best.txt")
         assert wu.best_repeats_final(best, np.loadtxt(run / "firefly_result.txt")) is rotated
         wu.fig4(run, run, evaluate=False)
-        assert (run / "wu2025_fig4_firefly_convergence.png").exists()
+        assert _is_png(run / wu.FIG4_OUTPUTS["figure"])
         assert ("Best fireflies" in plotted) is not rotated
 
 
-def test_a_cached_cost_parts_file_with_other_stages_is_not_reused(tmp_path) -> None:
-    """A cache from a B81 run has no Best rows; a pre-B81 fig4 into the same place recomputes."""
-    cache = tmp_path / "wu2025_fig4_cost_parts.csv"
-    assert wu.read_cost_parts_cache(cache, {"Initial", "Final"}) is None
-    wu._write_csv(cache, [{"stage": s, "firefly": 0, "total": 1.0} for s in ("Initial", "Final")])
-    rows = wu.read_cost_parts_cache(cache, {"Initial", "Final"})
-    assert [r["stage"] for r in rows] == ["Initial", "Final"]
-    assert wu.read_cost_parts_cache(cache, {"Initial", "Best", "Final"}) is None
+def test_a_b81_run_with_a_failed_evaluation_still_repeats_its_final():
+    """A NaN cost from a failed evaluation must not bring the duplicate Best stage back."""
+    final = np.array([[0.1, 0.2, 1.5], [0.3, 0.4, np.nan]])
+    best = np.column_stack([np.full(2, 500.0), final])
+    assert wu.best_repeats_final(best, final)
+
+
+def test_a_converged_pre_b81_run_keeps_its_best_stage():
+    """Bests equal to the final positions, but reached at different iterations: not B81."""
+    final = np.array([[0.1, 0.2, 1.5], [0.3, 0.4, 2.5]])
+    best = np.column_stack([np.array([120.0, 340.0]), final])
+    assert not wu.best_repeats_final(best, final)
+
+
+@pytest.fixture
+def stub_objective(monkeypatch):
+    """fast_cost stand-in: the total and every part are functions of the vector.
+
+    cost_parts.LAST is filled in place, as its module requires, and its contents are restored
+    afterwards, so the stub's parts never reach a later test.
+    """
+    from covsyn.calibration import cost_parts, fast_cost
+
+    parts = [key for key, _ in wu.COST_PARTS[:-1]]
+    saved = dict(cost_parts.LAST)
+
+    def cost_function(vector, *args):
+        cost_parts.LAST.clear()
+        cost_parts.LAST.update({key: float(np.sum(vector)) + i for i, key in enumerate(parts)})
+        return float(np.sum(vector))
+
+    monkeypatch.setattr(fast_cost, "init_worker", lambda *a: None)
+    monkeypatch.setattr(fast_cost, "cost_function", cost_function)
+    yield
+    cost_parts.LAST.clear()
+    cost_parts.LAST.update(saved)
+
+
+def _is_png(path):
+    with open(path, "rb") as f:
+        return f.read(8) == b"\x89PNG\r\n\x1a\n"
+
+
+def _first_column(path):
+    return path.read_text().splitlines()[0].split(",")[0]
+
+
+def test_cost_parts_are_recomputed_even_when_a_previous_table_exists(tmp_path, stub_objective):
+    """No cache: a table left by an earlier run is replaced, its total and every part."""
+    table = tmp_path / "wu2025_fig4_cost_parts.csv"
+    stale = {"stage": "Final", "firefly": 0, "total": 999.0}
+    stale.update({key: 999.0 for key, _ in wu.COST_PARTS[:-1]})
+    wu._write_csv(table, [stale])
+    rows = wu.evaluate_cost_parts({"Final": np.array([[1.0, 2.0]])}, table, workers=1)
+    assert rows[0]["total"] == 3.0
+    assert [rows[0][key] for key, _ in wu.COST_PARTS[:-1]] == [
+        3.0 + i for i in range(len(wu.COST_PARTS) - 1)]
+    assert "999" not in table.read_text()
+
+
+def test_fig4_replaces_an_earlier_run_s_outputs_when_it_evaluates(tmp_path, stub_objective):
+    """With evaluation, fig4 writes its own figure and tables over an earlier run's."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _optimizer_run(run, rotated=True)
+    out = tmp_path / "figures"
+    out.mkdir()
+    for name in wu.FIG4_OUTPUTS.values():
+        (out / name).write_text("another run")
+    wu.fig4(run, out, evaluate=True)
+    assert _is_png(out / wu.FIG4_OUTPUTS["figure"])
+    assert _first_column(out / wu.FIG4_OUTPUTS["cost_parts"]) == "stage"
+    assert _first_column(out / wu.FIG4_OUTPUTS["reproducibility"]) == "stage"
+
+
+def test_fig4_without_evaluation_removes_an_earlier_run_s_tables(tmp_path):
+    """Without evaluation, an earlier run's tables go and the figure is this run's."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _optimizer_run(run, rotated=False)
+    out = tmp_path / "figures"
+    out.mkdir()
+    for name in wu.FIG4_OUTPUTS.values():
+        (out / name).write_text("another run")
+    wu.fig4(run, out, evaluate=False)
+    assert _is_png(out / wu.FIG4_OUTPUTS["figure"])
+    assert not (out / wu.FIG4_OUTPUTS["cost_parts"]).exists()
+    assert not (out / wu.FIG4_OUTPUTS["reproducibility"]).exists()
+
+
+def test_fig4_on_a_directory_it_cannot_draw_still_clears_the_earlier_outputs(tmp_path):
+    """The clean-up comes before reading the run, so even this failure leaves nothing stale."""
+    out = tmp_path / "figures"
+    out.mkdir()
+    for name in wu.FIG4_OUTPUTS.values():
+        (out / name).write_text("another run")
+    with pytest.raises(OSError):
+        wu.fig4(tmp_path / "not_a_run", out, evaluate=False)
+    assert not any((out / name).exists() for name in wu.FIG4_OUTPUTS.values())
+
+
+def test_fig4_that_fails_leaves_no_earlier_run_s_figure(tmp_path, monkeypatch):
+    """A failure after the clean-up must not leave another run's figure without its tables."""
+    from covsyn.calibration import fast_cost
+
+    def broken(*args):
+        raise RuntimeError("worker crashed")
+
+    monkeypatch.setattr(fast_cost, "init_worker", lambda *a: None)
+    monkeypatch.setattr(fast_cost, "cost_function", broken)
+    run = tmp_path / "run"
+    run.mkdir()
+    _optimizer_run(run, rotated=True)
+    out = tmp_path / "figures"
+    out.mkdir()
+    for name in wu.FIG4_OUTPUTS.values():
+        (out / name).write_text("another run")
+    with pytest.raises(RuntimeError):
+        wu.fig4(run, out, evaluate=True)
+    assert not any((out / name).exists() for name in wu.FIG4_OUTPUTS.values())

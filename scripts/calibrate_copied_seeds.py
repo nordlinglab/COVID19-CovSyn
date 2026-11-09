@@ -29,16 +29,21 @@ import pandas as pd
 sys.path.insert(0, "src")
 from covsyn.data_processing import build_first_wave_seeds as bfs  # noqa: E402
 from covsyn.model.data_synthesis_main import run_covid  # noqa: E402
-from covsyn.validation.compare_first_wave import SOURCES, reference_local_cases  # noqa: E402
+from covsyn.validation.compare_first_wave import (  # noqa: E402
+    SOURCES,
+    is_local_case,
+    reference_local_cases,
+)
 
 SEED_START = 720000
-LOCAL = (None, "local_unknown", "local_from_imported")
 
 
 def local_cases(seed, P, dp, mode, seed_file):
     """Local cases of one run: the non-seed cases and the local seeds, copies included."""
     _, _, course, _ = run_covid(seed, P, dp, mode=mode, seed_file=seed_file)
-    return sum(1 for c in course if c.get("seed_type") in LOCAL)
+    # compare_first_wave.is_local_case is the one definition the reports share (code review
+    # 2026-11-09): a copy of its seed types here would drift when a seed type is added.
+    return sum(1 for c in course if is_local_case(c))
 
 
 def mean_local(P, dp, mode, seed_file, runs, workers):
