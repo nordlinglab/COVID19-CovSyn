@@ -206,26 +206,32 @@ tail -4 "$LOG"
 # independent seeds like everything else that is reported. Fig 6 needs its own scenario
 # (100 index cases, Cheng 2020), generated here on the same independent seeds.
 say 'drawing the Wu & Nordling 2025 figures from the independent seeds (E97)'
+# Each figure's failure is recorded on its own: a { ...; } || group reports only its last
+# command, so an earlier figure could fail unreported (code review 2026-11-09).
+FIGURES_FAILED=''
+for figure in fig3 fig5 fig7; do
+    run covsyn.figures.reproduce_wu2025 "$figure" "$REPORT_FIRST" wu2025_figures >> "$LOG" 2>&1 \
+        || FIGURES_FAILED="$FIGURES_FAILED $figure"
+done
+# Fig 4 plots the optimizer's own history, so it reads the optimizer output directory, not
+# the revalidated or selected copy.
+run covsyn.figures.reproduce_wu2025 fig4 "${OPTIMIZER_RUN:-$FIREFLY_RUN}" wu2025_figures \
+    >> "$LOG" 2>&1 || FIGURES_FAILED="$FIGURES_FAILED fig4"
+# F6 (code review 2026-11-09): Fig 6 is reported, so a failed synthesis stops the chain, as at
+# step 3b. It runs last, after the figures that do not need it, and the previous run's Fig 6 is
+# removed first, so a stop never leaves another run's Fig 6 among this run's figures.
+rm -f wu2025_figures/wu2025_fig6_cheng2020.png wu2025_figures/wu2025_fig6_cheng2020.csv
 rm -rf "$REPORT_CHENG"
 mkdir -p "$REPORT_CHENG"
 run covsyn.model.data_synthesis_main --mode cheng2020 --monte_carlo_number 1000 \
     --result_path "$REPORT_CHENG" --cpu_cores "${CPU_CORES:-24}" \
     --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
-    || { say 'ERROR: independent cheng2020 synthesis failed, Fig 6 is not drawn'
-         CHENG_FAILED=1; }
-{
-  for figure in fig3 fig5 fig7; do
-    run covsyn.figures.reproduce_wu2025 "$figure" "$REPORT_FIRST" wu2025_figures
-  done
-  # F6 (code review 2026-11-09): Fig 6 only from data that exists; the chain ends with an error
-  # below instead of ALL DONE.
-  [ -n "${CHENG_FAILED:-}" ] || run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures
-  # Fig 4 plots the optimizer's own history, so it reads the optimizer output directory, not
-  # the revalidated or selected copy.
-  run covsyn.figures.reproduce_wu2025 fig4 "${OPTIMIZER_RUN:-$FIREFLY_RUN}" wu2025_figures
-} >> "$LOG" 2>&1 || say 'WARNING: a Wu 2025 figure failed'
-if [ -n "${CHENG_FAILED:-}" ]; then
-    say 'DONE WITH AN ERROR: the reported Fig 6 is missing (independent cheng2020 synthesis failed)'
-    exit 1
+    || { say 'ERROR: independent cheng2020 synthesis failed, so Fig 6 is missing; stopping'
+         exit 1; }
+run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures >> "$LOG" 2>&1 \
+    || FIGURES_FAILED="$FIGURES_FAILED fig6"
+if [ -n "$FIGURES_FAILED" ]; then
+    say "DONE WITH WARNINGS: Wu 2025 figures that failed:$FIGURES_FAILED"
+else
+    say 'ALL DONE'
 fi
-say 'ALL DONE'
