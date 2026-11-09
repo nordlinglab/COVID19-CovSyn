@@ -29,11 +29,13 @@ def _loaded_script():
 
 @pytest.fixture(scope="module")
 def script():
+    """The script loaded once for the module's tests."""
     with _loaded_script() as module:
         yield module
 
 
 def test_loading_the_script_leaves_sys_path_as_it_was():
+    """The script's relative 'src' entry must not stay on sys.path for later tests."""
     before = list(sys.path)
     with _loaded_script():
         pass
@@ -53,6 +55,7 @@ def test_the_line_through_two_low_measurements_matches_b82(script):
 
 
 def test_measurements_that_do_not_rise_with_q_are_an_error(script):
+    """A flat or falling pair of measurements gives no line to solve."""
     with pytest.raises(ValueError):
         script.solve_line(0.0, 10.0, 1.0, 10.0, 12)
 
@@ -107,12 +110,14 @@ def test_two_close_measurements_inverted_by_noise_do_not_stop_the_calibration(sc
 
 
 def test_max_steps_below_one_is_refused(script):
+    """At least one step is needed, or the error would name an unset factor."""
     with pytest.raises(ValueError, match="max_steps"):
         script.calibrate(_curve, 12, 0.1, max_steps=0)
 
 
 @pytest.mark.parametrize("q0", [0.0, -0.1, 1.5, float("nan")])
 def test_a_starting_factor_outside_the_unit_interval_is_refused_before_any_run(script, q0):
+    """q0 outside (0, 1] is refused before a batch of runs is spent on it."""
     calls = []
     with pytest.raises(ValueError):
         script.calibrate(lambda x: calls.append(x) or _curve(x), 12, q0)
@@ -120,11 +125,13 @@ def test_a_starting_factor_outside_the_unit_interval_is_refused_before_any_run(s
 
 
 def test_seeds_held_at_one_that_already_reach_the_data_are_an_error(script):
+    """When m(0) already exceeds the data, no factor in [0, 1] can reach it."""
     with pytest.raises(ValueError, match="alone infect"):
         script.calibrate(lambda x: 13.0 + x, 12, 0.1)
 
 
 def test_a_target_beyond_q_1_is_an_error_not_a_clipped_factor(script):
+    """m(1) below the data is an error, not a factor clipped to 1."""
     with pytest.raises(ValueError, match=r"m\(1\)"):
         script.calibrate(lambda x: 7.0 + 2.0 * x, 12, 0.5)
 
@@ -150,18 +157,21 @@ def test_a_convex_response_beyond_the_first_line_is_reached_through_m1(script):
 
 
 def test_seeds_alone_within_tolerance_give_a_factor_of_zero(script):
+    """m(0) within tolerance returns 0 after one batch."""
     calls = []
     assert script.calibrate(lambda x: calls.append(x) or 11.7 + 30.0 * x, 12, 0.1) == 0.0
     assert calls == [0.0]
 
 
 def test_no_convergence_within_the_steps_is_an_error(script):
+    """Measurements that never come within tolerance end in an error."""
     noisy = iter([7.27, 9.0, 20.0, 5.0, 20.0, 5.0, 20.0])
     with pytest.raises(ValueError):
         script.calibrate(lambda x: next(noisy), 12, 0.1, max_steps=3)
 
 
 def test_main_exits_non_zero_when_no_factor_reaches_the_data(script, monkeypatch, tmp_path):
+    """A calibration error becomes a non-zero exit of main with its message."""
     best = tmp_path / "firefly_best.txt"
     best.write_text("0 0.5 0.5 1.0\n")
     monkeypatch.setattr(script, "observed_offspring", lambda: (12, 118))

@@ -154,6 +154,7 @@ def test_the_model_mean_names_mass_events_only_when_one_can_happen():
 
 
 def test_the_b62_model_mean_is_the_distribution_mean():
+    """Under B62 the mean is the scale-free count's, labelled by its shift and alpha."""
     from covsyn.model.data_synthesize import model_community_mean
 
     P = _vector(205, p28=0.79, p199=0.0, p200=2.0, p201=10, p202=100, p203=1.0, p204=1.74)

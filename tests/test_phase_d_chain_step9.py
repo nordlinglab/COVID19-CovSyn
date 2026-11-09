@@ -74,6 +74,7 @@ def test_a_clean_run_ends_all_done_and_leaves_no_previous_file(tmp_path):
 
 @pytest.mark.parametrize("figure", ["fig3", "fig4", "fig5", "fig6", "fig7"])
 def test_a_failed_figure_ends_with_an_error_and_leaves_no_stale_file(tmp_path, figure):
+    """Each figure that fails is named, ends the chain with exit 1, and leaves no old file."""
     status, last, left = _run_step_9(tmp_path, figure)
     assert status == 1
     assert last == f"SAY DONE WITH AN ERROR: Wu 2025 figures that failed: {figure}"
@@ -82,6 +83,7 @@ def test_a_failed_figure_ends_with_an_error_and_leaves_no_stale_file(tmp_path, f
 
 
 def test_a_failed_cheng2020_synthesis_stops_and_names_earlier_failures(tmp_path):
+    """A failed cheng2020 synthesis stops at once and names the figures that failed before."""
     status, last, left = _run_step_9(tmp_path, "fig4 cheng2020")
     assert status == 1
     assert "cheng2020 synthesis failed" in last and "fig4" in last and last.endswith("stopping")

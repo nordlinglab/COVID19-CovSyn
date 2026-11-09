@@ -26,6 +26,7 @@ from covsyn.validation.compare_first_wave import LOCAL_SEED_TYPES, is_local_case
     ],
 )
 def test_each_seed_type_is_classified(course, local):
+    """Each seed type, and a case with none, is classified."""
     assert is_local_case(course) is local
 
 
