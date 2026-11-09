@@ -1079,9 +1079,11 @@ SIMULATIONS_PER_EVALUATION = 300
 # B81 (2026-11-03): every generation scores the population on its own block of seeds. Run 20
 # selected a vector whose workplace SAR was 0.024 on the fixed block 0..299 and 0.070 over ten
 # unseen blocks -- below the lowest of the ten -- while an unoptimised vector sat 9th of eleven,
-# so the search was fitting the fixed sample (winner's curse over 664,435 evaluations). The
-# initial population keeps block 0; generation g takes the next one. 120 generations end at
-# 36,299, clear of revalidation's blocks from 100,000 (E87).
+# so the search was fitting the fixed sample (winner's curse over 664,435 evaluations).
+# Generation g scores on block g. The initial population is scored on block 0, so generation 0
+# starts from those scores instead of scoring the same population again on a second block, which
+# cost one population of evaluations and changed nothing in the search (code review 2026-11-09,
+# F7). 120 generations end at 35,999, clear of revalidation's blocks from 100,000 (E87).
 # Costs from different blocks are NOT comparable, so nothing keeps a running minimum across
 # generations: the attraction, the elite and the progress row all use this generation's scores,
 # and the candidates are re-scored on one common set of blocks afterwards.
@@ -1089,8 +1091,9 @@ ARCHIVE_EVERY = 5
 
 
 def generation_seed_offset(generation):
-    """First simulation seed of a generation's own block (B81)."""
-    return SIMULATIONS_PER_EVALUATION * (generation + 1)
+    """First simulation seed of a generation's own block (B81); generation 0 shares block 0
+    with the initial population, whose scores it starts from (F7)."""
+    return SIMULATIONS_PER_EVALUATION * generation
 
 # E86: the objective summed the contact bins of all 300 simulated cases and compared them
 # with Cheng et al. 2020's totals for 100 cases (the original 100 cases x 3 repeats lost its
@@ -1432,8 +1435,9 @@ class Firefly:
         for generation in tqdm(range(max_generations)):
             # B81: this generation's block, and every firefly re-scored on it -- the brightest
             # included, since its score came from another block and cannot be compared here.
+            # Generation 0's block is the initial population's, already scored (F7).
             offset = generation_seed_offset(generation)
-            for k in range(self.pop_size):
+            for k in range(self.pop_size if generation > 0 else 0):
                 intensities[k] = function(
                     fireflies[k], demographic_parameters, executor, Cheng_contact_array,
                     Cheng_attack_rate, norm_weights, seed_offset=offset)

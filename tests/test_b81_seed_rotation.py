@@ -48,11 +48,12 @@ def run(monkeypatch, tmp_path):
 
 
 def test_offset_of_each_generation_is_its_own_block():
-    """Generation g scores on its own 300 seeds; the initial population scores on 0..299."""
-    assert fo.generation_seed_offset(0) == fo.SIMULATIONS_PER_EVALUATION
-    assert fo.generation_seed_offset(5) == 6 * fo.SIMULATIONS_PER_EVALUATION
+    """Generation g scores on its own 300 seeds; generation 0 shares 0..299 with the initial
+    population (F7)."""
+    assert fo.generation_seed_offset(0) == 0
+    assert fo.generation_seed_offset(5) == 5 * fo.SIMULATIONS_PER_EVALUATION
     offsets = {fo.generation_seed_offset(g) for g in range(120)}
-    assert len(offsets) == 120 and 0 not in offsets
+    assert len(offsets) == 120
 
 
 def test_training_seeds_never_reach_the_validation_blocks():
@@ -72,6 +73,14 @@ def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):
     assert set(seen) == expected
     # the offsets arrive in generation order and never come back
     assert seen == sorted(seen)
+
+
+def test_generation_0_starts_from_the_initial_scores_without_rescoring(run):
+    """The initial population is scored on block 0, generation 0's block, once only (F7)."""
+    recorder, _, _ = run
+    initial = [P for P, _ in recorder.calls[:POP]]
+    following = [P for P, _ in recorder.calls[POP:2 * POP]]
+    assert not all(np.array_equal(a, b) for a, b in zip(initial, following, strict=True))
 
 
 def test_the_whole_population_is_rescored_when_the_block_changes(run):
