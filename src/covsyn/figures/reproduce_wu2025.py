@@ -434,8 +434,8 @@ def evaluate_cost_parts(
                 )
                 print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
     finally:
-        # Cancels the batches still waiting in the executor; batches already handed to a worker
-        # run to their end or fail before shutdown returns.
+        # Cancels the batches not yet queued for a worker; batches already in the executor's
+        # call queue or running finish or fail before shutdown returns.
         pool.shutdown(cancel_futures=True)
     _write_csv(table, rows)
     return rows
