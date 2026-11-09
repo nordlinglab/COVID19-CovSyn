@@ -409,15 +409,30 @@ def read_cost_parts_cache(cache: Path, stages: set[str]) -> list[dict] | None:
     return rows if {r["stage"] for r in rows} == stages else None
 
 
-def cost_parts_cache_path(out_dir: Path, vectors: dict[str, np.ndarray]) -> Path:
-    """The cost-parts cache of these vectors, named by a digest of the stages and vectors.
+# What the cost parts depend on besides the vectors: the cost code and the data it reads, so a
+# changed cost function or data set never reuses a cache of the old one (code review 2026-11-09).
+COST_INPUTS = (
+    Path(__file__).resolve().parent.parent / "calibration" / "fast_cost.py",
+    Path(__file__).resolve().parent.parent / "calibration" / "cost_parts.py",
+    Path("variable/demographic_parameters.pkl"),
+    Path("variable/processed_contact_tracing_data.pkl"),
+    Path("variable/Taiwan_data_matrix.npy"),
+)
+
+
+def cost_parts_cache_path(
+    out_dir: Path, vectors: dict[str, np.ndarray], inputs: tuple[Path, ...] = COST_INPUTS
+) -> Path:
+    """The cost-parts cache of these vectors, named by a digest of what the cost depends on.
 
     A cache named only by its directory was reused for the next optimizer run drawn into the
     same directory, so Fig 4 showed the previous run's cost parts (code review 2026-11-09).
+    The digest covers the stages, their vectors, and the bytes of each input file that exists.
 
     Args:
         out_dir: The figure directory.
         vectors: The parameter vectors of each stage.
+        inputs: The cost code and data files.
 
     Returns:
         The cache path, wu2025_fig4_cost_parts_<12 hex digits>.csv.
@@ -426,6 +441,9 @@ def cost_parts_cache_path(out_dir: Path, vectors: dict[str, np.ndarray]) -> Path
     for stage in sorted(vectors):
         digest.update(stage.encode())
         digest.update(np.ascontiguousarray(vectors[stage], dtype=float).tobytes())
+    for path in inputs:
+        digest.update(str(path.name).encode())
+        digest.update(path.read_bytes() if path.exists() else b"absent")
     return out_dir / f"wu2025_fig4_cost_parts_{digest.hexdigest()[:12]}.csv"
 
 

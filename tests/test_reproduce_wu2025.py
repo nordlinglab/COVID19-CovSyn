@@ -117,3 +117,13 @@ def test_the_cost_parts_cache_is_named_by_the_run_it_belongs_to(tmp_path):
     assert path.parent == tmp_path and path.name.startswith("wu2025_fig4_cost_parts_")
     assert path == wu.cost_parts_cache_path(tmp_path, dict(one))
     assert path != wu.cost_parts_cache_path(tmp_path, other)
+
+
+def test_the_cost_parts_cache_changes_with_the_cost_inputs(tmp_path):
+    """A changed cost function or data file must not reuse the cache of the old one."""
+    vectors = {"Initial": np.zeros((2, 3)), "Final": np.ones((2, 3))}
+    data = tmp_path / "data.pkl"
+    data.write_bytes(b"one")
+    before = wu.cost_parts_cache_path(tmp_path, vectors, (data,))
+    data.write_bytes(b"two")
+    assert wu.cost_parts_cache_path(tmp_path, vectors, (data,)) != before
