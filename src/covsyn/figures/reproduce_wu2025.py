@@ -434,8 +434,8 @@ def evaluate_cost_parts(
                 )
                 print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
     finally:
-        # On an exception or Ctrl-C the queued simulation batches are cancelled; the batches
-        # already running finish before the workers stop.
+        # On an exception the queued simulation batches are cancelled and the running ones
+        # finish. Ctrl-C in a terminal also reaches the workers, which stop where they are.
         pool.shutdown(cancel_futures=True)
     _write_csv(table, rows)
     return rows

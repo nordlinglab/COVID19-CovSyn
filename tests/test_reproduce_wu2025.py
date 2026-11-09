@@ -82,7 +82,7 @@ def test_a_b81_run_draws_no_separate_best_stage(tmp_path, monkeypatch) -> None:
         best = np.loadtxt(run / "firefly_best.txt")
         assert wu.best_repeats_final(best, np.loadtxt(run / "firefly_result.txt")) is rotated
         wu.fig4(run, run, evaluate=False)
-        assert (run / "wu2025_fig4_firefly_convergence.png").exists()
+        assert _is_png(run / wu.FIG4_OUTPUTS["figure"])
         assert ("Best fireflies" in plotted) is not rotated
 
 
@@ -125,7 +125,8 @@ def stub_objective(monkeypatch):
 
 
 def _is_png(path):
-    return path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    with open(path, "rb") as f:
+        return f.read(8) == b"\x89PNG\r\n\x1a\n"
 
 
 def _first_column(path):
