@@ -9,12 +9,14 @@ quarantine (the breach probability applies from then on, B74).
 Since B82 the seeds that arrived before the border control are held at 1.0, so the people the
 community seeds infect are m(q) = A + B q with A = m(0) > 0, and the proportional update
 q = 12 / m(1) this script used to make overshot (0.256 against about 0.11 on run 21's vector;
-code review 2026-11-09, F9). The script now measures m(0) and m(1), solves A + B q = 12, takes
-one secant step through m(0) and m(q) -- two low-q measurements, as B82 found necessary -- and
-checks the result with a last set of runs.
+code review 2026-11-09, F9). The script now measures m(0) and m(q0) at a low starting factor q0,
+the current IMPORTED_FACTOR unless given, solves the line through them for 12 -- two low-q
+measurements, as B82 found necessary, since m(q) is not quite linear far from the root -- and
+checks the result with a last set of runs. A factor that cannot reach the data stops the script
+with a non-zero exit.
 
 Usage (repository root):
-    python scripts/calibrate_imported_factor.py <firefly_best.txt> [runs] [workers] [isolation]
+    python scripts/calibrate_imported_factor.py <firefly_best.txt> [runs] [workers] [isolation] [q0]
 
 isolation is the B78 option A setting (model or imported_delay, the default since the
 meeting of 2026-11-02); calibrate with the one that will be used, since earlier isolation
@@ -30,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, "src")
-from covsyn.model.data_synthesis_main import run_covid  # noqa: E402
+from covsyn.model.data_synthesis_main import IMPORTED_FACTOR, run_covid  # noqa: E402
 
 LAYERS = ("household", "school", "workplace", "health_care", "municipality")
 SEED_START = 710000
@@ -73,15 +75,14 @@ def solve_line(q_low, m_low, q_high, m_high, target):
         target: The people infected in the data.
 
     Returns:
-        The factor, clipped to [0, 1].
+        The factor, not clipped: one outside [0, 1] means the data cannot be reached.
 
     Raises:
         ValueError: The two measurements do not rise with q, so no line can be solved.
     """
     if m_high <= m_low:
         raise ValueError(f"m({q_high:.4f}) = {m_high:.2f} is not above m({q_low:.4f}) = {m_low:.2f}")
-    q = q_low + (target - m_low) * (q_high - q_low) / (m_high - m_low)
-    return float(min(max(q, 0.0), 1.0))
+    return float(q_low + (target - m_low) * (q_high - q_low) / (m_high - m_low))
 
 
 def main():
@@ -90,6 +91,7 @@ def main():
     runs = int(sys.argv[2]) if len(sys.argv) > 2 else 400
     workers = int(sys.argv[3]) if len(sys.argv) > 3 else os.cpu_count()
     isolation = sys.argv[4] if len(sys.argv) > 4 else "imported_delay"
+    q0 = float(sys.argv[5]) if len(sys.argv) > 5 else IMPORTED_FACTOR
     with open("variable/demographic_parameters.pkl", "rb") as f:
         dp = pickle.load(f)
     k, n = observed_offspring()
@@ -100,13 +102,18 @@ def main():
               f"(5-95% of runs {band[0]:.0f}-{band[1]:.0f}), data {k}; {runs} runs")
         return m
 
-    print(f"isolation {isolation}")
-    m0, m1 = measure(0.0), measure(1.0)
+    print(f"isolation {isolation}; starting factor {q0:.4f}")
+    m0 = measure(0.0)
     if m0 >= k:
-        print(f"the seeds held at 1.0 alone infect {m0:.2f} >= {k}; no q in [0, 1] reaches the data")
-        return
-    q = solve_line(0.0, m0, 1.0, m1, k)
-    q = solve_line(0.0, m0, q, measure(q), k)   # secant through two low-q measurements
+        sys.exit(f"the seeds held at 1.0 alone infect {m0:.2f} >= {k}; no q in [0, 1] reaches "
+                 "the data")
+    try:
+        q = solve_line(0.0, m0, q0, measure(q0), k)
+    except ValueError as error:
+        sys.exit(f"no calibration: {error}; raise the runs or the starting factor")
+    if not 0.0 <= q <= 1.0:
+        sys.exit(f"the line through q = 0 and {q0:.4f} reaches {k} at q = {q:.4f}, outside [0, 1]; "
+                 "no factor reaches the data")
     print(f"calibrated q = {q:.4f}")
     measure(q)
 

@@ -1081,9 +1081,11 @@ SIMULATIONS_PER_EVALUATION = 300
 # unseen blocks -- below the lowest of the ten -- while an unoptimised vector sat 9th of eleven,
 # so the search was fitting the fixed sample (winner's curse over 664,435 evaluations).
 # Generation g scores on block g. The initial population is scored on block 0, so generation 0
-# starts from those scores instead of scoring the same population again on a second block, which
-# cost one population of evaluations and changed nothing in the search (code review 2026-11-09,
-# F7). 120 generations end at 35,999, clear of revalidation's blocks from 100,000 (E87).
+# moves on those scores. Before the code review of 2026-11-09 (F7) generation 0 scored the same
+# population again on block 300 and discarded the block-0 scores: one population of evaluations
+# for a different noise draw, not a better search. Runs from then on therefore take other paths
+# than runs 20-22. 120 generations end at 35,999, clear of revalidation's blocks from 100,000
+# (E87).
 # Costs from different blocks are NOT comparable, so nothing keeps a running minimum across
 # generations: the attraction, the elite and the progress row all use this generation's scores,
 # and the candidates are re-scored on one common set of blocks afterwards.
@@ -1435,14 +1437,14 @@ class Firefly:
         for generation in tqdm(range(max_generations)):
             # B81: this generation's block, and every firefly re-scored on it -- the brightest
             # included, since its score came from another block and cannot be compared here.
-            # Generation 0's block is the initial population's, already scored (F7).
             offset = generation_seed_offset(generation)
-            for k in range(self.pop_size if generation > 0 else 0):
-                intensities[k] = function(
-                    fireflies[k], demographic_parameters, executor, Cheng_contact_array,
-                    Cheng_attack_rate, norm_weights, seed_offset=offset)
-                cost_parts[k] = dict(LAST_COST_PARTS)
-                evaluations += 1
+            if generation > 0:   # generation 0's block is the initial one, already scored (F7)
+                for k in range(self.pop_size):
+                    intensities[k] = function(
+                        fireflies[k], demographic_parameters, executor, Cheng_contact_array,
+                        Cheng_attack_rate, norm_weights, seed_offset=offset)
+                    cost_parts[k] = dict(LAST_COST_PARTS)
+                    evaluations += 1
             new_alpha *= 0.97
             for i in range(self.pop_size):
                 if i % 10 == 0:

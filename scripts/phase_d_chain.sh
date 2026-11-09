@@ -144,6 +144,8 @@ say 'running the standard run report'
 say 'run report written to phaseD_report.txt'
 
 # ---------------------------------------------------------------- 5. figures
+# Step 3b already stops on a failed synthesis (F6); this catches one that reported success but
+# wrote no simulation.
 for d in "$REPORT_SPREAD" "$REPORT_FIRST"; do
     if ! ls "$d"/social_data_*.npy >/dev/null 2>&1; then
         say "ERROR: $d holds no simulation, so the report figures cannot be drawn; stopping"
@@ -209,14 +211,21 @@ mkdir -p "$REPORT_CHENG"
 run covsyn.model.data_synthesis_main --mode cheng2020 --monte_carlo_number 1000 \
     --result_path "$REPORT_CHENG" --cpu_cores "${CPU_CORES:-24}" \
     --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
-    || say 'WARNING: independent cheng2020 synthesis failed'
+    || { say 'ERROR: independent cheng2020 synthesis failed, Fig 6 is not drawn'
+         CHENG_FAILED=1; }
 {
   for figure in fig3 fig5 fig7; do
     run covsyn.figures.reproduce_wu2025 "$figure" "$REPORT_FIRST" wu2025_figures
   done
-  run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures
+  # F6 (code review 2026-11-09): Fig 6 only from data that exists; the chain ends with an error
+  # below instead of ALL DONE.
+  [ -n "${CHENG_FAILED:-}" ] || run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures
   # Fig 4 plots the optimizer's own history, so it reads the optimizer output directory, not
   # the revalidated or selected copy.
   run covsyn.figures.reproduce_wu2025 fig4 "${OPTIMIZER_RUN:-$FIREFLY_RUN}" wu2025_figures
 } >> "$LOG" 2>&1 || say 'WARNING: a Wu 2025 figure failed'
+if [ -n "${CHENG_FAILED:-}" ]; then
+    say 'DONE WITH AN ERROR: the reported Fig 6 is missing (independent cheng2020 synthesis failed)'
+    exit 1
+fi
 say 'ALL DONE'

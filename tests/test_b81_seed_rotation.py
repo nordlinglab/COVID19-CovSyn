@@ -76,17 +76,28 @@ def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):
 
 
 def test_generation_0_starts_from_the_initial_scores_without_rescoring(run):
-    """The initial population is scored on block 0, generation 0's block, once only (F7)."""
+    """The initial population is scored on block 0, generation 0's block, once only (F7).
+
+    Generation 0 evaluates only moved fireflies, on block 0: the first call after the initial
+    population is a move on block 0 (it was a re-score on block 300), and no initial vector is
+    evaluated on block 0 a second time.
+    """
+    from collections import Counter
+
     recorder, _, _ = run
     initial = [P for P, _ in recorder.calls[:POP]]
-    following = [P for P, _ in recorder.calls[POP:2 * POP]]
-    assert not all(np.array_equal(a, b) for a, b in zip(initial, following, strict=True))
+    assert recorder.calls[POP][1] == 0
+    on_block_0 = Counter(P for P, o in recorder.calls if o == 0)
+    assert all(on_block_0[P] == initial.count(P) for P in initial)
 
 
 def test_the_whole_population_is_rescored_when_the_block_changes(run):
-    """Including the brightest: a score from another block cannot be compared with this one."""
+    """Including the brightest: a score from another block cannot be compared with this one.
+
+    From generation 1 on; generation 0 shares the initial population's block (F7).
+    """
     recorder, _, _ = run
-    for g in range(GENERATIONS):
+    for g in range(1, GENERATIONS):
         offset = fo.generation_seed_offset(g)
         rescored = [P for P, o in recorder.calls if o == offset]
         assert len(rescored) >= POP
