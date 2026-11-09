@@ -131,3 +131,32 @@ def test_the_expected_community_count_is_the_mean_of_the_distribution_not_the_sh
     np.random.seed(0)
     draws = [draw_community_contact_count(1.74, 0.79) for _ in range(40000)]
     assert np.mean(draws) == pytest.approx(expected, rel=0.05)
+
+
+def _vector(length, **values):
+    P = np.zeros(length)
+    for index, value in values.items():
+        P[int(index[1:])] = value
+    return P
+
+
+def test_the_model_mean_names_mass_events_only_when_one_can_happen():
+    """An event block with probability 0 adds nothing, so its label must not claim it does."""
+    from covsyn.model.data_synthesize import model_community_mean
+
+    no_block = _vector(199, p28=3.1)
+    zero = _vector(204, p28=3.1, p199=0.0, p200=2.0, p201=10, p202=100, p203=1.0)
+    some = _vector(204, p28=3.1, p199=0.05, p200=2.0, p201=10, p202=100, p203=1.0)
+    assert model_community_mean(no_block, 1e5) == (3.1, "lambda 3.10")
+    assert model_community_mean(zero, 1e5) == (3.1, "lambda 3.10")
+    mean, label = model_community_mean(some, 1e5)
+    assert mean > 3.1 and label == "lambda 3.10 + mass events"
+
+
+def test_the_b62_model_mean_is_the_distribution_mean():
+    from covsyn.model.data_synthesize import model_community_mean
+
+    P = _vector(205, p28=0.79, p199=0.0, p200=2.0, p201=10, p202=100, p203=1.0, p204=1.74)
+    mean, label = model_community_mean(P, 1e5)
+    assert mean == pytest.approx(7.036, abs=0.01)
+    assert label == "shift 0.79, alpha 1.74"

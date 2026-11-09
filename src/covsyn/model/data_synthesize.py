@@ -321,6 +321,32 @@ def expected_event_size(exponent: float, min_size: int, max_size: int, room: flo
                                        float(min(room, max_size)))
 
 
+def model_community_mean(P: Sequence[float], room: float) -> tuple[float, str]:
+    """The model's mean community contacts per case, and a label naming what it is made of.
+
+    Under B62 the scale-free count's own mean; before it, B27's lambda = P[28] plus B54's
+    expected event contacts, named in the label only when an event can happen (code review
+    2026-11-09).
+
+    Args:
+        P: The full parameter vector.
+        room: People of the smallest municipality, which caps each event (B54).
+
+    Returns:
+        The mean and its label, such as 'lambda 3.10 + mass events'.
+    """
+    exponent = community_power_law_exponent(P)
+    if exponent is not None:
+        return (expected_community_contact_count(exponent, P[28]),
+                f'shift {P[28]:.2f}, alpha {exponent:.2f}')
+    event = community_event_parameters(P)
+    if event is None or event['probability'] == 0:
+        return float(P[28]), f'lambda {P[28]:.2f}'
+    return (P[28] + event['probability'] * expected_event_size(
+        event['exponent'], event['min_size'], event['max_size'], room),
+        f'lambda {P[28]:.2f} + mass events')
+
+
 @lru_cache(maxsize=256)
 def _expected_capped_event_size(exponent, min_size, max_size, cap):
     cdf = _event_size_cdf(exponent, min_size, max_size)
