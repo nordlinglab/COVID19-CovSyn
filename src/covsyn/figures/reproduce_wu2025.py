@@ -409,42 +409,63 @@ def read_cost_parts_cache(cache: Path, stages: set[str]) -> list[dict] | None:
     return rows if {r["stage"] for r in rows} == stages else None
 
 
-# What the cost parts depend on besides the vectors: the cost code and the data it reads, so a
-# changed cost function or data set never reuses a cache of the old one (code review 2026-11-09).
-COST_INPUTS = (
-    Path(__file__).resolve().parent.parent / "calibration" / "fast_cost.py",
-    Path(__file__).resolve().parent.parent / "calibration" / "cost_parts.py",
-    Path("variable/demographic_parameters.pkl"),
-    Path("variable/processed_contact_tracing_data.pkl"),
-    Path("variable/Taiwan_data_matrix.npy"),
-)
+PACKAGE_DIR = Path(__file__).resolve().parent.parent
 
 
-def cost_parts_cache_path(
-    out_dir: Path, vectors: dict[str, np.ndarray], inputs: tuple[Path, ...] = COST_INPUTS
-) -> Path:
-    """The cost-parts cache of these vectors, named by a digest of what the cost depends on.
+def cost_version(package_dir: Path = PACKAGE_DIR, data_dir: Path = Path("variable")) -> str:
+    """A digest of everything the cost can depend on: the package code and the model data.
 
-    A cache named only by its directory was reused for the next optimizer run drawn into the
-    same directory, so Fig 4 showed the previous run's cost parts (code review 2026-11-09).
-    The digest covers the stages, their vectors, and the bytes of each input file that exists.
+    Every .py file of the package, with line endings made LF so a Windows and a Mac checkout
+    of one commit agree, and every file of data_dir, the directory evaluate_cost_parts reads
+    from the working directory. Hashing all of them rather than a hand-kept list means no
+    module the objective imports can be missed (code review 2026-11-09).
 
     Args:
-        out_dir: The figure directory.
+        package_dir: The covsyn package.
+        data_dir: The model data, variable/ in the repository root.
+
+    Returns:
+        The hex digest.
+
+    Raises:
+        FileNotFoundError: data_dir does not exist, so the cost could not be evaluated either.
+    """
+    if not data_dir.is_dir():
+        raise FileNotFoundError(f"{data_dir} not found; run from the repository root")
+    digest = hashlib.sha256()
+    # Ordered by the relative path as a string: Windows orders Path objects ignoring case,
+    # so sorting the paths themselves gave a Windows and a WSL run different digests.
+    code = {p.relative_to(package_dir).as_posix(): p for p in package_dir.rglob("*.py")}
+    for name in sorted(code):
+        digest.update(name.encode())
+        digest.update(code[name].read_bytes().replace(b"\r\n", b"\n"))
+    data = {p.relative_to(data_dir).as_posix(): p for p in data_dir.rglob("*") if p.is_file()}
+    for name in sorted(data):
+        digest.update(name.encode())
+        digest.update(data[name].read_bytes())
+    return digest.hexdigest()
+
+
+def cost_parts_cache_path(run_dir: Path, vectors: dict[str, np.ndarray], version: str) -> Path:
+    """The cost-parts cache of an optimizer run, kept in that run's own directory.
+
+    The cache belongs to the run, not to the reported figures: in the figure directory it was
+    reused for the next run drawn there (code review 2026-11-09). Its name is a digest of the
+    stages, their vectors and the cost version, so a changed objective never reuses it.
+
+    Args:
+        run_dir: The optimizer run directory.
         vectors: The parameter vectors of each stage.
-        inputs: The cost code and data files.
+        version: cost_version() of the code and data the cost parts come from.
 
     Returns:
         The cache path, wu2025_fig4_cost_parts_<12 hex digits>.csv.
     """
-    digest = hashlib.sha256()
+    digest = hashlib.sha256(version.encode())
     for stage in sorted(vectors):
         digest.update(stage.encode())
         digest.update(np.ascontiguousarray(vectors[stage], dtype=float).tobytes())
-    for path in inputs:
-        digest.update(str(path.name).encode())
-        digest.update(path.read_bytes() if path.exists() else b"absent")
-    return out_dir / f"wu2025_fig4_cost_parts_{digest.hexdigest()[:12]}.csv"
+    return run_dir / f"wu2025_fig4_cost_parts_{digest.hexdigest()[:12]}.csv"
 
 
 def evaluate_cost_parts(
@@ -589,7 +610,7 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     rows = (
         evaluate_cost_parts(
             {k: v for k, (v, _) in stages.items()},
-            cost_parts_cache_path(out_dir, {k: v for k, (v, _) in stages.items()}),
+            cost_parts_cache_path(run_dir, {k: v for k, (v, _) in stages.items()}, cost_version()),
         )
         if evaluate
         else []

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from covsyn.figures import reproduce_wu2025 as wu
 
@@ -109,21 +110,61 @@ def test_a_converged_pre_b81_run_keeps_its_best_stage():
     assert not wu.best_repeats_final(best, final)
 
 
-def test_the_cost_parts_cache_is_named_by_the_run_it_belongs_to(tmp_path):
-    """Another optimizer run drawn into the same directory must not reuse this run's cache."""
+def test_the_cost_parts_cache_lives_in_its_run_and_is_named_by_its_vectors(tmp_path):
+    """Another optimizer run, or the same run's other stages, never reuses this cache."""
     one = {"Initial": np.zeros((2, 3)), "Final": np.ones((2, 3))}
     other = {"Initial": np.zeros((2, 3)), "Final": np.full((2, 3), 2.0)}
-    path = wu.cost_parts_cache_path(tmp_path, one)
+    path = wu.cost_parts_cache_path(tmp_path, one, "v1")
     assert path.parent == tmp_path and path.name.startswith("wu2025_fig4_cost_parts_")
-    assert path == wu.cost_parts_cache_path(tmp_path, dict(one))
-    assert path != wu.cost_parts_cache_path(tmp_path, other)
+    assert path == wu.cost_parts_cache_path(tmp_path, dict(one), "v1")
+    assert path != wu.cost_parts_cache_path(tmp_path, other, "v1")
+    assert path != wu.cost_parts_cache_path(tmp_path, one, "v2")
 
 
-def test_the_cost_parts_cache_changes_with_the_cost_inputs(tmp_path):
-    """A changed cost function or data file must not reuse the cache of the old one."""
-    vectors = {"Initial": np.zeros((2, 3)), "Final": np.ones((2, 3))}
-    data = tmp_path / "data.pkl"
-    data.write_bytes(b"one")
-    before = wu.cost_parts_cache_path(tmp_path, vectors, (data,))
-    data.write_bytes(b"two")
-    assert wu.cost_parts_cache_path(tmp_path, vectors, (data,)) != before
+def _package(root, source: bytes):
+    package = root / "covsyn"
+    (package / "calibration").mkdir(parents=True)
+    (package / "calibration" / "fast_cost.py").write_bytes(source)
+    data = root / "variable"
+    data.mkdir()
+    (data / "demographic_parameters.pkl").write_bytes(b"data")
+    return package, data
+
+
+def test_the_cost_version_changes_with_any_module_or_data_file(tmp_path):
+    """Any module the objective imports, or any model data file, changes the version."""
+    package, data = _package(tmp_path, b"WEIGHT = 1\n")
+    before = wu.cost_version(package, data)
+    (package / "calibration" / "fast_cost.py").write_bytes(b"WEIGHT = 2\n")
+    after_code = wu.cost_version(package, data)
+    (data / "demographic_parameters.pkl").write_bytes(b"other data")
+    assert len({before, after_code, wu.cost_version(package, data)}) == 3
+
+
+def test_the_cost_version_ignores_line_endings(tmp_path):
+    """A Windows checkout of a commit gives the same version as a Mac checkout."""
+    lf_root, crlf_root = tmp_path / "lf", tmp_path / "crlf"
+    lf = wu.cost_version(*_package(lf_root, b"A = 1\nB = 2\n"))
+    crlf = wu.cost_version(*_package(crlf_root, b"A = 1\r\nB = 2\r\n"))
+    assert lf == crlf
+
+
+def test_the_cost_version_needs_the_model_data(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        wu.cost_version(tmp_path, tmp_path / "variable")
+
+
+def test_the_cost_version_orders_files_by_their_path_string(tmp_path):
+    """Windows orders Path objects ignoring case; the digest must not depend on the platform."""
+    import hashlib
+
+    package, data = _package(tmp_path, b"x = 1\n")
+    (package / "B.py").write_bytes(b"b\n")
+    (package / "a.py").write_bytes(b"a\n")
+    expected = hashlib.sha256()
+    for name, body in (("B.py", b"b\n"), ("a.py", b"a\n"), ("calibration/fast_cost.py", b"x = 1\n")):
+        expected.update(name.encode())
+        expected.update(body)
+    expected.update(b"demographic_parameters.pkl")
+    expected.update(b"data")
+    assert wu.cost_version(package, data) == expected.hexdigest()
