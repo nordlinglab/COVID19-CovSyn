@@ -86,16 +86,6 @@ def test_a_b81_run_draws_no_separate_best_stage(tmp_path, monkeypatch) -> None:
         assert ("Best fireflies" in plotted) is not rotated
 
 
-def test_a_cached_cost_parts_file_with_other_stages_is_not_reused(tmp_path) -> None:
-    """A cache from a B81 run has no Best rows; a pre-B81 fig4 into the same place recomputes."""
-    cache = tmp_path / "wu2025_fig4_cost_parts.csv"
-    assert wu.read_cost_parts_cache(cache, {"Initial", "Final"}) is None
-    wu._write_csv(cache, [{"stage": s, "firefly": 0, "total": 1.0} for s in ("Initial", "Final")])
-    rows = wu.read_cost_parts_cache(cache, {"Initial", "Final"})
-    assert [r["stage"] for r in rows] == ["Initial", "Final"]
-    assert wu.read_cost_parts_cache(cache, {"Initial", "Best", "Final"}) is None
-
-
 def test_a_b81_run_with_a_failed_evaluation_still_repeats_its_final():
     """A NaN cost from a failed evaluation must not bring the duplicate Best stage back."""
     final = np.array([[0.1, 0.2, 1.5], [0.3, 0.4, np.nan]])
@@ -110,61 +100,14 @@ def test_a_converged_pre_b81_run_keeps_its_best_stage():
     assert not wu.best_repeats_final(best, final)
 
 
-def test_the_cost_parts_cache_lives_in_its_run_and_is_named_by_its_vectors(tmp_path):
-    """Another optimizer run, or the same run's other stages, never reuses this cache."""
-    one = {"Initial": np.zeros((2, 3)), "Final": np.ones((2, 3))}
-    other = {"Initial": np.zeros((2, 3)), "Final": np.full((2, 3), 2.0)}
-    path = wu.cost_parts_cache_path(tmp_path, one, "v1")
-    assert path.parent == tmp_path and path.name.startswith("wu2025_fig4_cost_parts_")
-    assert path == wu.cost_parts_cache_path(tmp_path, dict(one), "v1")
-    assert path != wu.cost_parts_cache_path(tmp_path, other, "v1")
-    assert path != wu.cost_parts_cache_path(tmp_path, one, "v2")
+def test_cost_parts_are_recomputed_even_when_a_previous_table_exists(tmp_path, monkeypatch):
+    """No cache: a table left by an earlier run is overwritten, never read back."""
+    from covsyn.calibration import fast_cost
 
-
-def _package(root, source: bytes):
-    package = root / "covsyn"
-    (package / "calibration").mkdir(parents=True)
-    (package / "calibration" / "fast_cost.py").write_bytes(source)
-    data = root / "variable"
-    data.mkdir()
-    (data / "demographic_parameters.pkl").write_bytes(b"data")
-    return package, data
-
-
-def test_the_cost_version_changes_with_any_module_or_data_file(tmp_path):
-    """Any module the objective imports, or any model data file, changes the version."""
-    package, data = _package(tmp_path, b"WEIGHT = 1\n")
-    before = wu.cost_version(package, data)
-    (package / "calibration" / "fast_cost.py").write_bytes(b"WEIGHT = 2\n")
-    after_code = wu.cost_version(package, data)
-    (data / "demographic_parameters.pkl").write_bytes(b"other data")
-    assert len({before, after_code, wu.cost_version(package, data)}) == 3
-
-
-def test_the_cost_version_ignores_line_endings(tmp_path):
-    """A Windows checkout of a commit gives the same version as a Mac checkout."""
-    lf_root, crlf_root = tmp_path / "lf", tmp_path / "crlf"
-    lf = wu.cost_version(*_package(lf_root, b"A = 1\nB = 2\n"))
-    crlf = wu.cost_version(*_package(crlf_root, b"A = 1\r\nB = 2\r\n"))
-    assert lf == crlf
-
-
-def test_the_cost_version_needs_the_model_data(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        wu.cost_version(tmp_path, tmp_path / "variable")
-
-
-def test_the_cost_version_orders_files_by_their_path_string(tmp_path):
-    """Windows orders Path objects ignoring case; the digest must not depend on the platform."""
-    import hashlib
-
-    package, data = _package(tmp_path, b"x = 1\n")
-    (package / "B.py").write_bytes(b"b\n")
-    (package / "a.py").write_bytes(b"a\n")
-    expected = hashlib.sha256()
-    for name, body in (("B.py", b"b\n"), ("a.py", b"a\n"), ("calibration/fast_cost.py", b"x = 1\n")):
-        expected.update(name.encode())
-        expected.update(body)
-    expected.update(b"demographic_parameters.pkl")
-    expected.update(b"data")
-    assert wu.cost_version(package, data) == expected.hexdigest()
+    monkeypatch.setattr(fast_cost, "init_worker", lambda *a: None)
+    monkeypatch.setattr(fast_cost, "cost_function", lambda vector, *a: float(np.sum(vector)))
+    table = tmp_path / "wu2025_fig4_cost_parts.csv"
+    wu._write_csv(table, [{"stage": "Final", "firefly": 0, "total": 999.0}])
+    rows = wu.evaluate_cost_parts({"Final": np.array([[1.0, 2.0]])}, table, workers=1)
+    assert [r["total"] for r in rows] == [3.0]
+    assert "999" not in table.read_text()

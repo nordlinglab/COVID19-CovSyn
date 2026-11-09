@@ -44,7 +44,7 @@ def _run_step_9(tmp_path: Path, failing: str) -> tuple[int, str, list[str]]:
     figures.mkdir()
     (figures / "wu2025_fig5_state_transitions.png").write_text("previous run")
     (figures / "wu2025_fig6_cheng2020.png").write_text("previous run")
-    (figures / "wu2025_fig4_cost_parts_0123456789ab.csv").write_text("cache")
+    (figures / "wu2025_fig4_cost_parts.csv").write_text("previous run")
     (figures / "archive").mkdir()
     (tmp_path / "step9.sh").write_text(_step_9(), encoding="utf-8", newline="\n")
     stub = (
@@ -65,7 +65,7 @@ def _run_step_9(tmp_path: Path, failing: str) -> tuple[int, str, list[str]]:
 
 
 def test_a_clean_run_ends_all_done_and_leaves_no_previous_file(tmp_path):
-    """Even an old cost-parts cache goes: the cache now lives in the optimizer run."""
+    """Fig 4's cost-parts table of the previous run goes too; it is recomputed."""
     status, last, left = _run_step_9(tmp_path, "")
     assert status == 0 and last == "SAY ALL DONE"
     assert left == ["archive"]

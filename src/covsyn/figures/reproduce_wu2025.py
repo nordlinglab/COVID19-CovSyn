@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import csv
 import glob
-import hashlib
 import json
 import re
 import sys
@@ -388,93 +387,16 @@ COST_PARTS = [
 ]
 
 
-def read_cost_parts_cache(cache: Path, stages: set[str]) -> list[dict] | None:
-    """The cached cost parts, or None when there is no cache or it holds other stages.
-
-    A B81 run has no Best stage, so a cache written for the other kind of run into the same
-    directory has the wrong stages and must not be reused (code review 2026-11-09).
-
-    Args:
-        cache: The CSV evaluate_cost_parts writes.
-        stages: The stages the figure needs.
-
-    Returns:
-        The rows, or None.
-    """
-    if not cache.exists():
-        return None
-    with open(cache) as f:
-        rows = [{k: (v if k == "stage" else float(v)) for k, v in r.items()}
-                for r in csv.DictReader(f)]
-    return rows if {r["stage"] for r in rows} == stages else None
-
-
-PACKAGE_DIR = Path(__file__).resolve().parent.parent
-
-
-def cost_version(package_dir: Path = PACKAGE_DIR, data_dir: Path = Path("variable")) -> str:
-    """A digest of everything the cost can depend on: the package code and the model data.
-
-    Every .py file of the package, with line endings made LF so a Windows and a Mac checkout
-    of one commit agree, and every file of data_dir, the directory evaluate_cost_parts reads
-    from the working directory. Hashing all of them rather than a hand-kept list means no
-    module the objective imports can be missed (code review 2026-11-09).
-
-    Args:
-        package_dir: The covsyn package.
-        data_dir: The model data, variable/ in the repository root.
-
-    Returns:
-        The hex digest.
-
-    Raises:
-        FileNotFoundError: data_dir does not exist, so the cost could not be evaluated either.
-    """
-    if not data_dir.is_dir():
-        raise FileNotFoundError(f"{data_dir} not found; run from the repository root")
-    digest = hashlib.sha256()
-    # Ordered by the relative path as a string: Windows orders Path objects ignoring case,
-    # so sorting the paths themselves gave a Windows and a WSL run different digests.
-    code = {p.relative_to(package_dir).as_posix(): p for p in package_dir.rglob("*.py")}
-    for name in sorted(code):
-        digest.update(name.encode())
-        digest.update(code[name].read_bytes().replace(b"\r\n", b"\n"))
-    data = {p.relative_to(data_dir).as_posix(): p for p in data_dir.rglob("*") if p.is_file()}
-    for name in sorted(data):
-        digest.update(name.encode())
-        digest.update(data[name].read_bytes())
-    return digest.hexdigest()
-
-
-def cost_parts_cache_path(run_dir: Path, vectors: dict[str, np.ndarray], version: str) -> Path:
-    """The cost-parts cache of an optimizer run, kept in that run's own directory.
-
-    The cache belongs to the run, not to the reported figures: in the figure directory it was
-    reused for the next run drawn there (code review 2026-11-09). Its name is a digest of the
-    stages, their vectors and the cost version, so a changed objective never reuses it.
-
-    Args:
-        run_dir: The optimizer run directory.
-        vectors: The parameter vectors of each stage.
-        version: cost_version() of the code and data the cost parts come from.
-
-    Returns:
-        The cache path, wu2025_fig4_cost_parts_<12 hex digits>.csv.
-    """
-    digest = hashlib.sha256(version.encode())
-    for stage in sorted(vectors):
-        digest.update(stage.encode())
-        digest.update(np.ascontiguousarray(vectors[stage], dtype=float).tobytes())
-    return run_dir / f"wu2025_fig4_cost_parts_{digest.hexdigest()[:12]}.csv"
-
-
 def evaluate_cost_parts(
-    vectors: dict[str, np.ndarray], cache: Path, workers: int = 32
+    vectors: dict[str, np.ndarray], table: Path, workers: int = 32
 ) -> list[dict]:
-    """Objective and its parts for every firefly at every stage, cached in a CSV."""
-    cached = read_cost_parts_cache(cache, set(vectors))
-    if cached is not None:
-        return cached
+    """Objective and its parts for every firefly at every stage, also written to a CSV table.
+
+    Computed on every call and never read back: a cache had to know when its rows were stale,
+    which depends on the vectors, every module the objective imports and the model data, and
+    each round of the 2026-11-09 code review found another case it missed. Recomputing costs
+    about the time of a few optimizer generations, once per drawn Fig 4.
+    """
     import concurrent.futures
     import pickle
 
@@ -504,7 +426,7 @@ def evaluate_cost_parts(
             )
             print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
     pool.shutdown()
-    _write_csv(cache, rows)
+    _write_csv(table, rows)
     return rows
 
 
@@ -610,7 +532,7 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     rows = (
         evaluate_cost_parts(
             {k: v for k, (v, _) in stages.items()},
-            cost_parts_cache_path(run_dir, {k: v for k, (v, _) in stages.items()}, cost_version()),
+            out_dir / "wu2025_fig4_cost_parts.csv",
         )
         if evaluate
         else []
