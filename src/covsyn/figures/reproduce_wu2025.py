@@ -387,16 +387,34 @@ COST_PARTS = [
 ]
 
 
+def read_cost_parts_cache(cache: Path, stages: set[str]) -> list[dict] | None:
+    """The cached cost parts, or None when there is no cache or it holds other stages.
+
+    A B81 run has no Best stage, so a cache written for the other kind of run into the same
+    directory has the wrong stages and must not be reused (code review 2026-11-09).
+
+    Args:
+        cache: The CSV evaluate_cost_parts writes.
+        stages: The stages the figure needs.
+
+    Returns:
+        The rows, or None.
+    """
+    if not cache.exists():
+        return None
+    with open(cache) as f:
+        rows = [{k: (v if k == "stage" else float(v)) for k, v in r.items()}
+                for r in csv.DictReader(f)]
+    return rows if {r["stage"] for r in rows} == stages else None
+
+
 def evaluate_cost_parts(
     vectors: dict[str, np.ndarray], cache: Path, workers: int = 32
 ) -> list[dict]:
     """Objective and its parts for every firefly at every stage, cached in a CSV."""
-    if cache.exists():
-        with open(cache) as f:
-            return [
-                {k: (v if k == "stage" else float(v)) for k, v in r.items()}
-                for r in csv.DictReader(f)
-            ]
+    cached = read_cost_parts_cache(cache, set(vectors))
+    if cached is not None:
+        return cached
     import concurrent.futures
     import pickle
 
@@ -430,16 +448,28 @@ def evaluate_cost_parts(
     return rows
 
 
-def has_rotated_seed_blocks(run_dir: Path) -> bool:
-    """True for an optimizer run under B81, which writes firefly_archive.txt."""
-    return (run_dir / "firefly_archive.txt").exists()
+def best_repeats_final(best: np.ndarray, final: np.ndarray) -> bool:
+    """True when firefly_best.txt holds the final population, as every B81 run's does.
+
+    Checked on the files themselves rather than on firefly_archive.txt, which
+    revalidation.copy_run_files copies into other directories.
+
+    Args:
+        best: Rows of firefly_best.txt (iteration, params..., cost).
+        final: Rows of firefly_result.txt (params..., cost).
+
+    Returns:
+        True when the best rows equal the final rows, parameters and cost.
+    """
+    return best.shape[0] == final.shape[0] and np.allclose(best[:, 1:], final)
 
 
 def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     """Fig 4: convergence of the firefly run.
 
     Cost against distance from the best firefly, the clustered distance matrix of the final
-    fireflies, and each cost part at the initial, worst, best and final positions.
+    fireflies, and each cost part at the initial, worst, best and final positions. A B81 run
+    has no separate best positions, so its stages are initial, worst and final.
     """
     from scipy.spatial import distance_matrix
 
@@ -455,24 +485,23 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     best = _load_rows(run_dir / "firefly_best.txt")
     worst = _load_rows(run_dir / "firefly_worst.txt")
     final = _load_rows(run_dir / "firefly_result.txt")
+    if not (len(initial) == len(best) == len(worst) == len(final)):
+        raise ValueError(
+            f"{run_dir} is not an optimizer run with one row per firefly in each file "
+            "(a revalidation directory holds every candidate in firefly_best.txt)"
+        )
     # B81 rotates the seed block every generation, so firefly_best.txt holds the final
-    # population with one iteration number and a separate "Best" stage would repeat the final
-    # points; such a run writes firefly_archive.txt (code review 2026-11-09, F2).
-    rotated = has_rotated_seed_blocks(run_dir)
+    # population with one iteration number and a "Best" stage would repeat the final points
+    # (code review 2026-11-09, F2).
     stages = {
         "Initial": (initial[:, :-1], initial[:, -1]),
         "Worst": (worst[:, 1:-1], worst[:, -1]),
         "Best": (best[:, 1:-1], best[:, -1]),
         "Final": (final[:, :-1], final[:, -1]),
     }
-    if rotated:
+    if best_repeats_final(best, final):
         del stages["Best"]
     names = list(stages)
-    if not (len(initial) == len(best) == len(worst) == len(final)):
-        raise ValueError(
-            f"{run_dir} is not an optimizer run with one row per firefly in each file "
-            "(a revalidation directory holds every candidate in firefly_best.txt)"
-        )
     best_index = int(np.argmin(best[:, -1]))
     reference = normalise(best[best_index, 1:-1])
     distance = {k: np.linalg.norm(normalise(v) - reference, axis=1) for k, (v, _) in stages.items()}
@@ -500,14 +529,9 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
             label="Final fireflies",
         )
         for i in range(len(best)):
-            if rotated:
-                order = ["Initial", "Worst", "Final"]
-            else:
-                order = (
-                    ["Initial", "Worst", "Best", "Final"]
-                    if worst_first[i]
-                    else ["Initial", "Best", "Worst", "Final"]
-                )
+            path = (["Initial", "Worst", "Best", "Final"] if worst_first[i]
+                    else ["Initial", "Best", "Worst", "Final"])
+            order = [stage for stage in path if stage in stages]
             width, alpha = (1.0, 1.0) if i == best_index else (0.3, 0.2)
             for a, b in zip(order[:-1], order[1:], strict=True):
                 ax.plot(

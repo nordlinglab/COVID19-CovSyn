@@ -31,7 +31,7 @@ from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootst
                                           json_band, percentile_intervals, verdict,
                                           worker_count)
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
-from covsyn.validation.compare_first_wave import reference_percentile
+from covsyn.validation.compare_first_wave import is_local_case, reference_percentile
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
@@ -342,7 +342,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # (code review 2026-11-09, F4).
     rng = np.random.default_rng(0)
     largest = np.array([rng.choice(counts, TAIWAN_TRACING_CASES).max() for _ in range(2000)])
-    check('B17', f'samples of {TAIWAN_TRACING_CASES} cases whose largest is at most '
+    check('B17', f'samples of {TAIWAN_TRACING_CASES} cases, percentile of a largest of '
           f'{TAIWAN_TRACING_LARGEST}', reference_percentile(largest, TAIWAN_TRACING_LARGEST), (2.5, 97.5),
           '%', interval=False,
           note=f'B71: Taiwan tracing largest {TAIWAN_TRACING_LARGEST} over {TAIWAN_TRACING_CASES} '
@@ -639,13 +639,13 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # local cases of unknown source (variable/taiwan_first_wave_seeds.csv); course['seed_type']
     # marks them. The local cases of a simulation are its non-seed cases plus the local seeds,
     # which is what the 55 reported local cases are. The local seeds are 'local_unknown' and,
-    # since B68, 'local_from_imported'; compare_first_wave.simulated counts both, and leaving
-    # the second out reported fewer local cases than it (code review 2026-11-09, F5).
+    # since B68, 'local_from_imported'; leaving the second out reported fewer local cases than
+    # compare_first_wave, so both now use its is_local_case (code review 2026-11-09, F5).
     if first_runs:
         def seeds_of(r, kind):
             return [i for i, c in enumerate(r['course']) if c.get('seed_type') == kind]
-        local = np.array([sum(1 for c in r['course'] if c.get('seed_type') != 'imported')
-                          for r in first_runs], dtype=float)
+        local = np.array([sum(1 for c in r['course'] if is_local_case(c)) for r in first_runs],
+                         dtype=float)
         deaths = np.array([sum(1 for c in r['course'] if not np.isnan(c['date_of_death']))
                            for r in first_runs], dtype=float)
         check('B66', 'first wave local cases per simulation', local.mean(), None,
@@ -678,7 +678,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                 ('all cases', lambda c: True,
                  f'{JIAN_ALL_PER_CASE:.1f} [13.9, 19.1]; without flight contacts '
                  f'{JIAN_ALL_NO_FLIGHT_PER_CASE:.1f}'),
-                ('local cases', lambda c: c.get('seed_type') != 'imported',
+                ('local cases', is_local_case,
                  f'locally acquired 1,435 / 55 = {JIAN_LOCAL_PER_CASE:.1f}'),
                 ('imported cases', lambda c: c.get('seed_type') == 'imported',
                  f'imported 6,616 / 432 = {JIAN_IMPORTED_PER_CASE:.1f}; without flight contacts '

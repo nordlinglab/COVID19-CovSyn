@@ -198,7 +198,8 @@ def expected_community_contact_count(exponent: float, shift: float,
     """Mean of P(N = n) proportional to (n + shift)^-exponent on 0..max_count (B62).
 
     Under B62 P[28] is the shift, not the mean, so a figure that shows the model's mean count
-    must compute it here (code review 2026-11-09, F3). The shift is floored as in the draw.
+    must compute it here (code review 2026-11-09, F3). It reads the draw's own CDF, so the
+    two cannot drift apart.
 
     Args:
         exponent: Tail exponent alpha, positive.
@@ -208,9 +209,9 @@ def expected_community_contact_count(exponent: float, shift: float,
     Returns:
         The expected community contact count.
     """
-    counts = np.arange(0, int(max_count) + 1, dtype=float)
-    weights = (counts + max(float(shift), 1e-6)) ** -float(exponent)
-    return float(np.sum(counts * weights) / np.sum(weights))
+    cdf = _community_count_cdf(float(exponent), max(float(shift), 1e-6), int(max_count))
+    pmf = np.diff(cdf, prepend=0.0)
+    return float(np.dot(np.arange(len(pmf), dtype=float), pmf))
 
 
 def draw_community_contact_count(exponent: float, shift: float,

@@ -33,6 +33,9 @@ from pathlib import Path
 DEFAULT_WATCH = (
     "contacts per day before onset, household",
     "cases infecting 3 or more",
+    "samples of 579 cases, percentile of a largest of 8",
+    # the same check's name before the code review of 2026-11-09 (F4), for older runs; its
+    # value was then P(largest <= 8), not the mid-rank percentile
     "samples of 579 cases whose largest is at most 8",
     "offspring dispersion k",
     "R (mean offspring of an index case)",

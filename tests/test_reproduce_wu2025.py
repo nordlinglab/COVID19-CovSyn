@@ -48,7 +48,7 @@ def test_a_run_with_compacted_case_ids_is_skipped_not_mispaired() -> None:
 
 
 def _optimizer_run(directory, rotated: bool) -> None:
-    """The four result files of a 5-firefly, 3-parameter run, plus B81's archive if rotated."""
+    """The four result files of a 5-firefly, 3-parameter run; under B81 best is the final."""
     rng = np.random.default_rng(0)
     pop, dim = 5, 3
     np.savetxt(directory / "bound.txt", np.array([np.zeros(dim), np.ones(dim)]))
@@ -57,11 +57,10 @@ def _optimizer_run(directory, rotated: bool) -> None:
     final = np.column_stack([rng.random((pop, dim)), rng.random(pop) + 1])
     np.savetxt(directory / "firefly_result.txt", final)
     iteration = np.full(pop, 500.0) if rotated else rng.integers(100, 500, pop).astype(float)
-    np.savetxt(directory / "firefly_best.txt", np.column_stack([iteration, final]))
+    best = final if rotated else np.column_stack([rng.random((pop, dim)), rng.random(pop) + 1])
+    np.savetxt(directory / "firefly_best.txt", np.column_stack([iteration, best]))
     np.savetxt(directory / "firefly_worst.txt",
                np.column_stack([np.full(pop, 50.0), rng.random((pop, dim)), rng.random(pop) + 3]))
-    if rotated:
-        np.savetxt(directory / "firefly_archive.txt", final)
 
 
 def test_a_b81_run_draws_no_separate_best_stage(tmp_path, monkeypatch) -> None:
@@ -79,7 +78,18 @@ def test_a_b81_run_draws_no_separate_best_stage(tmp_path, monkeypatch) -> None:
         run.mkdir()
         _optimizer_run(run, rotated)
         plotted.clear()
-        assert wu.has_rotated_seed_blocks(run) is rotated
+        best = np.loadtxt(run / "firefly_best.txt")
+        assert wu.best_repeats_final(best, np.loadtxt(run / "firefly_result.txt")) is rotated
         wu.fig4(run, run, evaluate=False)
         assert (run / "wu2025_fig4_firefly_convergence.png").exists()
         assert ("Best fireflies" in plotted) is not rotated
+
+
+def test_a_cached_cost_parts_file_with_other_stages_is_not_reused(tmp_path) -> None:
+    """A cache from a B81 run has no Best rows; a pre-B81 fig4 into the same place recomputes."""
+    cache = tmp_path / "wu2025_fig4_cost_parts.csv"
+    assert wu.read_cost_parts_cache(cache, {"Initial", "Final"}) is None
+    wu._write_csv(cache, [{"stage": s, "firefly": 0, "total": 1.0} for s in ("Initial", "Final")])
+    rows = wu.read_cost_parts_cache(cache, {"Initial", "Final"})
+    assert [r["stage"] for r in rows] == ["Initial", "Final"]
+    assert wu.read_cost_parts_cache(cache, {"Initial", "Best", "Final"}) is None

@@ -395,7 +395,7 @@ else:
     event = community_event_parameters(P)
     expected_mean = P[28] + (0.0 if event is None else event['probability'] * expected_event_size(
         event['exponent'], event['min_size'], event['max_size'], min(MUNICIPALITY_POP.values())))
-    mean_label = f'lambda {P[28]:.2f} + mass events'
+    mean_label = f'lambda {P[28]:.2f}' + ('' if event is None else ' + mass events')
 fig, ax = plt.subplots(figsize=(9, 6))
 ax.scatter(by_city_index['pop'] / 1e6, by_city_index['cand'], color='#1f4e79', label='index cases')
 ax.scatter(by_city['pop'] / 1e6, by_city['cand'], color=SIM_COLOR, marker='x', label=f'spread cases ({len(spread):,})')
@@ -403,7 +403,8 @@ xs = np.linspace(0, max(MUNICIPALITY_POP.values()), 50)
 # Before B27 the community layer drew Binomial(city population, p), so the expected number of
 # contacts was a straight line through the origin -- a case in Taipei met twelve times as many
 # people as one in Taitung purely because of where it lived (finding E4). The community layer
-# now draws Poisson(nu * lambda), independent of the city, so the expectation is a flat line.
+# now draws a count independent of the city -- Poisson(nu * lambda) under B27, the scale-free
+# (n + s)^-alpha under B62 -- so the expectation is a flat line.
 ax.axhline(expected_mean, color='gray', ls='--',
            label=f'model mean: {expected_mean:.1f} contacts per case ({mean_label}), '
                  'independent of the city')
