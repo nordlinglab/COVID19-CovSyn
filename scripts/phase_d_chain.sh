@@ -207,7 +207,16 @@ tail -4 "$LOG"
 # (100 index cases, Cheng 2020), generated here on the same independent seeds.
 say 'drawing the Wu & Nordling 2025 figures from the independent seeds (E97)'
 # Each figure's failure is recorded on its own: a { ...; } || group reports only its last
-# command, so an earlier figure could fail unreported (code review 2026-11-09).
+# command, so an earlier figure could fail unreported. The previous run's figures and tables
+# are removed first, so a figure that fails is missing rather than stale; only Fig 4's
+# cost-parts cache is kept (code review 2026-11-09).
+mkdir -p wu2025_figures
+for old in wu2025_figures/*; do
+    case "${old##*/}" in
+        wu2025_fig4_cost_parts*) ;;
+        *) rm -f "$old" ;;
+    esac
+done
 FIGURES_FAILED=''
 for figure in fig3 fig5 fig7; do
     run covsyn.figures.reproduce_wu2025 "$figure" "$REPORT_FIRST" wu2025_figures >> "$LOG" 2>&1 \
@@ -218,20 +227,19 @@ done
 run covsyn.figures.reproduce_wu2025 fig4 "${OPTIMIZER_RUN:-$FIREFLY_RUN}" wu2025_figures \
     >> "$LOG" 2>&1 || FIGURES_FAILED="$FIGURES_FAILED fig4"
 # F6 (code review 2026-11-09): Fig 6 is reported, so a failed synthesis stops the chain, as at
-# step 3b. It runs last, after the figures that do not need it, and the previous run's Fig 6 is
-# removed first, so a stop never leaves another run's Fig 6 among this run's figures.
-rm -f wu2025_figures/wu2025_fig6_cheng2020.png wu2025_figures/wu2025_fig6_cheng2020.csv
+# step 3b. It runs last, after the figures that do not need it.
 rm -rf "$REPORT_CHENG"
 mkdir -p "$REPORT_CHENG"
 run covsyn.model.data_synthesis_main --mode cheng2020 --monte_carlo_number 1000 \
     --result_path "$REPORT_CHENG" --cpu_cores "${CPU_CORES:-24}" \
     --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
-    || { say 'ERROR: independent cheng2020 synthesis failed, so Fig 6 is missing; stopping'
+    || { say "ERROR: independent cheng2020 synthesis failed, so Fig 6 is missing;${FIGURES_FAILED:+ also failed:$FIGURES_FAILED;} stopping"
          exit 1; }
 run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures >> "$LOG" 2>&1 \
     || FIGURES_FAILED="$FIGURES_FAILED fig6"
+# A missing reported figure is an error, as a missing reported checklist is (F6).
 if [ -n "$FIGURES_FAILED" ]; then
-    say "DONE WITH WARNINGS: Wu 2025 figures that failed:$FIGURES_FAILED"
-else
-    say 'ALL DONE'
+    say "DONE WITH AN ERROR: Wu 2025 figures that failed:$FIGURES_FAILED"
+    exit 1
 fi
+say 'ALL DONE'
