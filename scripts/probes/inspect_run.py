@@ -113,6 +113,7 @@ def candidate_table(run: Path, watch: tuple[str, ...]) -> list[dict]:
         if checks is None:
             continue
         index = d.name.removeprefix("candidate_")
+        watched = {name: watched_value(checks, name) for name in watch}
         c = costs.get(index, {})
         rows.append({
             "candidate": index,
@@ -120,8 +121,8 @@ def candidate_table(run: Path, watch: tuple[str, ...]) -> list[dict]:
             "validation": c.get("validation_mean"),
             "sd": c.get("validation_sd"),
             "failed": failing(checks),
-            "watch": {name: watched_value(checks, name)[0] for name in watch},
-            "notes": {name: watched_value(checks, name)[1] for name in watch},
+            "watch": {name: watched[name][0] for name in watch},
+            "notes": {name: watched[name][1] for name in watch},
         })
     return rows
 
