@@ -25,10 +25,11 @@ class _Recorder:
     """Stands in for the objective: a deterministic cost, and every call recorded."""
 
     def __init__(self):
-        self.calls: list[tuple[float, int]] = []
+        # each vector by its bytes, so two different vectors can never be taken for one
+        self.calls: list[tuple[bytes, int]] = []
 
     def __call__(self, P, demo, executor, contacts, attack, weights, seed_offset=0):
-        self.calls.append((float(np.sum(P)), int(seed_offset)))
+        self.calls.append((np.asarray(P, dtype=float).tobytes(), int(seed_offset)))
         # the offset shifts the cost, so a stale score from another generation is visible
         return float(np.sum(P)) % 1.0 + seed_offset / 1e9
 
