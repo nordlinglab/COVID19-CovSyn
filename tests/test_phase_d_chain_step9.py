@@ -19,14 +19,23 @@ import pytest
 CHAIN = Path(__file__).resolve().parent.parent / "scripts" / "phase_d_chain.sh"
 STEP_9 = "# ---------------------------------------------------------------- 9. Wu"
 
-# The bash on PATH, by full path: a bare "bash" on Windows starts WSL's, not Git's.
+# The bash on PATH, by full path. On Windows the one in System32 is the WSL launcher, which
+# does not pass the environment through, so only another bash, such as Git's, will do.
 BASH = shutil.which("bash")
-pytestmark = pytest.mark.skipif(BASH is None, reason="needs bash")
+if BASH is not None and "system32" in BASH.lower():
+    BASH = None
+pytestmark = pytest.mark.skipif(BASH is None, reason="needs a bash that is not WSL's launcher")
 
 
 def _step_9() -> str:
     text = CHAIN.read_text(encoding="utf-8").replace("\r\n", "\n")
     return text[text.index(STEP_9):]
+
+
+def _environment(failing: str) -> dict[str, str]:
+    """Only what bash needs, so a developer's BASH_ENV or chain variables cannot leak in."""
+    keep = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "TMP", "TEMP") if k in os.environ}
+    return {**keep, "FAILING": failing}
 
 
 def _run_step_9(tmp_path: Path, failing: str) -> tuple[int, str, list[str]]:
@@ -50,13 +59,13 @@ def _run_step_9(tmp_path: Path, failing: str) -> tuple[int, str, list[str]]:
         "source ./step9.sh\n"
     )
     done = subprocess.run([BASH, "-c", stub], cwd=tmp_path, capture_output=True,
-                          encoding="utf-8", env={**os.environ, "FAILING": failing})
+                          encoding="utf-8", env=_environment(failing))
     said = [line for line in done.stdout.splitlines() if line.startswith("SAY ")]
     return done.returncode, said[-1] if said else "", sorted(p.name for p in figures.iterdir())
 
 
 def test_a_clean_run_ends_all_done_and_leaves_no_previous_file(tmp_path):
-    """Fig 4's cost-parts cache of another run goes too, so tables cannot pile up."""
+    """Even an old cost-parts cache goes: the cache now lives in the optimizer run."""
     status, last, left = _run_step_9(tmp_path, "")
     assert status == 0 and last == "SAY ALL DONE"
     assert left == ["archive"]
