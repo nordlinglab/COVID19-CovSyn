@@ -638,12 +638,14 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # B66: the first-wave scenario starts from every imported case of the first wave and the 13
     # local cases of unknown source (variable/taiwan_first_wave_seeds.csv); course['seed_type']
     # marks them. The local cases of a simulation are its non-seed cases plus the local seeds,
-    # which is what the 55 reported local cases are.
+    # which is what the 55 reported local cases are. The local seeds are 'local_unknown' and,
+    # since B68, 'local_from_imported'; compare_first_wave.simulated counts both, and leaving
+    # the second out reported fewer local cases than it (code review 2026-11-09, F5).
     if first_runs:
         def seeds_of(r, kind):
             return [i for i, c in enumerate(r['course']) if c.get('seed_type') == kind]
-        local = np.array([sum(1 for c in r['course'] if not c.get('seed_type'))
-                          + len(seeds_of(r, 'local_unknown')) for r in first_runs], dtype=float)
+        local = np.array([sum(1 for c in r['course'] if c.get('seed_type') != 'imported')
+                          for r in first_runs], dtype=float)
         deaths = np.array([sum(1 for c in r['course'] if not np.isnan(c['date_of_death']))
                            for r in first_runs], dtype=float)
         check('B66', 'first wave local cases per simulation', local.mean(), None,
