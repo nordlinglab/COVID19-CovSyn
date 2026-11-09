@@ -53,9 +53,13 @@ def stage_timings(run: Path) -> list[tuple[str, str]]:
 
 
 def failing(checks: list[dict]) -> list[str]:
-    """Names of the checks that failed, leaving out those with no measurable value."""
+    """Names of the checks that failed, leaving out those with no measurable value.
+
+    A value that could not be measured is stored as None or, by verify_phase_d.check, as NaN
+    with ok None; json reads the NaN back as a float, so only ok False counts as a failure.
+    """
     return [c["name"] for c in checks
-            if c["target"] is not None and c["value"] is not None and not c["ok"]]
+            if c["target"] is not None and c["value"] is not None and c["ok"] is False]
 
 
 def value_of(checks: list[dict], name: str) -> float | None:

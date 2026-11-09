@@ -76,6 +76,14 @@ def test_a_check_with_no_value_is_not_counted_as_a_failure(run):
     assert ir.failing(checks) == ["contacts per day before onset, household"]
 
 
+def test_a_check_whose_value_is_nan_is_not_counted_as_a_failure():
+    """verify_phase_d stores an unmeasurable value as NaN with ok None, and json keeps the NaN."""
+    stored = json.dumps({"checks": [_check("class size, no cases", float("nan"), [20, 35], None),
+                                    _check("household", 2.1, [2.27, 3.28], False)]})
+    checks = json.loads(stored)["checks"]
+    assert ir.failing(checks) == ["household"]
+
+
 def test_an_informational_check_is_never_a_failure(run):
     """A check whose target is None is reported only, so it cannot fail."""
     checks = ir.read_checks(run / "validation_reference" / "phaseD_checks.json")
