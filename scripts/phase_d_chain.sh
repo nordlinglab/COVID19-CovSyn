@@ -212,6 +212,7 @@ say 'drawing the Wu & Nordling 2025 figures from the independent seeds (E97)'
 # cost-parts cache is kept (code review 2026-11-09).
 mkdir -p wu2025_figures
 for old in wu2025_figures/*; do
+    [ -f "$old" ] || continue   # leave subdirectories, such as an archive, alone
     case "${old##*/}" in
         wu2025_fig4_cost_parts*) ;;
         *) rm -f "$old" ;;
