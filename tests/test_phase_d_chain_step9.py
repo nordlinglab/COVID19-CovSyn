@@ -9,6 +9,7 @@ the last message, and the exit status.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -18,7 +19,9 @@ import pytest
 CHAIN = Path(__file__).resolve().parent.parent / "scripts" / "phase_d_chain.sh"
 STEP_9 = "# ---------------------------------------------------------------- 9. Wu"
 
-pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+# The bash on PATH, by full path: a bare "bash" on Windows starts WSL's, not Git's.
+BASH = shutil.which("bash")
+pytestmark = pytest.mark.skipif(BASH is None, reason="needs bash")
 
 
 def _step_9() -> str:
@@ -46,16 +49,17 @@ def _run_step_9(tmp_path: Path, failing: str) -> tuple[int, str, list[str]]:
         "}\n"
         "source ./step9.sh\n"
     )
-    done = subprocess.run(["bash", "-c", stub], cwd=tmp_path, capture_output=True, text=True,
-                          env={"FAILING": failing, "PATH": "/usr/bin:/bin"})
+    done = subprocess.run([BASH, "-c", stub], cwd=tmp_path, capture_output=True,
+                          encoding="utf-8", env={**os.environ, "FAILING": failing})
     said = [line for line in done.stdout.splitlines() if line.startswith("SAY ")]
     return done.returncode, said[-1] if said else "", sorted(p.name for p in figures.iterdir())
 
 
-def test_a_clean_run_ends_all_done_and_keeps_only_the_cache(tmp_path):
+def test_a_clean_run_ends_all_done_and_leaves_no_previous_file(tmp_path):
+    """Fig 4's cost-parts cache of another run goes too, so tables cannot pile up."""
     status, last, left = _run_step_9(tmp_path, "")
     assert status == 0 and last == "SAY ALL DONE"
-    assert left == ["archive", "wu2025_fig4_cost_parts_0123456789ab.csv"]
+    assert left == ["archive"]
 
 
 @pytest.mark.parametrize("figure", ["fig3", "fig4", "fig5", "fig6", "fig7"])

@@ -208,15 +208,13 @@ tail -4 "$LOG"
 say 'drawing the Wu & Nordling 2025 figures from the independent seeds (E97)'
 # Each figure's failure is recorded on its own: a { ...; } || group reports only its last
 # command, so an earlier figure could fail unreported. The previous run's figures and tables
-# are removed first, so a figure that fails is missing rather than stale; only Fig 4's
-# cost-parts cache is kept (code review 2026-11-09).
+# are removed first, so a figure that fails is missing rather than stale. Fig 4's cost-parts
+# cache goes too: it is named by its optimizer run, so a new run never reuses it, and keeping
+# it would only pile up other runs' tables here (code review 2026-11-09).
 mkdir -p wu2025_figures
 for old in wu2025_figures/*; do
     [ -f "$old" ] || continue   # leave subdirectories, such as an archive, alone
-    case "${old##*/}" in
-        wu2025_fig4_cost_parts*) ;;
-        *) rm -f "$old" ;;
-    esac
+    rm -f "$old"
 done
 FIGURES_FAILED=''
 for figure in fig3 fig5 fig7; do
