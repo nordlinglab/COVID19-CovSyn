@@ -100,26 +100,40 @@ def test_a_converged_pre_b81_run_keeps_its_best_stage():
     assert not wu.best_repeats_final(best, final)
 
 
-def _stub_objective(monkeypatch):
-    """fast_cost stand-in: the total and every part are functions of the vector."""
+@pytest.fixture
+def stub_objective(monkeypatch):
+    """fast_cost stand-in: the total and every part are functions of the vector.
+
+    cost_parts.LAST is filled in place, as its module requires, and its contents are restored
+    afterwards, so the stub's parts never reach a later test.
+    """
     from covsyn.calibration import cost_parts, fast_cost
 
     parts = [key for key, _ in wu.COST_PARTS[:-1]]
+    saved = dict(cost_parts.LAST)
 
     def cost_function(vector, *args):
         cost_parts.LAST.clear()
         cost_parts.LAST.update({key: float(np.sum(vector)) + i for i, key in enumerate(parts)})
         return float(np.sum(vector))
 
-    # a dict of its own, so the stub's parts never reach a later test through the global LAST
-    monkeypatch.setattr(cost_parts, "LAST", {})
     monkeypatch.setattr(fast_cost, "init_worker", lambda *a: None)
     monkeypatch.setattr(fast_cost, "cost_function", cost_function)
+    yield
+    cost_parts.LAST.clear()
+    cost_parts.LAST.update(saved)
 
 
-def test_cost_parts_are_recomputed_even_when_a_previous_table_exists(tmp_path, monkeypatch):
+def _is_png(path):
+    return path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def _first_column(path):
+    return path.read_text().splitlines()[0].split(",")[0]
+
+
+def test_cost_parts_are_recomputed_even_when_a_previous_table_exists(tmp_path, stub_objective):
     """No cache: a table left by an earlier run is replaced, its total and every part."""
-    _stub_objective(monkeypatch)
     table = tmp_path / "wu2025_fig4_cost_parts.csv"
     stale = {"stage": "Final", "firefly": 0, "total": 999.0}
     stale.update({key: 999.0 for key, _ in wu.COST_PARTS[:-1]})
@@ -131,9 +145,8 @@ def test_cost_parts_are_recomputed_even_when_a_previous_table_exists(tmp_path, m
     assert "999" not in table.read_text()
 
 
-def test_fig4_replaces_an_earlier_run_s_outputs_when_it_evaluates(tmp_path, monkeypatch):
+def test_fig4_replaces_an_earlier_run_s_outputs_when_it_evaluates(tmp_path, stub_objective):
     """With evaluation, fig4 writes its own figure and tables over an earlier run's."""
-    _stub_objective(monkeypatch)
     run = tmp_path / "run"
     run.mkdir()
     _optimizer_run(run, rotated=True)
@@ -142,12 +155,13 @@ def test_fig4_replaces_an_earlier_run_s_outputs_when_it_evaluates(tmp_path, monk
     for name in wu.FIG4_OUTPUTS.values():
         (out / name).write_text("another run")
     wu.fig4(run, out, evaluate=True)
-    for name in wu.FIG4_OUTPUTS.values():
-        assert (out / name).read_bytes() != b"another run"
+    assert _is_png(out / wu.FIG4_OUTPUTS["figure"])
+    assert _first_column(out / wu.FIG4_OUTPUTS["cost_parts"]) == "stage"
+    assert _first_column(out / wu.FIG4_OUTPUTS["reproducibility"]) == "stage"
 
 
 def test_fig4_without_evaluation_removes_an_earlier_run_s_tables(tmp_path):
-    """Without evaluation, an earlier run's tables in out_dir go rather than stay beside it."""
+    """Without evaluation, an earlier run's tables go and the figure is this run's."""
     run = tmp_path / "run"
     run.mkdir()
     _optimizer_run(run, rotated=False)
@@ -156,9 +170,20 @@ def test_fig4_without_evaluation_removes_an_earlier_run_s_tables(tmp_path):
     for name in wu.FIG4_OUTPUTS.values():
         (out / name).write_text("another run")
     wu.fig4(run, out, evaluate=False)
-    assert (out / "wu2025_fig4_firefly_convergence.png").exists()
-    assert not (out / "wu2025_fig4_cost_parts.csv").exists()
-    assert not (out / "wu2025_fig4_reproducibility.csv").exists()
+    assert _is_png(out / wu.FIG4_OUTPUTS["figure"])
+    assert not (out / wu.FIG4_OUTPUTS["cost_parts"]).exists()
+    assert not (out / wu.FIG4_OUTPUTS["reproducibility"]).exists()
+
+
+def test_fig4_on_a_directory_it_cannot_draw_still_clears_the_earlier_outputs(tmp_path):
+    """The clean-up comes before reading the run, so even this failure leaves nothing stale."""
+    out = tmp_path / "figures"
+    out.mkdir()
+    for name in wu.FIG4_OUTPUTS.values():
+        (out / name).write_text("another run")
+    with pytest.raises(OSError):
+        wu.fig4(tmp_path / "not_a_run", out, evaluate=False)
+    assert not any((out / name).exists() for name in wu.FIG4_OUTPUTS.values())
 
 
 def test_fig4_that_fails_leaves_no_earlier_run_s_figure(tmp_path, monkeypatch):

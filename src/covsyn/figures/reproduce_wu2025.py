@@ -433,11 +433,10 @@ def evaluate_cost_parts(
                     }
                 )
                 print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
-    except BaseException:
-        # An exception or Ctrl-C drops the queued simulation batches instead of waiting for them.
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    pool.shutdown()
+    finally:
+        # On an exception or Ctrl-C the queued simulation batches are cancelled; the batches
+        # already running finish before the workers stop.
+        pool.shutdown(cancel_futures=True)
     _write_csv(table, rows)
     return rows
 
@@ -485,6 +484,8 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
         out_dir: Where the figure and tables are written.
         evaluate: Recompute the cost parts (hours); False draws the convergence panels only.
     """
+    for name in FIG4_OUTPUTS.values():
+        (out_dir / name).unlink(missing_ok=True)
     from scipy.spatial import distance_matrix
 
     _style()
@@ -556,8 +557,6 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
                     linewidth=width,
                 )
 
-    for name in FIG4_OUTPUTS.values():
-        (out_dir / name).unlink(missing_ok=True)
     rows = (
         evaluate_cost_parts(
             {k: v for k, (v, _) in stages.items()},
