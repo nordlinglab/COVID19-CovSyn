@@ -125,8 +125,34 @@ def test_seeds_held_at_one_that_already_reach_the_data_are_an_error(script):
 
 
 def test_a_target_beyond_q_1_is_an_error_not_a_clipped_factor(script):
-    with pytest.raises(ValueError, match="above 1"):
+    with pytest.raises(ValueError, match=r"m\(1\)"):
         script.calibrate(lambda x: 7.0 + 2.0 * x, 12, 0.5)
+
+
+@pytest.mark.parametrize("q0", [0.107, 0.3, 0.9])
+def test_a_saturating_response_converges_without_stalling_one_end(script, q0):
+    """Plain false position kept one end fixed on this curve and ran out of steps."""
+    import math
+
+    def saturating(q):
+        return 7.27 + 6.0 * (1.0 - math.exp(-20.0 * q))
+
+    assert abs(saturating(script.calibrate(saturating, 12, q0)) - 12) <= 0.5
+
+
+def test_a_convex_response_beyond_the_first_line_is_reached_through_m1(script):
+    """The line through m(0) and m(0.107) passes 12 at q = 1.69; the root is near 0.32."""
+
+    def convex(q):
+        return 7.27 + 80.0 * q ** 2.5
+
+    assert abs(convex(script.calibrate(convex, 12, 0.107)) - 12) <= 0.5
+
+
+def test_seeds_alone_within_tolerance_give_a_factor_of_zero(script):
+    calls = []
+    assert script.calibrate(lambda x: calls.append(x) or 11.7 + 30.0 * x, 12, 0.1) == 0.0
+    assert calls == [0.0]
 
 
 def test_no_convergence_within_the_steps_is_an_error(script):

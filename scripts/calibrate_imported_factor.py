@@ -86,16 +86,19 @@ def solve_line(q_low, m_low, q_high, m_high, target):
     return float(q_low + (target - m_low) * (q_high - q_low) / (m_high - m_low))
 
 
-def calibrate(measure, target, q0, tolerance=0.5, max_steps=4):
+def calibrate(measure, target, q0, tolerance=0.5, max_steps=8):
     """The factor whose measured mean reaches target within tolerance.
 
-    Each step solves the line through the measured point just below target with the largest q
-    and, once one exists, the point just above it with the smallest q (false position), so the
-    step stays inside a bracket and a noisy pair of close measurements cannot turn the slope
-    negative. Until a point lies above target, the line runs from m(0) through the highest point
-    below it (code review 2026-11-09). Every measurement is also its own check: a converged
-    calibration costs m(0), m(q0) and one batch per step, and q0 itself is returned when it is
-    already within tolerance.
+    Until a measurement lies above target, each step extends the line from m(0) through the
+    highest measurement below it, capped at q = 1, where m(1) is measured before the target is
+    called unreachable. Once target is bracketed, each step is Illinois false position: the
+    line between the two bracket ends, with the weight of an end that stays put twice halved,
+    so a curved m(q) cannot stall one end (code review 2026-11-09). Every measurement is also
+    its own check; m(0) or q0 is returned when it is already within tolerance.
+
+    The bracket assumes the measurement noise is smaller than the distance from target: a mean
+    that noise carries across target fixes a wrong bracket end, and the calibration then ends
+    with an error, not with a wrong factor. More runs per batch reduce the noise.
 
     Args:
         measure: Function of q returning the mean people infected over the runs.
@@ -108,39 +111,46 @@ def calibrate(measure, target, q0, tolerance=0.5, max_steps=4):
         The calibrated factor.
 
     Raises:
-        ValueError: q0 or max_steps is out of range, the seeds held at 1.0 alone reach target,
-            the line needs a q above 1, the measurements below target do not rise with q, or
-            no step converges.
+        ValueError: q0 or max_steps is out of range, the seeds held at 1.0 alone exceed
+            target, m(1) stays below it, the measurements below target do not rise with q,
+            or no step converges.
     """
     if not 0.0 < q0 <= 1.0:
         raise ValueError(f"starting factor {q0} is outside (0, 1]")
     if max_steps < 1:
         raise ValueError(f"max_steps {max_steps} must be at least 1")
     m0 = measure(0.0)
-    if m0 >= target:
-        raise ValueError(f"the seeds held at 1.0 alone infect {m0:.2f} >= {target}; "
+    if abs(m0 - target) <= tolerance:
+        return 0.0
+    if m0 > target:
+        raise ValueError(f"the seeds held at 1.0 alone infect {m0:.2f} > {target}; "
                          "no q in [0, 1] reaches the data")
     m = measure(q0)
     if abs(m - target) <= tolerance:
         return q0
-    points = [(0.0, m0), (q0, m)]
+    # bracket ends as (q, m - target): low below target, high above it once seen
+    low, high = ((q0, m - target), None) if m < target else ((0.0, m0 - target), (q0, m - target))
+    kept = None   # which end the last step left in place, for the Illinois halving
     for _ in range(max_steps):
-        below = max((p for p in points if p[1] < target), key=lambda p: p[0])
-        above = [p for p in points if p[1] > target]
-        high = min(above, key=lambda p: p[0]) if above else below
-        low = below if above else (0.0, m0)
-        if high[0] <= low[0]:   # noise put a point above target left of one below it
-            low, high = (0.0, m0), below
-        q = solve_line(low[0], low[1], high[0], high[1], target)
-        if q > 1.0:
-            raise ValueError(f"the line through q = {low[0]:.4f} and {high[0]:.4f} reaches "
-                             f"{target} at q = {q:.4f}, above 1; no factor reaches the data")
+        if high is None:
+            q = min(solve_line(0.0, m0 - target, low[0], low[1], 0.0), 1.0)
+        else:
+            q = solve_line(low[0], low[1], high[0], high[1], 0.0)
         m = measure(q)
         if abs(m - target) <= tolerance:
             return q
-        points.append((q, m))
+        if m < target:
+            if high is None and q == 1.0:
+                raise ValueError(f"m(1) = {m:.2f} < {target}; no factor reaches the data")
+            if kept == "high" and high is not None:
+                high = (high[0], high[1] / 2)
+            low, kept = (q, m - target), "high"
+        else:
+            if kept == "low":
+                low = (low[0], low[1] / 2)
+            high, kept = (q, m - target), "low"
     raise ValueError(f"no factor within {tolerance} of {target} after {max_steps} steps; "
-                     f"last q = {q:.4f} gave {m:.2f}")
+                     f"last q = {q:.4f} gave {m:.2f}; more runs per batch reduce the noise")
 
 
 def main():
