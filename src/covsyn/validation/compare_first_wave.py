@@ -61,6 +61,23 @@ def reference_local_cases(seeds: pd.DataFrame, sources: pd.DataFrame) -> list[in
     return sorted(c for c in infector if descends_from(c, infector, roots))
 
 
+LOCAL_SEED_TYPES = (None, "local_unknown", "local_from_imported")
+
+
+def is_local_case(course: dict) -> bool:
+    """A locally acquired case: a non-seed case or a local seed (B66, B68).
+
+    The one definition the first-wave reports share, so they cannot disagree on the count.
+
+    Args:
+        course: One entry of a simulation's course of disease data.
+
+    Returns:
+        True for a non-seed case or a 'local_unknown' / 'local_from_imported' seed.
+    """
+    return course.get("seed_type") in LOCAL_SEED_TYPES
+
+
 def reference_percentile(local: np.ndarray, reference: int) -> float | None:
     """Where the one observed count falls among the simulated runs, as a percentage.
 
@@ -107,8 +124,7 @@ def simulated(directory: Path) -> tuple[np.ndarray, np.ndarray]:
         k = Path(f).stem.split("_")[-1]
         course = list(np.load(f, allow_pickle=True))
         contact = list(np.load(directory / f"contact_data_{k}.npy", allow_pickle=True))
-        local.append(sum(1 for c in course
-                         if c.get("seed_type") in (None, "local_unknown", "local_from_imported")))
+        local.append(sum(1 for c in course if is_local_case(c)))
         for c, k_ in zip(course, contact, strict=True):
             if c.get("seed_type") == "imported":
                 imported.append(sum(float(np.nansum(np.asarray(k_[f"{L}_effective_contacts"] or [],

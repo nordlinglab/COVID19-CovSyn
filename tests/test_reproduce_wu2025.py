@@ -45,3 +45,51 @@ def test_a_run_with_compacted_case_ids_is_skipped_not_mispaired() -> None:
     courses = [_case(0, 5), _case(3, 2)]
     digraph = np.array([["nan", "1", "0", "nan"], ["1", "3", "3", "household"]], dtype="<U32")
     assert wu.transmission_intervals(courses, digraph) == ([], [])
+
+
+def _optimizer_run(directory, rotated: bool) -> None:
+    """The four result files of a 5-firefly, 3-parameter run; under B81 best is the final."""
+    rng = np.random.default_rng(0)
+    pop, dim = 5, 3
+    np.savetxt(directory / "bound.txt", np.array([np.zeros(dim), np.ones(dim)]))
+    np.savetxt(directory / "firefly_result_first_initial_guess.txt",
+               np.column_stack([rng.random((pop, dim)), rng.random(pop) + 2]))
+    final = np.column_stack([rng.random((pop, dim)), rng.random(pop) + 1])
+    np.savetxt(directory / "firefly_result.txt", final)
+    iteration = np.full(pop, 500.0) if rotated else rng.integers(100, 500, pop).astype(float)
+    best = final if rotated else np.column_stack([rng.random((pop, dim)), rng.random(pop) + 1])
+    np.savetxt(directory / "firefly_best.txt", np.column_stack([iteration, best]))
+    np.savetxt(directory / "firefly_worst.txt",
+               np.column_stack([np.full(pop, 50.0), rng.random((pop, dim)), rng.random(pop) + 3]))
+
+
+def test_a_b81_run_draws_no_separate_best_stage(tmp_path, monkeypatch) -> None:
+    """Under B81 firefly_best.txt is the final population, so Best would repeat Final (F2)."""
+    plotted = []
+    original = wu.plt.Axes.plot
+
+    def spy(self, *args, **kwargs):
+        plotted.append(kwargs.get("label"))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(wu.plt.Axes, "plot", spy)
+    for rotated in (True, False):
+        run = tmp_path / f"run_{rotated}"
+        run.mkdir()
+        _optimizer_run(run, rotated)
+        plotted.clear()
+        best = np.loadtxt(run / "firefly_best.txt")
+        assert wu.best_repeats_final(best, np.loadtxt(run / "firefly_result.txt")) is rotated
+        wu.fig4(run, run, evaluate=False)
+        assert (run / "wu2025_fig4_firefly_convergence.png").exists()
+        assert ("Best fireflies" in plotted) is not rotated
+
+
+def test_a_cached_cost_parts_file_with_other_stages_is_not_reused(tmp_path) -> None:
+    """A cache from a B81 run has no Best rows; a pre-B81 fig4 into the same place recomputes."""
+    cache = tmp_path / "wu2025_fig4_cost_parts.csv"
+    assert wu.read_cost_parts_cache(cache, {"Initial", "Final"}) is None
+    wu._write_csv(cache, [{"stage": s, "firefly": 0, "total": 1.0} for s in ("Initial", "Final")])
+    rows = wu.read_cost_parts_cache(cache, {"Initial", "Final"})
+    assert [r["stage"] for r in rows] == ["Initial", "Final"]
+    assert wu.read_cost_parts_cache(cache, {"Initial", "Best", "Final"}) is None

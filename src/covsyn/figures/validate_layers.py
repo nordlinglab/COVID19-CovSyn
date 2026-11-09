@@ -26,7 +26,8 @@ import pandas as pd
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
-from covsyn.model.data_synthesize import community_event_parameters, expected_event_size
+from covsyn.model.data_synthesize import (community_event_parameters, community_power_law_exponent,
+                                          expected_community_contact_count, expected_event_size)
 from covsyn.data_processing.taiwan_reference import (EFF_COLOR, IMPORTED_COLOR, LEVELS, MARKER_NOTE, REF_COLOR, RNG, SIM_COLOR,
                               half_points, half_violin, household_pmfs, load_demographics,
                               municipality_population, pmf_samples, school_classmates_all, school_reference,
@@ -384,9 +385,17 @@ def city_mean_r(labels):
 r_null = np.array([city_mean_r(city_rng.permutation(city_labels)) for _ in range(2000)])
 r_p = (1 + int(np.sum(r_null >= r))) / (1 + len(r_null))
 # E97: the mean includes the mass events of B54, which P[28] alone leaves out.
-event = community_event_parameters(P)
-expected_mean = P[28] + (0.0 if event is None else event['probability'] * expected_event_size(
-    event['exponent'], event['min_size'], event['max_size'], min(MUNICIPALITY_POP.values())))
+# B62: with P[204] present P[28] is the shift of the scale-free count and no mass event is
+# drawn, so the mean is that distribution's own (code review 2026-11-09, F3).
+community_exponent = community_power_law_exponent(P)
+if community_exponent is not None:
+    expected_mean = expected_community_contact_count(community_exponent, P[28])
+    mean_label = f'shift {P[28]:.2f}, alpha {community_exponent:.2f}'
+else:
+    event = community_event_parameters(P)
+    expected_mean = P[28] + (0.0 if event is None else event['probability'] * expected_event_size(
+        event['exponent'], event['min_size'], event['max_size'], min(MUNICIPALITY_POP.values())))
+    mean_label = f'lambda {P[28]:.2f}' + ('' if event is None else ' + mass events')
 fig, ax = plt.subplots(figsize=(9, 6))
 ax.scatter(by_city_index['pop'] / 1e6, by_city_index['cand'], color='#1f4e79', label='index cases')
 ax.scatter(by_city['pop'] / 1e6, by_city['cand'], color=SIM_COLOR, marker='x', label=f'spread cases ({len(spread):,})')
@@ -394,9 +403,10 @@ xs = np.linspace(0, max(MUNICIPALITY_POP.values()), 50)
 # Before B27 the community layer drew Binomial(city population, p), so the expected number of
 # contacts was a straight line through the origin -- a case in Taipei met twelve times as many
 # people as one in Taitung purely because of where it lived (finding E4). The community layer
-# now draws Poisson(nu * lambda), independent of the city, so the expectation is a flat line.
+# now draws a count independent of the city -- Poisson(nu * lambda) under B27, the scale-free
+# (n + s)^-alpha under B62 -- so the expectation is a flat line.
 ax.axhline(expected_mean, color='gray', ls='--',
-           label=f'model mean: {expected_mean:.1f} contacts per case (lambda {P[28]:.2f} + mass events), '
+           label=f'model mean: {expected_mean:.1f} contacts per case ({mean_label}), '
                  'independent of the city')
 ax.set_xlabel('city population (millions)')
 ax.set_ylabel('mean community candidate contacts per case')
@@ -427,5 +437,5 @@ for line in table:
     print(' | '.join(str(x) for x in line))
 print('municipality r(population, mean candidate contacts) =', round(r, 3),
       '| label-shuffle p =', round(r_p, 3),
-      '| model mean community contacts per case =', round(expected_mean, 3), '| lambda =', P[28])
+      '| model mean community contacts per case =', round(expected_mean, 3), f'({mean_label})')
 print('saved to', OUT)

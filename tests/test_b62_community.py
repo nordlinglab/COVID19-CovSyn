@@ -120,3 +120,14 @@ def test_b63_targets_charge_the_fu2010_shape_and_report_the_tracing_median() -> 
 
     contact = pickle.load(open("variable/contact_parameters.pkl", "rb"))
     assert contact["municipality_lower_bound"][1] == 0.0
+
+
+def test_the_expected_community_count_is_the_mean_of_the_distribution_not_the_shift():
+    """Under B62 P[28] is the shift; the figure's model mean was drawn at it (code review F3)."""
+    from covsyn.model.data_synthesize import (draw_community_contact_count,
+                                              expected_community_contact_count)
+    expected = expected_community_contact_count(1.74, 0.79)
+    assert expected == pytest.approx(7.036, abs=0.01)
+    np.random.seed(0)
+    draws = [draw_community_contact_count(1.74, 0.79) for _ in range(40000)]
+    assert np.mean(draws) == pytest.approx(expected, rel=0.05)

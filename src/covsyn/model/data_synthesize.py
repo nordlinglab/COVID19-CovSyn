@@ -193,6 +193,27 @@ def _community_count_cdf(exponent: float, shift: float, max_count: int) -> np.nd
     return cdf
 
 
+def expected_community_contact_count(exponent: float, shift: float,
+                                     max_count: int = COMMUNITY_MAX_CONTACTS) -> float:
+    """Mean of P(N = n) proportional to (n + shift)^-exponent on 0..max_count (B62).
+
+    Under B62 P[28] is the shift, not the mean, so a figure that shows the model's mean count
+    must compute it here (code review 2026-11-09, F3). It reads the draw's own CDF, so the
+    two cannot drift apart.
+
+    Args:
+        exponent: Tail exponent alpha, positive.
+        shift: Shift s of the distribution, positive.
+        max_count: Largest count.
+
+    Returns:
+        The expected community contact count.
+    """
+    cdf = _community_count_cdf(float(exponent), max(float(shift), 1e-6), int(max_count))
+    pmf = np.diff(cdf, prepend=0.0)
+    return float(np.dot(np.arange(len(pmf), dtype=float), pmf))
+
+
 def draw_community_contact_count(exponent: float, shift: float,
                                  max_count: int = COMMUNITY_MAX_CONTACTS) -> int:
     """Draw one community contact count from P(N = n) proportional to (n + shift)^-exponent (B62).

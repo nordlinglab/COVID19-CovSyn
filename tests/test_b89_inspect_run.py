@@ -45,7 +45,7 @@ def run(tmp_path):
              _check("offspring dispersion k", 0.2668, [0.2, 0.35], True),
              _check("free text", 5.0, None, True)]
     three = [_check("contacts per day before onset, household", 2.3203, [2.27, 3.28], True),
-             _check("samples of 579 cases whose largest is at most 8", 0.5, [2.5, 97.5], False),
+             _check("samples of 579 cases, percentile of a largest of 8", 0.5, [2.5, 97.5], False),
              _check("offspring dispersion k", 0.3019, [0.2, 0.35], True, within=True)]
     for name, checks in (("candidate_7", seven), ("candidate_3", three)):
         (tmp_path / "selected" / "candidates" / name / "checks.json").write_text(
@@ -76,6 +76,14 @@ def test_a_check_with_no_value_is_not_counted_as_a_failure(run):
     assert ir.failing(checks) == ["contacts per day before onset, household"]
 
 
+def test_a_check_whose_value_is_nan_is_not_counted_as_a_failure():
+    """verify_phase_d stores an unmeasurable value as NaN with ok None, and json keeps the NaN."""
+    stored = json.dumps({"checks": [_check("class size, no cases", float("nan"), [20, 35], None),
+                                    _check("household", 2.1, [2.27, 3.28], False)]})
+    checks = json.loads(stored)["checks"]
+    assert ir.failing(checks) == ["household"]
+
+
 def test_an_informational_check_is_never_a_failure(run):
     """A check whose target is None is reported only, so it cannot fail."""
     checks = ir.read_checks(run / "validation_reference" / "phaseD_checks.json")
@@ -87,7 +95,7 @@ def test_every_candidate_keeps_its_own_failing_check_names(run):
     rows = {r["candidate"]: r for r in ir.candidate_table(run, ir.DEFAULT_WATCH)}
     assert set(rows) == {"3", "7"}
     assert rows["7"]["failed"] == ["contacts per day before onset, household"]
-    assert rows["3"]["failed"] == ["samples of 579 cases whose largest is at most 8"]
+    assert rows["3"]["failed"] == ["samples of 579 cases, percentile of a largest of 8"]
 
 
 def test_the_watched_values_come_from_each_candidate(run):
@@ -121,6 +129,7 @@ def test_a_run_without_candidate_directories_still_reads(tmp_path):
 def test_the_watch_list_names_the_checks_a_review_returns_to(run):
     """The default watch list covers the checks this review kept asking about."""
     for name in ("contacts per day before onset, household",
+                 "samples of 579 cases, percentile of a largest of 8",
                  "samples of 579 cases whose largest is at most 8",
                  "cases infecting 3 or more"):
         assert name in ir.DEFAULT_WATCH
