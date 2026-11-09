@@ -417,10 +417,10 @@ def evaluate_cost_parts(
     cheng = (ct["Cheng_contact_array"], ct["Cheng_attack_rate"], ct["norm_weights"])
     columns = np.load("./variable/Taiwan_data_matrix.npy").shape[1]
     rows: list[dict[str, Any]] = []
-    # The with-block closes the workers on an exception or interrupt too.
-    with concurrent.futures.ProcessPoolExecutor(
+    pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns)
-    ) as pool:
+    )
+    try:
         for stage, matrix in vectors.items():
             for firefly, vector in enumerate(matrix):
                 total = float(fast_cost.cost_function(vector, demo, pool, *cheng))
@@ -433,6 +433,11 @@ def evaluate_cost_parts(
                     }
                 )
                 print(f"{stage} {firefly:3d} {total:.4f}", flush=True)
+    except BaseException:
+        # An exception or Ctrl-C drops the queued simulation batches instead of waiting for them.
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown()
     _write_csv(table, rows)
     return rows
 
@@ -458,12 +463,27 @@ def best_repeats_final(best: np.ndarray, final: np.ndarray) -> bool:
             and np.allclose(best[:, 1:], final, equal_nan=True))
 
 
+FIG4_OUTPUTS = {
+    "figure": "wu2025_fig4_firefly_convergence.png",
+    "cost_parts": "wu2025_fig4_cost_parts.csv",
+    "reproducibility": "wu2025_fig4_reproducibility.csv",
+}
+
+
 def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
     """Fig 4: convergence of the firefly run.
 
     Cost against distance from the best firefly, the clustered distance matrix of the final
     fireflies, and each cost part at the initial, worst, best and final positions. A B81 run
     has no separate best positions, so its stages are initial, worst and final.
+
+    Every file in FIG4_OUTPUTS is deleted from out_dir first, so a failed or non-evaluating
+    call never leaves an earlier run's figure or tables beside this run's.
+
+    Args:
+        run_dir: The optimizer run directory, with its four result files and bound.txt.
+        out_dir: Where the figure and tables are written.
+        evaluate: Recompute the cost parts (hours); False draws the convergence panels only.
     """
     from scipy.spatial import distance_matrix
 
@@ -536,14 +556,12 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
                     linewidth=width,
                 )
 
-    # Tables of an earlier fig4 into out_dir would otherwise sit beside this run's figure when
-    # this one does not evaluate.
-    for name in ("wu2025_fig4_cost_parts.csv", "wu2025_fig4_reproducibility.csv"):
+    for name in FIG4_OUTPUTS.values():
         (out_dir / name).unlink(missing_ok=True)
     rows = (
         evaluate_cost_parts(
             {k: v for k, (v, _) in stages.items()},
-            out_dir / "wu2025_fig4_cost_parts.csv",
+            out_dir / FIG4_OUTPUTS["cost_parts"],
         )
         if evaluate
         else []
@@ -608,14 +626,14 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
                     "max_abs_difference_from_stored_cost": float(np.max(np.abs(again - stored))),
                 }
             )
-        _write_csv(out_dir / "wu2025_fig4_reproducibility.csv", summary)
+        _write_csv(out_dir / FIG4_OUTPUTS["reproducibility"], summary)
         for r in summary:
             print(
                 f"{r['stage']:8s} re-evaluated cost vs stored: max |difference| "
                 f"{r['max_abs_difference_from_stored_cost']:.3g}"
             )
     plt.tight_layout()
-    fig.savefig(out_dir / "wu2025_fig4_firefly_convergence.png", dpi=200, bbox_inches="tight")
+    fig.savefig(out_dir / FIG4_OUTPUTS["figure"], dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(
         f"best firefly {best_index}, cost {best[best_index, -1]:.4f}; final cost range "
