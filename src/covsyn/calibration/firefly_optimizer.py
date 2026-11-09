@@ -102,17 +102,20 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
 
     Examples
     --------
-    >>> from sklearn.metrics.pairwise import nan_euclidean_distances
+    Without sklearn's rescaling by the share of present coordinates, a pair that shares one
+    coordinate is 1.0 apart where sklearn's nan_euclidean_distances gives 1.41421356
+    (code review 2026-11-09, F10):
+
     >>> nan = float("NaN")
     >>> X = [[0, 1], [1, nan]]
-    >>> nan_euclidean_distances(X, X) # distance between rows of X
-    array([[0.        , 1.41421356],
-           [1.41421356, 0.        ]])
+    >>> rw_nan_euclidean_distances(X, X) # distance between rows of X
+    array([[0., 1.],
+           [1., 0.]])
 
     >>> # get distance to origin
-    >>> nan_euclidean_distances(X, [[0, 0]])
-    array([[1.        ],
-           [1.41421356]])
+    >>> rw_nan_euclidean_distances(X, [[0, 0]])
+    array([[1.],
+           [1.]])
 
     References
     ----------
