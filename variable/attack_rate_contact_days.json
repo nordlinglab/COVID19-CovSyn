@@ -1,0 +1,10 @@
+{
+ "days": {
+  "household": 9.27,
+  "school": 5.3,
+  "workplace": 3.48,
+  "health_care": 2.94,
+  "municipality": 1.77
+ },
+ "measured_on": "Phase D run 19 candidate 60 under B77 (spread_Taiwan_weight, 400 simulations)"
+}

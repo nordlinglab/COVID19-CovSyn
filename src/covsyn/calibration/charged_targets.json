@@ -1,0 +1,327 @@
+{
+ "source": "run 14, candidate 156, checklist re-run with the E96 fix (CovSyn 7ecb1ab), 1000 simulations, 200 bootstrap replicates; B61 (2026-10-15): household, school and offspring_k acceptance intervals updated and recharged with the run-14 sigma via compute_margins; re-run target_margins on the next checklist; B63 (2026-10-16): daily_municipality acceptance [1.2, 7.12], recharged with the run-14 sigma via compute_margins; B67 (2026-10-24): the three Cheng per-index entries rescaled to local index cases (x 2.82) and recharged with their recorded run-14 sigma via charged_interval; B64 (2026-10-24): daily_workplace removed (reported only); daily_workplace_employed is charged on its acceptance interval until a checklist supplies its sigma; B76 (2026-11-01): daily_health_care removed (reported only); B76 (2026-11-01): health_care_contacts_per_index charged with the sigma of run 18 candidate 80 under B75 (1000 spread_Taiwan_weight simulations, 200 bootstrap replicates, CovSyn a35d951) via compute_margins; its open upper bound is null",
+ "z": 1.645,
+ "max_shift_of_width": 0.25,
+ "targets": {
+  "daily_household": {
+   "acceptance": [
+    2.27,
+    3.28
+   ],
+   "objective": [
+    2.27,
+    3.28
+   ],
+   "charged": [
+    2.3365753956330804,
+    3.2134246043669195
+   ],
+   "sigma": 0.040471365126492735,
+   "check": "B25 contacts per day before onset, household"
+  },
+  "daily_school": {
+   "acceptance": [
+    1.15,
+    1.72
+   ],
+   "objective": [
+    1.15,
+    1.72
+   ],
+   "charged": [
+    1.2925,
+    1.5775
+   ],
+   "sigma": 0.11523170756501905,
+   "check": "B25 contacts per day before onset, school"
+  },
+  "daily_municipality": {
+   "acceptance": [
+    1.2,
+    7.12
+   ],
+   "objective": [
+    1.2,
+    7.12
+   ],
+   "charged": [
+    1.289188162619533,
+    7.030811837380467
+   ],
+   "sigma": 0.05421772803619023,
+   "check": "B25 contacts per day before onset, municipality"
+  },
+  "asymptomatic_share": {
+   "acceptance": [
+    0.2,
+    0.28
+   ],
+   "objective": [
+    0.2,
+    0.28
+   ],
+   "charged": [
+    0.22000000000000003,
+    0.26
+   ],
+   "sigma": 0.012257653061224507,
+   "check": "B33 asymptomatic share"
+  },
+  "sar_school": {
+   "acceptance": [
+    0.01,
+    0.04
+   ],
+   "objective": [
+    0.01,
+    0.04
+   ],
+   "charged": [
+    0.0175,
+    0.0325
+   ],
+   "sigma": 0.005291311057883662,
+   "check": "B9 cumulative SAR per contact, school"
+  },
+  "sar_workplace": {
+   "acceptance": [
+    0.015,
+    0.05
+   ],
+   "objective": [
+    0.015,
+    0.05
+   ],
+   "charged": [
+    0.02375,
+    0.04125
+   ],
+   "sigma": 0.005597439220377463,
+   "check": "B9 cumulative SAR per contact, workplace"
+  },
+  "medical_late_share": {
+   "acceptance": [
+    0.2,
+    0.5
+   ],
+   "objective": [
+    0.25,
+    0.5
+   ],
+   "charged": [
+    0.25,
+    0.4849029893897746
+   ],
+   "sigma": 0.009177514048769243,
+   "check": "B23 health care contacts starting 8+ days after onset"
+  },
+  "medical_early_share": {
+   "acceptance": [
+    0.4,
+    0.7000000000000001
+   ],
+   "objective": [
+    0.4,
+    0.7
+   ],
+   "charged": [
+    0.41630742708971746,
+    0.6836925729102826
+   ],
+   "sigma": 0.00991332953782216,
+   "check": "B23 health care contacts starting before day 4"
+  },
+  "incubation_mean": {
+   "acceptance": [
+    3.9,
+    8.0
+   ],
+   "objective": [
+    3.9,
+    8.0
+   ],
+   "charged": [
+    4.026889210006167,
+    7.873110789993833
+   ],
+   "sigma": 0.07713629787608943,
+   "check": "B22 incubation period, mean"
+  },
+  "pre_onset_window_mean": {
+   "acceptance": [
+    1.0,
+    3.0
+   ],
+   "objective": [
+    1.0,
+    3.0
+   ],
+   "charged": [
+    1.0542298470172196,
+    2.94577015298278
+   ],
+   "sigma": 0.03296647235089335,
+   "check": "B22 pre-onset infectious window, mean"
+  },
+  "pre_onset_zero_share": {
+   "acceptance": [
+    0.0,
+    0.12
+   ],
+   "objective": [
+    0.0,
+    0.12
+   ],
+   "charged": [
+    0.0,
+    0.09786059358556508
+   ],
+   "sigma": 0.013458605723060742,
+   "check": "B22 pre-onset window of zero days"
+  },
+  "closure_after_confirmation_symptomatic": {
+   "acceptance": [
+    22.0,
+    32.0
+   ],
+   "objective": [
+    22.0,
+    32.0
+   ],
+   "charged": [
+    22.759214821175362,
+    31.240785178824638
+   ],
+   "sigma": 0.46152876667195286,
+   "check": "B28 confirmation to case closure, symptomatic"
+  },
+  "closure_after_confirmation_asymptomatic": {
+   "acceptance": [
+    17.0,
+    31.0
+   ],
+   "objective": [
+    17.0,
+    31.0
+   ],
+   "charged": [
+    18.250798141252652,
+    29.749201858747348
+   ],
+   "sigma": 0.7603636117037393,
+   "check": "B28 confirmation to case closure, asymptomatic"
+  },
+  "icu_to_closure": {
+   "acceptance": [
+    29.0,
+    44.0
+   ],
+   "objective": [
+    29.0,
+    44.0
+   ],
+   "charged": [
+    31.495362501582836,
+    41.50463749841716
+   ],
+   "sigma": 1.5169376909318153,
+   "check": "B28 ICU to case closure"
+  },
+  "onset_to_icu": {
+   "acceptance": [
+    5.4,
+    9.2
+   ],
+   "objective": [
+    5.4,
+    9.2
+   ],
+   "charged": [
+    6.35,
+    8.25
+   ],
+   "sigma": 1.029320453261449,
+   "check": "B28 onset to ICU"
+  },
+  "infections_per_index_household": {
+   "acceptance": [
+    0.13529309801000597,
+    0.5188501704644514
+   ],
+   "objective": [
+    0.13529309801000597,
+    0.5188501704644514
+   ],
+   "charged": [
+    0.15468059801000597,
+    0.49946267046445136
+   ],
+   "sigma": 0.01178571428571429,
+   "check": "B9 infections per index case, household"
+  },
+  "infections_per_index_health_care": {
+   "acceptance": [
+    0.06212240840569798,
+    0.3684491103531918
+   ],
+   "objective": [
+    0.06212240840569798,
+    0.3684491103531918
+   ],
+   "charged": [
+    0.07220432804855512,
+    0.3583671907103346
+   ],
+   "sigma": 0.006128826530612243,
+   "check": "B9 infections per index case, health_care"
+  },
+  "infections_per_index_municipality": {
+   "acceptance": [
+    0.001,
+    0.08463949843260188
+   ],
+   "objective": [
+    0.001,
+    0.08463949843260188
+   ],
+   "charged": [
+    0.00855357142857143,
+    0.07708592700403046
+   ],
+   "sigma": 0.004591836734693878,
+   "check": "B9 infections per index case, municipality"
+  },
+  "offspring_k": {
+   "acceptance": [
+    0.2,
+    0.35
+   ],
+   "objective": [
+    0.2,
+    0.35
+   ],
+   "charged": [
+    0.2375,
+    0.3125
+   ],
+   "sigma": 0.03258105083433496,
+   "check": "B17 offspring dispersion k"
+  },
+  "health_care_contacts_per_index": {
+   "acceptance": [
+    3.3352297478263013,
+    null
+   ],
+   "objective": [
+    3.3352297478263013,
+    null
+   ],
+   "charged": [
+    3.445816131754873,
+    null
+   ],
+   "sigma": 0.06722576530612256,
+   "check": "B76 health care contacts per index case"
+  }
+ }
+}
