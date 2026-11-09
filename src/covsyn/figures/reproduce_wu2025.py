@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import csv
 import glob
+import hashlib
 import json
 import re
 import sys
@@ -408,6 +409,26 @@ def read_cost_parts_cache(cache: Path, stages: set[str]) -> list[dict] | None:
     return rows if {r["stage"] for r in rows} == stages else None
 
 
+def cost_parts_cache_path(out_dir: Path, vectors: dict[str, np.ndarray]) -> Path:
+    """The cost-parts cache of these vectors, named by a digest of the stages and vectors.
+
+    A cache named only by its directory was reused for the next optimizer run drawn into the
+    same directory, so Fig 4 showed the previous run's cost parts (code review 2026-11-09).
+
+    Args:
+        out_dir: The figure directory.
+        vectors: The parameter vectors of each stage.
+
+    Returns:
+        The cache path, wu2025_fig4_cost_parts_<12 hex digits>.csv.
+    """
+    digest = hashlib.sha256()
+    for stage in sorted(vectors):
+        digest.update(stage.encode())
+        digest.update(np.ascontiguousarray(vectors[stage], dtype=float).tobytes())
+    return out_dir / f"wu2025_fig4_cost_parts_{digest.hexdigest()[:12]}.csv"
+
+
 def evaluate_cost_parts(
     vectors: dict[str, np.ndarray], cache: Path, workers: int = 32
 ) -> list[dict]:
@@ -452,16 +473,21 @@ def best_repeats_final(best: np.ndarray, final: np.ndarray) -> bool:
     """True when firefly_best.txt holds the final population, as every B81 run's does.
 
     Checked on the files themselves rather than on firefly_archive.txt, which
-    revalidation.copy_run_files copies into other directories.
+    revalidation.copy_run_files copies into other directories. A B81 run writes one iteration
+    number for every row, while a pre-B81 run records when each firefly reached its own best,
+    so a converged pre-B81 run whose bests equal its final positions keeps its Best stage. A
+    failed evaluation's NaN cost counts as equal to itself (code review 2026-11-09).
 
     Args:
         best: Rows of firefly_best.txt (iteration, params..., cost).
         final: Rows of firefly_result.txt (params..., cost).
 
     Returns:
-        True when the best rows equal the final rows, parameters and cost.
+        True when the iteration column is constant and the best rows equal the final rows.
     """
-    return best.shape[0] == final.shape[0] and np.allclose(best[:, 1:], final)
+    return (best.shape[0] == final.shape[0]
+            and bool(np.all(best[:, 0] == best[0, 0]))
+            and np.allclose(best[:, 1:], final, equal_nan=True))
 
 
 def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
@@ -544,7 +570,8 @@ def fig4(run_dir: Path, out_dir: Path, evaluate: bool = True) -> None:
 
     rows = (
         evaluate_cost_parts(
-            {k: v for k, (v, _) in stages.items()}, out_dir / "wu2025_fig4_cost_parts.csv"
+            {k: v for k, (v, _) in stages.items()},
+            cost_parts_cache_path(out_dir, {k: v for k, (v, _) in stages.items()}),
         )
         if evaluate
         else []

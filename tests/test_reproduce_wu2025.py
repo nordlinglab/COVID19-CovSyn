@@ -93,3 +93,27 @@ def test_a_cached_cost_parts_file_with_other_stages_is_not_reused(tmp_path) -> N
     rows = wu.read_cost_parts_cache(cache, {"Initial", "Final"})
     assert [r["stage"] for r in rows] == ["Initial", "Final"]
     assert wu.read_cost_parts_cache(cache, {"Initial", "Best", "Final"}) is None
+
+
+def test_a_b81_run_with_a_failed_evaluation_still_repeats_its_final():
+    """A NaN cost from a failed evaluation must not bring the duplicate Best stage back."""
+    final = np.array([[0.1, 0.2, 1.5], [0.3, 0.4, np.nan]])
+    best = np.column_stack([np.full(2, 500.0), final])
+    assert wu.best_repeats_final(best, final)
+
+
+def test_a_converged_pre_b81_run_keeps_its_best_stage():
+    """Bests equal to the final positions, but reached at different iterations: not B81."""
+    final = np.array([[0.1, 0.2, 1.5], [0.3, 0.4, 2.5]])
+    best = np.column_stack([np.array([120.0, 340.0]), final])
+    assert not wu.best_repeats_final(best, final)
+
+
+def test_the_cost_parts_cache_is_named_by_the_run_it_belongs_to(tmp_path):
+    """Another optimizer run drawn into the same directory must not reuse this run's cache."""
+    one = {"Initial": np.zeros((2, 3)), "Final": np.ones((2, 3))}
+    other = {"Initial": np.zeros((2, 3)), "Final": np.full((2, 3), 2.0)}
+    path = wu.cost_parts_cache_path(tmp_path, one)
+    assert path.parent == tmp_path and path.name.startswith("wu2025_fig4_cost_parts_")
+    assert path == wu.cost_parts_cache_path(tmp_path, dict(one))
+    assert path != wu.cost_parts_cache_path(tmp_path, other)
