@@ -72,17 +72,40 @@ def test_the_list_holds_every_default_the_scripts_read():
     assert read <= set(CHAIN_VARIABLES)
 
 
+def _allowed_script_line(line: str) -> bool:
+    """Whether a chain line that names a script is the fixed synthesis call or a message.
+
+    Rather than tell every way a shell can run a script, any line naming one must be the fixed
+    call or a say message without a substitution, which could run a command.
+    """
+    if not re.search(r"\.sh\b", line):
+        return True
+    if SYNTHESIS_CALL.match(line):
+        return True
+    return line.lstrip().startswith('say "') and "$(" not in line and "`" not in line
+
+
+@pytest.mark.parametrize(("line", "allowed"), [
+    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked >> l', True),
+    ('    say "then start scripts/phase_d_chain.sh itself"', True),
+    ("echo hi", True),
+    ("    . scripts/data_synthesis.sh", False),
+    ('  [ -f x ] && ./scripts/data_synthesis.sh >> "$LOG" 2>&1', False),
+    ("  if ./scripts/data_synthesis.sh; then", False),
+    ("bash scripts/data_synthesis.sh --environment-checked", False),        # no PARAMETER_PATH
+    ('say "$(bash scripts/other.sh)"', False),
+])
+def test_a_line_naming_a_script_is_the_fixed_call_or_a_message(line, allowed):
+    """Calls in any form, indented, after && or in an if, are caught; messages are not."""
+    assert _allowed_script_line(line) == allowed
+
+
 def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
     """The chain calls data_synthesis.sh in one fixed form, setting PARAMETER_PATH itself."""
-    # A call runs a script: bash, source or . before its path, or the path first in its command
-    # (after NAME= prefixes); a message that only names a script is no call.
-    run_by_shell = re.compile(r"(?:\bbash|\bsource|(?:^|[;&|]\s*)\.)\s+[^\s\"]*\.sh\b")
-    run_directly = re.compile(r"^\s*(?:[A-Z_][A-Z0-9_]*=\S+\s+)*[^\s\"=]*\.sh\b")
-    calls = [line for line in _code(CHAIN) if run_by_shell.search(line) or run_directly.match(line)]
-    assert calls
-    for line in calls:
-        assert SYNTHESIS_CALL.match(line), line
-
+    code = _code(CHAIN)
+    assert any(SYNTHESIS_CALL.match(line) for line in code)
+    for line in code:
+        assert _allowed_script_line(line), line
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
 # sets AGE_RR_FILE per candidate, so the chain clears any value the tmux server holds.
@@ -194,8 +217,12 @@ def test_a_failed_check_says_how_to_go_on(tmp_path, launched):
     assert "Nothing has run" in log and f"run in {root}" in log
     assert "UV_PROJECT_ENVIRONMENT=/opt/env uv sync --locked --inexact" in log
     assert "not launch_phase_d.sh" in log
-    assert "as a tmux new-session" in log
+    assert "empty ones included" in log
     assert ("  -e FIREFLY_STATUS=firefly.exit" in log) == launched
+    shown = [line.split("  -e ", 1)[1] for line in log.splitlines() if "  -e " in line]
+    assert sorted(item.split("=", 1)[0] for item in shown) == sorted(CHAIN_VARIABLES)
+    assert "SELECT=" in shown                                       # an empty one is shown too
+    assert "  -e UV_PROJECT_ENVIRONMENT=/opt/env" in log
 
 
 def test_the_failed_check_lists_every_forwarded_variable():

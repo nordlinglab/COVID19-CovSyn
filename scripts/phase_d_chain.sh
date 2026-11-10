@@ -67,11 +67,14 @@ if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
     say "Nothing has run. Once no optimiser runs in that environment, run in $ROOT:"
     say "  UV_PROJECT_ENVIRONMENT=$(printf %q "${UV_PROJECT_ENVIRONMENT:-.venv}") uv sync --locked --inexact"
     say "then start scripts/phase_d_chain.sh itself (not launch_phase_d.sh, which starts a new"
-    say "optimiser) in a tmux session, passing each setting it ran with as a tmux new-session"
-    say "option, as tmux gives a session its server's environment; any not shown was empty:"
+    say "optimiser) in a tmux session, passing every setting it ran with, empty ones included,"
+    say "as a tmux new-session option, as the launcher does: tmux gives a session its server's"
+    say "environment, which would fill in a setting left out."
     for name in PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
             SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
-        if [ -n "${!name:-}" ]; then say "  -e $(printf %q "$name=${!name}")"; fi
+        value="${!name:-}"
+        if [ "$name" = UV_PROJECT_ENVIRONMENT ]; then value="${value:-.venv}"; fi
+        say "  -e $(printf %q "$name=$value")"
     done
     exit 1
 fi
