@@ -12,6 +12,7 @@ fails a test loudly rather than letting a variable be dropped unseen.
 from __future__ import annotations
 
 import ast
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass
@@ -256,44 +257,84 @@ class ShellLine:
     heredoc: bool = False
 
 
+def _contexts(text: str) -> list[tuple[str, int]]:
+    """For each character of a text, the bash context it stands in, and the context depth.
+
+    One walker for every quoting rule of the scans. The contexts are ``top`` (plain code),
+    ``'``, ``"``, ``$'``, ```` ` ```` and the inside of ``$(`` and ``${``; a ``$(`` opens plain
+    code again wherever it stands, inside double quotes or ``${...}`` too. A backslash escapes
+    the next character outside single quotes, and so does it inside ``$'...'``. A character
+    that opens or closes a context belongs to the outer one.
+    """
+    stack, parens, result, index = ["top"], [0], [], 0
+
+    def push(kind: str, width: int) -> None:
+        nonlocal index
+        result.extend([(stack[-1], len(stack))] * width)
+        stack.append(kind)
+        parens.append(0)
+        index += width
+
+    while index < len(text):
+        kind, char = stack[-1], text[index]
+        plain = kind in {"top", "$(", "${"}
+        if kind == "'" and char != "'" or kind == "$'" and char not in "\\'":
+            result.append((kind, len(stack)))
+        elif char == "\\" and kind != "'":
+            result.extend([(kind, len(stack))] * len(text[index:index + 2]))
+            index += 2
+            continue
+        elif (kind in {"'", "$'"} and char == "'") or (kind == '"' and char == '"') or \
+                (kind == "`" and char == "`") or (kind == "${" and char == "}") or \
+                (kind == "$(" and char == ")" and parens[-1] == 0):
+            stack.pop()
+            parens.pop()
+            result.append((stack[-1], len(stack)))
+        elif kind in {"top", "$(", "${", '"', "`"} and text.startswith("$(", index):
+            push("$(", 2)
+            continue
+        elif kind in {"top", "$(", "${", '"'} and text.startswith("${", index):
+            push("${", 2)
+            continue
+        elif plain and text.startswith("$'", index):
+            push("$'", 2)
+            continue
+        elif (plain and char in "'\"`") or (kind == '"' and char == "`"):
+            push(char, 1)
+            continue
+        else:
+            if kind == "$(" and char in "()":
+                parens[-1] += 1 if char == "(" else -1
+            result.append((kind, len(stack)))
+        index += 1
+    return result
+
+
+def _open_context(text: str) -> str | None:
+    """The quote or substitution still open at the end of a text, or None."""
+    contexts = _contexts(text + " ")
+    kind = contexts[-1][0] if contexts else "top"
+    return None if kind == "top" else kind
+
+
 def _scan_quotes(text: str) -> tuple[str, str | None]:
     """A text without its comments, and the quote still open at its end, as bash reads it.
 
-    A ``#`` starts a comment at the start of a word, outside quotes, and runs to the end of its
-    line. A backslash outside single quotes escapes the next character; inside ANSI-C quotes
-    ``$'...'`` it does too, and nothing else but the closing ``'`` has a meaning there.
+    A ``#`` starts a comment at the start of a word in plain code and runs to the end of its
+    line; quoting follows _contexts.
     """
-    quote, out, index = None, [], 0
+    contexts, out, index = _contexts(text), [], 0
     while index < len(text):
         char = text[index]
-        if quote == "'":
-            quote = None if char == "'" else quote
-        elif quote == "$'":
-            if char == "\\":
-                out.append(text[index:index + 2])
-                index += 2
-                continue
-            quote = None if char == "'" else quote
-        elif quote is None and text.startswith("$'", index):
-            quote = "$'"
-            out.append("$'")
-            index += 2
-            continue
-        elif char == "\\":
-            out.append(text[index:index + 2])
-            index += 2
-            continue
-        elif quote == '"':
-            quote = None if char == '"' else quote
-        elif char in "'\"":
-            quote = char
-        elif char == "#" and (index == 0 or text[index - 1] in " \t\n;&|("):
+        if char == "#" and contexts[index][0] in {"top", "$("} and \
+                (index == 0 or text[index - 1] in " \t\n;&|("):
             end = text.find("\n", index)
             index = len(text) if end < 0 else end
             continue
         out.append(char)
         index += 1
-    return "".join(out), quote
+    open_kind = _open_context("".join(out))
+    return "".join(out), open_kind if open_kind in {"'", '"', "$'", "`"} else None
 
 
 def strip_comment(line: str) -> str:
@@ -308,42 +349,25 @@ def _trailing_backslashes(text: str) -> int:
 def _closing_parenthesis(line: str, start: int) -> int:
     """The index of the ``)`` closing the ``(`` at ``start``, or -1 if it stays open.
 
-    Quoted parentheses do not count; inside double quotes a backslash escapes and ``$(``
-    opens a nested group with quotes of its own. A group holding a case statement, whose
-    patterns end in an unpaired ``)``, is taken as open, which leaves it unfolded.
+    The ``(`` is that of a ``$(``, ``$((`` or ``((`` at ``start - 1`` or ``start``; quoting
+    follows _contexts. A group holding a case statement, whose patterns end in an unpaired
+    ``)``, is taken as open, which leaves it unfolded.
     """
-    if re.search(r"\bcase\b", line[start:]):
+    opener = start - 1 if start and line[start - 1] == "$" else start
+    contexts = _contexts(line)
+    depth = contexts[opener][1]
+    if line.startswith("$(", opener):
+        # The substitution's own context closes on its matching parenthesis.
+        for index in range(start + 1, len(line)):
+            if contexts[index][1] == depth and line[index] == ")":
+                return -1 if re.search(r"\bcase\b", line[start:index]) else index
         return -1
-    depth, index, quote = 0, start, None
-    while index < len(line):
-        char = line[index]
-        if quote == "'":
-            quote = None if char == "'" else quote
-        elif quote == '"':
-            if char == "\\":
-                index += 1
-            elif char == '"':
-                quote = None
-            elif line.startswith("$(", index):
-                index = _closing_parenthesis(line, index + 1)
-                if index < 0:
-                    return -1
-        elif quote == "$'":
-            if char == "\\":
-                index += 1
-            elif char == "'":
-                quote = None
-        elif char == "\\":
-            index += 1
-        elif line.startswith("$'", index):
-            quote, index = "$'", index + 1
-        elif char in "'\"":
-            quote = char
-        elif char in "()":
-            depth += 1 if char == "(" else -1
-            if depth == 0:
-                return index
-        index += 1
+    level = 0
+    for index in range(start, len(line)):
+        if contexts[index][1] == depth and contexts[index][0] in {"top", "$(", "${"}:
+            level += {"(": 1, ")": -1}.get(line[index], 0)
+            if level == 0:
+                return -1 if re.search(r"\bcase\b", line[start:index]) else index
     return -1
 
 
@@ -361,7 +385,8 @@ def _fold_balanced(line: str, opener: str) -> str:
 
 
 def _fold_arithmetic(line: str) -> str:
-    """The line with each arithmetic expansion and command as X."""
+    """The line with each arithmetic expansion and command as X, ``$[ ]`` included."""
+    line = re.sub(r"\$\[[^\]]*\]", "X", line)
     for opener in ("$((", "(("):
         line = _fold_balanced(line, opener)
     return line
@@ -388,34 +413,12 @@ def _raw_words(line: str) -> list[str]:
 
 
 def _plain_positions(line: str) -> list[bool]:
-    """For each character of a line, whether it stands outside quotes and ``${...}``.
+    """For each character of a line, whether it stands in plain code.
 
-    Only there does bash take ``<<`` for a redirection.
+    Plain code is outside quotes and ``${...}``, or inside a ``$(...)`` wherever that stands;
+    only there does bash take ``<<`` for a redirection.
     """
-    plain, quote, braces, index = [True] * len(line), None, 0, 0
-    while index < len(line):
-        char = line[index]
-        plain[index] = quote is None and braces == 0
-        if quote == "'":
-            quote = None if char == "'" else quote
-        elif quote in {'"', "$'"} and char == "\\":
-            index += 1
-        elif quote == "$'":
-            quote = None if char == "'" else quote
-        elif quote == '"':
-            quote = None if char == '"' else quote
-        elif char == "\\":
-            index += 1
-        elif line.startswith("$'", index):
-            quote, index = "$'", index + 1
-        elif char in "'\"":
-            quote = char
-        elif line.startswith("${", index):
-            braces, index = braces + 1, index + 1
-        elif char == "}" and braces:
-            braces -= 1
-        index += 1
-    return plain
+    return [kind in {"top", "$("} for kind, _ in _contexts(line)]
 
 
 def _shell_word(text: str) -> str | None:
@@ -423,17 +426,10 @@ def _shell_word(text: str) -> str | None:
 
     That is how bash reads a here-document delimiter; an unparsable word gives None too.
     """
-    text, end, quote = text.lstrip(" \t"), 0, None
-    while end < len(text):
-        char = text[end]
-        if quote:
-            quote = None if char == quote else quote
-        elif char == "\\":
-            end += 1
-        elif char in "'\"":
-            quote = char
-        elif char.isspace() or char in ";&|<>()":
-            break
+    text = text.lstrip(" \t")
+    contexts, end = _contexts(text), 0
+    while end < len(text) and not (contexts[end] == ("top", 1) and
+                                   (text[end].isspace() or text[end] in ";&|<>()")):
         end += 1
     try:
         words = shlex.split(text[:end])
@@ -445,11 +441,13 @@ def _shell_word(text: str) -> str | None:
 def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
     """The here-documents a line opens: whether tabs are stripped, and the delimiter.
 
-    ``<<`` opens one wherever bash takes it for a redirection: outside quotes, ``${...}`` and
-    arithmetic, inside a command substitution too, and in ``let x=1<<2`` as bash does
-    (checked with bash 5). ``<<<`` is a here-string. The delimiter is the next shell word with
-    its quotes and backslashes removed.
+    ``<<`` opens one wherever bash takes it for a redirection: in plain code, inside a command
+    substitution too, even within double quotes or ``${...}``, and in ``let x=1<<2`` as bash
+    does (checked with bash 5); not inside quotes, ``${...}`` or arithmetic. ``<<<`` is a
+    here-string. The delimiter is the next shell word with its quotes and backslashes removed.
     """
+    if "<<" not in line:
+        return []
     folded = _fold_arithmetic(line)
     plain, found = _plain_positions(folded), []
     for match in re.finditer(r"(?<!<)<<(?!<)(-?)", folded):
@@ -617,22 +615,28 @@ def environment_variables(path: Path) -> set[str]:
     return (referenced - assigned) | defaulted
 
 
-# Any mention of a shell script in the raw text, by its file name: a call may sit in a quoted
-# command string, a substitution, a subshell or a default value, be glued to ;, &&, | or a
-# redirection, or reach the script by another path ($SCRIPT_DIR/x.sh, scripts/./x.sh).
-SCRIPT_MENTION = re.compile(r"([\w.+@%~,:-]+\.sh)(?![\w.-])")
+# A path to a shell script, read after quotes and backslashes are removed; a ``$ROOT/`` or
+# ``${ROOT}/`` prefix, the repository root in every script, is dropped.
+SCRIPT_MENTION = re.compile(r"(?:\$\{?ROOT\}?/)?([\w./+@%~,-]*\.sh)(?![\w.-])")
 
 
 def mentioned_scripts(text: str) -> list[str]:
-    """The file name of every shell script a text names, in order, however it is written."""
-    return SCRIPT_MENTION.findall(text)
+    """Every shell script a text names, in order, as a normalised repository-relative path.
+
+    Every way of naming a script counts, in a quoted command string, a substitution, a
+    subshell, a default value or glued to other text. A name that cannot be resolved to a
+    path, such as ``${step}.sh``, ``{a,b}.sh``, ``$SCRIPT_DIR/a.sh`` or ``./a.sh`` after a
+    cd, comes out as what it can be read as, which differs from every scanned path, so a test
+    comparing them fails loudly rather than taking it for one already scanned.
+    """
+    plain = re.sub(r"[\\'\"]", "", text)
+    plain = re.sub(r"\$\{\w+:?[-=+?]", " ", plain)       # a default value is a word of its own
+    return [posixpath.normpath(path) for path in SCRIPT_MENTION.findall(plain)]
 
 
 def called_scripts(lines: list[ShellLine]) -> set[str]:
-    """The shell scripts a script may run, by file name: every one it names.
+    """The shell scripts a script may run: every one it names, as mentioned_scripts reads it.
 
-    A script named in a quoted command string, a substitution or a here-document piped to a
-    shell runs as surely as a plain call, so every mention counts; one that only names a script,
-    as in an echo, is reported too, which fails a test loudly rather than missing a call.
+    Here-document bodies count too, as one may be piped to a shell.
     """
-    return {name for line in lines for name in mentioned_scripts(line.text)}
+    return {path for line in lines for path in mentioned_scripts(line.text)}

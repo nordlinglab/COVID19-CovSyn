@@ -79,17 +79,18 @@ def test_the_chain_sets_what_it_does_not_forward(script, values):
     """
     prefix = " ".join(f"{name}={value}" for name, value in values.items())
     form = re.compile(rf"^\s*{re.escape(prefix)} bash scripts/{re.escape(script)}(?:\s|$)")
-    lines = [line for line in _lines(CHAIN) if script in es.mentioned_scripts(line.text)]
+    path = f"scripts/{script}"
+    lines = [line for line in _lines(CHAIN) if path in es.mentioned_scripts(line.text)]
     assert lines, script
     for line in lines:
         assert not line.heredoc, line.text          # text written out is no call
-        assert es.mentioned_scripts(line.text).count(script) == 1, line.text
+        assert es.mentioned_scripts(line.text).count(path) == 1, line.text
         assert form.match(line.text), line.text
 
 
 def test_every_script_the_chain_runs_is_scanned():
     """A script the chain runs and the scan skips would have its variables dropped unseen."""
-    assert es.called_scripts(_lines(CHAIN)) == {script.name for script in CHAIN_SCRIPTS}
+    assert es.called_scripts(_lines(CHAIN)) == {f"scripts/{s.name}" for s in CHAIN_SCRIPTS}
 
 
 def test_the_firefly_modules_do_not_touch_the_environment():

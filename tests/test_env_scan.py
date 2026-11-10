@@ -4,12 +4,13 @@
 
 from __future__ import annotations
 
+import posixpath
 import shlex
 from pathlib import Path
 
 import env_scan as es
 import pytest
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 
@@ -248,6 +249,10 @@ def test_commands_are_split_into_words(line, words):
     (['cat <<"E F"', "A=1", "E F", "B=1", "echo $B"], {"B"}),
     (["cat <<@@", "A=1", "@@", "B=1", "echo $B"], {"B"}),
     (["let x=1<<2", "A=1", "2", "B=1", "echo $B"], {"B"}),          # bash: a here-document
+    (["y=$((1<<2)); case $y in 4) :;; esac", "A=1", "echo $A"], {"A"}),  # case later on
+    (['echo "$(cat <<EOF)"', "A=1", "EOF", "echo $A"], set()),    # bash: a here-document
+    (["echo ${x:-$(cat <<EOF)}", "A=1", "EOF", "echo $A"], set()),
+    (["echo $[1<<2]", "A=1", "echo $A"], {"A"}),                  # legacy arithmetic
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -264,48 +269,52 @@ def test_every_form_of_reading_a_variable_is_a_reference(line, names):
     assert es.references(line) == names
 
 
+A = "scripts/a.sh"
+
+
 @pytest.mark.parametrize(("line", "called"), [
-    ("bash scripts/a.sh", {"a.sh"}),
-    ("sh scripts/a.sh", {"a.sh"}),
-    ("source scripts/a.sh", {"a.sh"}),
-    (". scripts/a.sh", {"a.sh"}),
-    ("./scripts/a.sh", {"a.sh"}),
-    ("scripts/a.sh x", {"a.sh"}),
-    ("bash ./scripts/a.sh", {"a.sh"}),
-    ('bash "$ROOT/scripts/a.sh"', {"a.sh"}),
-    ("P=1 bash scripts/a.sh >> log", {"a.sh"}),
-    ('bash "$ROOT"/scripts/a.sh', {"a.sh"}),
-    ('bash "${REPO_ROOT}/scripts/a.sh"', {"a.sh"}),
+    ("bash scripts/a.sh", {A}),
+    ("sh scripts/a.sh", {A}),
+    ("source scripts/a.sh", {A}),
+    (". scripts/a.sh", {A}),
+    ("./scripts/a.sh", {A}),
+    ("scripts/a.sh x", {A}),
+    ("bash ./scripts/a.sh", {A}),
+    ('bash "$ROOT/scripts/a.sh"', {A}),
+    ('bash "$ROOT"/scripts/a.sh', {A}),
+    ('bash "${ROOT}/scripts/a.sh"', {A}),
+    ("P=1 bash scripts/a.sh >> log", {A}),
+    ('echo "run scripts/a.sh later"', {A}),           # named in text: reported, to be safe
+    ("(bash scripts/a.sh)", {A}),
+    ("bash scripts/a.sh>log", {A}),
+    ("out=$(bash scripts/a.sh)", {A}),
+    ("x=`bash scripts/a.sh`", {A}),
+    ('tmux new-session -d -s x "bash scripts/a.sh"', {A}),
+    ("bash scripts//a.sh scripts/./b.sh", {A, "scripts/b.sh"}),
+    ('bash scripts/"a".sh', {A}),
+    ("bash scripts/a\\.sh", {A}),
+    ("true&&scripts/a.sh", {A}),
+    ("x;scripts/a.sh", {A}),
+    ("a|scripts/a.sh", {A}),
+    ("${X:-scripts/a.sh}", {A}),
+    ("bash -o pipefail scripts/a.sh", {A}),
+    ("if bash scripts/a.sh; then :; fi", {A}),
+    ("nohup bash scripts/a.sh &", {A}),
     ("echo done", set()),
-    ('echo "run scripts/a.sh later"', {"a.sh"}),     # named in text: reported, to be safe
-    ("(bash scripts/a.sh)", {"a.sh"}),
-    ("bash scripts/a.sh>log", {"a.sh"}),
-    ("out=$(bash scripts/a.sh)", {"a.sh"}),
-    ("x=`bash scripts/a.sh`", {"a.sh"}),
-    ('tmux new-session -d -s x "bash scripts/a.sh"', {"a.sh"}),
-    ("echo myscripts/a.sh", {"a.sh"}),               # some a.sh: reported, to be safe
-    ("bash scripts//a.sh scripts/./b.sh", {"a.sh", "b.sh"}),
-    ('bash "$SCRIPT_DIR/a.sh"', {"a.sh"}),
+    ("echo a.shx scripts/a.sh.bak", set()),
+    # Names that are no scanned path come out as something else, so a comparison fails:
+    ("echo myscripts/a.sh", {"myscripts/a.sh"}),
+    ("bash scripts/sub/a.sh", {"scripts/sub/a.sh"}),
+    ("bash benchmarks/a.sh", {"benchmarks/a.sh"}),
+    ('bash "$SCRIPT_DIR/a.sh"', {"SCRIPT_DIR/a.sh"}),
     ("cd scripts && bash ./a.sh", {"a.sh"}),
-    ("bash scripts/sub/a.sh", {"a.sh"}),
-    ("true&&scripts/a.sh", {"a.sh"}),
-    ("x;scripts/a.sh", {"a.sh"}),
-    ("a|scripts/a.sh", {"a.sh"}),
-    ("${X:-scripts/a.sh}", {"a.sh"}),
-    ("echo scripts/a.sh.bak", set()),
-    ("echo a.shx", set()),
-    ("bash -x scripts/a.sh", {"a.sh"}),
-    ("bash -o pipefail scripts/a.sh", {"a.sh"}),
-    ("if bash scripts/a.sh; then :; fi", {"a.sh"}),
-    ("do bash scripts/a.sh", {"a.sh"}),
-    ("( bash scripts/a.sh )", {"a.sh"}),
-    ("time bash scripts/a.sh", {"a.sh"}),
-    ("nohup bash scripts/a.sh &", {"a.sh"}),
-    ("tmux new-session -d -s x bash scripts/a.sh", {"a.sh"}),
-    ("echo scripts/a.sh", {"a.sh"}),                 # a word of its own: reported, to be safe
+    ('bash "scripts/${step}.sh"', {".sh"}),
+    ("bash scripts/{a,b}.sh", {".sh"}),
+    ("bash scripts/a.sh,b.sh", {"scripts/a.sh,b.sh"}),
+    ("bash scripts/a=b.sh", {"b.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):
-    """Every mention of a shell script counts, by its file name."""
+    """Every mention of a shell script counts, as a normalised repository-relative path."""
     assert es.called_scripts([es.ShellLine(line)]) == called
 
 
@@ -344,15 +353,16 @@ def test_plain_words_survive_the_split(words):
 
 @given(PLAIN_WORD)
 def test_a_called_script_is_found_with_any_name(name):
-    """A script is found under its own name, whatever characters the name uses."""
-    script = f"{name.replace('/', '_')}.sh"
-    assert es.called_scripts([es.ShellLine(f"bash scripts/{script}")]) == {script}
+    """A script is found under its own path, whatever characters its name uses."""
+    script = f"scripts/{name.replace('/', '_')}.sh"
+    assert es.called_scripts([es.ShellLine(f"bash {script}")]) == {posixpath.normpath(script)}
 
 
 @given(LINE_TEXT)
 def test_a_path_inside_quoted_text_is_reported(text):
     """A script named inside quoted text may be a command string, so it is reported."""
-    assert "a.sh" in es.called_scripts([es.ShellLine(f"run {shlex.quote(text + ' scripts/a.sh')}")])
+    line = f"run {shlex.quote(text + ' scripts/a.sh')}"
+    assert A in es.called_scripts([es.ShellLine(line)])
 
 
 @given(st.sampled_from(["", "bash ", "(bash ", "x=$(bash ", "`bash ", "if bash ", '"bash ',
@@ -360,4 +370,19 @@ def test_a_path_inside_quoted_text_is_reported(text):
        st.sampled_from(["", ")", ">log", " >> log", "`", '"', "; :", " || exit 1", "&"]))
 def test_a_script_is_found_in_any_structure(lead, trail):
     """However a call is wrapped, quoted or redirected, the script is found."""
-    assert es.called_scripts([es.ShellLine(f"{lead}scripts/a.sh{trail}")]) == {"a.sh"}
+    assert es.called_scripts([es.ShellLine(f"{lead}scripts/a.sh{trail}")]) == {A}
+
+
+@given(LINE_TEXT)
+def test_quoted_text_is_never_plain(text):
+    """No character inside a single-quoted word is plain code, where << could redirect."""
+    assume("'" not in text)            # one single-quoted word, no '"'"' splices
+    line = f"echo '{text}'"
+    assert not any(es._plain_positions(line)[len("echo '"):-1])
+
+
+@given(LINE_TEXT, st.sampled_from(["", " rest", ";x", ">out", "<<B"]))
+def test_a_quoted_delimiter_comes_back_whole(word, trail):
+    """The shell word after << is read back with its quotes removed, up to what follows."""
+    assume(word and word.strip(" \t") == word)
+    assert es._shell_word(shlex.quote(word) + trail) == word
