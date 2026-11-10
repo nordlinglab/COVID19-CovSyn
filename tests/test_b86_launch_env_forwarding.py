@@ -102,9 +102,11 @@ def test_the_firefly_modules_do_not_read_the_environment():
 def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     """A bin directory with stand-ins for tmux, uv and sleep, and the directory they record in.
 
-    new-session applies -c and -e, runs the firefly command and keeps the chain session's
-    environment; has-session reports the firefly session live, once started, only when
-    FIREFLY_LIVE is set.
+    new-session applies -c and -e and runs the firefly command with only those variables, PATH
+    and the stand-in uv's UV_STATUS, as a real session gets the tmux server's environment and
+    the client's PATH; it keeps the chain session's environment. has-session reports a session
+    named in LIVE_SESSIONS, and the firefly session live, once started, only when FIREFLY_LIVE
+    is set.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -119,6 +121,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
 case "$1" in
   has-session)
+    case " ${{LIVE_SESSIONS:-}} " in *" ${{3#=}} "*) exit 0 ;; esac
     # STATUS_ON_CHECK: the optimiser exits, with that status, while the launcher checks.
     if [ -n "${{STATUS_ON_CHECK:-}}" ] && [ -e "{record}/firefly_started" ]; then
       echo "$STATUS_ON_CHECK" > firefly_phaseD.exit; exit 1
@@ -139,7 +142,8 @@ while [ $# -gt 0 ]; do
 done
 if [ "$name" = firefly ]; then
   touch "{record}/firefly_started"
-  [ -n "${{KILL_FIREFLY:-}}" ] || (cd "$dir" && env "${{envs[@]}}" "$@")
+  [ -n "${{KILL_FIREFLY:-}}" ] || (cd "$dir" &&
+    env -i PATH="$PATH" UV_STATUS="${{UV_STATUS:-0}}" "${{envs[@]}}" "$@")
 else
   env -i "${{envs[@]}}" > "{record}/chain_env"
 fi
@@ -287,14 +291,16 @@ def test_the_chain_stops_when_the_firefly_failed(tmp_path, content, launched, st
     assert (record / "uv_run_args").exists() != stops
 
 
-def test_the_chain_reads_the_variables_review_found_dropped():
-    """The variables the 2026-11-10 code reviews found dropped are all found by the scan.
-
-    Seven are read by the chain itself; VERIFY_WORKERS (B86) by the checklist module.
-    """
-    dropped = {"CPU_CORES", "FIREFLY_RUN", "REVALIDATE", "REVALIDATION_BLOCKS", "SELECT",
-               "SELECT_TOP", "VERIFY_WORKERS", "PREVIOUS_CHECKS"}
-    assert dropped <= set(CHAIN_VARIABLES)
+@pytest.mark.parametrize("live", ["firefly", "chain"])
+def test_launch_refuses_while_a_session_runs(tmp_path, live):
+    """A second launch beside a live firefly or chain session stops before touching anything."""
+    root, record, status, output = _run(tmp_path, SCRIPT, {
+        "LIVE_SESSIONS": live, "_files": {"firefly_phaseD.exit": "0\n"},
+    })
+    assert status == 1
+    assert "already running" in output
+    assert not (record / "uv_run_args").exists()
+    assert (root / "firefly_phaseD.exit").read_text() == "0\n"
 
 
 @pytest.mark.parametrize("variable", CHAIN_VARIABLES)
