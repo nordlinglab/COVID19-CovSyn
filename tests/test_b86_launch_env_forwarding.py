@@ -67,24 +67,47 @@ def _environment_reads(path: Path, mappings: bool = True) -> set[str]:
 
 
 def _import_closure(module: str) -> set[Path]:
-    """The covsyn source files a module imports, directly or through other covsyn modules."""
+    """The covsyn source files a module imports, directly or through other covsyn modules.
+
+    Relative imports resolve against the importing module, and each package's ``__init__.py``
+    counts, as it runs on every import of the package.
+    """
     seen, todo, files = set(), [module], set()
     while todo:
         name = todo.pop()
-        if name in seen:
+        if name in seen or not name.startswith("covsyn"):
             continue
         seen.add(name)
+        parts = name.split(".")
+        for depth in range(1, len(parts)):
+            init = SOURCE.parent.joinpath(*parts[:depth], "__init__.py")
+            if init.is_file():
+                files.add(init)
         path = SOURCE.parent / (name.replace(".", "/") + ".py")
+        package = SOURCE.parent.joinpath(*parts, "__init__.py")
+        path = path if path.is_file() else package
         if not path.is_file():
             continue
         files.add(path)
+        base = parts if path.name == "__init__.py" else parts[:-1]
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("covsyn"):
-                todo.append(node.module)
-                todo.extend(f"{node.module}.{alias.name}" for alias in node.names)
+            if isinstance(node, ast.ImportFrom):
+                prefix = base[: len(base) - node.level + 1] if node.level else []
+                target = ".".join([*prefix, *(node.module or "").split(".")]).strip(".")
+                todo.append(target)
+                todo.extend(f"{target}.{alias.name}" for alias in node.names)
             elif isinstance(node, ast.Import):
-                todo.extend(a.name for a in node.names if a.name.startswith("covsyn"))
+                todo.extend(a.name for a in node.names)
     return files
+
+
+def _passes_environment(path: Path) -> bool:
+    """Whether a module passes ``os.environ`` itself to a function, as to ``worker_count``."""
+    return any(
+        isinstance(node, ast.Call)
+        and any(_name(arg) == "environ" for arg in [*node.args, *(k.value for k in node.keywords)])
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+    )
 
 
 # Every covsyn module the firefly session runs; the chain runs the rest, and these too.
@@ -100,12 +123,16 @@ def _shell_code(path: Path) -> str:
 def _assigned(code: str) -> set[str]:
     """Names a shell script assigns.
 
-    An assignment counts on any line, after ; & or |, and by export, local, declare, readonly,
-    for or read.
+    An assignment counts on any line, after ; & or |, and by export, local, declare or
+    readonly; so do the names of for and read.
     """
-    return set(re.findall(
-        rf"(?:^\s*|[;&|]\s*|\b(?:export|local|declare|readonly|for|read)\s+(?:-\w+\s+)*)"
-        rf"({NAME})(?:=|\s+in\b|\s*$)", code, re.MULTILINE))
+    builtin = r"\b(?:export|local|declare|readonly)\s+(?:-\w+\s+)*"
+    return (
+        set(re.findall(rf"(?:^\s*|[;&|]\s*|{builtin})({NAME})=", code, re.MULTILINE))
+        | set(re.findall(rf"\bfor\s+({NAME})\s+in\b", code))
+        | set(re.findall(rf"\b(?:read|export|local|declare|readonly)\s+(?:-\w+\s+)*({NAME})"
+                         r"\s*(?:$|;)", code, re.MULTILINE))
+    )
 
 
 def _chain_variables() -> list[str]:
@@ -145,6 +172,22 @@ def test_the_firefly_modules_read_only_what_the_firefly_session_is_given():
     assert len(FIREFLY_FILES) > 2
     for path in FIREFLY_FILES:
         assert _environment_reads(path, mappings=False) <= {"WARM_START"}, path.name
+        # A mapping reader such as worker_count reads only when given the environment.
+        assert not _passes_environment(path), path.name
+
+
+def test_the_import_closure_follows_relative_imports_and_packages(tmp_path, monkeypatch):
+    """A relative import and a package ``__init__.py`` are part of what a module runs."""
+    package = tmp_path / "covsyn" / "calibration"
+    package.mkdir(parents=True)
+    (tmp_path / "covsyn" / "__init__.py").write_text("")
+    (package / "__init__.py").write_text("import os\nos.environ['B']")
+    (package / "main.py").write_text("from .helper import f\n")
+    (package / "helper.py").write_text("def f():\n    pass\n")
+    monkeypatch.setattr(__import__(__name__), "SOURCE", tmp_path / "covsyn")
+    files = {p.relative_to(tmp_path).as_posix() for p in _import_closure("covsyn.calibration.main")}
+    assert files == {"covsyn/__init__.py", "covsyn/calibration/__init__.py",
+                     "covsyn/calibration/main.py", "covsyn/calibration/helper.py"}
 
 
 @pytest.mark.parametrize("code", [
@@ -157,6 +200,12 @@ def test_the_chain_scan_sees_every_assignment(code):
     It is not user input, so the launcher is not asked to forward it.
     """
     assert _assigned(code) == {"A"}
+
+
+@pytest.mark.parametrize("code", ["cmd || FALLBACK", 'echo "for A"', "test $A"])
+def test_the_chain_scan_takes_no_read_for_an_assignment(code):
+    """A word that only ends a line, or sits in a string, is not an assignment."""
+    assert _assigned(code) == set()
 
 
 @pytest.mark.parametrize(("source", "expected"), [
@@ -210,8 +259,11 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
-if [ "$name" = firefly ]; then (cd "$dir" && env "${{envs[@]}}" "$@")
-else env -i "${{envs[@]}}" > "{record}/chain_env"; fi
+if [ "$name" = firefly ]; then
+  [ -n "${{KILL_FIREFLY:-}}" ] || (cd "$dir" && env "${{envs[@]}}" "$@")
+else
+  env -i "${{envs[@]}}" > "{record}/chain_env"
+fi
 """)
     for tool in ("uv", "sleep", "tmux"):
         (bin_dir / tool).chmod(0o755)
@@ -238,45 +290,66 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
 
     A value with a quote arrives intact, an unset one arrives empty, the space-separated
     WARM_START reaches the optimiser as separate files whatever the user's login shell, and
-    the firefly session replaces the previous run's exit status with the optimiser's.
+    the firefly session leaves the optimiser's exit status where the chain looks for it.
     """
     root, record, status, output = _run(tmp_path, SCRIPT, {
         "WARM_START": "a/firefly_best.txt b/firefly_best.txt",
         "FIREFLY_RUN": "run's dir",
         "CPU_CORES": "8",
-        "UV_STATUS": "3",
-        "_files": {"firefly_phaseD.exit": "0\n"},
+        "_files": {"firefly_phaseD.exit": "1\n"},
     })
     assert status == 0, output
     args = (record / "uv_run_args").read_text().split("\n")
     start = args.index("--warm_start")
     assert args[start + 1:start + 3] == ["a/firefly_best.txt", "b/firefly_best.txt"]
-    assert (root / "firefly_phaseD.exit").read_text().strip() == "3"
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
+    assert (root / chain["FIREFLY_STATUS"]).read_text().strip() == "0"
     assert chain["FIREFLY_RUN"] == "run's dir"
     assert chain["CPU_CORES"] == "8"
     assert chain["SELECT_TOP"] == ""
     assert set(chain) == set(CHAIN_VARIABLES)
 
 
-@pytest.mark.parametrize(("exit_status", "stops"), [
-    ("1", True), ("137", True), ("0", False), (None, False),
-])
-def test_the_chain_stops_when_the_firefly_failed(tmp_path, exit_status, stops):
-    """A failed optimiser stops the chain before it reads FIREFLY_RUN.
+def test_launch_stops_when_the_optimiser_fails_at_startup(tmp_path):
+    """An optimiser that exits non-zero at once fails the launch, and no chain starts."""
+    root, record, status, output = _run(tmp_path, SCRIPT, {"UV_STATUS": "3"})
+    assert status == 1
+    assert "exited at startup with status 3" in output
+    assert not (record / "chain_env").exists()
 
-    A successful one, or a chain started on its own without a status file, goes on to its
-    first module, the revalidation (here a stand-in uv that fails, so the chain stops there).
+
+def test_a_killed_firefly_session_leaves_running(tmp_path):
+    """A session killed before the optimiser exits writes no status, so "running" stays."""
+    root, record, status, output = _run(tmp_path, SCRIPT, {"KILL_FIREFLY": "1"})
+    assert status == 0, output
+    assert (root / "firefly_phaseD.exit").read_text().strip() == "running"
+
+
+@pytest.mark.parametrize(("content", "launched", "stops"), [
+    ("1", True, True),
+    ("137", True, True),
+    ("running", True, True),    # killed before the optimiser exited
+    (None, True, True),         # status file gone
+    ("0", True, False),
+    ("1", False, False),        # a hand-run chain ignores a stale status
+    (None, False, False),
+])
+def test_the_chain_stops_when_the_firefly_failed(tmp_path, content, launched, stops):
+    """A failed or killed optimiser stops a launched chain before it reads FIREFLY_RUN.
+
+    A successful one, or a chain started by hand, goes on to its first module, the
+    revalidation (here a stand-in uv that fails, so the chain stops there).
     """
     files = {"run/firefly_result.txt": "1 2 3\n"}
-    if exit_status is not None:
-        files["firefly_phaseD.exit"] = exit_status + "\n"
-    root, record, status, output = _run(tmp_path, CHAIN, {
-        "FIREFLY_RUN": "run", "UV_STATUS": "9", "_files": files,
-    })
+    if content is not None:
+        files["firefly_phaseD.exit"] = content + "\n"
+    env = {"FIREFLY_RUN": "run", "UV_STATUS": "9", "_files": files}
+    if launched:
+        env["FIREFLY_STATUS"] = "firefly_phaseD.exit"
+    root, record, status, output = _run(tmp_path, CHAIN, env)
     log = (root / "phaseD_chain.log").read_text()
     assert status != 0, output
-    assert ("the firefly session exited with status" in log) == stops, log
+    assert ("the firefly session ended with status" in log) == stops, log
     assert (record / "uv_run_args").exists() != stops
 
 

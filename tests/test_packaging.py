@@ -182,7 +182,11 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
 
 
 PYTHON_SCRIPT = re.compile(r"\bpython3? [\w./-]+\.py\b")
-THROUGH_UV = re.compile(r"\buv run(?:\s+--?[\w-]+(?:[ =][^\s|;&-][^\s|;&]*)?)*\s+$")
+# uv run options that take a value; any other option stands alone.
+UV_VALUE_OPTIONS = r"--with|--python|-p|--extra|--group|--directory|--project|--env-file"
+THROUGH_UV = re.compile(
+    rf"\buv run(?:\s+(?:(?:{UV_VALUE_OPTIONS})(?:\s+|=)[^\s|;&]+|--?[\w-]+(?:=[^\s|;&]+)?))*\s+$"
+)
 
 
 @pytest.mark.parametrize("path", _script_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
@@ -209,6 +213,8 @@ def test_usage_lines_run_scripts_through_uv(path):
         ("uv run --python 3.13 -q python scripts/x.py", True),
         ("python scripts/x.py", False),
         ("Requires uv run setup first, then: python scripts/x.py", False),
+        ("see uv run --frozen then python scripts/x.py", False),
+        ("uv run --env-file=.env python scripts/x.py", True),
     ],
 )
 def test_usage_line_check_accepts_only_uv_options(line, through_uv):

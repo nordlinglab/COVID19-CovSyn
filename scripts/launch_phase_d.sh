@@ -19,6 +19,8 @@
 #   SELECT           1 (default) runs the checklist on the best revalidated candidates (B60)
 #   SELECT_TOP       how many candidates that selection checks (default 5)
 #   CPU_CORES        workers for the selection's simulations (default 24)
+#   FIREFLY_STATUS   set by this script: the file where the firefly session leaves its exit
+#                    status, which the chain checks before it uses FIREFLY_RUN
 # An unset variable reaches the chain empty, which the chain reads as its default.
 set -euo pipefail
 
@@ -42,18 +44,26 @@ uv sync --locked --inexact
 # through the user's default shell: bash then expands the variables, so WARM_START splits into
 # its files under any login shell, and a quote in a value cannot break the command line.
 CHAIN_ENV=(PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT
-           SELECT_TOP CPU_CORES)
+           SELECT_TOP CPU_CORES FIREFLY_STATUS)
+# The firefly session replaces "running" with the optimiser's exit status, so a session that is
+# killed before the optimiser exits leaves "running", which stops the chain too.
+FIREFLY_STATUS=firefly_phaseD.exit
+echo running > "$FIREFLY_STATUS"
 chain_env_args=()
 for name in "${CHAIN_ENV[@]}"; do chain_env_args+=(-e "$name=${!name:-}"); done
-# The firefly session writes its exit status, which the chain checks before using FIREFLY_RUN;
-# the previous run's status is removed first.
-rm -f firefly_phaseD.exit
 # shellcheck disable=SC2016
-tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" bash -c \
+tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
+  -e "FIREFLY_STATUS=$FIREFLY_STATUS" bash -c \
   'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1; \
-   echo $? > firefly_phaseD.exit'
+   echo $? > "$FIREFLY_STATUS"'
 sleep 2
+status=$(cat "$FIREFLY_STATUS")
+if [ "$status" != running ] && [ "$status" != 0 ]; then
+  echo "ERROR: the optimiser exited at startup with status $status; not starting the chain"
+  tail -n 20 firefly_phaseD.log 2>/dev/null || true
+  exit 1
+fi
 tmux new-session -d -s chain -c "$ROOT" "${chain_env_args[@]}" bash scripts/phase_d_chain.sh
 sleep 1
 tmux ls

@@ -21,8 +21,8 @@
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
 # Environment: PREVIOUS_CHECKS, FIREFLY_RUN, REVALIDATE, REVALIDATION_BLOCKS, SELECT,
-#              SELECT_TOP, CPU_CORES, VERIFY_WORKERS; launch_phase_d.sh documents and forwards
-#              each, and an empty value means the default.
+#              SELECT_TOP, CPU_CORES, VERIFY_WORKERS, FIREFLY_STATUS; launch_phase_d.sh
+#              documents and forwards each, and an empty value means the default.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,12 +49,16 @@ run() { uv run --no-sync python -m "$@"; }
 
 say 'waiting for the firefly session to finish'
 while tmux has-session -t firefly 2>/dev/null; do sleep 120; done
-# launch_phase_d.sh has the firefly session write its exit status, so a failed optimiser stops
-# the chain instead of letting it report an earlier run's results from FIREFLY_RUN. A chain
-# started on its own, on an existing result, has no status file and goes on.
-if [ -f firefly_phaseD.exit ] && [ "$(cat firefly_phaseD.exit)" != 0 ]; then
-    say "ERROR: the firefly session exited with status $(cat firefly_phaseD.exit), stopping"
-    exit 1
+# launch_phase_d.sh names in FIREFLY_STATUS the file where the firefly session leaves its exit
+# status; it holds "running" until the optimiser exits, so a failed or killed optimiser stops the
+# chain instead of letting it report an earlier run's results from FIREFLY_RUN. A chain started
+# by hand, on an existing result, has no FIREFLY_STATUS and goes on.
+if [ -n "${FIREFLY_STATUS:-}" ]; then
+    status=$(cat "$FIREFLY_STATUS" 2>/dev/null || echo missing)
+    if [ "$status" != 0 ]; then
+        say "ERROR: the firefly session ended with status '$status', stopping"
+        exit 1
+    fi
 fi
 # B56 (E87): the objective's 300 fixed seeds pick a vector that sits on the edge of several
 # targets; re-score the final population and every personal best on unseen seed blocks and
