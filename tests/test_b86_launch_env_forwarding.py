@@ -91,8 +91,8 @@ CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
 # environ[...] under any module name (not an assignment, which sets it for a child) and a
 # mapping of it passed as env (worker_count). A del is left out by _environment_reads.
 ENVIRONMENT_READ = re.compile(
-    r"""(?:environ\.get|getenv|\benv\.get)\(\s*['"]([A-Z][A-Z0-9_]*)"""
-    r"""|\b(?:\w+\.)?environ\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
+    r"""\b(?:environ\.get|getenv|env\.get)\(\s*['"]([A-Z][A-Z0-9_]*)"""
+    r"""|\benviron\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
 
 
 def _environment_reads(text: str) -> set[str]:
@@ -121,6 +121,7 @@ def _environment_reads(text: str) -> set[str]:
     ("del  os.environ['A']", set()),
     ("del environ['A']", set()),
     ("myenviron['A']", set()),
+    ("myenviron.get('A')", set()),
     ("_os.environ['A']", {"A"}),                   # os imported under another name
     ("del os.environ['A'], os.environ['B']", set()),
 ])
@@ -281,8 +282,7 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     command = (record / "chain_command").read_text().split("\n")
     script = command.index("scripts/phase_d_chain.sh")
     assert command[0] == "env" and command[script - 1] == "bash"
-    assigned = {word.split("=", 1)[0] for word in command[1:script - 1]}
-    assert assigned == SET_FOR_THE_CHAIN_PROCESS
+    assert set(command[1:script - 1]) == {f"{name}=1" for name in SET_FOR_THE_CHAIN_PROCESS}
     assert not SET_FOR_THE_CHAIN_PROCESS & set(chain)
     assert set(chain) == set(CHAIN_VARIABLES)
 
@@ -449,18 +449,32 @@ def test_launch_refuses_while_a_session_runs(tmp_path, live):
     assert (root / "firefly_phaseD.exit").read_text() == "0\n"
 
 
+def _header_sections() -> tuple[str, str]:
+    """The launcher header's inputs, and what it sets whatever the caller sets."""
+    header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]
+    inputs, marker, set_by_it = header.partition("# Set by this script")
+    assert marker, "the launcher header no longer has a '# Set by this script' section"
+    return inputs, set_by_it
+
+
 @pytest.mark.parametrize("variable", sorted(SET_FOR_THE_CHAIN_PROCESS))
 def test_what_the_launcher_sets_is_documented_as_set_by_it(variable):
-    """A variable the launcher sets whatever the caller sets is documented apart from inputs."""
-    header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]
-    assert variable in header.split("# Set by this script")[1]
+    """A variable the launcher sets whatever the caller sets is documented apart from inputs.
+
+    The launcher also clears a value the caller exports before any tmux server starts.
+    """
+    inputs, set_by_it = _header_sections()
+    assert variable in set_by_it
+    assert variable not in inputs
+    code = _code(SCRIPT)
+    unset = code.index(f"unset {variable}")
+    assert unset < next(i for i, line in enumerate(code) if "tmux new-session" in line)
 
 
 @pytest.mark.parametrize("variable", CHAIN_VARIABLES)
 def test_the_variable_is_documented_in_the_usage_header(variable):
-    """The header is where a run is configured from, so an undocumented variable is unusable."""
-    header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]
-    assert variable in header
+    """The header's inputs are where a run is configured from; an undocumented one is unusable."""
+    assert variable in _header_sections()[0]
 
 
 def test_the_checklist_uses_the_shared_helper_for_its_worker_count():

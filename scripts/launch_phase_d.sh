@@ -36,6 +36,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# A value the caller exports would reach a tmux server this script starts, and every window
+# opened there later; this script sets ENVIRONMENT_CHECKED on the chain process alone.
+unset ENVIRONMENT_CHECKED
 WARM_START="${WARM_START:-firefly_result/phaseD_run10/firefly_best.txt}"
 
 if tmux has-session -t =firefly 2>/dev/null || tmux has-session -t =chain 2>/dev/null; then
