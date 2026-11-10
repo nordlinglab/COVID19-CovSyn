@@ -28,7 +28,7 @@ SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
 # module (worker_count), the others by the two scripts.
 CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDATE",
                    "REVALIDATION_BLOCKS", "SELECT", "SELECT_TOP", "CPU_CORES", "FIREFLY_STATUS",
-                   "UV_PROJECT_ENVIRONMENT")
+                   "UV_PROJECT_ENVIRONMENT", "ENVIRONMENT_CHECKED")
 # Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
@@ -93,16 +93,21 @@ def test_every_module_environment_read_is_forwarded_or_cleared():
         assert any(re.fullmatch(rf"\s*unset {name}", line) for line in _code(CHAIN)), name
 
 
-def test_the_synthesis_checks_the_environment_before_running_without_sync():
-    """data_synthesis.sh checks .venv against uv.lock before it runs without syncing.
+def test_the_synthesis_checks_the_environment_unless_the_launcher_did():
+    """data_synthesis.sh checks the environment against uv.lock before it runs without syncing.
 
-    Run on its own, as the README shows, nothing else checks it; the check changes nothing, so
-    the chain may call the script too.
+    Run on its own, as the README shows, nothing else checks it. Under the launcher, which
+    checked it once and sets ENVIRONMENT_CHECKED, a lock pulled during the run must not stop the
+    chain halfway, as every step runs in the environment the launcher checked. uv's own message
+    is kept, as it names what differs.
     """
-    code = _code(SYNTHESIS)
-    check = next(i for i, line in enumerate(code) if "uv sync --locked --check" in line)
-    first_run = next(i for i, line in enumerate(code) if "uv run --no-sync" in line)
-    assert check < first_run
+    code = "\n".join(_code(SYNTHESIS))
+    check = re.search(r'if \[ -z "\$\{ENVIRONMENT_CHECKED:-\}" \]; then\n(.*?)\nfi', code, re.S)
+    assert check, "the check no longer depends on ENVIRONMENT_CHECKED"
+    sync = next(line for line in check.group(1).splitlines() if "uv sync" in line)
+    assert "--locked --check --inexact" in sync
+    assert "/dev/null" not in sync                  # uv's message names what differs
+    assert code.index("uv sync --locked --check") < code.index("uv run --no-sync")
 
 
 def test_the_firefly_modules_do_not_read_the_environment():
@@ -206,6 +211,7 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert chain["SELECT_TOP"] == ""
     # uv sync in the launcher and uv run in both sessions use the same environment.
     assert chain["UV_PROJECT_ENVIRONMENT"] == ".venv"
+    assert chain["ENVIRONMENT_CHECKED"] == "1"
     assert (record / "uv_run_environment").read_text().strip() == ".venv"
     assert set(chain) == set(CHAIN_VARIABLES)
 

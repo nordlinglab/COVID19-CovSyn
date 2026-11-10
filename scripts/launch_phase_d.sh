@@ -27,6 +27,8 @@
 #                    stops the chain.
 #   UV_PROJECT_ENVIRONMENT  the environment uv checks here and both sessions run in; default
 #                    .venv
+#   ENVIRONMENT_CHECKED  set by this script after it checks the environment, so that
+#                    data_synthesis.sh does not check it again during the run
 # An unset variable reaches the chain empty, which the chain reads as its default; the launcher
 # always gives FIREFLY_STATUS and UV_PROJECT_ENVIRONMENT a value.
 set -euo pipefail
@@ -47,6 +49,8 @@ command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"
 # them, lest they run in another one.
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-.venv}"
 uv sync --locked --inexact
+# shellcheck disable=SC2034  # read through ${!name} when the chain's variables are passed
+ENVIRONMENT_CHECKED=1
 # A tmux session gets the tmux server's environment, not this shell's, so every variable a
 # session reads is passed with -e. PATH is the exception: tmux gives a new session the PATH of
 # the shell that runs new-session (tested on tmux 3.6), so the uv found above is found there.
@@ -54,7 +58,7 @@ uv sync --locked --inexact
 # through the user's default shell: bash then expands the variables, so WARM_START splits into
 # its files under any login shell, and a quote in a value cannot break the command line.
 CHAIN_ENV=(PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT
-           SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT)
+           SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT ENVIRONMENT_CHECKED)
 # The firefly session replaces "running" with the optimiser's exit status, so a session that is
 # killed before the optimiser exits leaves "running", which stops the chain too.
 FIREFLY_STATUS="${FIREFLY_STATUS:-firefly_phaseD.exit}"

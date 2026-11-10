@@ -13,6 +13,8 @@
 #   CPU_CORES       worker processes (default 24)
 #   PARAMETER_PATH  directory holding firefly_best.txt (default: the name phase_d_chain.sh copies
 #                   the run onto)
+#   UV_PROJECT_ENVIRONMENT  the environment the runs use (default .venv)
+#   ENVIRONMENT_CHECKED  set by launch_phase_d.sh, which checked the environment at the launch
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,10 +30,16 @@ if [ ! -f "$parameter_path/firefly_best.txt" ]; then
     exit 1
 fi
 
-# The runs below use the environment as it is (--no-sync), so it is checked against uv.lock
-# first; the check changes nothing, so the chain can call this script without reinstalling.
-uv sync --locked --check --inexact >/dev/null 2>&1 \
-    || { echo "ERROR: .venv differs from uv.lock; run uv sync"; exit 1; }
+# The runs below use the environment as it is (--no-sync), so run on its own this script checks
+# it against uv.lock first; the check changes nothing, and uv's message names what differs.
+# Under the launcher, which checked it once, every step of the chain runs in that environment,
+# so a lock pulled during the run must not stop the chain here.
+if [ -z "${ENVIRONMENT_CHECKED:-}" ]; then
+    command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"; exit 1; }
+    uv sync --locked --check --inexact \
+        || { echo "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; run uv sync"
+             exit 1; }
+fi
 
 for mode in "${modes[@]}"; do
     result_path="./synthetic_data_results_$mode"
