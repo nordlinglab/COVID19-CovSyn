@@ -162,14 +162,24 @@ def test_the_chain_checks_the_environment_once_before_it_waits(tmp_path):
     stop the chain halfway. uv's own message is kept in the log.
     """
     root, record, status, output = _run(tmp_path, CHAIN, {
-        "FIREFLY_RUN": "run", "UV_SYNC_STATUS": "2",
+        "FIREFLY_RUN": "run", "UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env",
         "_files": {"run/firefly_result.txt": "1 2 3\n"}})
     log = (root / "phaseD_chain.log").read_text()
     assert status != 0
-    assert "differs from uv.lock" in log
-    calls = (record / "uv_calls").read_text().splitlines()
-    assert calls == ["sync --locked --check --inexact"]   # nothing ran on it
+    assert "/opt/env differs from uv.lock" in log
+    assert "once the firefly session has ended" in log   # not uv sync beside the optimiser
+    assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
+    # The check is the first call, before the wait for the firefly session, and nothing ran.
+    assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
 
+
+def test_the_chain_checks_before_it_waits_for_the_optimiser(tmp_path):
+    """A passing check comes before the first look for the firefly session."""
+    root, record, status, output = _run(tmp_path, CHAIN, {
+        "FIREFLY_RUN": "run", "UV_STATUS": "9", "_files": {"run/firefly_result.txt": "1 2 3\n"}})
+    calls = (record / "calls").read_text().splitlines()
+    assert calls[0] == "uv sync --locked --check --inexact"
+    assert calls[1] == "tmux has-session =firefly"
 
 
 def test_the_firefly_modules_do_not_read_the_environment():
@@ -195,7 +205,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "uv").write_text(
         "#!/usr/bin/env bash\n"
         f'echo "${{UV_PROJECT_ENVIRONMENT:-}}" > "{record}/uv_$1_environment"\n'
-        f'echo "$*" | cut -d" " -f1-4 >> "{record}/uv_calls"\n'
+        f'echo "uv $*" >> "{record}/calls"\n'
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
@@ -204,6 +214,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
 case "$1" in
   has-session)
+    echo "tmux $1 $3" >> "{record}/calls"
     case " ${{LIVE_SESSIONS:-}} " in *" ${{3#=}} "*) exit 0 ;; esac
     # STATUS_ON_CHECK: the optimiser exits, with that status, while the launcher checks.
     if [ -n "${{STATUS_ON_CHECK:-}}" ] && [ -e "{record}/firefly_started" ]; then
@@ -290,6 +301,7 @@ def test_launch_runs_both_sessions_in_the_environment_the_user_names(tmp_path):
     assert status == 0, output
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
+    assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
     assert chain["UV_PROJECT_ENVIRONMENT"] == "/opt/env"
 
@@ -308,7 +320,7 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
     assert status == 1
     assert "/opt/env differs from uv.lock" in output
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
-    assert (record / "uv_calls").read_text().splitlines() == ["sync --locked --check --inexact"]
+    assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
     assert not (record / "uv_run_args").exists()
 
 
@@ -320,13 +332,13 @@ def test_the_synthesis_rejects_an_argument_it_does_not_know(tmp_path, args):
         "PARAMETER_PATH": "run", "_args": args, **SYNTHESIS_FILES})
     assert status == 2
     assert "Usage" in output
-    assert not (record / "uv_calls").exists()
+    assert not (record / "calls").exists()
 
 
-def test_the_synthesis_under_the_launcher_skips_the_check(tmp_path):
+def test_the_synthesis_called_by_the_chain_skips_the_check(tmp_path):
     """With --environment-checked, a lock that changed mid-run does not stop the synthesis.
 
-    It runs in the environment the launcher checked.
+    The chain checked the environment at its start, and the synthesis runs in it.
     """
     root, record, status, output = _run(tmp_path, SYNTHESIS, {
         "PARAMETER_PATH": "run", "UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env",

@@ -59,7 +59,8 @@ run() { uv run --no-sync python -m "$@"; }
 # stop the chain halfway. uv's own message goes to the log.
 command -v uv >/dev/null || { say 'ERROR: uv not found on PATH; see the README'; exit 1; }
 if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
-    say "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; run uv sync"
+    say "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; the chain stops."
+    say "Run uv sync once the firefly session has ended, then start the chain again."
     exit 1
 fi
 
