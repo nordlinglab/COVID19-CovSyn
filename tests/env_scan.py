@@ -289,6 +289,7 @@ class _Walk:
     kinds: list[str]
     groups: dict[int, int]
     stack: list[_Frame]
+    closers: set[int]
 
     @property
     def open(self) -> list[str]:
@@ -305,9 +306,10 @@ GROUPS = {"$(", "$((", "((", "$[", "${", "`"}
 # Words after which a command starts on the same line: reserved words, the brace of a group,
 # and the openers whose condition is a command. block_change and _walk share them.
 LEADERS = {"then", "else", "elif", "do", "!", "time", "{", "if", "while", "until"}
-WORD = re.compile(r"[^\s;&|()]*")
-# The characters after which bash starts a new word, so that a # there starts a comment.
+# The characters after which bash starts a new word, so that a # there starts a comment; a )
+# that closes a substitution is no break, as the word goes on after it.
 WORD_BREAKS = " \t\n;&|()<>"
+WORD = re.compile(rf"[^{re.escape(WORD_BREAKS)}]*")
 
 
 def _arithmetic_closes(text: str, start: int) -> bool:
@@ -359,7 +361,7 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
     """
     stack = [_Frame(f.kind, -1, f.nesting, f.cases, f.command_start, f.in_pattern, f.expect_in)
              for f in stack] if stack else [_Frame("top", -1)]
-    kinds, groups, index, escaped_end = [], {}, 0, -1
+    kinds, groups, closers, index, escaped_end = [], {}, set(), 0, -1
 
     def push(kind: str, width: int) -> None:
         nonlocal index
@@ -370,6 +372,7 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
     def pop(width: int) -> None:
         nonlocal index
         frame = stack.pop()
+        closers.add(index + width - 1)
         if frame.kind in GROUPS and frame.start >= 0:
             groups[frame.start] = index + width - 1
         kinds.extend([stack[-1].kind] * width)
@@ -379,7 +382,8 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
         frame = stack[-1]
         kind, char = frame.kind, text[index]
         previous = text[index - 1] if index else before
-        word_start = previous in WORD_BREAKS and escaped_end != index
+        word_start = previous in WORD_BREAKS and escaped_end != index and \
+            (index - 1) not in closers
         if kind == "#":
             if char == "\n":
                 stack.pop()
@@ -419,7 +423,8 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             push("${", 2)
         elif kind in ACTIVE and text.startswith("$[", index):
             push("$[", 2)
-        elif kind in PLAIN and word_start and text.startswith("((", index):
+        elif kind in PLAIN and word_start and text.startswith("((", index) and \
+                previous not in "<>":           # <(( is a process substitution
             push("((", 2)
         elif kind in PLAIN and word_start and char == "#":
             stack.append(_Frame("#", index))
@@ -450,7 +455,8 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
                 frame.command_start = True
             elif pattern_paren:
                 frame.command_start = False     # bash: no esac right after a pattern's (
-            if kind == "$(" and re.match(r";;&?|;&", text[index:index + 3]) and frame.cases > 0:
+            if kind == "$(" and char == ";" and text.startswith((";;", ";&"), index) and \
+                    frame.cases > 0:
                 frame.in_pattern = True         # after ;; ;& ;;& the next pattern or esac
             if kind == "$(" and char == ")" and frame.nesting == 0 and frame.cases > 0:
                 frame.command_start = True      # a case pattern ends; its command follows
@@ -465,7 +471,7 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             index += 1
     while stack[-1].kind == "#":            # a comment ends with its line
         stack.pop()
-    return _Walk(kinds, groups, stack)
+    return _Walk(kinds, groups, stack, closers)
 
 
 def _code(text: str, walk: _Walk) -> str:
@@ -615,7 +621,8 @@ def shell_lines(text: str) -> list[ShellLine]:
             # escaped, ends this one.
             last = code[-2] if len(code) > 1 else before
             escaped = len(code) > 1 and _trailing_backslashes(code[:-2]) % 2 == 1
-            before = last if last in WORD_BREAKS and not escaped else "x"
+            closes = len(code) - 2 in walk.closers      # a ) closing a group goes on the word
+            before = last if last in WORD_BREAKS and not escaped and not closes else "x"
             continue
         if walk.open:
             buffer, stack, before = buffer + code + "\n", walk.stack, "\n"
@@ -772,19 +779,19 @@ def mentioned_scripts(text: str) -> list[str]:
     comparing them fails loudly rather than taking it for one already scanned.
     """
     plain = re.sub(r"[\\'\"]", "", text)
-    found = []
+    kinds, found = _walk(plain).kinds, []
     for match in SCRIPT_MENTION.finditer(plain):
-        # Text glued before the path, back to a blank or an operator, belongs to its word: an
-        # assignment or option name (S=, --file=) is dropped, anything else is kept.
-        glued = re.search(r"[^\s;&|()<>`]*$", plain[:match.start()]).group()
-        if glued.count("${") > glued.count("}"):
-            inside = (glued + match.group(1)).rsplit("${", 1)[1]
-            if re.fullmatch(r"\w+(?:%%?|##?)\.sh", inside):
+        if kinds[match.start()] == "${":
+            opening = plain.rfind("${", 0, match.start())
+            if re.fullmatch(r"\w+(?:%%?|##?)\.sh", plain[opening + 2:match.end()]):
                 continue                    # ${f%.sh} removes an extension; it names nothing
-            # A path in a default, alternative or pattern (${X:-scripts/a.sh}) is reported
-            # with the open expansion, so it differs from every scanned path.
-            found.append(glued + match.group(1))
+            # A path in a default, alternative or pattern (${X:-bash scripts/a.sh}) is
+            # reported with the expansion before it, so it differs from every scanned path.
+            found.append(plain[opening:match.end()])
             continue
+        # Text glued before the path, back to a word break, belongs to its word: an
+        # assignment or option name (S=, --file=) is dropped, anything else is kept.
+        glued = re.search(rf"[^{re.escape(WORD_BREAKS)}`]*$", plain[:match.start()]).group()
         if re.fullmatch(r"(?:[A-Za-z_]\w*|--?[\w-]+)[=:]|", glued):
             glued = ""
         found.append(posixpath.normpath(glued + match.group(1)))

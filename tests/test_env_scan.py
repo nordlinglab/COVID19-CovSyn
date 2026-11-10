@@ -185,6 +185,13 @@ def test_a_backslash_newline_in_ansi_c_quotes_is_kept():
     assert es.shell_lines("echo $'a\\\nb'\n") == [es.ShellLine("echo $'a\\\nb'")]
 
 
+@pytest.mark.parametrize("text", ["echo $(echo a)#$Z\n", "A=$(echo a)\\\n#$Z\n",
+                                  "echo $((1+2))#$Z\n"])
+def test_a_hash_after_a_closed_group_stays_in_the_word(text):
+    """The word goes on after the ) of a substitution, as in bash, so # there is no comment."""
+    assert "Z" in es.shell_variables(es.shell_lines(text))[0]
+
+
 def test_scan_reads_a_comment_after_an_operator_continuation():
     """After a semicolon and a continuation the next line starts a word, so # comments."""
     assert "Z" not in es.shell_variables(es.shell_lines("A=1;\\\n#b $Z\n"))[0]
@@ -327,6 +334,9 @@ def test_commands_are_split_into_words(line, words):
      {"X", "A"}),                                                 # case after a command
     (["B=1;\\", "#b $Z", "echo $B"], {"B"}),                       # # after ; is a comment
     (["cmd >#; A=1", "echo $A"], set()),                         # bash: # after > comments
+    (["echo $(echo a)#$Z", "A=1", "echo $A"], {"A"}),             # ) of $( ) is no break
+    (["cat <((echo p) | cat)", "A=1", "echo $A"], {"A"}),         # process substitution
+    (["A=$(case a in a) echo hi;; esac>/dev/null)", "B=1", "echo $B"], {"A", "B"}),
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
@@ -396,6 +406,7 @@ A = "scripts/a.sh"
     ("n=${f%.sh}", set()),                            # an extension removed, no script
     ("${X/old/scripts/a.sh}", {"${X/old/scripts/a.sh"}),   # any other expansion: loud
     ("${CMD:-scripts/run.sh --flag}", {"${CMD:-scripts/run.sh"}),
+    ("${CMD:-bash scripts/a.sh}", {"${CMD:-bash scripts/a.sh"}),
     ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):
