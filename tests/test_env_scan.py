@@ -186,7 +186,7 @@ def test_a_backslash_newline_in_ansi_c_quotes_is_kept():
 
 
 @pytest.mark.parametrize("text", ["echo $(echo a)#$Z\n", "A=$(echo a)\\\n#$Z\n",
-                                  "echo $((1+2))#$Z\n"])
+                                  "echo $((1+2))#$Z\n", "cat <(echo a)#$Z\n"])
 def test_a_hash_after_a_closed_group_stays_in_the_word(text):
     """The word goes on after the ) of a substitution, as in bash, so # there is no comment."""
     assert "Z" in es.shell_variables(es.shell_lines(text))[0]
@@ -336,6 +336,7 @@ def test_commands_are_split_into_words(line, words):
     (["cmd >#; A=1", "echo $A"], set()),                         # bash: # after > comments
     (["echo $(echo a)#$Z", "A=1", "echo $A"], {"A"}),             # ) of $( ) is no break
     (["cat <((echo p) | cat)", "A=1", "echo $A"], {"A"}),         # process substitution
+    (["((1))#it's", "A=1", "echo $A $Q"], {"A"}),                 # # after (( )) comments
     (["A=$(case a in a) echo hi;; esac>/dev/null)", "B=1", "echo $B"], {"A", "B"}),
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
 ])
@@ -407,6 +408,9 @@ A = "scripts/a.sh"
     ("${X/old/scripts/a.sh}", {"${X/old/scripts/a.sh"}),   # any other expansion: loud
     ("${CMD:-scripts/run.sh --flag}", {"${CMD:-scripts/run.sh"}),
     ("${CMD:-bash scripts/a.sh}", {"${CMD:-bash scripts/a.sh"}),
+    ("${X:-${Y} scripts/a.sh}", {"${X:-${Y} scripts/a.sh"}),   # the outermost expansion
+    ("${X:-$(bash scripts/a.sh)}", {"${X:-$(bash scripts/a.sh"}),
+    ("bash $(cd x; pwd)scripts/a.sh", {"$(cd x; pwd)scripts/a.sh"}),  # a built path
     ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):
@@ -522,7 +526,9 @@ def test_balanced_text_leaves_nothing_open(text):
     """
     walk = es._walk(text)
     assert walk.open == []
-    closers = {"$((": "))", "((": "))", "$(": ")", "${": "}", "$[": "]", "`": "`"}
+    # $(( may be arithmetic, closed by )), or a $( starting with a subshell, closed by ).
+    closers = {"$((": ("))", ")"), "((": ("))",), "$(": (")",), "${": ("}",), "$[": ("]",),
+               "`": ("`",)}
     for start, end in walk.groups.items():
         opener = next(o for o in closers if text.startswith(o, start))
         assert text[: end + 1].endswith(closers[opener])

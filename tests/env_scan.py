@@ -282,8 +282,11 @@ class _Walk:
     quote (``'``, ``"``, ``$'``, a backtick), the inside of ``$(`` (plain code too), of the
     arithmetic ``$((``, ``((`` and ``$[``, of ``${``, or ``#`` for a comment. ``groups`` maps
     the index where each ``$(``, ``$((``, ``((``, ``$[``, ``${`` or backtick group opens to the
-    index of its last character. ``stack`` holds the contexts open at the end, the outermost
-    ``top`` first, so a walk can go on from it.
+    index of its last character; a process substitution ``<(`` or ``>(`` is recorded like a
+    ``$(``. ``stack`` holds the contexts open at the end, the outermost ``top`` first, so a walk
+    can go on from it. ``closers`` holds the index of each ``)`` that closes a substitution
+    (``$(``, ``$((``, ``<(``), after which the word goes on, unlike after the ``))`` of an
+    arithmetic command.
     """
 
     kinds: list[str]
@@ -372,7 +375,8 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
     def pop(width: int) -> None:
         nonlocal index
         frame = stack.pop()
-        closers.add(index + width - 1)
+        if frame.kind in {"$(", "$(("}:     # the word goes on after a substitution's )
+            closers.add(index + width - 1)
         if frame.kind in GROUPS and frame.start >= 0:
             groups[frame.start] = index + width - 1
         kinds.extend([stack[-1].kind] * width)
@@ -419,6 +423,9 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             push("$((", 3)
         elif kind in ACTIVE and text.startswith("$(", index):
             push("$(", 2)
+        elif kind in PLAIN and char in "<>" and text.startswith("(", index + 1) and \
+                previous not in "<>":
+            push("$(", 2)                   # a process substitution, plain code like $(
         elif kind in ACTIVE and text.startswith("${", index):
             push("${", 2)
         elif kind in ACTIVE and text.startswith("$[", index):
@@ -779,19 +786,35 @@ def mentioned_scripts(text: str) -> list[str]:
     comparing them fails loudly rather than taking it for one already scanned.
     """
     plain = re.sub(r"[\\'\"]", "", text)
-    kinds, found = _walk(plain).kinds, []
+    walk, found = _walk(plain), []
+    opened = [start for start in range(len(plain)) if plain.startswith("${", start)]
+    # A substitution that ends right before a path joins its word: its closing character mapped
+    # to where it opens.
+    closed_at = {end: start for start, end in walk.groups.items()
+                 if plain.startswith(("$(", "<(", ">(", "`"), start)}
     for match in SCRIPT_MENTION.finditer(plain):
-        if kinds[match.start()] == "${":
-            opening = plain.rfind("${", 0, match.start())
+        enclosing = [s for s in opened if s < match.start() and
+                     walk.groups.get(s, len(plain)) >= match.start()]
+        if enclosing:
+            opening = enclosing[0]          # the outermost ${ that holds the path
             if re.fullmatch(r"\w+(?:%%?|##?)\.sh", plain[opening + 2:match.end()]):
                 continue                    # ${f%.sh} removes an extension; it names nothing
             # A path in a default, alternative or pattern (${X:-bash scripts/a.sh}) is
             # reported with the expansion before it, so it differs from every scanned path.
             found.append(plain[opening:match.end()])
             continue
-        # Text glued before the path, back to a word break, belongs to its word: an
-        # assignment or option name (S=, --file=) is dropped, anything else is kept.
-        glued = re.search(rf"[^{re.escape(WORD_BREAKS)}`]*$", plain[:match.start()]).group()
+        # Text glued before the path, back to a word break, belongs to its word, a
+        # substitution such as $(pwd) included: an assignment or option name (S=, --file=) is
+        # dropped, anything else is kept.
+        begin = match.start()
+        while begin:
+            if begin - 1 in closed_at:
+                begin = closed_at[begin - 1]
+            elif plain[begin - 1] not in WORD_BREAKS + "`":
+                begin -= 1
+            else:
+                break
+        glued = plain[begin:match.start()]
         if re.fullmatch(r"(?:[A-Za-z_]\w*|--?[\w-]+)[=:]|", glued):
             glued = ""
         found.append(posixpath.normpath(glued + match.group(1)))
