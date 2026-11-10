@@ -79,7 +79,24 @@ def test_it_runs_on_the_declared_scikit_learn():
 
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     pins = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
-    declared = next(pin.split("==")[1] for pin in pins if pin.startswith("scikit-learn=="))
-    assert sklearn.__version__ == declared
+    declared = [pin.split("==")[1] for pin in pins if pin.startswith("scikit-learn==")]
+    assert declared, f"pyproject.toml pins no scikit-learn==X.Y.Z: {pins}"
+    assert sklearn.__version__ == declared[0]
     nan = float("nan")
     assert np.isfinite(rw_nan_euclidean_distances([[0, 1], [1, nan]], [[0, 0]])).all()
+
+
+def test_the_call_uses_the_parameter_name_newer_releases_keep():
+    """The distance passes ensure_all_finite, the name newer scikit-learn releases keep.
+
+    scikit-learn 1.9 removed force_all_finite, which the pinned 1.6.1 still accepts, so a run on
+    the pinned version cannot catch the old name coming back; the source is checked instead.
+    """
+    import inspect
+
+    from covsyn.calibration import firefly_optimizer
+
+    source = inspect.getsource(firefly_optimizer.rw_nan_euclidean_distances)
+    code = "\n".join(line.split("#")[0] for line in source.splitlines())   # not the B87 note
+    assert "force_all_finite" not in code
+    assert "ensure_all_finite=" in code
