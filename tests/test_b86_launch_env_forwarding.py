@@ -110,13 +110,18 @@ def test_the_chain_names_only_the_golden_script_lines():
 FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
 
 
-def _parameter_paths(record: Path) -> list[str]:
-    """The --parameter_path of every uv run the stand-in recorded, in order."""
-    paths = []
+def _synthesis_runs(record: Path) -> list[tuple[str, str]]:
+    """The (--mode, --parameter_path) of every uv run the stand-in recorded, in order."""
+    assert (record / "uv_runs").exists(), "no uv run was recorded"
+    runs = []
     for line in (record / "uv_runs").read_text().splitlines():
         words = shlex.split(line)
-        paths.append(words[words.index("--parameter_path") + 1])
-    return paths
+        assert "--mode" in words and "--parameter_path" in words, line
+        runs.append((words[words.index("--mode") + 1], words[words.index("--parameter_path") + 1]))
+    return runs
+
+
+MODES = ["spread_Taiwan_weight", "taiwan_first_outbreak"]
 
 
 def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
@@ -128,7 +133,16 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
         tmp_path, SYNTHESIS, {"_files": {f"{FIREFLY}/firefly_best.txt": "1 2 3\n"}}
     )
     assert status == 0, output
-    assert _parameter_paths(record) == [f"./{FIREFLY}"] * 2, output  # both modes
+    assert _synthesis_runs(record) == [(mode, f"./{FIREFLY}") for mode in MODES], output
+
+
+def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
+    """With PARAMETER_PATH set, both modes run on that directory."""
+    root, record, status, output = _run(
+        tmp_path, SYNTHESIS, {"PARAMETER_PATH": "run", "_files": {"run/firefly_best.txt": "1\n"}}
+    )
+    assert status == 0, output
+    assert _synthesis_runs(record) == [(mode, "run") for mode in MODES], output
 
 
 SYNTHESIS_STAND_IN = (
@@ -355,7 +369,6 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         f'echo "uv $*" >> "{record}/calls"\n'
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
-        f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
         f'printf "%q " "$@" >> "{record}/uv_runs"; echo >> "{record}/uv_runs"\n'
         'exit "${UV_STATUS:-0}"\n'
     )
@@ -438,7 +451,7 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
         },
     )
     assert status == 0, output
-    args = (record / "uv_run_args").read_text().split("\n")
+    args = shlex.split((record / "uv_runs").read_text().splitlines()[-1])
     start = args.index("--warm_start")
     assert args[start + 1 : start + 3] == ["a/firefly_best.txt", "b/firefly_best.txt"]
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
@@ -487,7 +500,7 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
     assert "/opt/env differs from uv.lock" in output
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
     assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
-    assert not (record / "uv_run_args").exists()
+    assert not (record / "uv_runs").exists()
 
 
 @pytest.mark.parametrize(
@@ -522,7 +535,6 @@ def test_the_synthesis_called_by_the_chain_skips_the_check(tmp_path):
     assert status == 0, output
     assert not (record / "uv_sync_environment").exists()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
-    assert _parameter_paths(record) == ["run"] * 2, output  # PARAMETER_PATH is used, both modes
 
 
 def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
@@ -540,7 +552,7 @@ def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
     # The chain's own run() reached the revalidation, which the stand-in uv fails.
     assert status != 0
     assert "revalidation failed" in (root / "phaseD_chain.log").read_text()
-    assert "covsyn.calibration.revalidation" in (record / "uv_run_args").read_text()
+    assert "covsyn.calibration.revalidation" in (record / "uv_runs").read_text()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
 
 
@@ -649,7 +661,7 @@ def test_the_chain_stops_when_the_firefly_failed(tmp_path, content, launched, st
     log = (root / "phaseD_chain.log").read_text()
     assert status != 0, output
     assert ("the firefly session ended with status" in log) == stops, log
-    assert (record / "uv_run_args").exists() != stops
+    assert (record / "uv_runs").exists() != stops
 
 
 @pytest.mark.parametrize("live", ["firefly", "chain"])
@@ -665,7 +677,7 @@ def test_launch_refuses_while_a_session_runs(tmp_path, live):
     )
     assert status == 1
     assert "already running" in output
-    assert not (record / "uv_run_args").exists()
+    assert not (record / "uv_runs").exists()
     assert (root / "firefly_phaseD.exit").read_text() == "0\n"
 
 
