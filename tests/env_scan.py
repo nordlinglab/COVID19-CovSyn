@@ -317,7 +317,7 @@ WORD = re.compile(rf"[^{re.escape(WORD_BREAKS)}]*")
 
 
 def _arithmetic_closes(text: str, start: int) -> bool:
-    """Whether the ``$((`` at ``start`` closes with ``))``, so that bash reads arithmetic.
+    """Whether the ``$((`` or ``((`` at ``start`` closes with ``))``, so bash reads arithmetic.
 
     bash reads ``$((cd x) | wc)``, whose first group closes with a single ``)``, as a command
     substitution starting with a subshell; quoted and escaped parentheses do not count. The
@@ -325,7 +325,8 @@ def _arithmetic_closes(text: str, start: int) -> bool:
     walk line by line reads the same as a walk of the whole text; an expansion still open there
     is taken as arithmetic.
     """
-    depth, index, quote = 0, start + 3, None
+    depth, quote = 0, None
+    index = start + (3 if text.startswith("$((", start) else 2)
     while index < len(text) and text[index] != "\n":
         char = text[index]
         if char == "\\" and quote != "'":
@@ -453,6 +454,7 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
         elif kind in ACTIVE and text.startswith("$[", index):
             push("$[", 2)
         elif kind in PLAIN and word_start and text.startswith("((", index) and \
+                _arithmetic_closes(text, index) and \
                 previous not in "<>":           # <(( is a process substitution
             push("((", 2)
         elif kind in PLAIN and word_start and char == "#":
@@ -717,6 +719,10 @@ def block_change(line: str) -> int:
     change, starts_command = 0, True
     for word in _raw_words(line):
         if word and set(word) <= set(";&|"):
+            starts_command = True
+            continue
+        if word and set(word) <= set("()") and word != "()":
+            change += word.count("(") - word.count(")")     # subshells: (( is two
             starts_command = True
             continue
         function = word == "()" or word.endswith("()")
