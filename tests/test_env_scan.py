@@ -182,6 +182,8 @@ def test_a_case_pattern_starts_a_command():
     ("A=1; echo hi", [["A=1"], ["echo", "hi"]]),
     ('A=$(echo ")")', [["A=X"]]),                                  # a quoted ) is text
     ("x=$( echo $(a)", [["x=$(", "echo", "X"]]),                   # the closed one still folds
+    ('A=$(echo "a\\")b")', [["A=X"]]),                           # an escaped quote
+    ('A=$(echo "$(echo ")")")', [["A=X"]]),                       # quotes nested in $( )
     ("a && b || c | d & e", [["a"], ["b"], ["c"], ["d"], ["e"]]),
 ])
 def test_commands_are_split_into_words(line, words):
@@ -224,6 +226,9 @@ def test_commands_are_split_into_words(line, words):
     (["func(){", "A=1", "}", "echo $A"], set()),                  # a function body, no spaces
     (['echo x"<<"EOF', "A=1", "echo $A"], {"A"}),                 # a quoted <<, no heredoc
     (['cat x"<<"<<EOF', "A=1", "EOF", "echo $A"], set()),         # the unquoted << counts
+    (["cat <<EOF>out", "A=1", "EOF", "B=1", "echo $B"], {"B"}),    # a glued redirection
+    (["cat <<A<<B", "x", "A", "y", "B", "C=1", "echo $C"], {"C"}),  # two here-documents
+    (["x=$(cat <<EOF)", "A=1", "EOF", "echo $A"], set()),         # inside a substitution
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -238,18 +243,6 @@ def test_only_assignments_that_always_run_before_use_count(lines, assigned):
 def test_every_form_of_reading_a_variable_is_a_reference(line, names):
     """Length, indirection and arithmetic read a variable too."""
     assert es.references(line) == names
-
-
-def test_a_prefix_assignment_belongs_to_its_own_command():
-    """NAME=value sets the variable only for the command it prefixes, each call on its own."""
-    assert es.script_calls('P="./$F" bash scripts/a.sh') == [("a.sh", ["P=./$F"])]
-    assert es.script_calls('P="./$F" true; bash scripts/a.sh') == [("a.sh", [])]
-    assert es.script_calls("P=x bash scripts/a.sh || bash scripts/a.sh") == [
-        ("a.sh", ["P=x"]), ("a.sh", [])]
-    assert es.script_calls("env P=x bash scripts/a.sh") == [("a.sh", ["P=x"])]
-    assert es.script_calls("echo X=1 scripts/a.sh") == [("a.sh", [])]       # an argument
-    assert es.script_calls("tmux new -e P=1 bash scripts/a.sh") == [("a.sh", [])]
-    assert es.script_calls("P=1 bash scripts/a.sh>log") == [("a.sh", ["P=1"])]
 
 
 @pytest.mark.parametrize(("line", "called"), [
@@ -272,6 +265,12 @@ def test_a_prefix_assignment_belongs_to_its_own_command():
     ("x=`bash scripts/a.sh`", {"a.sh"}),
     ('tmux new-session -d -s x "bash scripts/a.sh"', {"a.sh"}),
     ("echo myscripts/a.sh", set()),
+    ("true&&scripts/a.sh", {"a.sh"}),
+    ("x;scripts/a.sh", {"a.sh"}),
+    ("a|scripts/a.sh", {"a.sh"}),
+    ("${X:-scripts/a.sh}", {"a.sh"}),
+    ("echo scripts/a.sh.bak", set()),
+    ("echo my-scripts/a.sh", set()),
     ("bash -x scripts/a.sh", {"a.sh"}),
     ("bash -o pipefail scripts/a.sh", {"a.sh"}),
     ("if bash scripts/a.sh; then :; fi", {"a.sh"}),
@@ -327,18 +326,6 @@ def test_a_called_script_is_found_with_any_name(name):
     assert es.called_scripts([es.ShellLine(f"bash scripts/{script}")]) == {script}
 
 
-@given(st.lists(PLAIN_WORD, max_size=3), st.sampled_from(["bash ", "", "if ", "env P=1 "]))
-def test_a_script_path_word_is_always_a_call(words, lead):
-    """A whole word that is a path to a script is a call wherever it stands.
-
-    Its prefix holds only NAME= words.
-    """
-    line = f"{lead}{' '.join(w.replace('/', '_') for w in words)} scripts/a.sh"
-    calls = es.script_calls(line)
-    assert [name for name, _ in calls] == ["a.sh"]
-    assert all(word.split("=")[0].isupper() for _, prefix in calls for word in prefix)
-
-
 @given(LINE_TEXT)
 def test_a_path_inside_quoted_text_is_reported(text):
     """A script named inside quoted text may be a command string, so it is reported."""
@@ -351,12 +338,3 @@ def test_a_path_inside_quoted_text_is_reported(text):
 def test_a_script_is_found_in_any_structure(lead, trail):
     """However a call is wrapped, quoted or redirected, the script is found."""
     assert es.called_scripts([es.ShellLine(f"{lead}scripts/a.sh{trail}")]) == {"a.sh"}
-
-
-@given(st.from_regex(r"[A-Z][A-Z0-9_]{0,8}", fullmatch=True), PLAIN_WORD,
-       st.sampled_from(["", ">log", " 2>&1", " || exit 1"]))
-def test_a_leading_assignment_is_the_prefix(name, value, trail):
-    """NAME=value starting the command is the call's environment prefix."""
-    value = value.replace("/", "_")
-    assert es.script_calls(f"{name}={value} bash scripts/a.sh{trail}") == [
-        ("a.sh", [f"{name}={value}"])]

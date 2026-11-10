@@ -70,19 +70,20 @@ def test_the_chain_session_is_given_every_variable_it_reads(chain_env, variable)
 
 @pytest.mark.parametrize(("script", "values"), [(s.name, v) for s, v in CHAIN_SCRIPTS.items()])
 def test_the_chain_sets_what_it_does_not_forward(script, values):
-    """The chain sets on a script's command line every variable it does not forward.
+    """The chain runs each such script in one fixed form, setting what it does not forward.
 
-    Such a variable is left out of the forwarding, so without it the tmux server's value would
-    reach the script.
+    A variable set by the chain is left out of the forwarding, so without it the tmux server's
+    value would reach the script. Rather than parse every way a shell can set it, the chain
+    must call the script as ``NAME=value bash scripts/x.sh`` at the start of a line, once per
+    line; any other form fails here, to be checked by hand.
     """
-    expected = [f"{name}={value.strip(chr(34))}" for name, value in values.items()]
+    prefix = " ".join(f"{name}={value}" for name, value in values.items())
+    form = re.compile(rf"^\s*{re.escape(prefix)} bash scripts/{re.escape(script)}(?:\s|$)")
     lines = [line.text for line in _lines(CHAIN) if script in es.mentioned_scripts(line.text)]
     assert lines, script
     for line in lines:
-        prefixes = [prefix for name, prefix in es.script_calls(line) if name == script]
-        # Every mention must be a call with its prefix; one the parser cannot place fails.
-        assert len(prefixes) == es.mentioned_scripts(line).count(script), line
-        assert all(prefix == expected for prefix in prefixes), line
+        assert es.mentioned_scripts(line).count(script) == 1, line
+        assert form.match(line), line
 
 
 def test_every_script_the_chain_runs_is_scanned():

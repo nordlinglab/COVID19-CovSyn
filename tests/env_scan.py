@@ -305,51 +305,70 @@ def _trailing_backslashes(text: str) -> int:
     return len(text) - len(text.rstrip("\\"))
 
 
-def _fold_balanced(line: str, opener: str) -> str:
-    """The line with each closed ``opener ... )`` group as X.
+def _closing_parenthesis(line: str, start: int) -> int:
+    """The index of the ``)`` closing the ``(`` at ``start``, or -1 if it stays open.
 
-    Nested parentheses count, quoted ones do not; a group left open is kept and the search
-    goes on after it.
+    Quoted parentheses do not count; inside double quotes a backslash escapes and ``$(``
+    opens a nested group with quotes of its own.
     """
+    depth, index, quote = 0, start, None
+    while index < len(line):
+        char = line[index]
+        if quote == "'":
+            quote = None if char == "'" else quote
+        elif quote == '"':
+            if char == "\\":
+                index += 1
+            elif char == '"':
+                quote = None
+            elif line.startswith("$(", index):
+                index = _closing_parenthesis(line, index + 1)
+                if index < 0:
+                    return -1
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char in "()":
+            depth += 1 if char == "(" else -1
+            if depth == 0:
+                return index
+        index += 1
+    return -1
+
+
+def _fold_balanced(line: str, opener: str) -> str:
+    """The line with each closed ``opener ... )`` group as X; a group left open is kept."""
     start = line.find(opener)
     while start >= 0:
-        depth, index, quote = 0, start + opener.index("("), None
-        while index < len(line):
-            char = line[index]
-            if quote:
-                quote = None if char == quote else quote
-            elif char in "'\"":
-                quote = char
-            elif char == "\\":
-                index += 1
-            else:
-                depth += {"(": 1, ")": -1}.get(char, 0)
-                if depth == 0:
-                    break
-            index += 1
-        if index >= len(line):
+        end = _closing_parenthesis(line, start + opener.index("("))
+        if end < 0:
             start = line.find(opener, start + 1)
             continue
-        line = line[:start] + "X" + line[index + 1:]
-        start = line.find(opener)
+        line = line[:start] + "X" + line[end + 1:]
+        start = line.find(opener, start)
     return line
 
 
-def _fold_substitutions(line: str) -> str:
+def _fold_substitutions(line: str, commands_too: bool = True) -> str:
     """The line with each substitution as X.
 
-    Arithmetic expansions and commands, command substitutions and backtick groups, nested
-    parentheses included; one left open at the end of the line stays as it is.
+    Arithmetic expansions and commands and, with ``commands_too``, command substitutions and
+    backtick groups, nested parentheses included; one left open stays as it is.
     """
-    line = re.sub(r"`[^`]*`", "X", line)
-    for opener in ("$((", "$(", "(("):
+    openers = ("$((", "((")
+    if commands_too:
+        line = re.sub(r"`[^`]*`", "X", line)
+        openers = ("$((", "$(", "((")
+    for opener in openers:
         line = _fold_balanced(line, opener)
     return line
 
 
-def _raw_words(line: str) -> list[str]:
+def _raw_words(line: str, commands_too: bool = True) -> list[str]:
     """A line's words with their quotes kept, substitutions folded; unparsable gives none."""
-    lexer = shlex.shlex(_fold_substitutions(line), posix=False, punctuation_chars=";&|")
+    folded = _fold_substitutions(line, commands_too)
+    lexer = shlex.shlex(folded, posix=False, punctuation_chars=";&|")
     lexer.whitespace_split = True
     lexer.commenters = ""
     try:
@@ -361,19 +380,19 @@ def _raw_words(line: str) -> list[str]:
 def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
     """The here-documents a line opens: whether tabs are stripped, and the delimiter.
 
-    ``<<<`` is a here-string, and ``<<`` inside quotes or arithmetic is no here-document.
+    ``<<<`` is a here-string, and ``<<`` inside quotes or arithmetic is no here-document; one
+    inside a command substitution is. The delimiter is the word after ``<<``, quotes and
+    backslashes removed, and ends where a redirection or another ``<<`` is glued to it.
     """
-    words, found = _raw_words(line), []
+    words, found = _raw_words(line, commands_too=False), []
     for index, word in enumerate(words):
         for match in re.finditer(r"(?<!<)<<(?!<)(-?)", word):
             if _scan_quotes(word[:match.start()])[1]:
                 continue
-            rest = word[match.end():]
-            delimiter = rest or (words[index + 1] if index + 1 < len(words) else "")
-            delimiter = delimiter.replace("\\", "").strip("'\"")
+            rest = word[match.end():] or (words[index + 1] if index + 1 < len(words) else "")
+            delimiter = re.match(r"""\\?(['"]?)([\w.-]+)\1""", rest)
             if delimiter:
-                found.append((match.group(1) == "-", delimiter))
-            break
+                found.append((match.group(1) == "-", delimiter.group(2)))
     return found
 
 
@@ -534,37 +553,10 @@ def environment_variables(path: Path) -> set[str]:
     return (referenced - assigned) | defaulted
 
 
-SCRIPT_PATH = re.compile(r"(?:^|/)scripts/([\w.-]+\.sh)$")
-# Any mention of a script in the raw text: a call may sit in a quoted command string, a
-# substitution, a subshell or before a redirection.
-SCRIPT_MENTION = re.compile(r"(?:^|[\s\"'`(/=])scripts/([\w.-]+\.sh)(?=$|[\s\"'`);&|<>])")
-
-
-def script_calls(line: str) -> list[tuple[str, list[str]]]:
-    """The scripts a line runs as a word of its own, each with its environment prefix.
-
-    The prefix is the NAME=value words that start the command, and those right after ``env``;
-    quotes are removed. A NAME=value word anywhere else is an argument, not the environment.
-    """
-    calls = []
-    for command in commands(line):
-        prefix, index = [], 0
-        while index < len(command) and re.match(rf"{NAME}=", command[index]):
-            prefix.append(command[index])
-            index += 1
-        if index < len(command) and command[index] == "env":
-            index += 1
-            while index < len(command) and (re.match(rf"{NAME}=", command[index]) or
-                                            command[index].startswith("-")):
-                if not command[index].startswith("-"):
-                    prefix.append(command[index])
-                index += 1
-        for word in command:
-            # A redirection or a closing parenthesis glued to the path is no part of it.
-            match = SCRIPT_PATH.search(re.split(r"\d*[<>]", word)[0].rstrip(")"))
-            if match:
-                calls.append((match.group(1), prefix))
-    return calls
+# Any mention of a script in the raw text, bounded by anything that cannot be part of a path
+# name: a call may sit in a quoted command string, a substitution, a subshell, a default value,
+# or be glued to ;, &&, | or a redirection.
+SCRIPT_MENTION = re.compile(r"(?<![\w.])(?<![\w.]-)scripts/([\w.-]+\.sh)(?![\w.-])")
 
 
 def mentioned_scripts(text: str) -> list[str]:
