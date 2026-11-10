@@ -358,7 +358,7 @@ def _arithmetic_frame(stack: list[_Frame]) -> _Frame | None:
     those inside a nested ${...} included.
     """
     for frame in reversed(stack):
-        if frame.kind in ARITHMETIC:
+        if frame.kind in {"$((", "(("}:      # $[ counts brackets, not parentheses
             return frame
         if frame.kind != "${":
             return None

@@ -369,6 +369,7 @@ def test_commands_are_split_into_words(line, words):
     (["echo $(( ${X:-<(echo })} ))", "A=1", "echo $A"], {"A"}),    # } inside the group
     (['echo "${X:-<(echo })"', "A=1", 'echo "$A"'], set()),         # bash: an open quote
     (["X=$((1+2)", ")", "A=1", "echo $A"], {"X", "A"}),             # bash: a subshell
+    (["echo $[ ${X:-(} ]", "A=1", "echo $A"], {"A"}),              # $[ closes at ]
     (["(( $(cat <<E) ))", "A=1", "E", "B=1", "echo $B"], {"B"}),   # bash: a here-document
     (["A=$(case a in a) echo hi;; esac>/dev/null)", "B=1", "echo $B"], {"A", "B"}),
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
