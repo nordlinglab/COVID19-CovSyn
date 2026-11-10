@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 import pipeline_runner
 import pytest
@@ -145,7 +146,7 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain
 
     The directory comes from a chain run, so no directory name is written in the test.
     """
-    directory = chain_at_step_2[5]
+    directory = chain_at_step_2.directory
     root, record, status, output = _run(
         tmp_path, SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
     )
@@ -170,14 +171,22 @@ SYNTHESIS_STAND_IN = (
 )
 
 
-def _chain_to_step_2(
-    tmp_path: Path, synthesis_status: str
-) -> tuple[Path, Path, int, str, str, str]:
+class ChainRun(NamedTuple):
+    """A chain run to its synthesis step."""
+
+    root: Path  # the scratch repository
+    record: Path  # where the stand-ins record their calls
+    status: int
+    context: str  # output and log, for assertion messages
+    log: str  # phaseD_chain.log, which the user reads
+    directory: str  # what the synthesis was told to read: PARAMETER_PATH without ./
+
+
+def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
     """Run the chain to its synthesis step with a stand-in data_synthesis.sh.
 
-    Returns the repository root, the stand-ins' record directory, the exit status, the output
-    with the log for messages, the log alone, and the directory the synthesis was told to read
-    (PARAMETER_PATH without ./).
+    With REVALIDATE=0 no uv run happens before the synthesis, so every recorded uv run comes
+    after it.
     """
     root, record, status, output = _run(
         tmp_path,
@@ -201,11 +210,11 @@ def _chain_to_step_2(
     assert len(calls) == 1 and calls[0][1:] == ["--environment-checked"], context
     path = calls[0][0]
     assert path.startswith("./"), context
-    return root, record, status, context, log, path[2:]
+    return ChainRun(root, record, status, context, log, path[2:])
 
 
 @pytest.fixture(scope="module")
-def chain_at_step_2(tmp_path_factory) -> tuple[Path, Path, int, str, str, str]:
+def chain_at_step_2(tmp_path_factory) -> ChainRun:
     """One chain run to step 2 with a synthesis that succeeds, shared by the tests below."""
     return _chain_to_step_2(tmp_path_factory.mktemp("chain"), "0")
 
@@ -216,19 +225,23 @@ def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2
     That copy is the directory the regression harness checks, and the log reports success.
     Only this path is run; other settings reach the same call by reading of the script.
     """
-    root, record, status, context, log, directory = chain_at_step_2
-    assert (root / directory / "firefly_best.txt").exists(), context
-    assert directory == pipeline_runner.COMPAT_DIR, context
-    assert "synthetic data done" in log, context
+    run = chain_at_step_2
+    assert (run.root / run.directory / "firefly_best.txt").exists(), run.context
+    assert run.directory == pipeline_runner.COMPAT_DIR, run.context
+    assert "synthetic data done" in run.log, run.context
+    # The steps after it run uv, which the stop test relies on not seeing after a failure.
+    assert (run.record / "uv_runs").exists(), run.context
 
 
 def test_a_failed_synthesis_stops_the_chain(tmp_path):
     """A failed synthesis stops the chain, and the log, which the user reads, says so."""
-    root, record, status, context, log, directory = _chain_to_step_2(tmp_path, "1")
-    assert status != 0, context
-    assert not (record / "uv_runs").exists(), context  # nothing ran after the synthesis
-    assert "] ERROR: data synthesis failed" in log, context
-    assert "synthetic data done" not in log, context
+    run = _chain_to_step_2(tmp_path, "1")
+    assert run.status != 0, run.context
+    # No uv run is recorded: none comes before the synthesis (REVALIDATE=0), and a chain that
+    # went on would run uv in its next step, as the success test shows.
+    assert not (run.record / "uv_runs").exists(), run.context
+    assert "] ERROR: data synthesis failed" in run.log, run.context
+    assert "synthetic data done" not in run.log, run.context
 
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
