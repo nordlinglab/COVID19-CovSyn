@@ -520,7 +520,8 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
             check=False,
         )
     except subprocess.TimeoutExpired as timeout:
-        # A timeout's captured output is bytes, whatever text=True says.
+        # A timeout's captured output is bytes even though the run decodes its output, so it
+        # is decoded here the same way; without this, joining it would fail.
         parts = [timeout.stdout or b"", timeout.stderr or b""]
         show("timed out", "".join(p.decode("utf-8", "replace") for p in parts))
         raise
