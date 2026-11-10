@@ -110,6 +110,11 @@ def test_the_chain_names_only_the_golden_script_lines():
 SYNTHESIS_FILES = {"_files": {"run/firefly_best.txt": "1 2 3\n"}}
 
 
+def _record_dir(tmp_path: Path) -> Path:
+    """Where the stand-ins of a scratch run record their calls."""
+    return tmp_path / "record"
+
+
 def _read(path: Path) -> str:
     """A file the stand-ins or the chain wrote, as UTF-8 with no newline translation."""
     with path.open(encoding="utf-8", newline="") as file:
@@ -208,7 +213,7 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
             "SYNTHESIS_STATUS": synthesis_status,
             "_files": {
                 "run/firefly_best.txt": "1 2 3\n",
-                "scripts/data_synthesis.sh": _synthesis_stand_in(tmp_path / "record"),
+                "scripts/data_synthesis.sh": _synthesis_stand_in(_record_dir(tmp_path)),
             },
         },
     )
@@ -239,7 +244,7 @@ def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2
     assert run.directory == pipeline_runner.COMPAT_DIR, run.context
     assert "synthetic data done" in run.log, run.context
     # The steps after it run uv: recorded after the synthesis, in order.
-    calls = _records(run.record / "runs")
+    calls = _records(run.record / "runs", run.context)
     assert calls[0][0] == "SYNTHESIS" and len(calls) > 1, run.context
 
 
@@ -249,7 +254,8 @@ def test_a_failed_synthesis_stops_the_chain(tmp_path):
     assert run.status != 0, run.context
     # The synthesis is the only call recorded: none comes before it (REVALIDATE=0), and a chain
     # that went on would run uv in its next step.
-    assert [call[0] for call in _records(run.record / "runs")] == ["SYNTHESIS"], run.context
+    calls = _records(run.record / "runs", run.context)
+    assert [call[0] for call in calls] == ["SYNTHESIS"], run.context
     assert "] ERROR: data synthesis failed" in run.log, run.context
     assert "synthetic data done" not in run.log, run.context
 
@@ -427,7 +433,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    record = tmp_path / "record"
+    record = _record_dir(tmp_path)
     record.mkdir()
     (bin_dir / "uv").write_text(
         "#!/usr/bin/env bash\n"
