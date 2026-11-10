@@ -13,11 +13,11 @@ and each candidate took 19-28 minutes against the 4.3 measured in isolation.
 from __future__ import annotations
 
 import re
-import shlex
 import shutil
 import subprocess
 from pathlib import Path
 
+import pipeline_runner
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -107,21 +107,29 @@ def test_the_chain_names_only_the_golden_script_lines():
 
 
 # The fixed directory the chain copies the run onto, which data_synthesis.sh reads by default.
-FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
+FIREFLY = pipeline_runner.COMPAT_DIR
+
+
+SYNTHESIS_FILES = {"_files": {"run/firefly_best.txt": "1 2 3\n"}}
+
+
+def _uv_runs(record: Path) -> list[list[str]]:
+    """The arguments of every uv run the stand-in recorded, in order."""
+    assert (record / "uv_runs").exists(), "no uv run was recorded"
+    text = (record / "uv_runs").read_text()
+    return [run.split("\x1f")[:-1] for run in text.split("\x1e")[:-1]]
 
 
 def _synthesis_runs(record: Path) -> list[tuple[str, str]]:
     """The (--mode, --parameter_path) of every uv run the stand-in recorded, in order."""
-    assert (record / "uv_runs").exists(), "no uv run was recorded"
     runs = []
-    for line in (record / "uv_runs").read_text().splitlines():
-        words = shlex.split(line)
-        assert "--mode" in words and "--parameter_path" in words, line
+    for words in _uv_runs(record):
+        assert "--mode" in words and "--parameter_path" in words, words
         runs.append((words[words.index("--mode") + 1], words[words.index("--parameter_path") + 1]))
     return runs
 
 
-MODES = ["spread_Taiwan_weight", "taiwan_first_outbreak"]
+MODES = list(pipeline_runner.MODES)
 
 
 def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
@@ -139,7 +147,7 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
 def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
     """With PARAMETER_PATH set, both modes run on that directory."""
     root, record, status, output = _run(
-        tmp_path, SYNTHESIS, {"PARAMETER_PATH": "run", "_files": {"run/firefly_best.txt": "1\n"}}
+        tmp_path, SYNTHESIS, {"PARAMETER_PATH": "run", **SYNTHESIS_FILES}
     )
     assert status == 0, output
     assert _synthesis_runs(record) == [(mode, "run") for mode in MODES], output
@@ -369,7 +377,9 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         f'echo "uv $*" >> "{record}/calls"\n'
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
-        f'printf "%q " "$@" >> "{record}/uv_runs"; echo >> "{record}/uv_runs"\n'
+        # One record per run: arguments ended by \x1f, the run by \x1e, so any argument,
+        # newlines included, comes back as it was.
+        f'printf "%s\\x1f" "$@" >> "{record}/uv_runs"; printf "\\x1e" >> "{record}/uv_runs"\n'
         'exit "${UV_STATUS:-0}"\n'
     )
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
@@ -451,7 +461,7 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
         },
     )
     assert status == 0, output
-    args = shlex.split((record / "uv_runs").read_text().splitlines()[-1])
+    args = _uv_runs(record)[-1]
     start = args.index("--warm_start")
     assert args[start + 1 : start + 3] == ["a/firefly_best.txt", "b/firefly_best.txt"]
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
@@ -476,9 +486,6 @@ def test_launch_runs_both_sessions_in_the_environment_the_user_names(tmp_path):
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
     assert chain["UV_PROJECT_ENVIRONMENT"] == "/opt/env"
-
-
-SYNTHESIS_FILES = {"_files": {"run/firefly_best.txt": "1 2 3\n"}}
 
 
 def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
@@ -535,6 +542,7 @@ def test_the_synthesis_called_by_the_chain_skips_the_check(tmp_path):
     assert status == 0, output
     assert not (record / "uv_sync_environment").exists()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
+    assert _synthesis_runs(record) == [(mode, "run") for mode in MODES], output
 
 
 def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
@@ -552,7 +560,7 @@ def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
     # The chain's own run() reached the revalidation, which the stand-in uv fails.
     assert status != 0
     assert "revalidation failed" in (root / "phaseD_chain.log").read_text()
-    assert "covsyn.calibration.revalidation" in (record / "uv_runs").read_text()
+    assert "covsyn.calibration.revalidation" in _uv_runs(record)[-1]
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
 
 
