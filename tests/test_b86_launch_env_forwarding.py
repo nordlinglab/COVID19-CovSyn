@@ -111,10 +111,11 @@ FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generat
 
 def test_the_chain_and_the_synthesis_agree_on_the_run_directory():
     """The chain's FIREFLY and data_synthesis.sh's default PARAMETER_PATH name one directory."""
-    assignments = [line.strip(" \t") for line in _code(CHAIN) if re.match(r"[ \t]*FIREFLY=", line)]
-    assert assignments == [f"FIREFLY={FIREFLY}"]  # set once, never changed
-    default = f"${{PARAMETER_PATH:-./{FIREFLY}}}"
-    assert any(default in line for line in _code(SYNTHESIS)), default
+    # Each set exactly once, at the top level (not indented into a block), word for word.
+    chain = [line for line in _code(CHAIN) if re.match(r"[ \t]*FIREFLY=", line)]
+    assert chain == [f"FIREFLY={FIREFLY}"]
+    synthesis = [line for line in _code(SYNTHESIS) if re.match(r"[ \t]*parameter_path=", line)]
+    assert synthesis == [f'parameter_path="${{PARAMETER_PATH:-./{FIREFLY}}}"']
 
 
 SYNTHESIS_STAND_IN = (
