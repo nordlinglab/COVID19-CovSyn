@@ -35,7 +35,7 @@ CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDA
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
 SYNTHESIS_CALL = re.compile(
-    r'^\s*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh --environment-checked\b')
+    r'^[ \t]*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh --environment-checked\b')
 
 
 def _code(path: Path) -> list[str]:
@@ -82,8 +82,9 @@ def _allowed_script_line(line: str) -> bool:
     """
     if not re.search(r"\.sh\b", line):
         return True
-    call = SYNTHESIS_CALL.pattern + r'(?:\s+>>\s*"\$LOG"\s+2>&1)?(?:\s+\\|\s*)'
-    message = r"""\s*say\s+(?:'[^'$`]*'|"[^"$`\\]*")\s*"""
+    # Blanks are what bash takes for blanks, space and tab, not any Unicode white space.
+    call = SYNTHESIS_CALL.pattern + r'(?:[ \t]+>>[ \t]*"\$LOG"[ \t]+2>&1)?(?:[ \t]+\\|[ \t]*)'
+    message = r"""[ \t]*say[ \t]+(?:'[^'$`]*'|"[^"$`\\]*")[ \t]*"""
     return bool(re.fullmatch(call, line) or re.fullmatch(message, line))
 
 
@@ -105,6 +106,8 @@ def _allowed_script_line(line: str) -> bool:
     ("    say 'see C:\\tmp\\x.sh'", True),                              # literal in '...'
     ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
      '>> "$LOG" 2>&1 ', True),                                        # a trailing blank
+    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked\xa0',
+     False),                                                          # not a bash blank
     ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
      '>> "$LOG" 2>&1 \\ ', False),                                    # an escaped space
 ])
@@ -114,12 +117,30 @@ def test_a_line_naming_a_script_is_the_fixed_call_or_a_message(line, allowed):
     assert _allowed_script_line(line) == allowed
 
 
-@given(st.text(), st.sampled_from(["'", '"']))
-def test_a_message_is_allowed_exactly_when_nothing_can_run_in_it(text, quote):
-    """Any text inside a say message is allowed exactly when nothing can run in it.
+ALLOWED_LINES = st.sampled_from([
+    'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked',
+    'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
+    '>> "$LOG" 2>&1',
+    "    say 'see launch_phase_d.sh'",
+    '    say "then start scripts/phase_d_chain.sh"',
+])
 
-    That is, it holds no character that could end the quote or run a command there: the quote
-    itself, $ or a backtick, and in double quotes a backslash.
+
+@given(ALLOWED_LINES, st.sampled_from([";", " &&", " ||", " |", " &", "\xa0", "\u3000"]),
+       st.sampled_from(["bash x.sh", "./x.sh", ". x.sh", "source x.sh", ""]))
+def test_nothing_can_follow_an_allowed_line(line, separator, call):
+    """No separator, call or non-bash blank may follow an allowed line."""
+    assert _allowed_script_line(line)
+    assert not _allowed_script_line(f"{line}{separator}{' ' + call if call else ''}")
+
+
+@given(st.text(), st.sampled_from(["'", '"']))
+def test_a_message_is_allowed_exactly_without_a_refused_character(text, quote):
+    """Any text inside a say message is allowed exactly when it holds no refused character.
+
+    The refused characters are the quote itself, $ or a backtick, and in double quotes a
+    backslash. In single quotes $ and a backtick are literal in bash, so the rule is
+    deliberately stricter than bash there; in double quotes they could run a command.
     """
     forbidden = set(quote + "$`") | ({"\\"} if quote == '"' else set())
     line = f"    say {quote}{text} x.sh{quote}"
