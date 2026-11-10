@@ -13,7 +13,6 @@ and each candidate took 19-28 minutes against the 4.3 measured in isolation.
 from __future__ import annotations
 
 import re
-import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -75,8 +74,7 @@ def test_the_list_holds_every_default_the_scripts_read():
 
 def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
     """The chain calls data_synthesis.sh in one fixed form, setting PARAMETER_PATH itself."""
-    calls = [line for line in _code(CHAIN)                # not the printed restart command
-             if re.search(r"\.sh\b", line) and "bash scripts/phase_d_chain.sh" not in line]
+    calls = [line for line in _code(CHAIN) if re.search(r"\.sh\b", line)]
     assert calls
     for line in calls:
         assert SYNTHESIS_CALL.match(line), line
@@ -174,56 +172,17 @@ def test_the_chain_checks_the_environment_once_before_it_waits(tmp_path):
     assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
 
 
-def _restart_line(log: str) -> list[str]:
-    """The restart command a stopped chain prints, as the shell would split it."""
-    line = next(line for line in log.splitlines() if "bash scripts/phase_d_chain.sh" in line)
-    return shlex.split(line)
+def test_a_failed_check_says_how_to_go_on(tmp_path):
+    """The chain says nothing ran and how to go on.
 
-
-def test_a_launched_chain_tells_how_to_restart_it_with_its_settings(tmp_path):
-    """A launched chain that stops on its check prints one line to paste.
-
-    Once the optimiser has ended, the line syncs the environment the chain checked, from the
-    repository root, and starts the chain again in its own tmux session with the settings it
-    was given, FIREFLY_STATUS included.
-    """
-    root, record, status, output = _run(tmp_path, CHAIN, {
-        "FIREFLY_RUN": "run's dir", "UV_SYNC_STATUS": "2", "FIREFLY_STATUS": "firefly.exit",
-        "UV_PROJECT_ENVIRONMENT": "/opt/env", "_files": {"run's dir/firefly_result.txt": "1\n"}})
-    log = (root / "phaseD_chain.log").read_text()
-    assert "once the firefly session has ended" in log.lower()
-    words = _restart_line(log)
-    assert words[:2] == ["cd", str(root)]
-    sync = words.index("uv")
-    assert words[sync - 1:sync + 4] == ["UV_PROJECT_ENVIRONMENT=/opt/env", "uv", "sync",
-                                        "--locked", "--inexact"]
-    tmux = words.index("tmux")
-    assert words[tmux:tmux + 6] == ["tmux", "new-session", "-d", "-s", "chain", "-c"]
-    settings = {words[i + 1] for i in range(tmux, len(words)) if words[i] == "-e"}
-    assert settings == {"FIREFLY_RUN=run's dir", "FIREFLY_STATUS=firefly.exit",
-                        "UV_PROJECT_ENVIRONMENT=/opt/env"}
-    assert words[-2:] == ["bash", "scripts/phase_d_chain.sh"]
-
-
-def test_a_chain_started_by_hand_mentions_no_firefly_session(tmp_path):
-    """Without FIREFLY_STATUS there is no firefly session to wait for.
-
-    A setting the chain was not given, such as FIREFLY_RUN, stays out of the restart command.
+    It says to sync with the launcher's options once no optimiser uses the environment, and to
+    restart with the same settings, FIREFLY_STATUS included.
     """
     root, record, status, output = _run(tmp_path, CHAIN, {"UV_SYNC_STATUS": "2"})
     log = (root / "phaseD_chain.log").read_text()
-    assert "firefly session" not in log
-    words = _restart_line(log)
-    assert not any(word.startswith("FIREFLY_RUN=") for word in words)
-
-
-def test_the_restart_command_carries_every_forwarded_variable():
-    """The chain's list for its restart command is the launcher's list."""
-    code = "\n".join(_code(CHAIN)).replace("\\\n", " ")
-    match = re.search(r"for name in ([A-Z0-9_ ]+); do", code)
-    assert match, "the chain no longer builds its restart command from a list"
-    assert sorted(match.group(1).split()) == sorted(CHAIN_VARIABLES)
-
+    assert "Nothing has run" in log
+    assert "uv sync --locked --inexact" in log
+    assert "FIREFLY_STATUS included" in log
 
 def test_the_chain_checks_before_it_waits_for_the_optimiser(tmp_path):
     """A passing check comes before the first look for the firefly session."""
