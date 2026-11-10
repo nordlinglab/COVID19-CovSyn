@@ -182,10 +182,22 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
 
 
 PYTHON_SCRIPT = re.compile(r"\bpython3? [\w./-]+\.py\b")
-# uv run options that take a value; any other option stands alone.
-UV_VALUE_OPTIONS = r"--with|--python|-p|--extra|--group|--directory|--project|--env-file"
+# The uv run options that take a value, from `uv run --help` of uv 0.13.6; any other option
+# stands alone.
+UV_VALUE_OPTIONS = "|".join(
+    """--extra --no-extra --group --no-group --only-group --no-editable-package --env-file -w
+    --with --with-editable --with-requirements --package --python-platform --index
+    --default-index -i --index-url --extra-index-url -f --find-links --index-strategy
+    --keyring-provider -P --upgrade-package --upgrade-group --resolution --prerelease
+    --prerelease-package --fork-strategy --exclude-newer --exclude-newer-package
+    --no-sources-package --reinstall-package --link-mode -C --config-setting
+    --config-settings-package --no-build-isolation-package --no-build-package
+    --no-binary-package --cache-dir --refresh-package -p --python --color
+    --allow-insecure-host --directory --project --config-file""".split()
+)
 THROUGH_UV = re.compile(
-    rf"\buv run(?:\s+(?:(?:{UV_VALUE_OPTIONS})(?:\s+|=)[^\s|;&]+|--?[\w-]+(?:=[^\s|;&]+)?))*\s+$"
+    rf"\buv run(?:\s+(?:(?:{UV_VALUE_OPTIONS})(?:\s+|=)[^\s|;&]+|--?[\w-]+(?:=[^\s|;&]+)?))*"
+    r"\s+$"
 )
 
 
@@ -215,6 +227,9 @@ def test_usage_lines_run_scripts_through_uv(path):
         ("Requires uv run setup first, then: python scripts/x.py", False),
         ("see uv run --frozen then python scripts/x.py", False),
         ("uv run --env-file=.env python scripts/x.py", True),
+        ("uv run --package covsyn python scripts/x.py", True),
+        ("uv run --with-editable ./pkg python scripts/x.py", True),
+        ("uv run --python-preference only-managed python scripts/x.py", False),
     ],
 )
 def test_usage_line_check_accepts_only_uv_options(line, through_uv):

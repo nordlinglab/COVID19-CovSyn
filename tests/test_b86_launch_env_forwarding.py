@@ -16,6 +16,7 @@ import ast
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -101,11 +102,14 @@ def _import_closure(module: str) -> set[Path]:
     return files
 
 
-def _passes_environment(path: Path) -> bool:
-    """Whether a module passes ``os.environ`` itself to a function, as to ``worker_count``."""
+def _mentions_environment(path: Path) -> bool:
+    """Whether a module touches ``os.environ`` or ``getenv`` at all.
+
+    A copy, an alias or a mapping handed to a reader such as ``worker_count`` reads the
+    environment as surely as a lookup does, so the firefly session's modules may not touch it.
+    """
     return any(
-        isinstance(node, ast.Call)
-        and any(_name(arg) == "environ" for arg in [*node.args, *(k.value for k in node.keywords)])
+        isinstance(node, (ast.Name, ast.Attribute)) and _name(node) in {"environ", "getenv"}
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
     )
 
@@ -124,14 +128,14 @@ def _assigned(code: str) -> set[str]:
     """Names a shell script assigns.
 
     An assignment counts on any line, after ; & or |, and by export, local, declare or
-    readonly; so do the names of for and read.
+    readonly with a value; so do the names of for and read. A bare ``export A`` keeps the
+    value A came with, so it is no assignment.
     """
     builtin = r"\b(?:export|local|declare|readonly)\s+(?:-\w+\s+)*"
     return (
         set(re.findall(rf"(?:^\s*|[;&|]\s*|{builtin})({NAME})=", code, re.MULTILINE))
         | set(re.findall(rf"\bfor\s+({NAME})\s+in\b", code))
-        | set(re.findall(rf"\b(?:read|export|local|declare|readonly)\s+(?:-\w+\s+)*({NAME})"
-                         r"\s*(?:$|;)", code, re.MULTILINE))
+        | set(re.findall(rf"\bread\s+(?:-\w+\s+)*({NAME})\s*(?:$|;)", code, re.MULTILINE))
     )
 
 
@@ -171,9 +175,21 @@ def test_the_firefly_modules_read_only_what_the_firefly_session_is_given():
     """The firefly session gets WARM_START alone, so no module it imports may read another."""
     assert len(FIREFLY_FILES) > 2
     for path in FIREFLY_FILES:
-        assert _environment_reads(path, mappings=False) <= {"WARM_START"}, path.name
-        # A mapping reader such as worker_count reads only when given the environment.
-        assert not _passes_environment(path), path.name
+        assert not _mentions_environment(path), path.name
+
+
+@pytest.mark.parametrize(("source", "touches"), [
+    ("import os\nworker_count(dict(os.environ))", True),
+    ("import os\nenv = os.environ\nworker_count(env)", True),
+    ("from os import getenv\ngetenv('A')", True),
+    ("def worker_count(env):\n    return env.get('A')", False),
+    ("# os.environ\nprint('os.environ')", False),
+])
+def test_touching_the_environment_is_found(tmp_path, source, touches):
+    """Copies and aliases of the environment count, a mapping parameter or text does not."""
+    path = tmp_path / "module.py"
+    path.write_text(source)
+    assert _mentions_environment(path) == touches
 
 
 def test_the_import_closure_follows_relative_imports_and_packages(tmp_path, monkeypatch):
@@ -184,14 +200,16 @@ def test_the_import_closure_follows_relative_imports_and_packages(tmp_path, monk
     (package / "__init__.py").write_text("import os\nos.environ['B']")
     (package / "main.py").write_text("from .helper import f\n")
     (package / "helper.py").write_text("def f():\n    pass\n")
-    monkeypatch.setattr(__import__(__name__), "SOURCE", tmp_path / "covsyn")
-    files = {p.relative_to(tmp_path).as_posix() for p in _import_closure("covsyn.calibration.main")}
+    monkeypatch.setattr(sys.modules[__name__], "SOURCE", tmp_path / "covsyn")
+    closure = _import_closure("covsyn.calibration.main")
+    files = {p.relative_to(tmp_path).as_posix() for p in closure}
     assert files == {"covsyn/__init__.py", "covsyn/calibration/__init__.py",
                      "covsyn/calibration/main.py", "covsyn/calibration/helper.py"}
+    assert any(_mentions_environment(p) for p in closure)
 
 
 @pytest.mark.parametrize("code", [
-    "    A=1", "A=1", "true; A=1", "export A=1", "local A", "readonly -x A=1",
+    "    A=1", "A=1", "true; A=1", "export A=1", "local A=", "readonly -x A=1",
     "for A in 1 2; do :; done", "read -r A",
 ])
 def test_the_chain_scan_sees_every_assignment(code):
@@ -202,7 +220,9 @@ def test_the_chain_scan_sees_every_assignment(code):
     assert _assigned(code) == {"A"}
 
 
-@pytest.mark.parametrize("code", ["cmd || FALLBACK", 'echo "for A"', "test $A"])
+@pytest.mark.parametrize("code", [
+    "cmd || FALLBACK", 'echo "for A"', "test $A", "export A", "local A", "declare -x A",
+])
 def test_the_chain_scan_takes_no_read_for_an_assignment(code):
     """A word that only ends a line, or sits in a string, is not an assignment."""
     assert _assigned(code) == set()
@@ -231,7 +251,8 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     """A bin directory with stand-ins for tmux, uv and sleep, and the directory they record in.
 
     new-session applies -c and -e, runs the firefly command and keeps the chain session's
-    environment; has-session reports no live session, as after the firefly has ended.
+    environment; has-session reports the firefly session live, once started, only when
+    FIREFLY_LIVE is set.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -245,7 +266,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
 case "$1" in
-  has-session) exit 1 ;;
+  has-session) [ -n "${{FIREFLY_LIVE:-}}" ] && [ -e "{record}/firefly_started" ]; exit ;;
   new-session) shift ;;
   *) exit 0 ;;
 esac
@@ -260,6 +281,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ "$name" = firefly ]; then
+  touch "{record}/firefly_started"
   [ -n "${{KILL_FIREFLY:-}}" ] || (cd "$dir" && env "${{envs[@]}}" "$@")
 else
   env -i "${{envs[@]}}" > "{record}/chain_env"
@@ -314,15 +336,30 @@ def test_launch_stops_when_the_optimiser_fails_at_startup(tmp_path):
     """An optimiser that exits non-zero at once fails the launch, and no chain starts."""
     root, record, status, output = _run(tmp_path, SCRIPT, {"UV_STATUS": "3"})
     assert status == 1
-    assert "exited at startup with status 3" in output
+    assert "ended at startup with status 3" in output
     assert not (record / "chain_env").exists()
 
 
-def test_a_killed_firefly_session_leaves_running(tmp_path):
-    """A session killed before the optimiser exits writes no status, so "running" stays."""
+def test_a_firefly_session_killed_at_startup_fails_the_launch(tmp_path):
+    """A session killed before the optimiser exits fails the launch.
+
+    It leaves "running" and no session, which the launcher reports instead of starting the
+    chain.
+    """
     root, record, status, output = _run(tmp_path, SCRIPT, {"KILL_FIREFLY": "1"})
+    assert status == 1
+    assert "status killed" in output
+    assert (root / "firefly_phaseD.exit").read_text().strip() == "running"
+    assert not (record / "chain_env").exists()
+
+
+def test_a_running_firefly_session_starts_the_chain(tmp_path):
+    """While the optimiser still runs at the check, the launcher starts the chain."""
+    root, record, status, output = _run(tmp_path, SCRIPT, {"KILL_FIREFLY": "1",
+                                                          "FIREFLY_LIVE": "1"})
     assert status == 0, output
     assert (root / "firefly_phaseD.exit").read_text().strip() == "running"
+    assert (record / "chain_env").exists()
 
 
 @pytest.mark.parametrize(("content", "launched", "stops"), [

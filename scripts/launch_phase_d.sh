@@ -19,8 +19,10 @@
 #   SELECT           1 (default) runs the checklist on the best revalidated candidates (B60)
 #   SELECT_TOP       how many candidates that selection checks (default 5)
 #   CPU_CORES        workers for the selection's simulations (default 24)
-#   FIREFLY_STATUS   set by this script: the file where the firefly session leaves its exit
-#                    status, which the chain checks before it uses FIREFLY_RUN
+#   FIREFLY_STATUS   the file where the firefly session leaves its exit status, which the
+#                    chain checks before it uses FIREFLY_RUN; default firefly_phaseD.exit.
+#                    The launcher fails if the optimiser exits within its first 2 s; a later
+#                    failure stops the chain.
 # An unset variable reaches the chain empty, which the chain reads as its default.
 set -euo pipefail
 
@@ -47,7 +49,7 @@ CHAIN_ENV=(PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BL
            SELECT_TOP CPU_CORES FIREFLY_STATUS)
 # The firefly session replaces "running" with the optimiser's exit status, so a session that is
 # killed before the optimiser exits leaves "running", which stops the chain too.
-FIREFLY_STATUS=firefly_phaseD.exit
+FIREFLY_STATUS="${FIREFLY_STATUS:-firefly_phaseD.exit}"
 echo running > "$FIREFLY_STATUS"
 chain_env_args=()
 for name in "${CHAIN_ENV[@]}"; do chain_env_args+=(-e "$name=${!name:-}"); done
@@ -56,11 +58,16 @@ tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
   -e "FIREFLY_STATUS=$FIREFLY_STATUS" bash -c \
   'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1; \
-   echo $? > "$FIREFLY_STATUS"'
+   echo $? > "$FIREFLY_STATUS.tmp" && mv "$FIREFLY_STATUS.tmp" "$FIREFLY_STATUS"'
 sleep 2
+# The status is renamed into place, so it is never read half-written. "running" with no
+# session left means the session was killed before the optimiser exited.
 status=$(cat "$FIREFLY_STATUS")
+if [ "$status" = running ] && ! tmux has-session -t firefly 2>/dev/null; then
+  status='killed'
+fi
 if [ "$status" != running ] && [ "$status" != 0 ]; then
-  echo "ERROR: the optimiser exited at startup with status $status; not starting the chain"
+  echo "ERROR: the firefly session ended at startup with status $status; not starting the chain"
   tail -n 20 firefly_phaseD.log 2>/dev/null || true
   exit 1
 fi
