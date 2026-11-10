@@ -160,6 +160,16 @@ def test_heredoc_bodies_are_text():
     assert {"A", "B"} <= referenced
 
 
+def test_a_case_statement_in_a_substitution_is_left_unfolded():
+    """The unpaired ) of a case pattern cannot end its command substitution.
+
+    The line then assigns nothing, which can only report more reads.
+    """
+    line = "A=$(case $x in a) echo 1;; esac)"
+    assert "X" not in es.commands(line)[0][0]
+    assert es.assignment(line) is None
+
+
 def test_nested_arithmetic_opens_no_block():
     """An arithmetic expansion with nested parentheses folds into one word."""
     assert es.block_change("x=$(( (1+2) ))") == 0
@@ -184,6 +194,7 @@ def test_a_case_pattern_starts_a_command():
     ("x=$( echo $(a)", [["x=$(", "echo", "X"]]),                   # the closed one still folds
     ('A=$(echo "a\\")b")', [["A=X"]]),                           # an escaped quote
     ('A=$(echo "$(echo ")")")', [["A=X"]]),                       # quotes nested in $( )
+    ("A=$(echo $'\\'')", [["A=X"]]),                              # ANSI-C quoting
     ("a && b || c | d & e", [["a"], ["b"], ["c"], ["d"], ["e"]]),
 ])
 def test_commands_are_split_into_words(line, words):
@@ -229,6 +240,14 @@ def test_commands_are_split_into_words(line, words):
     (["cat <<EOF>out", "A=1", "EOF", "B=1", "echo $B"], {"B"}),    # a glued redirection
     (["cat <<A<<B", "x", "A", "y", "B", "C=1", "echo $C"], {"C"}),  # two here-documents
     (["x=$(cat <<EOF)", "A=1", "EOF", "echo $A"], set()),         # inside a substitution
+    (['echo x"a <<EOF"', "B=1", "echo $B"], {"B"}),               # << quoted mid-word
+    (['echo ${x:-"a <<b"}', "B=1", "echo $B"], {"B"}),
+    (["echo ${x:-a <<b}", "B=1", "echo $B"], {"B"}),              # bash: no here-document
+    (["cat <<E\\OF", "A=1", "EOF", "B=1", "echo $B"], {"B"}),     # delimiter EOF
+    (["cat <<'EOF'x", "A=1", "EOF", "EOFx", "echo $A"], set()),    # delimiter EOFx
+    (['cat <<"E F"', "A=1", "E F", "B=1", "echo $B"], {"B"}),
+    (["cat <<@@", "A=1", "@@", "B=1", "echo $B"], {"B"}),
+    (["let x=1<<2", "A=1", "2", "B=1", "echo $B"], {"B"}),          # bash: a here-document
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -264,13 +283,17 @@ def test_every_form_of_reading_a_variable_is_a_reference(line, names):
     ("out=$(bash scripts/a.sh)", {"a.sh"}),
     ("x=`bash scripts/a.sh`", {"a.sh"}),
     ('tmux new-session -d -s x "bash scripts/a.sh"', {"a.sh"}),
-    ("echo myscripts/a.sh", set()),
+    ("echo myscripts/a.sh", {"a.sh"}),               # some a.sh: reported, to be safe
+    ("bash scripts//a.sh scripts/./b.sh", {"a.sh", "b.sh"}),
+    ('bash "$SCRIPT_DIR/a.sh"', {"a.sh"}),
+    ("cd scripts && bash ./a.sh", {"a.sh"}),
+    ("bash scripts/sub/a.sh", {"a.sh"}),
     ("true&&scripts/a.sh", {"a.sh"}),
     ("x;scripts/a.sh", {"a.sh"}),
     ("a|scripts/a.sh", {"a.sh"}),
     ("${X:-scripts/a.sh}", {"a.sh"}),
     ("echo scripts/a.sh.bak", set()),
-    ("echo my-scripts/a.sh", set()),
+    ("echo a.shx", set()),
     ("bash -x scripts/a.sh", {"a.sh"}),
     ("bash -o pipefail scripts/a.sh", {"a.sh"}),
     ("if bash scripts/a.sh; then :; fi", {"a.sh"}),
@@ -281,8 +304,8 @@ def test_every_form_of_reading_a_variable_is_a_reference(line, names):
     ("tmux new-session -d -s x bash scripts/a.sh", {"a.sh"}),
     ("echo scripts/a.sh", {"a.sh"}),                 # a word of its own: reported, to be safe
 ])
-def test_script_calls_are_found_however_written(line, called):
-    """Every way of running a script under scripts/ is a call."""
+def test_scripts_are_found_however_named(line, called):
+    """Every mention of a shell script counts, by its file name."""
     assert es.called_scripts([es.ShellLine(line)]) == called
 
 

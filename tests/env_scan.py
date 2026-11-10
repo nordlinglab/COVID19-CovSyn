@@ -309,8 +309,11 @@ def _closing_parenthesis(line: str, start: int) -> int:
     """The index of the ``)`` closing the ``(`` at ``start``, or -1 if it stays open.
 
     Quoted parentheses do not count; inside double quotes a backslash escapes and ``$(``
-    opens a nested group with quotes of its own.
+    opens a nested group with quotes of its own. A group holding a case statement, whose
+    patterns end in an unpaired ``)``, is taken as open, which leaves it unfolded.
     """
+    if re.search(r"\bcase\b", line[start:]):
+        return -1
     depth, index, quote = 0, start, None
     while index < len(line):
         char = line[index]
@@ -325,8 +328,15 @@ def _closing_parenthesis(line: str, start: int) -> int:
                 index = _closing_parenthesis(line, index + 1)
                 if index < 0:
                     return -1
+        elif quote == "$'":
+            if char == "\\":
+                index += 1
+            elif char == "'":
+                quote = None
         elif char == "\\":
             index += 1
+        elif line.startswith("$'", index):
+            quote, index = "$'", index + 1
         elif char in "'\"":
             quote = char
         elif char in "()":
@@ -350,25 +360,25 @@ def _fold_balanced(line: str, opener: str) -> str:
     return line
 
 
-def _fold_substitutions(line: str, commands_too: bool = True) -> str:
-    """The line with each substitution as X.
-
-    Arithmetic expansions and commands and, with ``commands_too``, command substitutions and
-    backtick groups, nested parentheses included; one left open stays as it is.
-    """
-    openers = ("$((", "((")
-    if commands_too:
-        line = re.sub(r"`[^`]*`", "X", line)
-        openers = ("$((", "$(", "((")
-    for opener in openers:
+def _fold_arithmetic(line: str) -> str:
+    """The line with each arithmetic expansion and command as X."""
+    for opener in ("$((", "(("):
         line = _fold_balanced(line, opener)
     return line
 
 
-def _raw_words(line: str, commands_too: bool = True) -> list[str]:
+def _fold_substitutions(line: str) -> str:
+    """The line with each substitution as X.
+
+    Arithmetic expansions and commands, command substitutions and backtick groups, nested
+    parentheses included; one left open stays as it is.
+    """
+    return _fold_balanced(_fold_arithmetic(re.sub(r"`[^`]*`", "X", line)), "$(")
+
+
+def _raw_words(line: str) -> list[str]:
     """A line's words with their quotes kept, substitutions folded; unparsable gives none."""
-    folded = _fold_substitutions(line, commands_too)
-    lexer = shlex.shlex(folded, posix=False, punctuation_chars=";&|")
+    lexer = shlex.shlex(_fold_substitutions(line), posix=False, punctuation_chars=";&|")
     lexer.whitespace_split = True
     lexer.commenters = ""
     try:
@@ -377,22 +387,76 @@ def _raw_words(line: str, commands_too: bool = True) -> list[str]:
         return []
 
 
+def _plain_positions(line: str) -> list[bool]:
+    """For each character of a line, whether it stands outside quotes and ``${...}``.
+
+    Only there does bash take ``<<`` for a redirection.
+    """
+    plain, quote, braces, index = [True] * len(line), None, 0, 0
+    while index < len(line):
+        char = line[index]
+        plain[index] = quote is None and braces == 0
+        if quote == "'":
+            quote = None if char == "'" else quote
+        elif quote in {'"', "$'"} and char == "\\":
+            index += 1
+        elif quote == "$'":
+            quote = None if char == "'" else quote
+        elif quote == '"':
+            quote = None if char == '"' else quote
+        elif char == "\\":
+            index += 1
+        elif line.startswith("$'", index):
+            quote, index = "$'", index + 1
+        elif char in "'\"":
+            quote = char
+        elif line.startswith("${", index):
+            braces, index = braces + 1, index + 1
+        elif char == "}" and braces:
+            braces -= 1
+        index += 1
+    return plain
+
+
+def _shell_word(text: str) -> str | None:
+    """The first shell word of a text, quotes and backslashes removed; None if there is none.
+
+    That is how bash reads a here-document delimiter; an unparsable word gives None too.
+    """
+    text, end, quote = text.lstrip(" \t"), 0, None
+    while end < len(text):
+        char = text[end]
+        if quote:
+            quote = None if char == quote else quote
+        elif char == "\\":
+            end += 1
+        elif char in "'\"":
+            quote = char
+        elif char.isspace() or char in ";&|<>()":
+            break
+        end += 1
+    try:
+        words = shlex.split(text[:end])
+    except ValueError:
+        return None
+    return words[0] if words else None
+
+
 def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
     """The here-documents a line opens: whether tabs are stripped, and the delimiter.
 
-    ``<<<`` is a here-string, and ``<<`` inside quotes or arithmetic is no here-document; one
-    inside a command substitution is. The delimiter is the word after ``<<``, quotes and
-    backslashes removed, and ends where a redirection or another ``<<`` is glued to it.
+    ``<<`` opens one wherever bash takes it for a redirection: outside quotes, ``${...}`` and
+    arithmetic, inside a command substitution too, and in ``let x=1<<2`` as bash does
+    (checked with bash 5). ``<<<`` is a here-string. The delimiter is the next shell word with
+    its quotes and backslashes removed.
     """
-    words, found = _raw_words(line, commands_too=False), []
-    for index, word in enumerate(words):
-        for match in re.finditer(r"(?<!<)<<(?!<)(-?)", word):
-            if _scan_quotes(word[:match.start()])[1]:
-                continue
-            rest = word[match.end():] or (words[index + 1] if index + 1 < len(words) else "")
-            delimiter = re.match(r"""\\?(['"]?)([\w.-]+)\1""", rest)
+    folded = _fold_arithmetic(line)
+    plain, found = _plain_positions(folded), []
+    for match in re.finditer(r"(?<!<)<<(?!<)(-?)", folded):
+        if plain[match.start()]:
+            delimiter = _shell_word(folded[match.end():])
             if delimiter:
-                found.append((match.group(1) == "-", delimiter.group(2)))
+                found.append((match.group(1) == "-", delimiter))
     return found
 
 
@@ -553,19 +617,19 @@ def environment_variables(path: Path) -> set[str]:
     return (referenced - assigned) | defaulted
 
 
-# Any mention of a script in the raw text, bounded by anything that cannot be part of a path
-# name: a call may sit in a quoted command string, a substitution, a subshell, a default value,
-# or be glued to ;, &&, | or a redirection.
-SCRIPT_MENTION = re.compile(r"(?<![\w.])(?<![\w.]-)scripts/([\w.-]+\.sh)(?![\w.-])")
+# Any mention of a shell script in the raw text, by its file name: a call may sit in a quoted
+# command string, a substitution, a subshell or a default value, be glued to ;, &&, | or a
+# redirection, or reach the script by another path ($SCRIPT_DIR/x.sh, scripts/./x.sh).
+SCRIPT_MENTION = re.compile(r"([\w.+@%~,:-]+\.sh)(?![\w.-])")
 
 
 def mentioned_scripts(text: str) -> list[str]:
-    """Every script under scripts/ a text names, in order, however it is written."""
+    """The file name of every shell script a text names, in order, however it is written."""
     return SCRIPT_MENTION.findall(text)
 
 
 def called_scripts(lines: list[ShellLine]) -> set[str]:
-    """The scripts under scripts/ a script may run: every one it names.
+    """The shell scripts a script may run, by file name: every one it names.
 
     A script named in a quoted command string, a substitution or a here-document piped to a
     shell runs as surely as a plain call, so every mention counts; one that only names a script,

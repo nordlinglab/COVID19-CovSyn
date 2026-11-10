@@ -79,11 +79,12 @@ def test_the_chain_sets_what_it_does_not_forward(script, values):
     """
     prefix = " ".join(f"{name}={value}" for name, value in values.items())
     form = re.compile(rf"^\s*{re.escape(prefix)} bash scripts/{re.escape(script)}(?:\s|$)")
-    lines = [line.text for line in _lines(CHAIN) if script in es.mentioned_scripts(line.text)]
+    lines = [line for line in _lines(CHAIN) if script in es.mentioned_scripts(line.text)]
     assert lines, script
     for line in lines:
-        assert es.mentioned_scripts(line).count(script) == 1, line
-        assert form.match(line), line
+        assert not line.heredoc, line.text          # text written out is no call
+        assert es.mentioned_scripts(line.text).count(script) == 1, line.text
+        assert form.match(line.text), line.text
 
 
 def test_every_script_the_chain_runs_is_scanned():
