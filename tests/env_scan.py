@@ -258,96 +258,123 @@ class ShellLine:
 
 
 @dataclass
+class _Frame:
+    """One open context of the walker.
+
+    Its kind, where it opened, its parenthesis or bracket nesting, and, in a command
+    substitution, how many case statements are open in it.
+    """
+
+    kind: str
+    start: int
+    nesting: int = 0
+    cases: int = 0
+
+
+@dataclass
 class _Walk:
     """What the context walker found in a text.
 
     ``kinds`` holds, for each character, the context it stands in: ``top`` (plain code), a
-    quote (``'``, ``"``, ``$'``, a backtick), the inside of a ``$(``, ``((`` or ``${``, or
-    ``#`` for a comment. ``groups`` maps the index where each ``$(``, ``$((``, ``((``, ``$[``
-    or ``${`` opens to the index of the character that closes it. ``open`` lists the contexts
-    still open at the end, innermost last.
+    quote (``'``, ``"``, ``$'``, a backtick), the inside of ``$(`` (plain code too), of the
+    arithmetic ``$((``, ``((`` and ``$[``, of ``${``, or ``#`` for a comment. ``groups`` maps
+    the index where each ``$(``, ``$((``, ``((``, ``$[``, ``${`` or backtick group opens to the
+    index of its last character. ``stack`` holds the contexts open at the end, the outermost
+    ``top`` first, so a walk can go on from it.
     """
 
     kinds: list[str]
     groups: dict[int, int]
-    open: list[str]
+    stack: list[_Frame]
+
+    @property
+    def open(self) -> list[str]:
+        """The contexts still open at the end of the text, innermost last."""
+        return [frame.kind for frame in self.stack[1:]]
 
 
-PLAIN = {"top", "$(", "(("}
+PLAIN = {"top", "$("}                   # commands: where << redirects and # comments
+ACTIVE = PLAIN | {"${", '"'}            # where $(, $((, ${ and $[ open
+ARITHMETIC = {"$((", "((", "$["}
+GROUPS = {"$(", "$((", "((", "$[", "${", "`"}
 
 
-def _walk(text: str) -> _Walk:
-    """Walk a text as bash reads its quoting, one pass for every scan.
+def _walk(text: str, stack: list[_Frame] | None = None) -> _Walk:
+    """Walk a text as bash reads its quoting, going on from ``stack`` when one is given.
 
     A backslash escapes the next character outside single quotes, inside ``$'...'`` too. A
     ``$(`` opens plain code again inside double quotes and ``${...}``, but inside backticks it
-    is text, as bash reads backtick content as a string. ``((`` at the start of a word in plain
-    code is an arithmetic command, and ``$[`` legacy arithmetic. A ``#`` at the start of a word
-    in plain code starts a comment to the end of its line. A character that opens or closes a
-    context belongs to the outer one.
+    is text, as bash reads backtick content as a string. ``$((``, ``((`` at the start of a word
+    and ``$[`` open arithmetic. In a command substitution a ``)`` that ends a case pattern does
+    not close it. A ``#`` at the start of a word in plain code, not after an escaped blank,
+    starts a comment to the end of its line. A character that opens or closes a context
+    belongs to the outer one.
     """
-    stack: list[tuple[str, int, int]] = [("top", -1, 0)]       # kind, open index, nesting
-    kinds, groups, index = [], {}, 0
+    stack = [_Frame(f.kind, f.start, f.nesting, f.cases) for f in stack] if stack else \
+        [_Frame("top", -1)]
+    kinds, groups, index, escaped_end = [], {}, 0, -1
 
     def push(kind: str, width: int) -> None:
         nonlocal index
-        kinds.extend([stack[-1][0]] * width)
-        stack.append((kind, index, 0))
+        kinds.extend([stack[-1].kind] * width)
+        stack.append(_Frame(kind, index))
         index += width
 
-    def pop() -> None:
-        kind, opened, _ = stack.pop()
-        if kind in {"$(", "((", "$[", "${"}:
-            groups[opened] = index
-        kinds.append(stack[-1][0])
+    def pop(width: int) -> None:
+        nonlocal index
+        frame = stack.pop()
+        if frame.kind in GROUPS and frame.start >= 0:
+            groups[frame.start] = index + width - 1
+        kinds.extend([stack[-1].kind] * width)
+        index += width
 
     while index < len(text):
-        kind, _, nesting = stack[-1]
-        char = text[index]
-        word_start = index == 0 or text[index - 1] in " \t\n;&|("
-        active = kind in PLAIN | {"${", '"'}
+        frame = stack[-1]
+        kind, char = frame.kind, text[index]
+        word_start = index == 0 or (text[index - 1] in " \t\n;&|(" and escaped_end != index)
         if kind == "#":
             if char == "\n":
                 stack.pop()
-                kinds.append(stack[-1][0])
+                kinds.append(stack[-1].kind)
             else:
                 kinds.append("#")
             index += 1
         elif kind == "'":
             if char == "'":
-                pop()
+                pop(1)
             else:
                 kinds.append(kind)
-            index += 1
+                index += 1
         elif char == "\\":
             width = len(text[index:index + 2])
             kinds.extend([kind] * width)
             index += width
+            escaped_end = index
         elif kind == "$'":
             if char == "'":
-                pop()
+                pop(1)
             else:
                 kinds.append(kind)
-            index += 1
+                index += 1
         elif (kind == '"' and char == '"') or (kind == "`" and char == "`") or \
                 (kind == "${" and char == "}") or \
-                (kind == "$[" and char == "]" and nesting == 0) or \
-                (kind in {"$(", "(("} and char == ")" and nesting == 0):
-            if kind == "((" and text.startswith("))", index):
-                kinds.append(kind)          # the first ) of the closing ))
-                index += 1
-            pop()
-            index += 1
-        elif active and text.startswith("$(", index):
+                (kind == "$[" and char == "]" and frame.nesting == 0) or \
+                (kind == "$(" and char == ")" and frame.nesting == 0 and frame.cases == 0):
+            pop(1)
+        elif kind in {"$((", "(("} and text.startswith("))", index) and frame.nesting == 0:
+            pop(2)
+        elif kind in ACTIVE and text.startswith("$((", index):
+            push("$((", 3)
+        elif kind in ACTIVE and text.startswith("$(", index):
             push("$(", 2)
-        elif active and text.startswith("${", index):
+        elif kind in ACTIVE and text.startswith("${", index):
             push("${", 2)
-        elif active and text.startswith("$[", index):
+        elif kind in ACTIVE and text.startswith("$[", index):
             push("$[", 2)
         elif kind in PLAIN and word_start and text.startswith("((", index):
             push("((", 2)
         elif kind in PLAIN and word_start and char == "#":
-            stack.append(("#", index, 0))
+            stack.append(_Frame("#", index))
             kinds.append("#")
             index += 1
         elif kind in PLAIN | {"${"} and text.startswith("$'", index):
@@ -355,23 +382,33 @@ def _walk(text: str) -> _Walk:
         elif (kind in PLAIN | {"${"} and char in "'\"`") or (kind == '"' and char == "`"):
             push(char, 1)
         else:
-            if kind in {"$(", "(("} and char in "()":
-                stack[-1] = (kind, stack[-1][1], nesting + (1 if char == "(" else -1))
+            if kind == "$(" and word_start and re.match(r"(case|esac)\b", text[index:]):
+                frame.cases += 1 if text.startswith("case", index) else -1
+            elif kind == "$(" and char == ")" and frame.cases:
+                pass                        # a case pattern ends here
+            elif kind in {"$(", "$((", "(("} and char in "()":
+                frame.nesting += 1 if char == "(" else -1
             elif kind == "$[" and char in "[]":
-                stack[-1] = (kind, stack[-1][1], nesting + (1 if char == "[" else -1))
+                frame.nesting += 1 if char == "[" else -1
             kinds.append(kind)
             index += 1
-    return _Walk(kinds, groups, [kind for kind, _, _ in stack[1:] if kind != "#"])
+    while stack[-1].kind == "#":            # a comment ends with its line
+        stack.pop()
+    return _Walk(kinds, groups, stack)
+
+
+def _code(text: str, walk: _Walk) -> str:
+    """A walked text without its comments."""
+    return "".join(c for c, kind in zip(text, walk.kinds, strict=True) if kind != "#")
 
 
 def _scan_quotes(text: str) -> tuple[str, str | None]:
     """A text without its comments, and the context still open at its end, as bash reads it.
 
-    Any open quote, substitution or ``${`` continues the logical line, as it does in bash.
+    Any open quote, substitution, arithmetic or ``${`` continues the logical line, as in bash.
     """
     walk = _walk(text)
-    code = "".join(c for c, kind in zip(text, walk.kinds, strict=True) if kind != "#")
-    return code, walk.open[-1] if walk.open else None
+    return _code(text, walk), walk.open[-1] if walk.open else None
 
 
 def strip_comment(line: str) -> str:
@@ -386,9 +423,9 @@ def _trailing_backslashes(text: str) -> int:
 def _fold(line: str, openers: tuple[str, ...]) -> str:
     """The line with each closed group that opens with one of ``openers`` as X.
 
-    Groups come from one walk; a quoted opener is text and opens none. A group holding a case
-    statement, whose patterns end in an unpaired ``)``, is left unfolded, as is one left open.
-    Nested groups fold with the outermost.
+    Groups come from one walk; a quoted opener is text and opens none. A command substitution
+    holding a case statement is left unfolded, as is a group left open. Nested groups fold with
+    the outermost.
     """
     walk, spans = _walk(line), []
     for start, end in sorted(walk.groups.items()):
@@ -410,12 +447,8 @@ def _fold_arithmetic(line: str) -> str:
 
 
 def _fold_substitutions(line: str) -> str:
-    """The line with each substitution as X.
-
-    Arithmetic expansions and commands, command substitutions and backtick groups, nested
-    parentheses included; one left open stays as it is.
-    """
-    return _fold(re.sub(r"`[^`]*`", "X", line), ("$((", "((", "$[", "$("))
+    """The line with each substitution as X: arithmetic, ``$( )`` and backtick groups."""
+    return _fold(line, ("$((", "((", "$[", "$(", "`"))
 
 
 def _raw_words(line: str) -> list[str]:
@@ -435,7 +468,7 @@ def _plain_positions(line: str) -> list[bool]:
     Plain code is outside quotes, ``${...}`` and arithmetic, or inside a ``$(...)`` wherever
     that stands; only there does bash take ``<<`` for a redirection.
     """
-    return [kind in {"top", "$("} for kind in _walk(line).kinds]
+    return [kind in PLAIN for kind in _walk(line).kinds]
 
 
 def _shell_word(text: str) -> str | None:
@@ -455,21 +488,22 @@ def _shell_word(text: str) -> str | None:
     return words[0] if words else None
 
 
-def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
+def _heredoc_delimiters(line: str, kinds: list[str] | None = None) -> list[tuple[bool, str]]:
     """The here-documents a line opens: whether tabs are stripped, and the delimiter.
 
     ``<<`` opens one wherever bash takes it for a redirection: in plain code, inside a command
     substitution too, even within double quotes or ``${...}``, and in ``let x=1<<2`` as bash
-    does (checked with bash 5); not inside quotes, ``${...}`` or arithmetic. ``<<<`` is a
-    here-string. The delimiter is the next shell word with its quotes and backslashes removed.
+    does (checked with bash 5); not inside quotes, ``${...}``, arithmetic or backticks.
+    ``<<<`` is a here-string. The delimiter is the next shell word with its quotes and
+    backslashes removed. ``kinds`` are the line's contexts when it continues a walk.
     """
     if "<<" not in line:
         return []
-    folded = _fold_arithmetic(line)
-    plain, found = _plain_positions(folded), []
-    for match in re.finditer(r"(?<!<)<<(?!<)(-?)", folded):
-        if plain[match.start()]:
-            delimiter = _shell_word(folded[match.end():])
+    kinds = kinds if kinds is not None else _walk(line).kinds
+    found = []
+    for match in re.finditer(r"(?<!<)<<(?!<)(-?)", line):
+        if kinds[match.start()] in PLAIN:
+            delimiter = _shell_word(line[match.end():])
             if delimiter:
                 found.append((match.group(1) == "-", delimiter))
     return found
@@ -478,12 +512,14 @@ def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
 def shell_lines(text: str) -> list[ShellLine]:
     """A script's logical lines.
 
-    A line still inside a quote at its end goes on with the next, comments are dropped before
-    continuation lines are joined (bash does not continue a comment), an odd run of trailing
-    backslashes continues a line, blank lines are left out, and here-document bodies are kept
-    as such, since they hold text, not commands.
+    A line still inside a quote, substitution, arithmetic or ``${`` at its end goes on with the
+    next, walked from where it stopped; comments are dropped before continuation lines are
+    joined (bash does not continue a comment), an odd run of trailing backslashes continues a
+    line, and blank lines are left out. A here-document body is kept as such, since it holds
+    text: it follows the physical line that opens it inside an open substitution, and the
+    logical line otherwise.
     """
-    lines, buffer, delimiters = [], "", []
+    lines, buffer, stack, delimiters, pending = [], "", None, [], []
     for raw in text.splitlines():
         if delimiters:
             strip_tabs, word = delimiters[0]
@@ -492,17 +528,22 @@ def shell_lines(text: str) -> list[ShellLine]:
             else:
                 lines.append(ShellLine(raw, heredoc=True))
             continue
-        code, open_quote = _scan_quotes(buffer + raw)
-        if open_quote:
-            buffer += raw + "\n"
+        walk = _walk(raw, stack)
+        code = _code(raw, walk)
+        opened = _heredoc_delimiters(raw, walk.kinds)
+        if walk.open:
+            buffer, stack = buffer + code + "\n", walk.stack
+            delimiters = pending + opened
+            pending = []
             continue
         if _trailing_backslashes(code) % 2:
-            buffer = code[:-1] + " "
+            buffer, stack = buffer + code[:-1] + " ", None
+            pending += opened
             continue
-        buffer = ""
-        if code.strip():
-            lines.append(ShellLine(code))
-            delimiters = _heredoc_delimiters(code)
+        line, buffer, stack = buffer + code, "", None
+        if line.strip():
+            lines.append(ShellLine(line))
+        delimiters, pending = pending + opened, []
     if buffer.strip():
         lines.append(ShellLine(buffer))
     return lines
@@ -635,7 +676,7 @@ def environment_variables(path: Path) -> set[str]:
 # A path to a shell script, read after quotes and backslashes are removed; a ``$ROOT/`` or
 # ``${ROOT}/`` prefix, the repository root in every script, is dropped.
 SCRIPT_MENTION = re.compile(
-    r"(?:\$\{?ROOT\}?/)?((?:\$\{[^}]*\}|\$\w+|[\w./+@%~,-])*\.sh)(?![\w.-])")
+    r"(?:\$\{?ROOT\}?/)?((?:\$\{[^}]*\}|\$\w+|[\w./+@%~,:=?#-])*\.sh)(?![\w.-])")
 
 
 def mentioned_scripts(text: str) -> list[str]:

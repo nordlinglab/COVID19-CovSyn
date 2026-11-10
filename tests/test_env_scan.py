@@ -115,6 +115,7 @@ def test_the_import_closure_follows_relative_imports_and_packages(tmp_path):
     ("echo '#x' \"#y\" a#b", "echo '#x' \"#y\" a#b"),
     ("echo ${#x}", "echo ${#x}"),
     ("echo \\# x", "echo \\# x"),
+    ("echo a\\ #b", "echo a\\ #b"),                # an escaped blank keeps # in the word
     ("f; # note", "f; "),
 ])
 def test_comments_are_stripped_as_bash_reads_them(line, code):
@@ -174,6 +175,11 @@ def test_a_case_statement_in_a_substitution_is_left_unfolded():
 def test_nested_arithmetic_opens_no_block():
     """An arithmetic expansion with nested parentheses folds into one word."""
     assert es.block_change("x=$(( (1+2) ))") == 0
+
+
+def test_arithmetic_starting_with_a_parenthesis_folds_whole():
+    """$(((1+2)*3)) is one arithmetic expansion, not $( followed by (( )."""
+    assert es._fold_arithmetic("echo $(((1+2)*3)) x") == "echo X x"
 
 
 def test_a_case_pattern_starts_a_command():
@@ -260,6 +266,10 @@ def test_commands_are_split_into_words(line, words):
     (['X="$(', "echo hi", ')"', "A=1", 'echo "$A"'], {"X", "A"}),  # a $( open in quotes
     (['echo "${x:-a', 'b}"', "A=1", "echo $A"], {"A"}),            # a ${ open in quotes
     (["echo hi # don't", "A=1", "echo $A"], {"A"}),               # a quote in a comment
+    (["X=$(cat <<EOF", "hello", "don't", "EOF", ")", "A=1", "echo $A"], {"X", "A"}),
+    (['X="$(cat <<EOF', "hello", "EOF", ')"', "A=1", "echo $A"], {"X", "A"}),
+    (["echo '`' && while read x; do echo '`'", "A=1", "done", "echo $A"], set()),
+    (["X=$(", "case $y in", "a) echo;;", "esac", ")", "A=1", "echo $A"], {"A"}),
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -303,7 +313,9 @@ A = "scripts/a.sh"
     ("true&&scripts/a.sh", {A}),
     ("x;scripts/a.sh", {A}),
     ("a|scripts/a.sh", {A}),
-    ("${X:-scripts/a.sh}", {"-scripts/a.sh"}),       # a default value: reported, differs
+    ("${X:-scripts/a.sh}", {"X:-scripts/a.sh"}),     # a default value: reported, differs
+    ("bash ${X:=scripts/a.sh}", {"X:=scripts/a.sh"}),
+    ("bash ${X#scripts/a.sh}", {"X#scripts/a.sh"}),
     ("bash -o pipefail scripts/a.sh", {A}),
     ("if bash scripts/a.sh; then :; fi", {A}),
     ("nohup bash scripts/a.sh &", {A}),
@@ -320,7 +332,7 @@ A = "scripts/a.sh"
     ('bash "scripts/${step}.sh"', {"scripts/${step}.sh"}),
     ("bash scripts/{a,b}.sh", {".sh"}),
     ("bash scripts/a.sh,b.sh", {"scripts/a.sh,b.sh"}),
-    ("bash scripts/a=b.sh", {"b.sh"}),
+    ("bash scripts/a=b.sh", {"scripts/a=b.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):
     """Every mention of a shell script counts, as a normalised repository-relative path."""
@@ -403,3 +415,48 @@ def test_a_quoted_word_leaves_nothing_open(text):
     code, open_context = es._scan_quotes(f"echo {shlex.quote(text)}")
     assert open_context is None
     assert code == f"echo {shlex.quote(text)}"
+
+
+# A small grammar of balanced bash text: plain words, quotes, substitutions, arithmetic,
+# parameter expansions and backticks, nested at random.
+WORD = st.text(st.sampled_from("abc xyz019_"), min_size=1, max_size=6)
+BALANCED = st.recursive(
+    WORD,
+    lambda inner: st.one_of(
+        st.builds(lambda w: f"'{w}'", WORD),
+        st.builds(lambda w: f'"{w}"', inner),
+        st.builds(lambda w: f"$({w})", inner),
+        st.builds(lambda w: f"$(( {w} ))", st.sampled_from(["1+2", "(1+2)*3", "x<<2"])),
+        st.builds(lambda w: f"${{X:-{w}}}", inner),
+        st.builds(lambda w: f"`{w}`", WORD),
+        st.builds(lambda a, b: f"{a} {b}", inner, inner),
+    ),
+    max_leaves=8,
+)
+
+
+@given(BALANCED)
+def test_balanced_text_leaves_nothing_open(text):
+    """Text built from balanced constructs opens nothing that outlasts it.
+
+    Every group the walker records starts with an opener and ends with its closer.
+    """
+    walk = es._walk(text)
+    assert walk.open == []
+    closers = {"$((": "))", "((": "))", "$(": ")", "${": "}", "$[": "]", "`": "`"}
+    for start, end in walk.groups.items():
+        opener = next(o for o in closers if text.startswith(o, start))
+        assert text[: end + 1].endswith(closers[opener])
+
+
+@given(st.lists(BALANCED, min_size=1, max_size=4))
+def test_walking_line_by_line_equals_walking_whole(parts):
+    """A walk that goes on from the previous line's stack reads each line as a whole walk."""
+    text = "\n".join(parts)
+    whole = es._walk(text).kinds
+    stack, kinds = None, []
+    for index, part in enumerate(parts):
+        walk = es._walk(part + ("\n" if index < len(parts) - 1 else ""), stack)
+        kinds += walk.kinds
+        stack = walk.stack
+    assert kinds == whole
