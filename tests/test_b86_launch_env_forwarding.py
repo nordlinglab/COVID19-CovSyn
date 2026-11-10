@@ -99,8 +99,8 @@ SCRIPT_LINES = [
 def test_the_chain_names_only_the_golden_script_lines():
     """The code lines naming a script are word for word the golden ones.
 
-    This checks the spelling only; test_the_chain_runs_the_synthesis_at_step_2 checks what
-    bash runs.
+    This checks the spelling only; test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy
+    and test_a_failed_synthesis_stops_the_chain check what bash runs.
     """
     naming = [line for line in _code(CHAIN) if re.search(r"\.sh\b", line)]
     assert naming == SCRIPT_LINES
@@ -145,7 +145,7 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain
 
     The directory comes from a chain run, so no directory name is written in the test.
     """
-    directory = chain_at_step_2[4]
+    directory = chain_at_step_2[5]
     root, record, status, output = _run(
         tmp_path, SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
     )
@@ -170,11 +170,14 @@ SYNTHESIS_STAND_IN = (
 )
 
 
-def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> tuple[Path, int, str, str, str]:
+def _chain_to_step_2(
+    tmp_path: Path, synthesis_status: str
+) -> tuple[Path, Path, int, str, str, str]:
     """Run the chain to its synthesis step with a stand-in data_synthesis.sh.
 
-    Returns the repository root, the exit status, the output with the log for messages, the
-    log alone, and the directory the synthesis was told to read (PARAMETER_PATH without ./).
+    Returns the repository root, the stand-ins' record directory, the exit status, the output
+    with the log for messages, the log alone, and the directory the synthesis was told to read
+    (PARAMETER_PATH without ./).
     """
     root, record, status, output = _run(
         tmp_path,
@@ -198,11 +201,11 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> tuple[Path, int, 
     assert len(calls) == 1 and calls[0][1:] == ["--environment-checked"], context
     path = calls[0][0]
     assert path.startswith("./"), context
-    return root, status, context, log, path[2:]
+    return root, record, status, context, log, path[2:]
 
 
 @pytest.fixture(scope="module")
-def chain_at_step_2(tmp_path_factory) -> tuple[Path, int, str, str, str]:
+def chain_at_step_2(tmp_path_factory) -> tuple[Path, Path, int, str, str, str]:
     """One chain run to step 2 with a synthesis that succeeds, shared by the tests below."""
     return _chain_to_step_2(tmp_path_factory.mktemp("chain"), "0")
 
@@ -213,8 +216,7 @@ def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2
     That copy is the directory the regression harness checks, and the log reports success.
     Only this path is run; other settings reach the same call by reading of the script.
     """
-    root, status, context, log, directory = chain_at_step_2
-    assert (root / directory).resolve() != (root / "run").resolve(), context
+    root, record, status, context, log, directory = chain_at_step_2
     assert (root / directory / "firefly_best.txt").exists(), context
     assert directory == pipeline_runner.COMPAT_DIR, context
     assert "synthetic data done" in log, context
@@ -222,8 +224,9 @@ def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2
 
 def test_a_failed_synthesis_stops_the_chain(tmp_path):
     """A failed synthesis stops the chain, and the log, which the user reads, says so."""
-    root, status, context, log, directory = _chain_to_step_2(tmp_path, "1")
+    root, record, status, context, log, directory = _chain_to_step_2(tmp_path, "1")
     assert status != 0, context
+    assert not (record / "uv_runs").exists(), context  # nothing ran after the synthesis
     assert "] ERROR: data synthesis failed" in log, context
     assert "synthetic data done" not in log, context
 
