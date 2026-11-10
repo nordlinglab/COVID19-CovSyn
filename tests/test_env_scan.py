@@ -249,6 +249,11 @@ def test_case_and_subshell_substitutions_fold_whole(line):
     assert es.commands(line) == [["A=X"]]
 
 
+def test_a_process_substitution_leaves_the_block_depth():
+    """A closed <( ) is one word and opens no block."""
+    assert es.block_change("cat <(echo hi )") == 0
+
+
 def test_arithmetic_left_open_at_the_end_of_the_text_waits():
     """For $(( ${X:-(} )) bash -n reports EOF: the arithmetic is still open there."""
     assert es._walk("echo $(( ${X:-(} ))").open == ["$(("]
@@ -280,6 +285,7 @@ def test_a_case_pattern_starts_a_command():
     ('A=$(echo "$(echo ")")")', [["A=X"]]),                       # quotes nested in $( )
     ("A=$(echo $'\\'')", [["A=X"]]),                              # ANSI-C quoting
     ("a && b || c | d & e", [["a"], ["b"], ["c"], ["d"], ["e"]]),
+    ("diff <(a) <(b)", [["diff", "X", "X"]]),           # process substitutions fold
 ])
 def test_commands_are_split_into_words(line, words):
     """Words split at whitespace and command separators.
