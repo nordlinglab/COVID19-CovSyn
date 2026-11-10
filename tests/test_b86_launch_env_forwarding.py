@@ -23,47 +23,99 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "launch_phase_d.sh"
 CHAIN = SCRIPT.parent / "phase_d_chain.sh"
+SYNTHESIS = SCRIPT.parent / "data_synthesis.sh"
 SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
+# The scripts the chain runs, each with the variables the chain sets on its command line.
+CHAIN_SCRIPTS = {SYNTHESIS: {"PARAMETER_PATH"}}
 # Set by the chain or its modules themselves, not by the user: OPTIMIZER_RUN after
 # revalidation, AGE_RR_FILE by select_by_checklist for each candidate's checklist.
 CHAIN_INTERNAL = {"OPTIMIZER_RUN", "AGE_RR_FILE"}
 SHELL_SPECIAL = {"BASH_SOURCE"}
 NAME = r"[A-Z][A-Z0-9_]*"
-ENVIRON = {"environ"}
-MAPPING = {"env"}
+# One definition of an environment access for both scans: the mappings and the getters of os,
+# and a mapping passed in as ``env``, as ``worker_count(os.environ)`` reads VERIFY_WORKERS.
+ENVIRONMENT_MAPPINGS = {"environ", "environb"}
+ENVIRONMENT_GETTERS = {"getenv", "getenvb"}
+ENVIRONMENT_NAMES = ENVIRONMENT_MAPPINGS | ENVIRONMENT_GETTERS
+MAPPING_PARAMETER = "env"
 
 
 def _name(node: ast.AST) -> str:
     return getattr(node, "attr", getattr(node, "id", ""))
 
 
+def _environment_names(tree: ast.AST) -> dict[str, str]:
+    """The names a module uses for the environment accesses of os, imported aliases included."""
+    names = {name: name for name in ENVIRONMENT_NAMES}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "os":
+            for alias in node.names:
+                if alias.name in ENVIRONMENT_NAMES:
+                    names[alias.asname or alias.name] = alias.name
+    return names
+
+
 def _environment_reads(path: Path) -> set[str]:
     """Names a module reads from the environment, found in its code, not its comments.
 
-    Covers ``os.environ`` or ``environ`` subscripts, ``.get`` and ``.setdefault``, ``getenv``
-    and ``in environ``, and the same on a mapping passed in as ``env``, as
-    ``worker_count(os.environ)`` reads VERIFY_WORKERS.
+    Covers subscripts, ``.get``, ``.setdefault`` and ``in`` on ``os.environ`` or on a mapping
+    passed in as ``env``, and ``getenv``, under any name the module imports them as.
     """
-    sources = ENVIRON | MAPPING
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    aliases = _environment_names(tree)
+
+    def kind(node: ast.AST) -> str:
+        name = _name(node)
+        if isinstance(node, ast.Name):
+            name = aliases.get(name, name)
+        if name in ENVIRONMENT_MAPPINGS or name == MAPPING_PARAMETER:
+            return "mapping"
+        return "getter" if name in ENVIRONMENT_GETTERS else ""
+
     names = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for node in ast.walk(tree):
         key = None
         if isinstance(node, ast.Call) and node.args:
             func = node.func
             if isinstance(func, ast.Attribute) and func.attr in {"get", "setdefault"}:
-                if _name(func.value) in sources:
+                if kind(func.value) == "mapping":
                     key = node.args[0]
-            elif _name(func) == "getenv":
+            elif kind(func) == "getter":
                 key = node.args[0]
-        elif isinstance(node, ast.Subscript) and _name(node.value) in sources:
+        elif isinstance(node, ast.Subscript) and kind(node.value) == "mapping":
             key = node.slice
         elif isinstance(node, ast.Compare) and any(isinstance(o, ast.In) for o in node.ops):
-            if any(_name(c) in sources for c in node.comparators):
+            if any(kind(c) == "mapping" for c in node.comparators):
                 key = node.left
         if isinstance(key, ast.Constant) and isinstance(key.value, str) and \
                 re.fullmatch(NAME, key.value):
             names.add(key.value)
     return names
+
+
+def _mentions_environment(path: Path) -> bool:
+    """Whether a module touches the environment at all.
+
+    A copy, an alias or a mapping handed to a reader such as ``worker_count`` reads the
+    environment as surely as a lookup does, so the firefly session's modules may not touch it:
+    no environment access of os under any name, and no such name as a string outside a
+    docstring, which covers ``getattr(os, "environ")`` and ``vars(os)["environ"]``.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    aliases = _environment_names(tree)
+    docstrings = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Expr)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in aliases:
+            return True
+        if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_NAMES:
+            return True
+        if isinstance(node, ast.ImportFrom) and node.module == "os" and \
+                any(a.name in ENVIRONMENT_NAMES or a.name == "*" for a in node.names):
+            return True
+        if isinstance(node, ast.Constant) and node.value in ENVIRONMENT_NAMES and \
+                id(node) not in docstrings:
+            return True
+    return False
 
 
 def _import_closure(module: str) -> set[Path]:
@@ -101,61 +153,57 @@ def _import_closure(module: str) -> set[Path]:
     return files
 
 
-ENVIRONMENT_NAMES = {"environ", "environb", "getenv", "getenvb"}
-
-
-def _mentions_environment(path: Path) -> bool:
-    """Whether a module touches the environment at all.
-
-    A copy, an alias or a mapping handed to a reader such as ``worker_count`` reads the
-    environment as surely as a lookup does, so the firefly session's modules may not touch it:
-    no ``os.environ``, ``environb``, ``getenv`` or ``getenvb``, under any import name, and no
-    ``getattr`` on ``os``.
-    """
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, (ast.Name, ast.Attribute)) and _name(node) in ENVIRONMENT_NAMES:
-            return True
-        if isinstance(node, ast.ImportFrom) and node.module == "os" and \
-                any(a.name in ENVIRONMENT_NAMES or a.name == "*" for a in node.names):
-            return True
-        if isinstance(node, ast.Call) and _name(node.func) == "getattr" and node.args and \
-                _name(node.args[0]) == "os":
-            return True
-    return False
-
-
 # Every covsyn module the firefly session runs; the chain runs the rest, and these too.
 FIREFLY_FILES = _import_closure("covsyn.calibration.firefly_optimizer")
 
 
-def _shell_code(path: Path) -> str:
-    """A shell script without its comment lines."""
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return "\n".join(line for line in lines if not line.lstrip().startswith("#"))
+def _shell_lines(path: Path) -> list[str]:
+    """A shell script's lines, continuation lines joined and comment lines dropped."""
+    text = re.sub(r"\\\n", " ", path.read_text(encoding="utf-8"))
+    return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
 
 
-def _assigned(code: str) -> set[str]:
-    """Names a shell script assigns with ``NAME=`` at the start of a line.
+# NAME=value alone on its line; NAME=value followed by a command sets NAME for that command only.
+ASSIGNMENT = re.compile(rf"^\s*({NAME})=")
+COMMAND_PREFIX = re.compile(rf"""^\s*{NAME}=(?:"[^"]*"|'[^']*'|[^\s"'$(]*)\s+[^\s#|;&]""")
 
-    The chain gives each variable it reads from the environment a default, ``${NAME:-...}``,
-    and assigns its own variables with ``NAME=``; test_the_chain_follows_the_convention fails
-    loudly on any other form, rather than this scan guessing at it.
+
+def _shell_variables(lines: list[str]) -> tuple[set[str], set[str], set[str]]:
+    """The names a script references, assigns and reads with a ``${NAME:-}`` default.
+
+    A name counts as assigned only when the script assigns it, with NAME= on a line of its own,
+    before it first uses it; a script that uses a name first reads it from the environment.
     """
-    return set(re.findall(rf"^\s*({NAME})=", code, re.MULTILINE))
+    referenced, defaulted, first_use, first_assignment = set(), set(), {}, {}
+    for number, line in enumerate(lines):
+        for name in re.findall(rf"\$\{{?({NAME})", line):
+            referenced.add(name)
+            first_use.setdefault(name, number)
+        defaulted |= set(re.findall(rf"\$\{{({NAME}):-", line))
+        match = ASSIGNMENT.match(line)
+        if match and not COMMAND_PREFIX.match(line):
+            first_assignment.setdefault(match.group(1), number)
+    assigned = {name for name, number in first_assignment.items()
+                if number < first_use.get(name, len(lines))}
+    return referenced - SHELL_SPECIAL, assigned, defaulted
+
+
+def _environment_variables(path: Path) -> set[str]:
+    """The names a script reads from the environment: defaulted or used before assigned."""
+    referenced, assigned, defaulted = _shell_variables(_shell_lines(path))
+    return (referenced - assigned) | defaulted
 
 
 def _chain_variables() -> list[str]:
-    """Every variable the chain or a module it runs reads from the environment.
+    """Every variable the chain, a script it runs or a module it runs reads from the environment.
 
-    The chain reads one when it gives it a default or uses it without assigning it; PYTHON is
-    gone, as the chain runs every module through uv run (Task 1).
+    PYTHON is gone, as the chain runs every module through uv run (Task 1).
     """
-    chain = _shell_code(CHAIN)
-    referenced = set(re.findall(rf"\$\{{?({NAME})", chain))
-    assigned = _assigned(chain)
-    defaulted = set(re.findall(rf"\$\{{({NAME}):-", chain))
-    modules = {name for path in SOURCE.rglob("*.py") for name in _environment_reads(path)}
-    return sorted(((referenced - assigned) | defaulted | modules) - CHAIN_INTERNAL - SHELL_SPECIAL)
+    found = _environment_variables(CHAIN)
+    for script, set_by_chain in CHAIN_SCRIPTS.items():
+        found |= _environment_variables(script) - set_by_chain
+    found |= {name for path in SOURCE.rglob("*.py") for name in _environment_reads(path)}
+    return sorted(found - CHAIN_INTERNAL)
 
 
 CHAIN_VARIABLES = _chain_variables()
@@ -164,7 +212,7 @@ CHAIN_VARIABLES = _chain_variables()
 @pytest.fixture
 def chain_env() -> list[str]:
     """The names launch_phase_d.sh passes into the chain session."""
-    text = _shell_code(SCRIPT)
+    text = "\n".join(_shell_lines(SCRIPT))
     match = re.search(r"^CHAIN_ENV=\((.*?)\)", text, re.DOTALL | re.MULTILINE)
     assert match, "launch_phase_d.sh no longer lists the chain's variables in CHAIN_ENV"
     return match.group(1).split()
@@ -174,6 +222,20 @@ def chain_env() -> list[str]:
 def test_the_chain_session_is_given_every_variable_it_reads(chain_env, variable):
     """A variable missing here is dropped without any error at launch."""
     assert variable in chain_env
+
+
+@pytest.mark.parametrize(("script", "names"), [(s.name, n) for s, n in CHAIN_SCRIPTS.items()])
+def test_the_chain_sets_what_it_does_not_forward(script, names):
+    """The chain sets on a script's command line every variable it does not forward.
+
+    Such a variable is left out of the forwarding, so without it the tmux server's value would
+    reach the script.
+    """
+    calls = [line for line in _shell_lines(CHAIN) if f"scripts/{script}" in line]
+    assert calls, script
+    for line in calls:
+        for name in names:
+            assert re.match(rf"^\s*{name}=\S+\s+bash scripts/{script}", line), line
 
 
 def test_the_firefly_modules_do_not_touch_the_environment():
@@ -194,8 +256,11 @@ def test_the_firefly_modules_do_not_touch_the_environment():
     ("from os import getenv as g\ng('A')", True),
     ("import os\nos.environb", True),
     ("import os\ngetattr(os, 'environ')", True),
+    ("import os as o\ngetattr(o, 'environ')", True),
+    ("import os\nvars(os)['environ']", True),
     ("def worker_count(env):\n    return env.get('A')", False),
     ("# os.environ\nprint('os.environ')", False),
+    ("def f():\n    '''environ'''", False),
 ])
 def test_touching_the_environment_is_found(tmp_path, source, touches):
     """Copies and aliases of the environment count, a mapping parameter or text does not."""
@@ -220,24 +285,36 @@ def test_the_import_closure_follows_relative_imports_and_packages(tmp_path, monk
     assert any(_mentions_environment(p) for p in closure)
 
 
-def test_the_chain_follows_the_convention():
-    """Every variable the chain uses is assigned with NAME= or read with a ${NAME:-} default.
+@pytest.mark.parametrize("script", [CHAIN, *CHAIN_SCRIPTS], ids=lambda p: p.name)
+def test_the_scripts_follow_the_convention(script):
+    """Every variable a script uses is assigned with NAME= or read with a ${NAME:-} default.
 
     A variable used any other way, say by for, read or local, would be taken for user input
     and its forwarding asked for; this fails instead, so its form can be checked by hand.
     """
-    chain = _shell_code(CHAIN)
-    referenced = set(re.findall(rf"\$\{{?({NAME})", chain)) - SHELL_SPECIAL
-    unaccounted = referenced - _assigned(chain) - set(re.findall(rf"\$\{{({NAME}):-", chain))
-    assert not unaccounted
+    referenced, assigned, defaulted = _shell_variables(_shell_lines(script))
+    assert not referenced - assigned - defaulted
 
 
-@pytest.mark.parametrize(("code", "names"), [
-    ("A=1", {"A"}), ("    A=1", {"A"}), ("echo A=1", set()), ("for A in 1; do :; done", set()),
+@pytest.mark.parametrize(("lines", "assigned"), [
+    (["A=1", "echo $A"], {"A"}),
+    (["    A=\"$(cd \"$(dirname x)\" && pwd)\"", "echo $A"], {"A"}),
+    (["echo A=1"], set()),
+    (["A=1 cmd", "echo $A"], set()),                # sets A for cmd only
+    (["A=\"x y\" cmd"], set()),
+    (["echo $A", "A=1"], set()),                    # read before it is assigned
+    (["for A in 1; do :; done"], set()),
 ])
-def test_the_chain_scan_sees_line_start_assignments(code, names):
-    """Only NAME= at the start of a line counts as an assignment."""
-    assert _assigned(code) == names
+def test_the_scan_takes_only_assignments_made_before_use(lines, assigned):
+    """Only NAME= on a line of its own, before the first use, makes a name the script's own."""
+    assert _shell_variables(lines)[1] == assigned
+
+
+def test_continuation_lines_are_joined(tmp_path):
+    """A NAME= argument on a continuation line belongs to the command it continues."""
+    script = tmp_path / "s.sh"
+    script.write_text("run x \\\n  A=1\necho $A\n")
+    assert _shell_variables(_shell_lines(script))[1] == set()
 
 
 @pytest.mark.parametrize(("source", "expected"), [
@@ -248,6 +325,8 @@ def test_the_chain_scan_sees_line_start_assignments(code, names):
     ("from os import getenv\ngetenv('A')", {"A"}),
     ("from os import environ\n'A' in environ", {"A"}),
     ("from os import environ\nenviron['A']", {"A"}),
+    ("from os import getenv as g\ng('A')", {"A"}),
+    ("from os import environ as e\ne.get('A')", {"A"}),
     ("def f(env):\n    return env.get('A')", {"A"}),
     ("# os.environ['A']\nprint('os.getenv(B)')", set()),
     ("d = {}\nd.get('A')", set()),
@@ -278,7 +357,12 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
 case "$1" in
-  has-session) [ -n "${{FIREFLY_LIVE:-}}" ] && [ -e "{record}/firefly_started" ]; exit ;;
+  has-session)
+    # STATUS_ON_CHECK: the optimiser exits, with that status, while the launcher checks.
+    if [ -n "${{STATUS_ON_CHECK:-}}" ] && [ -e "{record}/firefly_started" ]; then
+      echo "$STATUS_ON_CHECK" > firefly_phaseD.exit; exit 1
+    fi
+    [ -n "${{FIREFLY_LIVE:-}}" ] && [ -e "{record}/firefly_started" ]; exit ;;
   new-session) shift ;;
   *) exit 0 ;;
 esac
@@ -365,7 +449,7 @@ def test_session_checks_match_the_name_exactly():
     count; "=" makes the match exact.
     """
     for script in (SCRIPT, CHAIN):
-        targets = re.findall(r"has-session -t (\S+)", _shell_code(script))
+        targets = re.findall(r"has-session -t (\S+)", "\n".join(_shell_lines(script)))
         assert targets, script.name
         assert all(t.startswith("=") for t in targets), (script.name, targets)
 
@@ -389,6 +473,19 @@ def test_a_firefly_session_killed_at_startup_fails_the_launch(tmp_path):
     assert "status killed" in output
     assert (root / "firefly_phaseD.exit").read_text().strip() == "running"
     assert not (record / "chain_env").exists()
+
+
+@pytest.mark.parametrize(("exit_status", "launched"), [("0", True), ("3", False)])
+def test_an_optimiser_exiting_during_the_check_keeps_its_status(tmp_path, exit_status, launched):
+    """An optimiser that exits during the launcher's check keeps its own status.
+
+    The status is read again once the session is gone, so the exit is not reported as killed.
+    """
+    root, record, status, output = _run(tmp_path, SCRIPT, {"KILL_FIREFLY": "1",
+                                                          "STATUS_ON_CHECK": exit_status})
+    assert (status == 0) == launched, output
+    assert "killed" not in output
+    assert (record / "chain_env").exists() == launched
 
 
 def test_a_running_firefly_session_starts_the_chain(tmp_path):

@@ -22,7 +22,8 @@
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
 # Environment: PREVIOUS_CHECKS, FIREFLY_RUN, REVALIDATE, REVALIDATION_BLOCKS, SELECT,
 #              SELECT_TOP, CPU_CORES, VERIFY_WORKERS, FIREFLY_STATUS; launch_phase_d.sh
-#              documents and forwards each, and an empty value means the default.
+#              documents and forwards each, and an empty value means the default, except that
+#              an empty FIREFLY_STATUS (a chain started by hand) skips the firefly status check.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -103,7 +104,10 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
     fi
 done
 say 'generating synthetic data (2 modes x 1000 Monte-Carlo runs)'
-bash scripts/data_synthesis.sh >> "$LOG" 2>&1 || { say 'ERROR: data synthesis failed'; exit 1; }
+# PARAMETER_PATH is set here, so a value left in the tmux server's environment cannot point the
+# synthesis at another run than the one copied onto $FIREFLY.
+PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh >> "$LOG" 2>&1 \
+    || { say 'ERROR: data synthesis failed'; exit 1; }
 say 'synthetic data done'
 
 # ---------------------------------------------------------------- 2b. age risk ratio

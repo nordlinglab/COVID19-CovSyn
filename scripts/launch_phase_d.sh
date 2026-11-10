@@ -18,13 +18,15 @@
 #   REVALIDATION_BLOCKS  unseen seed blocks for that re-scoring (default 10, E95)
 #   SELECT           1 (default) runs the checklist on the best revalidated candidates (B60)
 #   SELECT_TOP       how many candidates that selection checks (default 5)
-#   CPU_CORES        workers for the selection's simulations (default 24)
+#   CPU_CORES        workers for the selection's and the data synthesis's simulations
+#                    (default 24)
 #   FIREFLY_STATUS   the file where the firefly session leaves its exit status, which the
 #                    chain checks before it uses FIREFLY_RUN; default firefly_phaseD.exit,
 #                    relative to the repository root. The launcher fails if the firefly session
 #                    ends within its first 2 s with a status other than 0; a later failure
 #                    stops the chain.
-# An unset variable reaches the chain empty, which the chain reads as its default.
+# An unset variable reaches the chain empty, which the chain reads as its default; the launcher
+# always gives FIREFLY_STATUS a value.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -68,7 +70,7 @@ sleep 2
 status=$(cat "$FIREFLY_STATUS")
 if [ "$status" = running ] && ! tmux has-session -t =firefly 2>/dev/null; then
   status=$(cat "$FIREFLY_STATUS")
-  [ "$status" = running ] && status='killed'
+  if [ "$status" = running ]; then status='killed'; fi
 fi
 if [ "$status" != running ] && [ "$status" != 0 ]; then
   echo "ERROR: the firefly session ended at startup with status $status; not starting the chain"

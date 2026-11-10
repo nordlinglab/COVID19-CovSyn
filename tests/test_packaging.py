@@ -196,8 +196,11 @@ UV_VALUE_OPTIONS = "|".join(
     --allow-insecure-host --directory --project --config-file --python-preference
     --python-fetch""".split()
 )
+# The short value options, which also take a value attached (-p3.12) or in a cluster (-qp 3.12).
+UV_SHORT_VALUE = "".join(o[1] for o in UV_VALUE_OPTIONS.split("|") if re.fullmatch(r"-\w", o))
 THROUGH_UV = re.compile(
-    rf"\buv run(?:\s+(?:(?:{UV_VALUE_OPTIONS})(?:\s+|=)[^\s|;&]+|-[pwifPC][^\s|;&-][^\s|;&]*"
+    rf"\buv run(?:\s+(?:(?:{UV_VALUE_OPTIONS})(?:\s+|=)[^\s|;&]+"
+    rf"|-[A-Za-z]*[{UV_SHORT_VALUE}](?:\s+|=)?[^\s|;&=-][^\s|;&]*"
     rf"|(?!(?:{UV_VALUE_OPTIONS})(?:\s|=|$))--?[\w-]+(?:=[^\s|;&]+)?))*"
     r"\s+$"
 )
@@ -234,6 +237,8 @@ def test_usage_lines_run_scripts_through_uv(path):
         ("uv run --python-preference only-managed python scripts/x.py", True),
         ("uv run -p3.12 python scripts/x.py", True),
         ("uv run --with python scripts/x.py", False),
+        ("uv run -qp 3.12 python scripts/x.py", True),
+        ("uv run -p= python scripts/x.py", False),
     ],
 )
 def test_usage_line_check_accepts_only_uv_options(line, through_uv):
