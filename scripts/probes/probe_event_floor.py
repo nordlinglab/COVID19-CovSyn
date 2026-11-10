@@ -14,8 +14,8 @@ infections per index case stay at the base vector's level, as the optimizer can 
 event risk ratio is locked at 1 (B54); without it the attack rate is held fixed. B59 (floor
 0.05) was decided on the compensated probe.
 
-Usage (repository root, PYTHONPATH=src):
-    python scripts/probes/probe_event_floor.py BEST_TXT OUT_CSV [BLOCKS] [--compensate]
+Usage (repository root, after uv sync):
+    uv run python scripts/probes/probe_event_floor.py BEST_TXT OUT_CSV [BLOCKS] [--compensate]
 """
 
 import concurrent.futures

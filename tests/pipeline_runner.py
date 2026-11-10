@@ -30,9 +30,7 @@ MODES = ("spread_Taiwan_weight", "taiwan_first_outbreak")
 
 
 def _run(args: list[str], workdir: Path) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, MPLBACKEND="Agg", PYTHONHASHSEED="0",
-               PYTHONPATH=os.pathsep.join(filter(None, [str(REPO_ROOT / "src"),
-                                                      os.environ.get("PYTHONPATH")])))
+    env = dict(os.environ, MPLBACKEND="Agg", PYTHONHASHSEED="0")
     return subprocess.run([sys.executable, *args], cwd=REPO_ROOT, env=env, text=True,
                           capture_output=True, check=False, timeout=1800)
 

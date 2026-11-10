@@ -6,7 +6,6 @@
 #
 # Usage: scripts/launch_phase_d.sh
 # Environment:
-#   PYTHON           interpreter with the CovSyn dependencies (default python3)
 #   WARM_START       space-separated firefly_best.txt files whose best vectors seed the initial
 #                    population (B49); default: the committed run 10 result
 #   PREVIOUS_CHECKS  phaseD_checks.json of the previous run, for the chain's comparison step
@@ -17,8 +16,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-PYTHON="${PYTHON:-python3}"
-PYPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 WARM_START="${WARM_START:-firefly_result/phaseD_run10/firefly_best.txt}"
 
 if tmux has-session -t firefly 2>/dev/null || tmux has-session -t chain 2>/dev/null; then
@@ -28,11 +25,11 @@ if tmux has-session -t firefly 2>/dev/null || tmux has-session -t chain 2>/dev/n
 fi
 # tmux does not pass this shell's environment to a new session, so it is given explicitly.
 tmux new-session -d -s firefly \
-  "cd '$ROOT' && PYTHONPATH='$PYPATH' '$PYTHON' -m covsyn.calibration.firefly_optimizer \
+  "cd '$ROOT' && uv run python -m covsyn.calibration.firefly_optimizer \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1"
 sleep 2
 tmux new-session -d -s chain \
-  "cd '$ROOT' && PYTHON='$PYTHON' PREVIOUS_CHECKS='${PREVIOUS_CHECKS:-}' \
+  "cd '$ROOT' && PREVIOUS_CHECKS='${PREVIOUS_CHECKS:-}' \
    VERIFY_WORKERS='${VERIFY_WORKERS:-}' bash scripts/phase_d_chain.sh"
 sleep 1
 tmux ls

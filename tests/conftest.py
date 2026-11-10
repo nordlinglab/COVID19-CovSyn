@@ -4,7 +4,8 @@
 
 The CovSyn modules read their inputs through paths relative to the repository root
 (``./variable/...``), so every test runs with the repository root as its working directory,
-and ``src/`` is put on ``sys.path`` so the ``covsyn`` package imports without installation.
+and the repository root is put on ``sys.path`` for the helpers under ``tests/`` and
+``scripts/``; ``covsyn`` itself comes from the editable install that ``uv sync`` makes.
 """
 
 from __future__ import annotations
@@ -24,9 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RUN10_BEST = REPO_ROOT / "firefly_result" / "phaseD_run10" / "firefly_best.txt"
 
-for entry in (REPO_ROOT / "src", REPO_ROOT):
-    if str(entry) not in sys.path:
-        sys.path.insert(0, str(entry))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 @pytest.fixture(scope="session", autouse=True)

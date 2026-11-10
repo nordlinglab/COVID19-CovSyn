@@ -1,5 +1,48 @@
-# Tool configuration for the CovSyn repository.
-# Runtime dependencies stay in requirements.txt until the package layout is restructured.
+# Package and tool configuration for the CovSyn repository.
+# `uv sync` installs Python, the pinned dependencies, and covsyn in editable mode (uv.lock).
+
+[project]
+name = "covsyn"
+version = "0.1.0"
+description = "Agent-based synthesis of COVID-19 contact tracing data, calibrated to Taiwan"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+# Python 3.10 reached end of life in October 2026; every pin below supports 3.13.
+requires-python = ">=3.13,<3.14"
+# The pins of requirements.txt at f8b7ccd, unchanged, so the regression fixtures still hold.
+dependencies = [
+    "bidict==0.23.1",
+    "lifelines==0.30.0",
+    "matplotlib==3.10.3",
+    "networkx==3.4.2",
+    "numpy==2.2.6",
+    "pandas==2.2.3",
+    "scikit-learn==1.6.1",
+    "scipy==1.15.3",
+    "seaborn==0.13.2",
+    "tqdm==4.67.1",
+    "openpyxl==3.1.5",
+    "xlrd>=2.0.1",
+    "psutil>=7.2.2",
+]
+
+[project.scripts]
+covsyn-optimise = "covsyn.calibration.firefly_optimizer:main"
+covsyn-revalidation = "covsyn.calibration.revalidation:main"
+covsyn-select-by-checklist = "covsyn.calibration.select_by_checklist:main"
+covsyn-data-synthesis = "covsyn.model.data_synthesis_main:main"
+covsyn-measure-age-rr = "covsyn.validation.measure_age_rr:main"
+covsyn-verify-phase-d = "covsyn.validation.verify_phase_d:main"
+covsyn-show-bounds = "covsyn.validation.show_bounds:cli"
+covsyn-measure-days = "covsyn.validation.measure_days:main"
+covsyn-compare-phase-d-runs = "covsyn.validation.compare_phase_d_runs:main"
+covsyn-plot-todolist923 = "covsyn.figures.plot_todolist923:main"
+covsyn-check-constraints = "covsyn.validation.check_constraints:main"
+covsyn-reproduce-wu2025 = "covsyn.figures.reproduce_wu2025:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14"]
+build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -10,7 +53,6 @@ addopts = "-ra"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
 # The pre-Phase-D modules are linted as they are moved into the package layout;
 # until then only new code under tests/ is held to the rules.
 extend-include = ["tests/*.py"]
@@ -21,3 +63,10 @@ ignore = ["D203", "D213"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170.15",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]

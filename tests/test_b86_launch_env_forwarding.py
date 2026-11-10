@@ -19,7 +19,8 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "launch_phase_d.sh"
 # Every variable the chain, or anything it starts, reads from the environment.
-CHAIN_VARIABLES = ("PYTHON", "PREVIOUS_CHECKS", "VERIFY_WORKERS")
+# PYTHON is gone: the chain runs every module through uv run (rework plan, Task 1).
+CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS")
 
 
 @pytest.fixture

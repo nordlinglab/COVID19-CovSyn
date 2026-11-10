@@ -20,14 +20,12 @@
 #   9. redraw the Wu & Nordling 2025 comparison figures from the independent seeds (E90, E97)
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
-# Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional), REVALIDATE (default 1),
+# Environment: PREVIOUS_CHECKS (optional), REVALIDATE (default 1),
 #              REVALIDATION_BLOCKS (default 10; E95: 4 blocks left the choice noisy).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-PYTHON="${PYTHON:-python3}"
-export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 LOG=phaseD_chain.log
 # The firefly names its output directory after its settings, while the report scripts read the
 # optimizer output from one fixed name. The run directory is copied onto that name below.
@@ -44,7 +42,8 @@ REPORT_CHENG=independent_cheng2020
 REPORT_CHECKS=validation_reference/phaseD_checks_independent.json
 
 say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
-run() { "$PYTHON" -m "$@"; }
+# uv run takes the interpreter and the installed covsyn from uv.lock.
+run() { uv run python -m "$@"; }
 
 say 'waiting for the firefly session to finish'
 while tmux has-session -t firefly 2>/dev/null; do sleep 120; done

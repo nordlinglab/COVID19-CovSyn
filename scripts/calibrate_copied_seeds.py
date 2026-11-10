@@ -13,7 +13,7 @@ against the reference (compare_first_wave), with n as a share of the community s
 first n whose mean reaches the reference is the answer.
 
 Usage (repository root):
-    python scripts/calibrate_copied_seeds.py <firefly_best.txt> [runs] [workers] [max_copies]
+    uv run python scripts/calibrate_copied_seeds.py <firefly_best.txt> [runs] [workers] [max_copies]
 """
 
 import concurrent.futures

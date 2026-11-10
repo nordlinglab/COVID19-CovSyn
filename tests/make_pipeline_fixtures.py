@@ -4,7 +4,7 @@
 
 Run on the compute server whenever a decision changes the output (last for B75):
 
-    python tests/make_pipeline_fixtures.py
+    uv run python tests/make_pipeline_fixtures.py
 
 Runs every step of ``pipeline_runner`` on the small fixed dataset and records, per step, the exit
 code and a digest of its normalised output; figure steps also record which files they wrote.

@@ -14,8 +14,8 @@ probability P[23] or the symptomatic-day probability P[24] of the base vector, c
 ceilings, and keeps the shape parameters P[25:28] fixed.
 
 Usage: python scripts/probes/probe_health_care_floor.py [parameter_dir] [draws] [simulations]
-       python scripts/probes/probe_health_care_floor.py [parameter_dir] grid [simulations] [23|24]
-       python scripts/probes/probe_health_care_floor.py [parameter_dir] shape [draws] [simulations]
+       uv run python scripts/probes/probe_health_care_floor.py [parameter_dir] grid [simulations] [23|24]
+       uv run python scripts/probes/probe_health_care_floor.py [parameter_dir] shape [draws] [simulations]
 
 The shape mode raises P[21] to 2-4 times the base and draws P[24] between the base and its
 ceiling and the timing parameters P[25:28] inside their bounds, to see whether moving contacts
