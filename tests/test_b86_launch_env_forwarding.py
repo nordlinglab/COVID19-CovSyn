@@ -109,13 +109,23 @@ def test_the_chain_names_only_the_golden_script_lines():
 SYNTHESIS_FILES = {"_files": {"run/firefly_best.txt": "1 2 3\n"}}
 
 
+def _read(path: Path) -> str:
+    """A file the stand-ins or the chain wrote, as UTF-8 with no newline translation."""
+    with path.open(encoding="utf-8", newline="") as file:
+        return file.read()
+
+
+def _records(path: Path) -> list[list[str]]:
+    """The calls a stand-in recorded, in order: fields ended by 0x1F, calls by 0x1E."""
+    assert path.exists(), f"no call was recorded in {path.name}"
+    text = _read(path)
+    assert text.endswith("\x1e"), f"the last record in {path.name} is cut off"
+    return [call.split("\x1f")[:-1] for call in text.split("\x1e")[:-1]]
+
+
 def _uv_runs(record: Path) -> list[list[str]]:
     """The arguments of every uv run the stand-in recorded, in order."""
-    assert (record / "uv_runs").exists(), "no uv run was recorded"
-    with (record / "uv_runs").open(encoding="utf-8", newline="") as file:  # bytes as written
-        text = file.read()
-    assert text.endswith("\x1e"), "the last run's record is cut off"
-    return [run.split("\x1f")[:-1] for run in text.split("\x1e")[:-1]]
+    return _records(record / "uv_runs")
 
 
 def _synthesis_runs(record: Path) -> list[tuple[str, str]]:
@@ -130,14 +140,14 @@ def _synthesis_runs(record: Path) -> list[tuple[str, str]]:
 MODES = list(pipeline_runner.MODES)
 
 
-def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
+def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain_at_step_2):
     """Run on its own without PARAMETER_PATH, data_synthesis.sh reads the chain's copy.
 
     The directory comes from a chain run, so no directory name is written in the test.
     """
-    _, _, _, directory = _chain_to_step_2(tmp_path / "chain", "0")
+    directory = chain_at_step_2[4]
     root, record, status, output = _run(
-        tmp_path / "alone", SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
+        tmp_path, SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
     )
     assert status == 0, output
     assert _synthesis_runs(record) == [(mode, f"./{directory}") for mode in MODES], output
@@ -154,16 +164,17 @@ def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
 
 SYNTHESIS_STAND_IN = (
     "#!/usr/bin/env bash\n"
-    'echo "$PARAMETER_PATH $*" >> synthesis_call\n'
+    # PARAMETER_PATH as its own field, then the arguments, in the uv stand-in's record format.
+    'printf "%s\\x1f" "$PARAMETER_PATH" "$@" >> synthesis_call; printf "\\x1e" >> synthesis_call\n'
     'exit "${SYNTHESIS_STATUS:-0}"\n'
 )
 
 
-def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> tuple[Path, int, str, str]:
+def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> tuple[Path, int, str, str, str]:
     """Run the chain to its synthesis step with a stand-in data_synthesis.sh.
 
-    Returns the repository root, the exit status, the output and log, and the directory the
-    synthesis was told to read (its PARAMETER_PATH without the leading ./).
+    Returns the repository root, the exit status, the output with the log for messages, the
+    log alone, and the directory the synthesis was told to read (PARAMETER_PATH without ./).
     """
     root, record, status, output = _run(
         tmp_path,
@@ -180,29 +191,41 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> tuple[Path, int, 
         },
     )
     log_path = root / "phaseD_chain.log"
-    context = output + (log_path.read_text() if log_path.exists() else "")
+    log = _read(log_path) if log_path.exists() else ""
+    context = output + log
     assert (root / "synthesis_call").exists(), context
-    calls = (root / "synthesis_call").read_text().splitlines()
-    assert len(calls) == 1 and calls[0].endswith(" --environment-checked"), context
-    assert calls[0].startswith("./"), context
-    return root, status, context, calls[0].split(" ")[0][2:]
+    calls = _records(root / "synthesis_call")
+    assert len(calls) == 1 and calls[0][1:] == ["--environment-checked"], context
+    path = calls[0][0]
+    assert path.startswith("./"), context
+    return root, status, context, log, path[2:]
 
 
-@pytest.mark.parametrize("synthesis_status", ["0", "1"])
-def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
+@pytest.fixture(scope="module")
+def chain_at_step_2(tmp_path_factory) -> tuple[Path, int, str, str, str]:
+    """One chain run to step 2 with a synthesis that succeeds, shared by the tests below."""
+    return _chain_to_step_2(tmp_path_factory.mktemp("chain"), "0")
+
+
+def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2):
     """Run to step 2 with REVALIDATE=0: the synthesis runs once, on the run's copy.
 
-    It gets --environment-checked, and a failed synthesis stops the chain. Only this path is
-    run; other settings reach the same call by reading of the script.
+    That copy is the directory the regression harness checks, and the log reports success.
+    Only this path is run; other settings reach the same call by reading of the script.
     """
-    root, status, context, directory = _chain_to_step_2(tmp_path, synthesis_status)
-    assert directory != "run" and (root / directory / "firefly_best.txt").exists(), context
-    if synthesis_status == "1":
-        assert status != 0, context
-        assert "] ERROR: data synthesis failed" in context, context
-        assert "synthetic data done" not in context, context
-    else:
-        assert "synthetic data done" in context, context
+    root, status, context, log, directory = chain_at_step_2
+    assert (root / directory).resolve() != (root / "run").resolve(), context
+    assert (root / directory / "firefly_best.txt").exists(), context
+    assert directory == pipeline_runner.COMPAT_DIR, context
+    assert "synthetic data done" in log, context
+
+
+def test_a_failed_synthesis_stops_the_chain(tmp_path):
+    """A failed synthesis stops the chain, and the log, which the user reads, says so."""
+    root, status, context, log, directory = _chain_to_step_2(tmp_path, "1")
+    assert status != 0, context
+    assert "] ERROR: data synthesis failed" in log, context
+    assert "synthetic data done" not in log, context
 
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
