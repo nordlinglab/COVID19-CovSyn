@@ -73,20 +73,22 @@ def test_the_list_holds_every_default_the_scripts_read():
 
 
 def _allowed_script_line(line: str) -> bool:
-    """Whether a chain line that names a script is the fixed synthesis call or a message.
+    """Whether a chain line that names a script is, as a whole, the fixed call or a message.
 
-    Rather than tell every way a shell can run a script, any line naming one must be the fixed
-    call or a say message without a substitution, which could run a command.
+    Rather than tell every way a shell can run a script, any line naming one must be exactly
+    the fixed synthesis call (with only its log redirection and continuation after it), or
+    exactly one say with a quoted message free of $ and backticks, so nothing can run there.
     """
     if not re.search(r"\.sh\b", line):
         return True
-    if SYNTHESIS_CALL.match(line):
-        return True
-    return line.lstrip().startswith('say "') and "$(" not in line and "`" not in line
+    call = SYNTHESIS_CALL.pattern + r'(?:\s+>>\s*"\$LOG"\s+2>&1)?\s*\\?\s*'
+    message = r"""\s*say\s+(?:'[^'$`]*'|"[^"$`]*")\s*"""
+    return bool(re.fullmatch(call, line) or re.fullmatch(message, line))
 
 
 @pytest.mark.parametrize(("line", "allowed"), [
-    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked >> l', True),
+    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
+     '>> "$LOG" 2>&1 \\', True),
     ('    say "then start scripts/phase_d_chain.sh itself"', True),
     ("echo hi", True),
     ("    . scripts/data_synthesis.sh", False),
@@ -94,6 +96,10 @@ def _allowed_script_line(line: str) -> bool:
     ("  if ./scripts/data_synthesis.sh; then", False),
     ("bash scripts/data_synthesis.sh --environment-checked", False),        # no PARAMETER_PATH
     ('say "$(bash scripts/other.sh)"', False),
+    ("    say 'ERROR: see launch_phase_d.sh'", True),                  # single quotes
+    ('say "synthesising" && bash scripts/other.sh', False),          # a call after a message
+    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked; '
+     "bash scripts/other.sh", False),                                 # a call after the call
 ])
 def test_a_line_naming_a_script_is_the_fixed_call_or_a_message(line, allowed):
     """Calls in any form, indented, after && or in an if, are caught; messages are not."""
@@ -204,8 +210,9 @@ def test_a_failed_check_says_how_to_go_on(tmp_path, launched):
     """The chain stops with nothing run and shows how to go on, with the values it was given.
 
     It names the environment to sync and the repository root, says to start the chain itself,
-    not the launcher, and lists every non-empty setting, so a launched chain's FIREFLY_STATUS
-    is not lost on restart.
+    not the launcher, and lists every setting as a tmux -e option, empty ones included, so a
+    launched chain's FIREFLY_STATUS is not lost and a left-out setting cannot take a stale
+    value from the tmux server on restart.
     """
     env = {"UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env"}
     if launched:
