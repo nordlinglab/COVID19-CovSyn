@@ -42,8 +42,9 @@ REPORT_CHENG=independent_cheng2020
 REPORT_CHECKS=validation_reference/phaseD_checks_independent.json
 
 say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
-# uv run takes the interpreter and the installed covsyn from uv.lock.
-run() { uv run python -m "$@"; }
+# uv run takes the interpreter and covsyn from the environment uv sync built; --no-sync keeps
+# it from reinstalling packages under the optimiser, which may still be running.
+run() { uv run --no-sync python -m "$@"; }
 
 say 'waiting for the firefly session to finish'
 while tmux has-session -t firefly 2>/dev/null; do sleep 120; done

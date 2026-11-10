@@ -31,7 +31,7 @@ fi
 for mode in "${modes[@]}"; do
     result_path="./synthetic_data_results_$mode"
     mkdir -p "$result_path"
-    uv run python -m covsyn.model.data_synthesis_main --mode "$mode" \
+    uv run --no-sync python -m covsyn.model.data_synthesis_main --mode "$mode" \
         --monte_carlo_number "$monte_carlo_number" \
         --result_path "$result_path" \
         --cpu_cores "$cpu_cores" \

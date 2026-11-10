@@ -6,7 +6,7 @@ weight can be set against a real objective rather than guessed. Run 6's decompos
 cost_contact 1.6956, cost_attack_rate 0.3092, cost_energy -0.1772, cost_penalty 0.0039,
 cost_outcome 0.0419 -- i.e. every Phase D decision together was 2.2% of the objective.
 
-Usage: python calibrate_outcome_weight.py [firefly_result_dir]
+Usage: uv run python scripts/probes/calibrate_outcome_weight.py [firefly_result_dir]
 """
 import csv
 import glob

@@ -18,6 +18,7 @@ uv run pytest
 ```
 
 `uv sync` installs Python 3.13, the dependencies pinned in `uv.lock`, and `covsyn` in editable mode, on macOS and Linux.
+`uv run pytest` includes the slow regression tests, which take several minutes; see [Tests](#tests).
 
 ## Repository layout
 
@@ -81,6 +82,7 @@ PARAMETER_PATH=firefly_result/phaseD_run10 scripts/data_synthesis.sh
 `tests/test_regression.py` and `tests/test_pipeline.py` require every commit to reproduce the output of the commit that produced Phase D run 10 (`799fb15`): the objective and its 40 cost parts, simulation output for fixed seeds, and every step of the post-optimisation pipeline.
 The other tests check the rules in `docs/covsyn_decisions.md`.
 The slow tests are marked `slow`; `-m "not slow"` skips them.
+Their fixtures were made on macOS (arm64); on Linux x86-64 the objective differs in the fifth significant digit because of floating-point rounding in the energy distance (E103), so `test_cost_function_reproduces_run10` and the `verify_phaseD_json` step fail there.
 
 ## Data Structure
 

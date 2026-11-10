@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -118,7 +119,7 @@ def test_package_imports_without_pythonpath(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert Path(result.stdout.strip()).is_relative_to(REPO_ROOT / "src" / "covsyn")
+    assert Path(result.stdout.strip()).resolve().is_relative_to(REPO_ROOT / "src" / "covsyn")
 
 
 def test_entry_points_are_declared(pyproject):
@@ -178,3 +179,44 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
         'uv run pytest -m "not slow"',
     ):
         assert needle in workflow, needle
+
+
+BARE_PYTHON = re.compile(r"(?<!uv run )\bpython3? [\w./-]+\.py\b")
+
+
+@pytest.mark.parametrize("path", _script_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
+def test_usage_lines_run_scripts_through_uv(path):
+    """Usage lines run a script from the repository root through ``uv run``.
+
+    A bare ``python script.py`` finds no ``covsyn`` without ``PYTHONPATH``.
+    """
+    lines = [line.strip() for line in path.read_text().splitlines() if BARE_PYTHON.search(line)]
+    assert not lines, lines
+
+
+def test_chain_scripts_do_not_resync_the_environment():
+    """The chain's ``uv run`` calls use the environment as installed.
+
+    The optimiser runs for days in the same ``.venv``; a sync in the middle of a run would
+    reinstall packages under it and could change the lock file.
+    """
+    for name in ("phase_d_chain.sh", "data_synthesis.sh", "launch_phase_d.sh"):
+        text = (REPO_ROOT / "scripts" / name).read_text()
+        commands = re.findall(r"(?:\buv|'\$UV') run\b.*", text)
+        assert commands, name
+        for command in commands:
+            assert "--no-sync" in command, (name, command)
+
+
+def test_launch_resolves_uv_for_the_tmux_session():
+    """The tmux session gets uv's absolute path, as it inherits the tmux server's PATH."""
+    text = (REPO_ROOT / "scripts" / "launch_phase_d.sh").read_text()
+    assert 'UV="$(command -v uv)"' in text
+    assert "'$UV' run" in text
+
+
+def test_readme_explains_the_slow_tests_on_linux():
+    """The README warns that the slow regression tests reproduce macOS fixtures (E103)."""
+    readme = (REPO_ROOT / "README.md").read_text()
+    assert "E103" in readme
+    assert "[Tests](#tests)" in readme

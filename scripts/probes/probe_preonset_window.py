@@ -14,7 +14,7 @@ verify_phaseD.py uses (symptomatic index case of every simulation):
   * its first exposure is its first contact day inside that window;
 for W = 4 (Cheng's maximum extension), and for comparison W = 0, 1, 2, 3 and 'no limit'.
 
-Usage: python probe_preonset_window.py [spread_dir]
+Usage: uv run python scripts/probes/probe_preonset_window.py [spread_dir]
 """
 import glob
 import sys

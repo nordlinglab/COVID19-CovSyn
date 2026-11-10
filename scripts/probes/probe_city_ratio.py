@@ -8,7 +8,7 @@ the same ratio after shuffling the city labels 2,000 times -- the distribution o
 city and contacts are independent by construction. If the observed ratio sits inside that null
 distribution, the check fails on sampling noise, not on a city effect.
 
-Usage: python probe_city_ratio.py [spread_dir]
+Usage: uv run python scripts/probes/probe_city_ratio.py [spread_dir]
 """
 import glob
 import sys

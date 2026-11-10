@@ -13,7 +13,7 @@ the grid mode instead scales the contact probability P[21] and one of the health
 probability P[23] or the symptomatic-day probability P[24] of the base vector, clipped to their
 ceilings, and keeps the shape parameters P[25:28] fixed.
 
-Usage: python scripts/probes/probe_health_care_floor.py [parameter_dir] [draws] [simulations]
+Usage: uv run python scripts/probes/probe_health_care_floor.py [parameter_dir] [draws] [simulations]
        uv run python scripts/probes/probe_health_care_floor.py [parameter_dir] grid [simulations] [23|24]
        uv run python scripts/probes/probe_health_care_floor.py [parameter_dir] shape [draws] [simulations]
 

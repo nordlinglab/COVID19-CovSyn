@@ -23,9 +23,11 @@ if tmux has-session -t firefly 2>/dev/null || tmux has-session -t chain 2>/dev/n
   tmux ls
   exit 1
 fi
-# tmux does not pass this shell's environment to a new session, so it is given explicitly.
+# tmux does not pass this shell's environment to a new session, so it is given explicitly;
+# the session inherits the tmux server's PATH, which may lack uv, so uv goes by its full path.
+UV="$(command -v uv)"
 tmux new-session -d -s firefly \
-  "cd '$ROOT' && uv run python -m covsyn.calibration.firefly_optimizer \
+  "cd '$ROOT' && '$UV' run --no-sync python -m covsyn.calibration.firefly_optimizer \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1"
 sleep 2
 tmux new-session -d -s chain \
