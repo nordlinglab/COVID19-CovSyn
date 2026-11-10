@@ -76,6 +76,22 @@ def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
         assert SYNTHESIS_CALL.match(line), line
 
 
+# Read by a module but set by the chain's own code where it needs a value: select_by_checklist
+# sets AGE_RR_FILE per candidate, so the chain clears any value the tmux server holds.
+CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
+
+
+def test_every_module_environment_read_is_forwarded_or_cleared():
+    """A module's environment read either is on the list or the chain clears it first."""
+    read = set()
+    for path in SOURCE.rglob("*.py"):
+        read |= set(re.findall(r"""environ\.get\(\s*['"]([A-Z][A-Z0-9_]*)""",
+                               path.read_text(encoding="utf-8")))
+    assert read <= set(CHAIN_VARIABLES) | CLEARED_BY_CHAIN
+    for name in CLEARED_BY_CHAIN:
+        assert any(re.fullmatch(rf"\s*unset {name}", line) for line in _code(CHAIN)), name
+
+
 def test_the_firefly_modules_do_not_read_the_environment():
     """The firefly session gets WARM_START alone, which the shell passes as an argument."""
     for name in ("firefly_optimizer.py", "fast_cost.py"):

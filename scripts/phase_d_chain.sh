@@ -43,6 +43,10 @@ REPORT_FIRST=independent_taiwan_first_outbreak
 REPORT_CHENG=independent_cheng2020
 REPORT_CHECKS=validation_reference/phaseD_checks_independent.json
 
+# verify_phase_d reads the age risk ratios from AGE_RR_FILE, which select_by_checklist sets for
+# each candidate; a value left in the tmux server's environment must not reach steps 3 and 3b,
+# which score the age_rr.json step 2b writes.
+unset AGE_RR_FILE
 say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 # uv run takes the interpreter and covsyn from the environment uv sync built; --no-sync keeps
 # it from reinstalling packages under the optimiser, which may still be running.
