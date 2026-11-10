@@ -180,6 +180,16 @@ def test_a_heredoc_body_follows_its_command():
     assert [line.heredoc for line in lines] == [False, True]
 
 
+def test_scan_reads_a_comment_after_an_operator_continuation():
+    """After a semicolon and a continuation the next line starts a word, so # comments."""
+    assert "Z" not in es.shell_variables(es.shell_lines("A=1;\\\n#b $Z\n"))[0]
+
+
+def test_the_arithmetic_look_ahead_stops_at_an_escaped_newline():
+    """An escaped newline ends the line for the look-ahead too."""
+    assert es._arithmetic_closes("A=$((a \\\n) b)", 2)
+
+
 def test_a_continued_walk_records_no_foreign_group():
     """A group opened in an earlier text is not recorded with indices from two texts."""
     first = es._walk("$(\n")
@@ -196,6 +206,9 @@ def test_a_mention_of_case_does_not_stop_folding():
     "A=$(while case $x in a) false;; esac; do :; done)",
     "A=$(case $x in a|esac) true;; esac)",           # esac as a pattern
     'A=$((echo "))") | wc)',                          # a quoted )) in a subshell
+    "A=$(case $x in a) for i in 1; do echo | case $y in b) :;; esac; done;; c) :;; esac)",
+    "A=$(case $x in case) :;; esac)",                 # a pattern spelled case
+    "A=$(case $x in (a) case $y in b) :;; esac;; c) :;; esac)",
 ])
 def test_case_and_subshell_substitutions_fold_whole(line):
     """Each of these is one command substitution assigned to A."""
@@ -305,6 +318,8 @@ def test_commands_are_split_into_words(line, words):
     (["echo a\\ \\", "#b $Z", "A=1", "echo $A"], {"A"}),          # after an escaped blank
     (["X=$(", "echo a", "case $y in", "a) echo;;", "esac", ")", "A=1", "echo $A"],
      {"X", "A"}),                                                 # case after a command
+    (["B=1;\\", "#b $Z", "echo $B"], {"B"}),                       # # after ; is a comment
+    (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -371,6 +386,9 @@ A = "scripts/a.sh"
     ("bash scripts/a.sh,b.sh", {"scripts/a.sh,b.sh"}),
     ("bash scripts/a=b.sh", {"scripts/a=b.sh"}),      # the whole word, never its tail
     ("n=${f%.sh}", set()),                            # an extension removed, no script
+    ("${X/old/scripts/a.sh}", {"${X/old/scripts/a.sh"}),   # any other expansion: loud
+    ("${CMD:-scripts/run.sh --flag}", {"${CMD:-scripts/run.sh"}),
+    ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh}"}),
 ])
 def test_scripts_are_found_however_named(line, called):
     """Every mention of a shell script counts, as a normalised repository-relative path."""
