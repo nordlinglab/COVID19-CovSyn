@@ -82,15 +82,28 @@ def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
 CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
 
 
+# The ways a module reads the environment in this code base: os.environ.get, os.getenv,
+# os.environ[...] and a mapping of it passed as env (worker_count).
+ENVIRONMENT_READ = re.compile(
+    r"""(?:environ\.get|getenv|\benv\.get)\(\s*['"]([A-Z][A-Z0-9_]*)|environ\[\s*['"]([A-Z][A-Z0-9_]*)""")
+
+
 def test_every_module_environment_read_is_forwarded_or_cleared():
-    """A module's environment read either is on the list or the chain clears it first."""
+    """A module's environment read either is on the list or the chain clears it first.
+
+    The chain clears it at the top level, before it first runs verify_phase_d, which reads it.
+    """
     read = set()
     for path in SOURCE.rglob("*.py"):
-        read |= set(re.findall(r"""environ\.get\(\s*['"]([A-Z][A-Z0-9_]*)""",
-                               path.read_text(encoding="utf-8")))
+        for match in ENVIRONMENT_READ.finditer(path.read_text(encoding="utf-8")):
+            read.add(match.group(1) or match.group(2))
+    assert "VERIFY_WORKERS" in read                 # read through worker_count's env mapping
     assert read <= set(CHAIN_VARIABLES) | CLEARED_BY_CHAIN
+    code = _code(CHAIN)
+    first_verify = next(i for i, line in enumerate(code) if "verify_phase_d" in line)
     for name in CLEARED_BY_CHAIN:
-        assert any(re.fullmatch(rf"\s*unset {name}", line) for line in _code(CHAIN)), name
+        unset = next(i for i, line in enumerate(code) if line == f"unset {name}")
+        assert unset < first_verify, name
 
 
 def test_the_synthesis_checks_the_environment_unless_the_launcher_did():
