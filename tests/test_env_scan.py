@@ -202,10 +202,22 @@ def test_the_arithmetic_look_ahead_stops_at_an_escaped_newline():
     assert es._arithmetic_closes("A=$((a \\\n) b)", 2)
 
 
-def test_a_process_substitution_in_a_quoted_expansion_is_text():
-    """A quoted "${X:-<(echo hi)}" prints literally in bash, so <( there opens no group."""
-    text = '"${X:-<(echo hi)}"'
+@pytest.mark.parametrize("text", [
+    '"${X:-<(echo hi)}"',
+    '"${A:-${B:-<(echo hi)}}"',                       # nested in a quoted expansion
+    "echo $(( ${X:-<(echo hi)} ))",                   # arithmetic: <( stays literal in bash
+    "(( ${X:-<(echo hi)} ))",
+    "echo $[ ${X:-<(echo hi)} ]",
+])
+def test_a_process_substitution_where_bash_reads_text_opens_no_group(text):
+    """These <( print literally in bash, so the walker opens no group there."""
     assert text.index("<") not in es._walk(text).groups
+
+
+def test_a_process_substitution_in_plain_code_or_its_expansion_is_a_group():
+    """In plain code and in a ${...} reached from it, <( substitutes a process."""
+    for text in ["cat <(echo hi)", "echo ${X:-<(echo hi)}"]:
+        assert text.index("<") in es._walk(text).groups
 
 
 def test_a_continued_walk_records_no_foreign_group():
@@ -344,6 +356,9 @@ def test_commands_are_split_into_words(line, words):
     (["cat <((echo p) | cat)", "A=1", "echo $A"], {"A"}),         # process substitution
     (["((1))#it's", "A=1", "echo $A $Q"], {"A"}),                 # # after (( )) comments
     (["echo ${X:-<(echo })}#$Z", "A=1", "echo $A"], {"A"}),       # <( inside ${
+    (["(( ${X:-<(echo <<E)} ))", "A=1", "echo $A"], {"A"}),       # no heredoc: <( is text
+    (['echo "${C:-${B:-<(#)}}" $Z', "A=1", "echo $A"], {"A"}),
+    (["(( $(cat <<E) ))", "A=1", "E", "B=1", "echo $B"], {"B"}),   # bash: a here-document
     (["A=$(case a in a) echo hi;; esac>/dev/null)", "B=1", "echo $B"], {"A", "B"}),
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
 ])
@@ -432,6 +447,7 @@ A = "scripts/a.sh"
     ("echo `bash $(pwd)scripts/a.sh", {"$(pwd)scripts/a.sh"}),   # an open backtick
     ("host:`pwd`/scripts/a.sh", {"host:`pwd`/scripts/a.sh"}),
     ("PATH=$PATH:scripts/a.sh", {"PATH=$PATH:scripts/a.sh"}),
+    ("S=$(echo a:b)/scripts/a.sh", {"$(echo a:b)/scripts/a.sh"}),   # a : inside $( )
     ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):

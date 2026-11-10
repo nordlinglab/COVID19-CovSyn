@@ -348,12 +348,28 @@ def _arithmetic_closes(text: str, start: int) -> bool:
     return True
 
 
+def _substitutes_processes(stack: list[_Frame]) -> bool:
+    """Whether bash performs a process substitution ``<(`` in the innermost open context.
+
+    It does in plain code and in a ``${...}`` reached from plain code; inside double quotes or
+    arithmetic, through any number of ``${...}``, it reads ``<(`` as text.
+    """
+    for frame in reversed(stack):
+        if frame.kind in PLAIN:
+            return True
+        if frame.kind != "${":
+            return False
+    return False
+
+
 def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _Walk:
     """Walk a text as bash reads its quoting, going on from ``stack`` when one is given.
 
     A backslash escapes the next character outside single quotes, inside ``$'...'`` too. A
-    ``$(`` opens plain code again inside double quotes and ``${...}``, but inside backticks it
-    is text, as bash reads backtick content as a string. ``$((``, ``((`` at the start of a word
+    ``$(`` opens plain code again inside double quotes, ``${...}`` and arithmetic, where
+    ``${``, ``$((`` and ``$[`` open too, as bash expands them there; inside backticks it is
+    text, as bash reads backtick content as a string. ``<(`` and ``>(`` substitute processes
+    only where _substitutes_processes says. ``$((``, ``((`` at the start of a word
     and ``$[`` open arithmetic. In a command substitution a ``)`` that ends a case pattern does
     not close it; ``case`` and ``esac`` count only where a command starts, and in a case's
     pattern position (opened by the ``in`` right after its subject and by ``;;``, ``;&`` or
@@ -424,9 +440,8 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             push("$((", 3)
         elif kind in ACTIVE and text.startswith("$(", index):
             push("$(", 2)
-        elif (kind in PLAIN or kind == "${" and stack[-2].kind != '"') and char in "<>" and \
-                text.startswith("(", index + 1) and previous not in "<>":
-            # Inside "${...}" bash reads <( as text.
+        elif char in "<>" and text.startswith("(", index + 1) and previous not in "<>" and \
+                _substitutes_processes(stack):
             push("$(", 2)                   # a process substitution, plain code like $(
         elif kind in ACTIVE and text.startswith("${", index):
             push("${", 2)
@@ -833,9 +848,10 @@ def mentioned_scripts(text: str) -> list[str]:
                 break
         glued = plain[begin:match.start()]
         # A leading NAME= or --option= whose value is the path alone is dropped; one whose value
-        # holds more, as PATH=$PATH:scripts/a.sh, stays, as does host: before a path.
+        # is a : list, as PATH=$PATH:scripts/a.sh, stays, as does host: before a path. A colon
+        # inside a substitution does not count.
         name = re.match(r"(?:[A-Za-z_]\w*|--?[\w-]+)=", glued)
-        if name and ":" not in glued[name.end():]:
+        if name and ":" not in _fold_substitutions(glued[name.end():]):
             glued = glued[name.end():]
         found.append(posixpath.normpath(glued + match.group(1)))
     return found
