@@ -61,10 +61,17 @@ command -v uv >/dev/null || { say 'ERROR: uv not found on PATH; see the README';
 if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
     say "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; the chain stops."
     # Under the launcher this check runs seconds after the launcher's own identical one, so it
-    # fails mainly for a chain started by hand; a restart is then the same command again.
-    say "Nothing has run. Once no optimiser runs in that environment, run"
-    say "uv sync --locked --inexact, then start the chain again with the same settings"
-    say "(FIREFLY_STATUS included, if it had one, so that it still checks the optimiser's end)."
+    # fails mainly for a chain started by hand. The settings are shown, not built into a
+    # command: a launched chain got FIREFLY_STATUS and UV_PROJECT_ENVIRONMENT from the launcher
+    # even when the user set neither, and a restart needs them to keep checking the optimiser.
+    say "Nothing has run. Once no optimiser runs in that environment, run in $ROOT:"
+    say "  UV_PROJECT_ENVIRONMENT=$(printf %q "${UV_PROJECT_ENVIRONMENT:-.venv}") uv sync --locked --inexact"
+    say "then start scripts/phase_d_chain.sh itself in a tmux session (not launch_phase_d.sh,"
+    say "which starts a new optimiser) with these settings; the others were empty:"
+    for name in PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
+            SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
+        if [ -n "${!name:-}" ]; then say "  $name=$(printf %q "${!name}")"; fi
+    done
     exit 1
 fi
 

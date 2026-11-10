@@ -74,7 +74,8 @@ def test_the_list_holds_every_default_the_scripts_read():
 
 def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
     """The chain calls data_synthesis.sh in one fixed form, setting PARAMETER_PATH itself."""
-    calls = [line for line in _code(CHAIN) if re.search(r"\.sh\b", line)]
+    # A call is bash followed by a script path; a message that names a script is no call.
+    calls = [line for line in _code(CHAIN) if re.search(r"\bbash\s+[^\s\"]*\.sh\b", line)]
     assert calls
     for line in calls:
         assert SYNTHESIS_CALL.match(line), line
@@ -172,17 +173,33 @@ def test_the_chain_checks_the_environment_once_before_it_waits(tmp_path):
     assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
 
 
-def test_a_failed_check_says_how_to_go_on(tmp_path):
-    """The chain says nothing ran and how to go on.
+@pytest.mark.parametrize("launched", [True, False])
+def test_a_failed_check_says_how_to_go_on(tmp_path, launched):
+    """The chain stops with nothing run and shows how to go on, with the values it was given.
 
-    It says to sync with the launcher's options once no optimiser uses the environment, and to
-    restart with the same settings, FIREFLY_STATUS included.
+    It names the environment to sync and the repository root, says to start the chain itself,
+    not the launcher, and lists every non-empty setting, so a launched chain's FIREFLY_STATUS
+    is not lost on restart.
     """
-    root, record, status, output = _run(tmp_path, CHAIN, {"UV_SYNC_STATUS": "2"})
+    env = {"UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env"}
+    if launched:
+        env["FIREFLY_STATUS"] = "firefly.exit"
+    root, record, status, output = _run(tmp_path, CHAIN, env)
     log = (root / "phaseD_chain.log").read_text()
-    assert "Nothing has run" in log
-    assert "uv sync --locked --inexact" in log
-    assert "FIREFLY_STATUS included" in log
+    assert status != 0
+    assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
+    assert "Nothing has run" in log and f"run in {root}" in log
+    assert "UV_PROJECT_ENVIRONMENT=/opt/env uv sync --locked --inexact" in log
+    assert "not launch_phase_d.sh" in log
+    assert ("  FIREFLY_STATUS=firefly.exit" in log) == launched
+
+
+def test_the_failed_check_lists_every_forwarded_variable():
+    """The settings the chain shows on a failed check are the launcher's list."""
+    code = "\n".join(_code(CHAIN)).replace("\\\n", " ")
+    match = re.search(r"for name in ([A-Z0-9_ ]+); do", code)
+    assert match, "the chain no longer lists its settings on a failed check"
+    assert sorted(match.group(1).split()) == sorted(CHAIN_VARIABLES)
 
 def test_the_chain_checks_before_it_waits_for_the_optimiser(tmp_path):
     """A passing check comes before the first look for the firefly session."""
