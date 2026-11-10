@@ -17,7 +17,7 @@ of 12.
 A factor that cannot reach the data stops the script with a non-zero exit.
 
 Usage (repository root):
-    python scripts/calibrate_imported_factor.py <firefly_best.txt> [runs] [workers] [isolation] [q0]
+    uv run python scripts/calibrate_imported_factor.py <firefly_best.txt> [runs] [workers] [isolation] [q0]
 
 isolation is the B78 option A setting (model or imported_delay, the default since the
 meeting of 2026-11-02); calibrate with the one that will be used, since earlier isolation

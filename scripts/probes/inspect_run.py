@@ -18,7 +18,7 @@ What the chain keeps, and what this reads:
   phaseD_report.txt                      the standard report
 
 Usage (from a run directory, or with one as the argument):
-    python scripts/probes/inspect_run.py [RUN_DIR] [--watch "check name" ...]
+    uv run python scripts/probes/inspect_run.py [RUN_DIR] [--watch "check name" ...]
 """
 
 from __future__ import annotations

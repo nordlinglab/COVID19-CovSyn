@@ -9,7 +9,7 @@ different sets of numbers (finding E53).
 Definition: the row sums of {layer}_contacts_matrix (contacts x days, True where the contact
 was met) averaged over every candidate contact of every case in the files read.
 
-Usage: python -m covsyn.validation.measure_days <synthetic_data_dir> [more dirs...]
+Usage: uv run python -m covsyn.validation.measure_days <synthetic_data_dir> [more dirs...]
 """
 import glob
 import os

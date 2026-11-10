@@ -1523,7 +1523,11 @@ class Firefly:
                 fireflies, intensities)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the optimiser from the command line (``covsyn-optimise``)."""
+    # Firefly.firefly writes its output to the module-level result_path, which test_b81
+    # sets directly; Task 3 of the rework plan replaces it with an explicit run directory.
+    global result_path
     start_time = time.time()
 
     parser = argparse.ArgumentParser(description='Firefly optimization')
@@ -1687,3 +1691,7 @@ if __name__ == "__main__":
         np.savetxt(result_path/'firefly_best.txt', best_result, fmt='%.7f')
         np.savetxt(result_path/'firefly_worst.txt', worst_result, fmt='%.7f')
         print("--- Done %s seconds ---" % (time.time() - start_time))
+
+
+if __name__ == "__main__":
+    main()

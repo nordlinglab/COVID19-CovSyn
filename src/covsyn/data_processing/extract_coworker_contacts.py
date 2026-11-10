@@ -7,7 +7,9 @@ For every index case with any coworker record:
   uninfected_coworkers 'number_of_uninfected_contact_(coworker)' (missing -> not recorded)
   total                infected + uninfected (a missing uninfected count is taken as 0)
 
-Usage: python -m covsyn.data_processing.extract_coworker_contacts [forecasting_repo] [output_csv]
+Usage:
+    uv run python -m covsyn.data_processing.extract_coworker_contacts \\
+        [forecasting_repo] [output_csv]
 """
 import re
 import sys

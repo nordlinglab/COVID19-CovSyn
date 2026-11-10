@@ -14,7 +14,7 @@ we actually have next to the simulation, and says how large each sample is.
       axes, against the tracing records. The medians agree; the tail does not.
   (d) community, attack rate against its calibration anchor and Cheng's pooled "others".
 
-Usage: python -m covsyn.figures.compare_healthcare_municipality [spread_dir] [out_dir]
+Usage: uv run python -m covsyn.figures.compare_healthcare_municipality [spread_dir] [out_dir]
 """
 import glob
 import pickle

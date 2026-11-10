@@ -11,7 +11,9 @@ the company (Chen 2022). The CovSyn series below is therefore the CURRENT model,
 group is that capped group; fig_workplace_establishment_size_sampling_diagnostic.png in
 validate_layers.py shows the enterprise size against the same census curves.
 
-Usage: python -m covsyn.figures.workplace_sampling_options [spread_dir] [out_dir] [parameter_dir]
+Usage:
+    uv run python -m covsyn.figures.workplace_sampling_options \\
+        [spread_dir] [out_dir] [parameter_dir]
 """
 import glob
 import sys

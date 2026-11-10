@@ -8,7 +8,7 @@ and compare with an external reference wherever one exists, naming the source an
 Stage 5 has no matching observed scenario (the Taiwan outbreak comparison uses the
 taiwan_first_outbreak mode, see tw_check.py), so it stays CovSyn-only.
 
-Usage: python -m covsyn.figures.plot_diagnostics [spread_dir] [out_dir]
+Usage: uv run python -m covsyn.figures.plot_diagnostics [spread_dir] [out_dir]
 Only the spread dataset is plotted: the cheng2020 mode is another CovSyn configuration, so showing
 it next to CovSyn results would add no independent evidence.
 """

@@ -14,7 +14,7 @@ maxima. That derivation hides two things the thesis has to state:
 Output: validation_reference/literature_provenance.csv, one row per (quantity, study), plus
 a summary of how many studies and which statistic types stand behind each range.
 
-Usage: python -m covsyn.data_processing.extract_literature_provenance [notebook] [out_csv]
+Usage: uv run python -m covsyn.data_processing.extract_literature_provenance [notebook] [out_csv]
 """
 import ast
 import io

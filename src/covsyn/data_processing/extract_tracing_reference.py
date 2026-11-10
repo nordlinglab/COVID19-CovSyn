@@ -19,7 +19,9 @@ Outputs (validation_reference/):
                                          ('source infected case'), with the relationship to the
                                          infector and the mapped layer
 
-Usage: python -m covsyn.data_processing.extract_tracing_reference [forecasting_repo] [output_dir]
+Usage:
+    uv run python -m covsyn.data_processing.extract_tracing_reference \\
+        [forecasting_repo] [output_dir]
 """
 import re
 import sys

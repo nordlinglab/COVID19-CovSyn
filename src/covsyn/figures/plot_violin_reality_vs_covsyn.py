@@ -11,7 +11,9 @@ half a violin against a point estimate invites reading a spread that was never o
   (c) course-of-disease durations that the tracing file records dates for
   (d) secondary infections per case and the age of the cases
 
-Usage: python -m covsyn.figures.plot_violin_reality_vs_covsyn [spread_dir] [out_dir] [case_timeline_csv]
+Usage:
+    uv run python -m covsyn.figures.plot_violin_reality_vs_covsyn \\
+        [spread_dir] [out_dir] [case_timeline_csv]
 """
 import glob
 import sys

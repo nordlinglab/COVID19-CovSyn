@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Plot the output of probe_event_tradeoff.py: four quantities against the event probability.
 
-Usage: python scripts/probes/plot_event_tradeoff.py PROBE_CSV OUT_PNG [RUN11_P199]
+Usage: uv run python scripts/probes/plot_event_tradeoff.py PROBE_CSV OUT_PNG [RUN11_P199]
 """
 
 import sys

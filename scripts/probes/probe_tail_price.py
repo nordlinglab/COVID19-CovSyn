@@ -11,7 +11,7 @@ ratio, the all-case median, and the cost WITHOUT the tail term -- the difference
 unmodified vector is what the optimizer saves by not growing the tail. The same grid is the
 reachability gate (lesson 2) for the re-weighted target.
 
-Usage: python probe_tail_price.py
+Usage: uv run python scripts/probes/probe_tail_price.py
 """
 import concurrent.futures
 import pickle

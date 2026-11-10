@@ -6,7 +6,7 @@ item with its target, the measured value and a verdict, so the rerun can be acce
 rejected on the record rather than on impressions.
 
 Usage:
-    python -m covsyn.validation.verify_phase_d [spread_dir] [first_outbreak_dir] [out_json]
+    uv run python -m covsyn.validation.verify_phase_d [spread_dir] [first_outbreak_dir] [out_json]
 
 spread_dir          synthetic_data_results_spread_Taiwan_weight (single seed, 84 days)
 first_outbreak_dir  synthetic_data_results_taiwan_first_outbreak (B66 first-wave seeds), optional

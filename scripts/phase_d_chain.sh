@@ -20,14 +20,15 @@
 #   9. redraw the Wu & Nordling 2025 comparison figures from the independent seeds (E90, E97)
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
-# Environment: PYTHON (default python3), PREVIOUS_CHECKS (optional), REVALIDATE (default 1),
-#              REVALIDATION_BLOCKS (default 10; E95: 4 blocks left the choice noisy).
+# Environment: PREVIOUS_CHECKS, FIREFLY_RUN, REVALIDATE, REVALIDATION_BLOCKS, SELECT,
+#              SELECT_TOP, CPU_CORES, VERIFY_WORKERS, FIREFLY_STATUS, UV_PROJECT_ENVIRONMENT;
+#              launch_phase_d.sh documents and forwards each, and an empty value means the
+#              default, except that an empty FIREFLY_STATUS (a chain started by hand) skips the
+#              firefly status check.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-PYTHON="${PYTHON:-python3}"
-export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 LOG=phaseD_chain.log
 # The firefly names its output directory after its settings, while the report scripts read the
 # optimizer output from one fixed name. The run directory is copied onto that name below.
@@ -43,11 +44,55 @@ REPORT_FIRST=independent_taiwan_first_outbreak
 REPORT_CHENG=independent_cheng2020
 REPORT_CHECKS=validation_reference/phaseD_checks_independent.json
 
+# verify_phase_d reads the age risk ratios from AGE_RR_FILE, which select_by_checklist sets for
+# each candidate; a value left in the tmux server's environment must not reach steps 3 and 3b,
+# which score the age_rr.json step 2b writes.
+unset AGE_RR_FILE
 say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
-run() { "$PYTHON" -m "$@"; }
+# uv run takes the interpreter and covsyn from the environment uv sync built; --no-sync keeps
+# it from reinstalling packages under the optimiser, which may still be running.
+run() { uv run --no-sync python -m "$@"; }
+
+# Every step runs uv run --no-sync, so the environment is checked against uv.lock once, here,
+# before the chain waits: the check changes nothing, so it is safe while the optimiser runs, it
+# stops a chain on a stale environment before hours of work, and a lock pulled later does not
+# stop the chain halfway. uv's own message goes to the log.
+command -v uv >/dev/null || { say 'ERROR: uv not found on PATH; see the README'; exit 1; }
+if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
+    say "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; the chain stops."
+    # Under the launcher this check runs seconds after the launcher's own identical one, so it
+    # fails mainly for a chain started by hand. The settings are shown, not built into a
+    # command: a launched chain got FIREFLY_STATUS and UV_PROJECT_ENVIRONMENT from the launcher
+    # even when the user set neither, and a restart needs them to keep checking the optimiser.
+    say "Nothing has run. Once no optimiser runs in that environment, run in $ROOT:"
+    say "  UV_PROJECT_ENVIRONMENT=$(printf %q "${UV_PROJECT_ENVIRONMENT:-.venv}") uv sync --locked --inexact"
+    say "then start scripts/phase_d_chain.sh itself (not launch_phase_d.sh, which starts a new"
+    say "optimiser) in a tmux session, passing every setting it ran with, empty ones included,"
+    say "as a tmux new-session option, as the launcher does: tmux gives a session its server's"
+    say "environment, which would fill in a setting left out."
+    for name in PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
+            SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
+        value="${!name:-}"
+        if [ "$name" = UV_PROJECT_ENVIRONMENT ]; then value="${value:-.venv}"; fi
+        say "  -e $(printf %q "$name=$value")"
+    done
+    exit 1
+fi
 
 say 'waiting for the firefly session to finish'
-while tmux has-session -t firefly 2>/dev/null; do sleep 120; done
+# "=" matches the session name exactly, not as a prefix (firefly_old would match).
+while tmux has-session -t =firefly 2>/dev/null; do sleep 120; done
+# launch_phase_d.sh names in FIREFLY_STATUS the file where the firefly session leaves its exit
+# status; it holds "running" until the optimiser exits, so a failed or killed optimiser stops the
+# chain instead of letting it report an earlier run's results from FIREFLY_RUN. A chain started
+# by hand, on an existing result, has no FIREFLY_STATUS and goes on.
+if [ -n "${FIREFLY_STATUS:-}" ]; then
+    status=$(cat "$FIREFLY_STATUS" 2>/dev/null || echo missing)
+    if [ "$status" != 0 ]; then
+        say "ERROR: the firefly session ended with status '$status', stopping"
+        exit 1
+    fi
+fi
 # B56 (E87): the objective's 300 fixed seeds pick a vector that sits on the edge of several
 # targets; re-score the final population and every personal best on unseen seed blocks and
 # report the lowest mean instead. REVALIDATE=0 skips it, e.g. for a directory that already
@@ -90,7 +135,11 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
     fi
 done
 say 'generating synthetic data (2 modes x 1000 Monte-Carlo runs)'
-bash scripts/data_synthesis.sh >> "$LOG" 2>&1 || { say 'ERROR: data synthesis failed'; exit 1; }
+# PARAMETER_PATH is set here, so a value left in the tmux server's environment cannot point the
+# synthesis at another run than the one copied onto $FIREFLY. The chain checked the environment
+# at its start, so the synthesis does not check it again.
+PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked >> "$LOG" 2>&1 \
+    || { say 'ERROR: data synthesis failed'; exit 1; }
 say 'synthetic data done'
 
 # ---------------------------------------------------------------- 2b. age risk ratio

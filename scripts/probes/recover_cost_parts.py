@@ -10,7 +10,7 @@ The objective is deterministic on its fixed seeds (E30), so evaluating the run's
 once reproduces exactly the decomposition the optimizer saw. Prints it, and the measured values,
 against the acceptance intervals.
 
-Usage: python recover_cost_parts.py [firefly_result_dir]
+Usage: uv run python scripts/probes/recover_cost_parts.py [firefly_result_dir]
 """
 import concurrent.futures
 import glob

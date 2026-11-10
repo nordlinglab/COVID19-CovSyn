@@ -5,7 +5,7 @@ scans the shift s = P[28], the repeat-contact probability P[29] (0.29 is the sha
 daily) and the healthy community daily contact probability P[30]; each point is 300 index cases,
 measured with the objective's own measure_outcomes (E100, B63).
 
-Usage (CovSyn root): python scripts/probes/probe_community_b62.py FIREFLY_BEST_TXT [ALPHA]
+Usage (CovSyn root): uv run python scripts/probes/probe_community_b62.py FIREFLY_BEST_TXT [ALPHA]
 """
 import concurrent.futures
 import copy

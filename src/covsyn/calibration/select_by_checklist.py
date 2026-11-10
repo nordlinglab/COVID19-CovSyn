@@ -12,8 +12,9 @@ fewest results that pass only within their 95% interval, then the lowest validat
 The data are generated on the chain's usual seeds 0..999. Because the choice is made on them,
 the chain reports the chosen candidate's checklist again on an independent seed set as well.
 
-Usage (repository root, PYTHONPATH=src):
-    python -m covsyn.calibration.select_by_checklist REVALIDATION_DIR OUT_DIR [TOP] [CPU_CORES]
+Usage (repository root, after uv sync):
+    uv run python -m covsyn.calibration.select_by_checklist REVALIDATION_DIR OUT_DIR \\
+        [TOP] [CPU_CORES]
 
 Writes OUT_DIR (a copy of REVALIDATION_DIR whose firefly_best.txt holds only the chosen vector),
 OUT_DIR/selection.csv and the candidates' checklists under OUT_DIR/candidates/.

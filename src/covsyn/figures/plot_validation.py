@@ -9,7 +9,7 @@ OUTCOME_TARGETS (firefly_optimizer.py) -- instead of a separate set that contrad
 and the pass/fail marks are gone: a mean sitting outside a band is a finding to read with
 the rest of the validation, not a test this figure can decide on its own.
 
-Usage: python -m covsyn.figures.plot_validation [param_dir] [out_dir] [n_courses]
+Usage: uv run python -m covsyn.figures.plot_validation [param_dir] [out_dir] [n_courses]
 """
 import random
 import sys

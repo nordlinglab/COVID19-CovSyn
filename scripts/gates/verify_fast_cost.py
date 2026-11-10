@@ -7,7 +7,7 @@ the same parameter vectors through both and compares the total cost and all 31+ 
 Run with a small --workers while another job owns the machine: correctness does not need speed.
 Timing is only meaningful on an idle machine, so it is reported but flagged.
 
-Usage: python verify_fast_cost.py [--workers N] [--vectors N]
+Usage: uv run python scripts/gates/verify_fast_cost.py [--workers N] [--vectors N]
 """
 import argparse
 import concurrent.futures

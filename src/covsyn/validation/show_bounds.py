@@ -76,7 +76,12 @@ def main(directory: Path | str = './variable') -> None:
     print('latent mean %.2f [%.2f, %.2f]' % (p[0] * p[1], lb[0] * lb[1], ub[0] * ub[1]))
 
 
-if __name__ == '__main__':
+def cli() -> None:
+    """Print the bounds from the command line (``covsyn-show-bounds [directory]``)."""
     import sys
 
     main(sys.argv[1] if len(sys.argv) > 1 else './variable')
+
+
+if __name__ == '__main__':
+    cli()

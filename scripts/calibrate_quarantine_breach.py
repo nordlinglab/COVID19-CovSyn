@@ -9,7 +9,7 @@ unclear ones. The infection probabilities are small, so m(p) is close to p * m(1
 step multiplies p by observed / m(p) and the last set of runs checks the result.
 
 Usage (repository root):
-    python scripts/calibrate_quarantine_breach.py <firefly_best.txt> [runs] [workers]
+    uv run python scripts/calibrate_quarantine_breach.py <firefly_best.txt> [runs] [workers]
 """
 
 import concurrent.futures

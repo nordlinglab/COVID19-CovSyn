@@ -11,7 +11,7 @@ CovSyn attack rate = effective / candidate contacts (C2 in covsyn_decisions.md):
 are everyone contacted on at least one day between infection and isolation, with no duration
 threshold. Relationship-to-layer mapping: F9 in covsyn_decisions.md (extract_tracing_reference.py).
 
-Usage: python -m covsyn.figures.validate_infection [spread_dir] [out_dir] [index_case_dir]
+Usage: uv run python -m covsyn.figures.validate_infection [spread_dir] [out_dir] [index_case_dir]
 """
 import csv
 import glob

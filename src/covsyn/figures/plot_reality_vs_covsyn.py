@@ -12,7 +12,9 @@ Only quantities with a real observation behind them are included. Where the only
 a literature RANGE rather than a point (the disease-course durations), the midpoint of the
 range is used as the observation and the range is drawn as a band.
 
-Usage: python -m covsyn.figures.plot_reality_vs_covsyn [spread_dir] [first_outbreak_dir] [out_dir]
+Usage:
+    uv run python -m covsyn.figures.plot_reality_vs_covsyn \\
+        [spread_dir] [first_outbreak_dir] [out_dir]
 """
 import glob
 import pickle

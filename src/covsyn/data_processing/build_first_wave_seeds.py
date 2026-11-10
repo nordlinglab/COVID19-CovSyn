@@ -68,7 +68,7 @@ Age is kept as the ten-year group; the simulation draws the year within it (prof
 2026-10-19). Day 0 of a scenario is its earliest seed infection.
 
 Usage (repository root):
-    python -m covsyn.data_processing.build_first_wave_seeds [case_xlsx] [sources_csv]
+    uv run python -m covsyn.data_processing.build_first_wave_seeds [case_xlsx] [sources_csv]
 """
 
 from __future__ import annotations

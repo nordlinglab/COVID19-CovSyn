@@ -6,23 +6,20 @@ Repository for the code of the COVID-19 Data Synthesis project
 
 CovSyn, an innovative tool that generates comprehensive synthetic data at the individual level, encompassing demographic characteristics (age, gender, occupation), course of disease (infection dates, symptom onset, recovery dates), and contact tracing information (daily social interactions including household, school, workplace, healthcare, and municipality).
 
-To run our code, we recommend you follow the following steps:
-
 ## Installation
 
-1. Clone the repository
-2. Install Miniconda
-3. Create and activate the conda environment:
-   ```bash
-   conda create -n "covsyn" python=3.10.16
-   conda activate covsyn
-   ```
-4. Navigate to the project directory and install dependencies:
-   ```bash
-   cd to CovSyn folder
-   pip install -r requirements.txt --use-deprecated=legacy-resolver
-   ```
-    
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+
+```bash
+git clone git@github.com:nordlinglab/COVID19-CovSyn.git
+cd COVID19-CovSyn
+uv sync
+uv run pytest
+```
+
+`uv sync` installs Python 3.13, the dependencies pinned in `uv.lock`, and `covsyn` in editable mode, on macOS and Linux.
+`uv run pytest` includes the slow regression tests, which take several minutes;
+see [Tests](#tests).
 
 ## Repository layout
 
@@ -46,27 +43,22 @@ Every command below runs from the repository root, because the modules read thei
 
 ## Usage
 
-Put `src/` on the Python path, or install the package in editable mode:
-
-```bash
-export PYTHONPATH="$PWD/src"
-```
-
-Modules run as `python -m covsyn.<package>.<module>`.
-The shell scripts set `PYTHONPATH` themselves and take the interpreter from `PYTHON` (default `python3`).
+Modules run as `uv run python -m covsyn.<package>.<module>`, and the optimiser and the modules with a `main` function also as entry points, such as `uv run covsyn-optimise`;
+`pyproject.toml` lists them under `[project.scripts]`.
+The shell scripts run every module through `uv run`.
 
 ### 1. Search bounds and seed vector
 
 ```bash
-python -m covsyn.calibration.apply_phase_d_parameters
+uv run python -m covsyn.calibration.apply_phase_d_parameters
 ```
 
 ### 2. Checks before an optimisation run
 
 ```bash
-python -m pytest tests/
-python scripts/gates/verify_fast_cost.py --workers 8 --vectors 4
-python scripts/gates/smoke_test.py
+uv run pytest
+uv run python scripts/gates/verify_fast_cost.py --workers 8 --vectors 4
+uv run python scripts/gates/smoke_test.py
 ```
 
 The first reproduces Phase D run 10 exactly; the second checks that the fast objective equals the reference one; the third evaluates the seed vector once.
@@ -74,7 +66,7 @@ The first reproduces Phase D run 10 exactly; the second checks that the fast obj
 ### 3. Parameter optimisation
 
 ```bash
-PYTHON=python3 scripts/launch_phase_d.sh
+scripts/launch_phase_d.sh
 ```
 
 This starts the Firefly optimizer and then `scripts/phase_d_chain.sh` in two tmux sessions.
@@ -91,6 +83,8 @@ PARAMETER_PATH=firefly_result/phaseD_run10 scripts/data_synthesis.sh
 `tests/test_regression.py` and `tests/test_pipeline.py` require every commit to reproduce the output of the commit that produced Phase D run 10 (`799fb15`): the objective and its 40 cost parts, simulation output for fixed seeds, and every step of the post-optimisation pipeline.
 The other tests check the rules in `docs/covsyn_decisions.md`.
 The slow tests are marked `slow`; `-m "not slow"` skips them.
+Their fixtures were made on macOS (arm64);
+on Linux x86-64 the objective differs in the fifth significant digit because of floating-point rounding in the energy distance (E103), so `test_cost_function_reproduces_run10` and the `verify_phaseD_json` step fail there.
 
 ## Data Structure
 

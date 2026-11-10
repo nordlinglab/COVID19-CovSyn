@@ -5,7 +5,7 @@ both runs side by side and, first of all, the regressions: the checks that passe
 change and fail after it. Those are the ones worth arguing about; everything else is either
 an intended improvement or unchanged.
 
-Usage: python -m covsyn.validation.compare_phase_d_runs old_checks.json new_checks.json
+Usage: uv run python -m covsyn.validation.compare_phase_d_runs old_checks.json new_checks.json
 """
 import json
 import sys

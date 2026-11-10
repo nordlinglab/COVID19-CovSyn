@@ -7,8 +7,8 @@ partly a property of those seeds: run 12's best vector sat on the edge of severa
 them and fell outside on 1,000 independent simulations. This scores the final population and
 every firefly's personal best on fresh, disjoint seed blocks and picks the lowest mean.
 
-Usage (repository root, PYTHONPATH=src):
-    python -m covsyn.calibration.revalidation FIREFLY_DIR OUT_DIR [BLOCKS]
+Usage (repository root, after uv sync):
+    uv run python -m covsyn.calibration.revalidation FIREFLY_DIR OUT_DIR [BLOCKS]
 
 Writes OUT_DIR/revalidation.csv (every candidate) and OUT_DIR/firefly_best.txt (every candidate
 with its validation cost, so its minimum is the chosen vector), and copies the run's other files

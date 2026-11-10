@@ -793,7 +793,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     return (demographic_data_list, social_data_list, course_of_disease_data_list, contact_data_list)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Synthesise data from the command line (``covsyn-data-synthesis``)."""
     start_time = time.time()
     parser = argparse.ArgumentParser(description='Data synthesis')
     parser.add_argument('--mode', type=str, default='spread_Taiwan_weight', choices=['spread_Taiwan', 'spread_Taiwan_weight', 'spread_Taitung', 'profile', 'result', 'cheng2020', 'test', 'ge2021',
@@ -921,3 +922,7 @@ if __name__ == "__main__":
                            **options, seed_start=seed_start, monte_carlo_number=mc_number,
                            parameter_path=str(parameter_path))
         print("--- Done %s seconds ---" % (time.time() - start_time))
+
+
+if __name__ == "__main__":
+    main()
