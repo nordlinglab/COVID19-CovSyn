@@ -106,17 +106,15 @@ def test_the_chain_names_only_the_golden_script_lines():
     assert naming == SCRIPT_LINES
 
 
-# The fixed directory the chain copies the run onto, which data_synthesis.sh reads by default.
-FIREFLY = pipeline_runner.COMPAT_DIR
-
-
 SYNTHESIS_FILES = {"_files": {"run/firefly_best.txt": "1 2 3\n"}}
 
 
 def _uv_runs(record: Path) -> list[list[str]]:
     """The arguments of every uv run the stand-in recorded, in order."""
     assert (record / "uv_runs").exists(), "no uv run was recorded"
-    text = (record / "uv_runs").read_text()
+    with (record / "uv_runs").open(encoding="utf-8", newline="") as file:  # bytes as written
+        text = file.read()
+    assert text.endswith("\x1e"), "the last run's record is cut off"
     return [run.split("\x1f")[:-1] for run in text.split("\x1e")[:-1]]
 
 
@@ -133,15 +131,16 @@ MODES = list(pipeline_runner.MODES)
 
 
 def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
-    """Run on its own without PARAMETER_PATH, data_synthesis.sh reads ./<FIREFLY>.
+    """Run on its own without PARAMETER_PATH, data_synthesis.sh reads the chain's copy.
 
-    That is the directory the chain copies the run onto; checked by a run, not by the text.
+    The directory comes from a chain run, so no directory name is written in the test.
     """
+    _, _, _, directory = _chain_to_step_2(tmp_path / "chain", "0")
     root, record, status, output = _run(
-        tmp_path, SYNTHESIS, {"_files": {f"{FIREFLY}/firefly_best.txt": "1 2 3\n"}}
+        tmp_path / "alone", SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
     )
     assert status == 0, output
-    assert _synthesis_runs(record) == [(mode, f"./{FIREFLY}") for mode in MODES], output
+    assert _synthesis_runs(record) == [(mode, f"./{directory}") for mode in MODES], output
 
 
 def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
@@ -160,12 +159,11 @@ SYNTHESIS_STAND_IN = (
 )
 
 
-@pytest.mark.parametrize("synthesis_status", ["0", "1"])
-def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
-    """Run to step 2 with REVALIDATE=0: the synthesis runs once, on the copied run.
+def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> tuple[Path, int, str, str]:
+    """Run the chain to its synthesis step with a stand-in data_synthesis.sh.
 
-    It gets --environment-checked, and a failed synthesis stops the chain.
-    Only this path is run; other settings reach the same call by reading of the script.
+    Returns the repository root, the exit status, the output and log, and the directory the
+    synthesis was told to read (its PARAMETER_PATH without the leading ./).
     """
     root, record, status, output = _run(
         tmp_path,
@@ -182,18 +180,29 @@ def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
         },
     )
     log_path = root / "phaseD_chain.log"
-    log = log_path.read_text() if log_path.exists() else ""
-    context = output + log
+    context = output + (log_path.read_text() if log_path.exists() else "")
     assert (root / "synthesis_call").exists(), context
     calls = (root / "synthesis_call").read_text().splitlines()
-    assert calls == [f"./{FIREFLY} --environment-checked"], context
-    assert (root / FIREFLY / "firefly_best.txt").exists(), context  # the run copied there
+    assert len(calls) == 1 and calls[0].endswith(" --environment-checked"), context
+    assert calls[0].startswith("./"), context
+    return root, status, context, calls[0].split(" ")[0][2:]
+
+
+@pytest.mark.parametrize("synthesis_status", ["0", "1"])
+def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
+    """Run to step 2 with REVALIDATE=0: the synthesis runs once, on the run's copy.
+
+    It gets --environment-checked, and a failed synthesis stops the chain. Only this path is
+    run; other settings reach the same call by reading of the script.
+    """
+    root, status, context, directory = _chain_to_step_2(tmp_path, synthesis_status)
+    assert directory != "run" and (root / directory / "firefly_best.txt").exists(), context
     if synthesis_status == "1":
         assert status != 0, context
-        assert "] ERROR: data synthesis failed" in log, context
-        assert "synthetic data done" not in log, context
+        assert "] ERROR: data synthesis failed" in context, context
+        assert "synthetic data done" not in context, context
     else:
-        assert "synthetic data done" in log, context
+        assert "synthetic data done" in context, context
 
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
