@@ -253,6 +253,13 @@ def test_commands_are_split_into_words(line, words):
     (['echo "$(cat <<EOF)"', "A=1", "EOF", "echo $A"], set()),    # bash: a here-document
     (["echo ${x:-$(cat <<EOF)}", "A=1", "EOF", "echo $A"], set()),
     (["echo $[1<<2]", "A=1", "echo $A"], {"A"}),                  # legacy arithmetic
+    (["echo $[a[1]<<2]", "A=1", "echo $A"], {"A"}),               # nested brackets
+    (["echo '$['; cat <<EOF; echo ']'", "A=1", "EOF", "echo $A"], set()),  # a quoted $[
+    (["echo '$(( ' ; cat <<EOF ; echo ' ))'", "A=1", "EOF", "echo $A"], set()),
+    (["x=`echo $(cat <<EOF)`", "A=1", "echo $A"], {"A"}),         # bash: text in backticks
+    (['X="$(', "echo hi", ')"', "A=1", 'echo "$A"'], {"X", "A"}),  # a $( open in quotes
+    (['echo "${x:-a', 'b}"', "A=1", "echo $A"], {"A"}),            # a ${ open in quotes
+    (["echo hi # don't", "A=1", "echo $A"], {"A"}),               # a quote in a comment
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -296,7 +303,7 @@ A = "scripts/a.sh"
     ("true&&scripts/a.sh", {A}),
     ("x;scripts/a.sh", {A}),
     ("a|scripts/a.sh", {A}),
-    ("${X:-scripts/a.sh}", {A}),
+    ("${X:-scripts/a.sh}", {"-scripts/a.sh"}),       # a default value: reported, differs
     ("bash -o pipefail scripts/a.sh", {A}),
     ("if bash scripts/a.sh; then :; fi", {A}),
     ("nohup bash scripts/a.sh &", {A}),
@@ -306,9 +313,11 @@ A = "scripts/a.sh"
     ("echo myscripts/a.sh", {"myscripts/a.sh"}),
     ("bash scripts/sub/a.sh", {"scripts/sub/a.sh"}),
     ("bash benchmarks/a.sh", {"benchmarks/a.sh"}),
-    ('bash "$SCRIPT_DIR/a.sh"', {"SCRIPT_DIR/a.sh"}),
+    ('bash "$SCRIPT_DIR/a.sh"', {"$SCRIPT_DIR/a.sh"}),
+    ('bash "${DIR}scripts/a.sh"', {"${DIR}scripts/a.sh"}),
+    ("bash ${SUB:+sub/}scripts/a.sh", {"${SUB:+sub/}scripts/a.sh"}),
     ("cd scripts && bash ./a.sh", {"a.sh"}),
-    ('bash "scripts/${step}.sh"', {".sh"}),
+    ('bash "scripts/${step}.sh"', {"scripts/${step}.sh"}),
     ("bash scripts/{a,b}.sh", {".sh"}),
     ("bash scripts/a.sh,b.sh", {"scripts/a.sh,b.sh"}),
     ("bash scripts/a=b.sh", {"b.sh"}),
@@ -386,3 +395,11 @@ def test_a_quoted_delimiter_comes_back_whole(word, trail):
     """The shell word after << is read back with its quotes removed, up to what follows."""
     assume(word and word.strip(" \t") == word)
     assert es._shell_word(shlex.quote(word) + trail) == word
+
+
+@given(LINE_TEXT)
+def test_a_quoted_word_leaves_nothing_open(text):
+    """Any text quoted for the shell opens no context that outlasts it."""
+    code, open_context = es._scan_quotes(f"echo {shlex.quote(text)}")
+    assert open_context is None
+    assert code == f"echo {shlex.quote(text)}"

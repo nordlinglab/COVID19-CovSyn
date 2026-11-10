@@ -257,84 +257,121 @@ class ShellLine:
     heredoc: bool = False
 
 
-def _contexts(text: str) -> list[tuple[str, int]]:
-    """For each character of a text, the bash context it stands in, and the context depth.
+@dataclass
+class _Walk:
+    """What the context walker found in a text.
 
-    One walker for every quoting rule of the scans. The contexts are ``top`` (plain code),
-    ``'``, ``"``, ``$'``, ```` ` ```` and the inside of ``$(`` and ``${``; a ``$(`` opens plain
-    code again wherever it stands, inside double quotes or ``${...}`` too. A backslash escapes
-    the next character outside single quotes, and so does it inside ``$'...'``. A character
-    that opens or closes a context belongs to the outer one.
+    ``kinds`` holds, for each character, the context it stands in: ``top`` (plain code), a
+    quote (``'``, ``"``, ``$'``, a backtick), the inside of a ``$(``, ``((`` or ``${``, or
+    ``#`` for a comment. ``groups`` maps the index where each ``$(``, ``$((``, ``((``, ``$[``
+    or ``${`` opens to the index of the character that closes it. ``open`` lists the contexts
+    still open at the end, innermost last.
     """
-    stack, parens, result, index = ["top"], [0], [], 0
+
+    kinds: list[str]
+    groups: dict[int, int]
+    open: list[str]
+
+
+PLAIN = {"top", "$(", "(("}
+
+
+def _walk(text: str) -> _Walk:
+    """Walk a text as bash reads its quoting, one pass for every scan.
+
+    A backslash escapes the next character outside single quotes, inside ``$'...'`` too. A
+    ``$(`` opens plain code again inside double quotes and ``${...}``, but inside backticks it
+    is text, as bash reads backtick content as a string. ``((`` at the start of a word in plain
+    code is an arithmetic command, and ``$[`` legacy arithmetic. A ``#`` at the start of a word
+    in plain code starts a comment to the end of its line. A character that opens or closes a
+    context belongs to the outer one.
+    """
+    stack: list[tuple[str, int, int]] = [("top", -1, 0)]       # kind, open index, nesting
+    kinds, groups, index = [], {}, 0
 
     def push(kind: str, width: int) -> None:
         nonlocal index
-        result.extend([(stack[-1], len(stack))] * width)
-        stack.append(kind)
-        parens.append(0)
+        kinds.extend([stack[-1][0]] * width)
+        stack.append((kind, index, 0))
         index += width
 
+    def pop() -> None:
+        kind, opened, _ = stack.pop()
+        if kind in {"$(", "((", "$[", "${"}:
+            groups[opened] = index
+        kinds.append(stack[-1][0])
+
     while index < len(text):
-        kind, char = stack[-1], text[index]
-        plain = kind in {"top", "$(", "${"}
-        if kind == "'" and char != "'" or kind == "$'" and char not in "\\'":
-            result.append((kind, len(stack)))
-        elif char == "\\" and kind != "'":
-            result.extend([(kind, len(stack))] * len(text[index:index + 2]))
-            index += 2
-            continue
-        elif (kind in {"'", "$'"} and char == "'") or (kind == '"' and char == '"') or \
-                (kind == "`" and char == "`") or (kind == "${" and char == "}") or \
-                (kind == "$(" and char == ")" and parens[-1] == 0):
-            stack.pop()
-            parens.pop()
-            result.append((stack[-1], len(stack)))
-        elif kind in {"top", "$(", "${", '"', "`"} and text.startswith("$(", index):
+        kind, _, nesting = stack[-1]
+        char = text[index]
+        word_start = index == 0 or text[index - 1] in " \t\n;&|("
+        active = kind in PLAIN | {"${", '"'}
+        if kind == "#":
+            if char == "\n":
+                stack.pop()
+                kinds.append(stack[-1][0])
+            else:
+                kinds.append("#")
+            index += 1
+        elif kind == "'":
+            if char == "'":
+                pop()
+            else:
+                kinds.append(kind)
+            index += 1
+        elif char == "\\":
+            width = len(text[index:index + 2])
+            kinds.extend([kind] * width)
+            index += width
+        elif kind == "$'":
+            if char == "'":
+                pop()
+            else:
+                kinds.append(kind)
+            index += 1
+        elif (kind == '"' and char == '"') or (kind == "`" and char == "`") or \
+                (kind == "${" and char == "}") or \
+                (kind == "$[" and char == "]" and nesting == 0) or \
+                (kind in {"$(", "(("} and char == ")" and nesting == 0):
+            if kind == "((" and text.startswith("))", index):
+                kinds.append(kind)          # the first ) of the closing ))
+                index += 1
+            pop()
+            index += 1
+        elif active and text.startswith("$(", index):
             push("$(", 2)
-            continue
-        elif kind in {"top", "$(", "${", '"'} and text.startswith("${", index):
+        elif active and text.startswith("${", index):
             push("${", 2)
-            continue
-        elif plain and text.startswith("$'", index):
+        elif active and text.startswith("$[", index):
+            push("$[", 2)
+        elif kind in PLAIN and word_start and text.startswith("((", index):
+            push("((", 2)
+        elif kind in PLAIN and word_start and char == "#":
+            stack.append(("#", index, 0))
+            kinds.append("#")
+            index += 1
+        elif kind in PLAIN | {"${"} and text.startswith("$'", index):
             push("$'", 2)
-            continue
-        elif (plain and char in "'\"`") or (kind == '"' and char == "`"):
+        elif (kind in PLAIN | {"${"} and char in "'\"`") or (kind == '"' and char == "`"):
             push(char, 1)
-            continue
         else:
-            if kind == "$(" and char in "()":
-                parens[-1] += 1 if char == "(" else -1
-            result.append((kind, len(stack)))
-        index += 1
-    return result
-
-
-def _open_context(text: str) -> str | None:
-    """The quote or substitution still open at the end of a text, or None."""
-    contexts = _contexts(text + " ")
-    kind = contexts[-1][0] if contexts else "top"
-    return None if kind == "top" else kind
+            if kind in {"$(", "(("} and char in "()":
+                stack[-1] = (kind, stack[-1][1], nesting + (1 if char == "(" else -1))
+            elif kind == "$[" and char in "[]":
+                stack[-1] = (kind, stack[-1][1], nesting + (1 if char == "[" else -1))
+            kinds.append(kind)
+            index += 1
+    return _Walk(kinds, groups, [kind for kind, _, _ in stack[1:] if kind != "#"])
 
 
 def _scan_quotes(text: str) -> tuple[str, str | None]:
-    """A text without its comments, and the quote still open at its end, as bash reads it.
+    """A text without its comments, and the context still open at its end, as bash reads it.
 
-    A ``#`` starts a comment at the start of a word in plain code and runs to the end of its
-    line; quoting follows _contexts.
+    Any open quote, substitution or ``${`` continues the logical line, as it does in bash.
     """
-    contexts, out, index = _contexts(text), [], 0
-    while index < len(text):
-        char = text[index]
-        if char == "#" and contexts[index][0] in {"top", "$("} and \
-                (index == 0 or text[index - 1] in " \t\n;&|("):
-            end = text.find("\n", index)
-            index = len(text) if end < 0 else end
-            continue
-        out.append(char)
-        index += 1
-    open_kind = _open_context("".join(out))
-    return "".join(out), open_kind if open_kind in {"'", '"', "$'", "`"} else None
+    walk = _walk(text)
+    code = "".join(c for c, kind in zip(text, walk.kinds, strict=True) if kind != "#")
+    return code, walk.open[-1] if walk.open else None
 
 
 def strip_comment(line: str) -> str:
@@ -346,50 +383,30 @@ def _trailing_backslashes(text: str) -> int:
     return len(text) - len(text.rstrip("\\"))
 
 
-def _closing_parenthesis(line: str, start: int) -> int:
-    """The index of the ``)`` closing the ``(`` at ``start``, or -1 if it stays open.
+def _fold(line: str, openers: tuple[str, ...]) -> str:
+    """The line with each closed group that opens with one of ``openers`` as X.
 
-    The ``(`` is that of a ``$(``, ``$((`` or ``((`` at ``start - 1`` or ``start``; quoting
-    follows _contexts. A group holding a case statement, whose patterns end in an unpaired
-    ``)``, is taken as open, which leaves it unfolded.
+    Groups come from one walk; a quoted opener is text and opens none. A group holding a case
+    statement, whose patterns end in an unpaired ``)``, is left unfolded, as is one left open.
+    Nested groups fold with the outermost.
     """
-    opener = start - 1 if start and line[start - 1] == "$" else start
-    contexts = _contexts(line)
-    depth = contexts[opener][1]
-    if line.startswith("$(", opener):
-        # The substitution's own context closes on its matching parenthesis.
-        for index in range(start + 1, len(line)):
-            if contexts[index][1] == depth and line[index] == ")":
-                return -1 if re.search(r"\bcase\b", line[start:index]) else index
-        return -1
-    level = 0
-    for index in range(start, len(line)):
-        if contexts[index][1] == depth and contexts[index][0] in {"top", "$(", "${"}:
-            level += {"(": 1, ")": -1}.get(line[index], 0)
-            if level == 0:
-                return -1 if re.search(r"\bcase\b", line[start:index]) else index
-    return -1
-
-
-def _fold_balanced(line: str, opener: str) -> str:
-    """The line with each closed ``opener ... )`` group as X; a group left open is kept."""
-    start = line.find(opener)
-    while start >= 0:
-        end = _closing_parenthesis(line, start + opener.index("("))
-        if end < 0:
-            start = line.find(opener, start + 1)
+    walk, spans = _walk(line), []
+    for start, end in sorted(walk.groups.items()):
+        if not any(line.startswith(o, start) for o in openers):
             continue
+        if spans and start <= spans[-1][1]:
+            continue                        # inside a group already folded
+        if re.search(r"\bcase\b", line[start:end]):
+            continue
+        spans.append((start, end))
+    for start, end in reversed(spans):
         line = line[:start] + "X" + line[end + 1:]
-        start = line.find(opener, start)
     return line
 
 
 def _fold_arithmetic(line: str) -> str:
     """The line with each arithmetic expansion and command as X, ``$[ ]`` included."""
-    line = re.sub(r"\$\[[^\]]*\]", "X", line)
-    for opener in ("$((", "(("):
-        line = _fold_balanced(line, opener)
-    return line
+    return _fold(line, ("$((", "((", "$["))
 
 
 def _fold_substitutions(line: str) -> str:
@@ -398,7 +415,7 @@ def _fold_substitutions(line: str) -> str:
     Arithmetic expansions and commands, command substitutions and backtick groups, nested
     parentheses included; one left open stays as it is.
     """
-    return _fold_balanced(_fold_arithmetic(re.sub(r"`[^`]*`", "X", line)), "$(")
+    return _fold(re.sub(r"`[^`]*`", "X", line), ("$((", "((", "$[", "$("))
 
 
 def _raw_words(line: str) -> list[str]:
@@ -415,10 +432,10 @@ def _raw_words(line: str) -> list[str]:
 def _plain_positions(line: str) -> list[bool]:
     """For each character of a line, whether it stands in plain code.
 
-    Plain code is outside quotes and ``${...}``, or inside a ``$(...)`` wherever that stands;
-    only there does bash take ``<<`` for a redirection.
+    Plain code is outside quotes, ``${...}`` and arithmetic, or inside a ``$(...)`` wherever
+    that stands; only there does bash take ``<<`` for a redirection.
     """
-    return [kind in {"top", "$("} for kind, _ in _contexts(line)]
+    return [kind in {"top", "$("} for kind in _walk(line).kinds]
 
 
 def _shell_word(text: str) -> str | None:
@@ -427,8 +444,8 @@ def _shell_word(text: str) -> str | None:
     That is how bash reads a here-document delimiter; an unparsable word gives None too.
     """
     text = text.lstrip(" \t")
-    contexts, end = _contexts(text), 0
-    while end < len(text) and not (contexts[end] == ("top", 1) and
+    kinds, end = _walk(text).kinds, 0
+    while end < len(text) and not (kinds[end] == "top" and
                                    (text[end].isspace() or text[end] in ";&|<>()")):
         end += 1
     try:
@@ -617,7 +634,8 @@ def environment_variables(path: Path) -> set[str]:
 
 # A path to a shell script, read after quotes and backslashes are removed; a ``$ROOT/`` or
 # ``${ROOT}/`` prefix, the repository root in every script, is dropped.
-SCRIPT_MENTION = re.compile(r"(?:\$\{?ROOT\}?/)?([\w./+@%~,-]*\.sh)(?![\w.-])")
+SCRIPT_MENTION = re.compile(
+    r"(?:\$\{?ROOT\}?/)?((?:\$\{[^}]*\}|\$\w+|[\w./+@%~,-])*\.sh)(?![\w.-])")
 
 
 def mentioned_scripts(text: str) -> list[str]:
@@ -625,12 +643,12 @@ def mentioned_scripts(text: str) -> list[str]:
 
     Every way of naming a script counts, in a quoted command string, a substitution, a
     subshell, a default value or glued to other text. A name that cannot be resolved to a
-    path, such as ``${step}.sh``, ``{a,b}.sh``, ``$SCRIPT_DIR/a.sh`` or ``./a.sh`` after a
-    cd, comes out as what it can be read as, which differs from every scanned path, so a test
-    comparing them fails loudly rather than taking it for one already scanned.
+    path, such as ``${step}.sh``, ``{a,b}.sh``, ``$SCRIPT_DIR/a.sh``, ``${DIR}scripts/a.sh``
+    or ``./a.sh`` after a cd, comes out with its variable parts kept, which differs from
+    every scanned path, so a test comparing them fails loudly rather than taking it for one
+    already scanned.
     """
     plain = re.sub(r"[\\'\"]", "", text)
-    plain = re.sub(r"\$\{\w+:?[-=+?]", " ", plain)       # a default value is a word of its own
     return [posixpath.normpath(path) for path in SCRIPT_MENTION.findall(plain)]
 
 
