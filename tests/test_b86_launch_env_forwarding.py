@@ -504,7 +504,14 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
         timeout=60,
         check=False,
     )
-    return root, record, result.returncode, result.stdout + result.stderr
+    output = result.stdout + result.stderr
+    # Printed for pytest, which shows a failing test's captured output: whichever check fails,
+    # and however (an assertion or an error), the script's output and the chain log are there.
+    print(f"--- {script.name} exited {result.returncode}; its output:\n{output}")
+    log = root / "phaseD_chain.log"
+    if log.exists():
+        print(f"--- phaseD_chain.log:\n{_read(log)}")
+    return root, record, result.returncode, output
 
 
 def test_launch_forwards_the_values_unchanged(tmp_path):
