@@ -27,6 +27,7 @@ ENVIRONMENT_NAMES = ENVIRONMENT_MAPPINGS | ENVIRONMENT_GETTERS
 MAPPING_PARAMETER = "env"
 # Methods that copy the environment or view it, which read it as surely as a lookup.
 COPIES = {"copy", "keys", "items", "values"}
+COPY_FUNCTIONS = {"copy", "deepcopy"}
 
 
 # --- Python ---------------------------------------------------------------------------------
@@ -34,6 +35,25 @@ COPIES = {"copy", "keys", "items", "values"}
 
 def _name(node: ast.AST) -> str:
     return getattr(node, "attr", getattr(node, "id", ""))
+
+
+def copied(node: ast.AST) -> list[ast.AST]:
+    """The expressions a copy or view is made of; none for anything else.
+
+    Covers ``dict(e)``, ``dict(**e)``, ``{**e}``, ``copy.copy(e)``, ``e.copy()`` and
+    ``e.keys()``.
+    """
+    if isinstance(node, ast.Dict):
+        return [v for k, v in zip(node.keys, node.values, strict=True) if k is None]
+    if not isinstance(node, ast.Call):
+        return []
+    func = node.func
+    if _name(func) == "dict" or (isinstance(func, ast.Attribute) and
+                                 _name(func.value) == "copy" and func.attr in COPY_FUNCTIONS):
+        return [*node.args, *(k.value for k in node.keywords if k.arg is None)]
+    if isinstance(func, ast.Attribute) and func.attr in COPIES:
+        return [func.value]
+    return []
 
 
 def _environment_names(tree: ast.AST) -> dict[str, str]:
@@ -55,13 +75,9 @@ def _environment_names(tree: ast.AST) -> dict[str, str]:
                     names[alias.asname or alias.name] = alias.name
 
     def target(value: ast.AST | None) -> str | None:
-        # A copy or view of the environment reads it as surely: dict(e), e.copy().
-        if isinstance(value, ast.Call):
-            if _name(value.func) == "dict" and len(value.args) == 1:
-                return target(value.args[0])
-            if isinstance(value.func, ast.Attribute) and value.func.attr in COPIES:
-                return target(value.func.value)
-            return None
+        # A copy or view of the environment reads it as surely as the environment itself.
+        if isinstance(value, (ast.Call, ast.Dict)):
+            return next((t for t in map(target, copied(value)) if t), None)
         if isinstance(value, ast.Name) and value.id in names:
             return names[value.id]
         if isinstance(value, ast.Attribute) and value.attr in ENVIRONMENT_NAMES and \
@@ -75,7 +91,8 @@ def _environment_names(tree: ast.AST) -> dict[str, str]:
             pairs = []
             if isinstance(node, ast.Assign):
                 for t in node.targets:
-                    if isinstance(t, ast.Tuple) and isinstance(node.value, ast.Tuple) and \
+                    if isinstance(t, (ast.Tuple, ast.List)) and \
+                            isinstance(node.value, (ast.Tuple, ast.List)) and \
                             len(t.elts) == len(node.value.elts):
                         pairs += list(zip(t.elts, node.value.elts, strict=True))
                     else:
@@ -112,11 +129,8 @@ def environment_reads(path: Path) -> set[str]:
     def kind(node: ast.AST) -> str:
         if isinstance(node, ast.NamedExpr):
             node = node.value
-        if isinstance(node, ast.Call):
-            inner = node.args[0] if _name(node.func) == "dict" and len(node.args) == 1 else (
-                node.func.value if isinstance(node.func, ast.Attribute)
-                and node.func.attr in COPIES else None)
-            return kind(inner) if inner is not None else ""
+        if isinstance(node, (ast.Call, ast.Dict)):
+            return "mapping" if any(kind(i) == "mapping" for i in copied(node)) else ""
         name = _name(node)
         if isinstance(node, ast.Name):
             name = aliases.get(name, name)
@@ -228,13 +242,20 @@ def _scan_quotes(text: str) -> tuple[str, str | None]:
     """A text without its comments, and the quote still open at its end, as bash reads it.
 
     A ``#`` starts a comment at the start of a word, outside quotes, and runs to the end of its
-    line; a backslash outside single quotes escapes the next character.
+    line; a backslash outside single quotes escapes the next character, also inside ``$'...'``.
     """
     quote, out, index = None, [], 0
     while index < len(text):
         char = text[index]
         if quote == "'":
             quote = None if char == "'" else quote
+        elif quote is None and text.startswith("$'", index):
+            quote = "$'"                        # ANSI-C quoting, where \' escapes a quote
+            out.append("$'")
+            index += 2
+            continue
+        elif quote == "$'" and char == "'":
+            quote = None
         elif char == "\\":
             out.append(text[index:index + 2])
             index += 2
@@ -279,8 +300,8 @@ def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
     """
     words, found = _raw_words(line), []
     for index, word in enumerate(words):
-        match = re.match(r"^\d*<<(?!<)(-?)(.*)$", word)
-        if not match:
+        match = re.search(r"(?<!<)<<(?!<)(-?)(.*)$", word)
+        if not match or word[0] in "'\"":
             continue
         delimiter = match.group(2) or (words[index + 1] if index + 1 < len(words) else "")
         delimiter = delimiter.replace("\\", "").strip("'\"")
@@ -323,8 +344,11 @@ def shell_lines(text: str) -> list[ShellLine]:
 
 
 def _fold_substitutions(line: str) -> str:
-    """The line with each arithmetic expansion, command substitution and backtick group as X."""
-    patterns = (r"\$\(\([^()]*\)\)", r"\$\([^()]*\)", r"`[^`]*`")
+    """The line with each substitution as X.
+
+    Arithmetic expansions and commands, command substitutions and backtick groups.
+    """
+    patterns = (r"\$?\(\([^()]*\)\)", r"\$\([^()]*\)", r"`[^`]*`")
     while True:
         folded = line
         for pattern in patterns:
@@ -373,17 +397,21 @@ def block_change(line: str) -> int:
     """How far a line moves the block depth.
 
     +1 for each if, loop, case, brace group (a function body included) or subshell it opens,
-    -1 for each it closes. An opener counts wherever a command may start, as in ``else if``;
-    quoted braces and parentheses are text. A subshell closed on a later word of its own line,
-    as in ``(cd x && y)``, leaves the depth raised, which can only report more reads.
+    -1 for each it closes; a parenthesis left open at the end of a word, as in ``ARR=(`` or
+    ``$(``, opens one too. An opener counts wherever a command may start, as in ``else if``
+    or after a case pattern; quoted braces and parentheses are text. A subshell closed on a
+    later word of its own line, as in ``(cd x && y)``, leaves the depth raised, which can only
+    report more reads.
     """
     change, starts_command = 0, True
     for word in _raw_words(line):
         if word and set(word) <= set(";&|"):
             starts_command = True
             continue
-        if word in {"{", "("} or (word.startswith("(") and not word.startswith("((")):
-            change += 1
+        function = word == "()" or word.endswith("()")
+        if word == "{" or (not function and (word == "(" or word.endswith("(") or
+                                            (word.startswith("(") and not word.startswith("((")))):
+            change += 1                     # a group, subshell, array or open substitution
             starts_command = True
             continue
         if word in {"}", ")"}:
@@ -392,6 +420,8 @@ def block_change(line: str) -> int:
         if starts_command:
             change += (word in OPENERS) - (word in CLOSERS)
             starts_command = word in LEADERS
+        if word.endswith(")") and not word.startswith("(") and not function:
+            starts_command = True           # a case pattern; a command follows it
     return change
 
 
@@ -451,9 +481,29 @@ def environment_variables(path: Path) -> set[str]:
     return (referenced - assigned) | defaulted
 
 
-SCRIPT_CALL = re.compile(
-    r"(?:^|[\s;&|(<])(?:(?:bash|sh|source|\.)\s+)?[\"']?"
-    r"(?:\$\{?\w+\}?[\"']?/|\./)?scripts/([\w.-]+\.sh)")
+SCRIPT_PATH = re.compile(r"(?:^|/)scripts/([\w.-]+\.sh)$")
+SHELLS = {"bash", "sh", "source", "."}
+
+
+def script_calls(line: str) -> list[tuple[str, list[str]]]:
+    """The scripts under scripts/ a line runs, each with its command's NAME=value prefix.
+
+    Quotes are removed from the prefix words.
+    A script runs when its path is a command's first word after its assignments, or the first
+    word after bash, sh, source or ``.``; a path elsewhere, as in an echo, is text.
+    """
+    calls = []
+    for command in commands(line):
+        index = 0
+        while index < len(command) and re.match(rf"{NAME}=", command[index]):
+            index += 1
+        prefix, rest = command[:index], command[index:]
+        if rest and rest[0] in SHELLS:
+            rest = [w for w in rest[1:] if not w.startswith("-")]
+        match = SCRIPT_PATH.search(rest[0]) if rest else None
+        if match:
+            calls.append((match.group(1), prefix))
+    return calls
 
 
 def called_scripts(lines: list[ShellLine]) -> set[str]:
@@ -461,16 +511,4 @@ def called_scripts(lines: list[ShellLine]) -> set[str]:
 
     Here-document bodies count too, as one may be piped to a shell.
     """
-    return {name for line in lines for name in SCRIPT_CALL.findall(line.text)}
-
-
-def script_call_prefix(line: str, script: str) -> list[str]:
-    """The NAME=value words that prefix the command running a script, quotes removed."""
-    for command in commands(line):
-        for index, word in enumerate(command):
-            if word.endswith(f"scripts/{script}"):
-                prefix = command[:index]
-                if prefix and prefix[-1] in {"bash", "sh", "source", "."}:
-                    prefix = prefix[:-1]
-                return [w for w in prefix if re.match(rf"{NAME}=", w)]
-    return []
+    return {name for line in lines for name, _ in script_calls(line.text)}

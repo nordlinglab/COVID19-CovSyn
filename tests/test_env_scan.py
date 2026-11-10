@@ -53,6 +53,11 @@ def _script(text: str) -> list[es.ShellLine]:
     ("import os\ne = dict(os.environ)\ne.get('A')", {"A"}),
     ("import os\n'A' in os.environ.keys()", {"A"}),
     ("import os\ne, f = os.environ, 1\ne.get('A')", {"A"}),
+    ("import os\n[e, f] = [os.environ, 1]\ne.get('A')", {"A"}),
+    ("import os\nx = {**os.environ}\nx['A']", {"A"}),
+    ("import os\nx = dict(**os.environ)\nx['A']", {"A"}),
+    ("import copy, os\nx = copy.copy(os.environ)\nx['A']", {"A"}),
+    ("import os\nx = {**os.environ, 'B': '1'}\nx.get('A')", {"A"}),
 ])
 def test_environment_reads_are_found_in_code_only(tmp_path, source, expected):
     """Every spelling of an environment read is found, and nothing in comments or text."""
@@ -149,6 +154,11 @@ def test_heredoc_bodies_are_text():
     assert {"A", "B"} <= referenced
 
 
+def test_a_case_pattern_starts_a_command():
+    """An opener after a case pattern counts, so a block opened and closed there nets zero."""
+    assert es.block_change("case x in a) if y; then z; fi;; esac") == 0
+
+
 @pytest.mark.parametrize(("line", "words"), [
     ("A=$B", [["A=$B"]]),
     ("A=${B}x", [["A=${B}x"]]),
@@ -188,6 +198,14 @@ def test_commands_are_split_into_words(line, words):
     (["cat <<\\EOF", "A=1", "EOF", "echo $A"], set()),           # a backslash-quoted delimiter
     (["x=$((1<<2))", "A=1", "echo $A"], {"A"}),                   # a shift, no here-document
     (["cat <<< word", "A=1", "echo $A"], {"A"}),                  # a here-string
+    (["(( x = 1 << 2 ))", "A=1", "echo $A"], {"A"}),              # a shift in (( ))
+    (["cat<<EOF", "A=1", "EOF", "echo $A"], set()),               # no space before EOF
+    (["if x; then", "ARR=(", " a", ")", "A=1", "fi", "echo $A"], set()),
+    (["if x; then", "Y=$(", " a", ")", "A=1", "fi", "echo $A"], set()),
+    (["f () {", ":", "}", "A=1", "echo $A"], {"A"}),              # one function body
+    # ANSI-C quoting no longer swallows the rest of the script; shlex cannot parse the value,
+    # so X itself is not taken as assigned, which can only report more reads.
+    (["X=$'it\\'s'", "A=1", "echo $A"], {"A"}),
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -205,9 +223,11 @@ def test_every_form_of_reading_a_variable_is_a_reference(line, names):
 
 
 def test_a_prefix_assignment_belongs_to_its_own_command():
-    """NAME=value sets the variable only for the command it prefixes."""
-    assert es.script_call_prefix('P="./$F" bash scripts/a.sh', "a.sh") == ["P=./$F"]
-    assert es.script_call_prefix('P="./$F" true; bash scripts/a.sh', "a.sh") == []
+    """NAME=value sets the variable only for the command it prefixes, each call on its own."""
+    assert es.script_calls('P="./$F" bash scripts/a.sh') == [("a.sh", ["P=./$F"])]
+    assert es.script_calls('P="./$F" true; bash scripts/a.sh') == [("a.sh", [])]
+    assert es.script_calls("P=x bash scripts/a.sh || bash scripts/a.sh") == [
+        ("a.sh", ["P=x"]), ("a.sh", [])]
 
 
 @pytest.mark.parametrize(("line", "called"), [
@@ -223,6 +243,8 @@ def test_a_prefix_assignment_belongs_to_its_own_command():
     ('bash "$ROOT"/scripts/a.sh', {"a.sh"}),
     ('bash "${REPO_ROOT}/scripts/a.sh"', {"a.sh"}),
     ("echo done", set()),
+    ('echo "run scripts/a.sh later"', set()),        # named in text, not run
+    ("bash -x scripts/a.sh", {"a.sh"}),
 ])
 def test_script_calls_are_found_however_written(line, called):
     """Every way of running a script under scripts/ is a call."""
