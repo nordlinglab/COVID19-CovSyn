@@ -37,15 +37,14 @@ def _name(node: ast.AST) -> str:
     return getattr(node, "attr", getattr(node, "id", ""))
 
 
-def _environment_reads(path: Path, mappings: bool = True) -> set[str]:
+def _environment_reads(path: Path) -> set[str]:
     """Names a module reads from the environment, found in its code, not its comments.
 
     Covers ``os.environ`` or ``environ`` subscripts, ``.get`` and ``.setdefault``, ``getenv``
-    and ``in environ``. With ``mappings``, a mapping passed in as ``env`` counts too, as
-    ``worker_count(os.environ)`` reads VERIFY_WORKERS; such a read happens only when a caller
-    passes the environment, so the firefly session's modules are scanned without it.
+    and ``in environ``, and the same on a mapping passed in as ``env``, as
+    ``worker_count(os.environ)`` reads VERIFY_WORKERS.
     """
-    sources = ENVIRON | (MAPPING if mappings else set())
+    sources = ENVIRON | MAPPING
     names = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         key = None
@@ -102,16 +101,27 @@ def _import_closure(module: str) -> set[Path]:
     return files
 
 
+ENVIRONMENT_NAMES = {"environ", "environb", "getenv", "getenvb"}
+
+
 def _mentions_environment(path: Path) -> bool:
-    """Whether a module touches ``os.environ`` or ``getenv`` at all.
+    """Whether a module touches the environment at all.
 
     A copy, an alias or a mapping handed to a reader such as ``worker_count`` reads the
-    environment as surely as a lookup does, so the firefly session's modules may not touch it.
+    environment as surely as a lookup does, so the firefly session's modules may not touch it:
+    no ``os.environ``, ``environb``, ``getenv`` or ``getenvb``, under any import name, and no
+    ``getattr`` on ``os``.
     """
-    return any(
-        isinstance(node, (ast.Name, ast.Attribute)) and _name(node) in {"environ", "getenv"}
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-    )
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, (ast.Name, ast.Attribute)) and _name(node) in ENVIRONMENT_NAMES:
+            return True
+        if isinstance(node, ast.ImportFrom) and node.module == "os" and \
+                any(a.name in ENVIRONMENT_NAMES or a.name == "*" for a in node.names):
+            return True
+        if isinstance(node, ast.Call) and _name(node.func) == "getattr" and node.args and \
+                _name(node.args[0]) == "os":
+            return True
+    return False
 
 
 # Every covsyn module the firefly session runs; the chain runs the rest, and these too.
@@ -125,18 +135,13 @@ def _shell_code(path: Path) -> str:
 
 
 def _assigned(code: str) -> set[str]:
-    """Names a shell script assigns.
+    """Names a shell script assigns with ``NAME=`` at the start of a line.
 
-    An assignment counts on any line, after ; & or |, and by export, local, declare or
-    readonly with a value; so do the names of for and read. A bare ``export A`` keeps the
-    value A came with, so it is no assignment.
+    The chain gives each variable it reads from the environment a default, ``${NAME:-...}``,
+    and assigns its own variables with ``NAME=``; test_the_chain_follows_the_convention fails
+    loudly on any other form, rather than this scan guessing at it.
     """
-    builtin = r"\b(?:export|local|declare|readonly)\s+(?:-\w+\s+)*"
-    return (
-        set(re.findall(rf"(?:^\s*|[;&|]\s*|{builtin})({NAME})=", code, re.MULTILINE))
-        | set(re.findall(rf"\bfor\s+({NAME})\s+in\b", code))
-        | set(re.findall(rf"\bread\s+(?:-\w+\s+)*({NAME})\s*(?:$|;)", code, re.MULTILINE))
-    )
+    return set(re.findall(rf"^\s*({NAME})=", code, re.MULTILINE))
 
 
 def _chain_variables() -> list[str]:
@@ -171,8 +176,11 @@ def test_the_chain_session_is_given_every_variable_it_reads(chain_env, variable)
     assert variable in chain_env
 
 
-def test_the_firefly_modules_read_only_what_the_firefly_session_is_given():
-    """The firefly session gets WARM_START alone, so no module it imports may read another."""
+def test_the_firefly_modules_do_not_touch_the_environment():
+    """No module the firefly session imports reads the environment.
+
+    The session gets WARM_START alone, which the shell passes to the optimiser as an argument.
+    """
     assert len(FIREFLY_FILES) > 2
     for path in FIREFLY_FILES:
         assert not _mentions_environment(path), path.name
@@ -182,6 +190,10 @@ def test_the_firefly_modules_read_only_what_the_firefly_session_is_given():
     ("import os\nworker_count(dict(os.environ))", True),
     ("import os\nenv = os.environ\nworker_count(env)", True),
     ("from os import getenv\ngetenv('A')", True),
+    ("from os import environ as e\nworker_count(e)", True),
+    ("from os import getenv as g\ng('A')", True),
+    ("import os\nos.environb", True),
+    ("import os\ngetattr(os, 'environ')", True),
     ("def worker_count(env):\n    return env.get('A')", False),
     ("# os.environ\nprint('os.environ')", False),
 ])
@@ -208,24 +220,24 @@ def test_the_import_closure_follows_relative_imports_and_packages(tmp_path, monk
     assert any(_mentions_environment(p) for p in closure)
 
 
-@pytest.mark.parametrize("code", [
-    "    A=1", "A=1", "true; A=1", "export A=1", "local A=", "readonly -x A=1",
-    "for A in 1 2; do :; done", "read -r A",
-])
-def test_the_chain_scan_sees_every_assignment(code):
-    """An assignment in an if or loop body, or by a builtin, is the script's own variable.
+def test_the_chain_follows_the_convention():
+    """Every variable the chain uses is assigned with NAME= or read with a ${NAME:-} default.
 
-    It is not user input, so the launcher is not asked to forward it.
+    A variable used any other way, say by for, read or local, would be taken for user input
+    and its forwarding asked for; this fails instead, so its form can be checked by hand.
     """
-    assert _assigned(code) == {"A"}
+    chain = _shell_code(CHAIN)
+    referenced = set(re.findall(rf"\$\{{?({NAME})", chain)) - SHELL_SPECIAL
+    unaccounted = referenced - _assigned(chain) - set(re.findall(rf"\$\{{({NAME}):-", chain))
+    assert not unaccounted
 
 
-@pytest.mark.parametrize("code", [
-    "cmd || FALLBACK", 'echo "for A"', "test $A", "export A", "local A", "declare -x A",
+@pytest.mark.parametrize(("code", "names"), [
+    ("A=1", {"A"}), ("    A=1", {"A"}), ("echo A=1", set()), ("for A in 1; do :; done", set()),
 ])
-def test_the_chain_scan_takes_no_read_for_an_assignment(code):
-    """A word that only ends a line, or sits in a string, is not an assignment."""
-    assert _assigned(code) == set()
+def test_the_chain_scan_sees_line_start_assignments(code, names):
+    """Only NAME= at the start of a line counts as an assignment."""
+    assert _assigned(code) == names
 
 
 @pytest.mark.parametrize(("source", "expected"), [
@@ -330,6 +342,32 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert chain["CPU_CORES"] == "8"
     assert chain["SELECT_TOP"] == ""
     assert set(chain) == set(CHAIN_VARIABLES)
+
+
+def test_launch_uses_a_status_file_the_user_names(tmp_path):
+    """A FIREFLY_STATUS set before the launch is the file the session writes and the chain reads.
+
+    The path is relative to the repository root.
+    """
+    root, record, status, output = _run(tmp_path, SCRIPT, {
+        "FIREFLY_STATUS": "runs/x.exit", "_files": {"runs/.keep": ""},
+    })
+    assert status == 0, output
+    chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
+    assert chain["FIREFLY_STATUS"] == "runs/x.exit"
+    assert (root / "runs" / "x.exit").read_text().strip() == "0"
+
+
+def test_session_checks_match_the_name_exactly():
+    """Every session check matches the session name exactly.
+
+    tmux matches -t firefly as a prefix when no session has that name, so firefly_old would
+    count; "=" makes the match exact.
+    """
+    for script in (SCRIPT, CHAIN):
+        targets = re.findall(r"has-session -t (\S+)", _shell_code(script))
+        assert targets, script.name
+        assert all(t.startswith("=") for t in targets), (script.name, targets)
 
 
 def test_launch_stops_when_the_optimiser_fails_at_startup(tmp_path):

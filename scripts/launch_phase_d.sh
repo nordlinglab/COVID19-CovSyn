@@ -20,9 +20,10 @@
 #   SELECT_TOP       how many candidates that selection checks (default 5)
 #   CPU_CORES        workers for the selection's simulations (default 24)
 #   FIREFLY_STATUS   the file where the firefly session leaves its exit status, which the
-#                    chain checks before it uses FIREFLY_RUN; default firefly_phaseD.exit.
-#                    The launcher fails if the optimiser exits within its first 2 s; a later
-#                    failure stops the chain.
+#                    chain checks before it uses FIREFLY_RUN; default firefly_phaseD.exit,
+#                    relative to the repository root. The launcher fails if the firefly session
+#                    ends within its first 2 s with a status other than 0; a later failure
+#                    stops the chain.
 # An unset variable reaches the chain empty, which the chain reads as its default.
 set -euo pipefail
 
@@ -30,7 +31,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 WARM_START="${WARM_START:-firefly_result/phaseD_run10/firefly_best.txt}"
 
-if tmux has-session -t firefly 2>/dev/null || tmux has-session -t chain 2>/dev/null; then
+if tmux has-session -t =firefly 2>/dev/null || tmux has-session -t =chain 2>/dev/null; then
   echo "ERROR: a firefly or chain session is already running, refusing to start"
   tmux ls
   exit 1
@@ -61,10 +62,13 @@ tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
    echo $? > "$FIREFLY_STATUS.tmp" && mv "$FIREFLY_STATUS.tmp" "$FIREFLY_STATUS"'
 sleep 2
 # The status is renamed into place, so it is never read half-written. "running" with no
-# session left means the session was killed before the optimiser exited.
+# session left means the session was killed before the optimiser exited; the file is read again
+# after the session check, as the optimiser may have exited in between. The "=" makes tmux match
+# the session name exactly rather than as a prefix.
 status=$(cat "$FIREFLY_STATUS")
-if [ "$status" = running ] && ! tmux has-session -t firefly 2>/dev/null; then
-  status='killed'
+if [ "$status" = running ] && ! tmux has-session -t =firefly 2>/dev/null; then
+  status=$(cat "$FIREFLY_STATUS")
+  [ "$status" = running ] && status='killed'
 fi
 if [ "$status" != running ] && [ "$status" != 0 ]; then
   echo "ERROR: the firefly session ended at startup with status $status; not starting the chain"

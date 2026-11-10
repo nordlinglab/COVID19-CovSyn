@@ -48,7 +48,8 @@ say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 run() { uv run --no-sync python -m "$@"; }
 
 say 'waiting for the firefly session to finish'
-while tmux has-session -t firefly 2>/dev/null; do sleep 120; done
+# "=" matches the session name exactly, not as a prefix (firefly_old would match).
+while tmux has-session -t =firefly 2>/dev/null; do sleep 120; done
 # launch_phase_d.sh names in FIREFLY_STATUS the file where the firefly session leaves its exit
 # status; it holds "running" until the optimiser exits, so a failed or killed optimiser stops the
 # chain instead of letting it report an earlier run's results from FIREFLY_RUN. A chain started
