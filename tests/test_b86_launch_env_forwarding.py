@@ -111,8 +111,10 @@ FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generat
 
 def test_the_chain_and_the_synthesis_agree_on_the_run_directory():
     """The chain's FIREFLY and data_synthesis.sh's default PARAMETER_PATH name one directory."""
-    assert f"FIREFLY={FIREFLY}" in _code(CHAIN)
-    assert f"./{FIREFLY}" in SYNTHESIS.read_text(encoding="utf-8")
+    assignments = [line.strip(" \t") for line in _code(CHAIN) if re.match(r"[ \t]*FIREFLY=", line)]
+    assert assignments == [f"FIREFLY={FIREFLY}"]  # set once, never changed
+    default = f"${{PARAMETER_PATH:-./{FIREFLY}}}"
+    assert any(default in line for line in _code(SYNTHESIS)), default
 
 
 SYNTHESIS_STAND_IN = (
@@ -143,7 +145,8 @@ def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
             },
         },
     )
-    log = (root / "phaseD_chain.log").read_text()
+    log_path = root / "phaseD_chain.log"
+    log = log_path.read_text() if log_path.exists() else ""
     context = output + log
     assert (root / "synthesis_call").exists(), context
     calls = (root / "synthesis_call").read_text().splitlines()
