@@ -87,24 +87,32 @@ class _Environment:
             return [func.value]
         return []
 
-    def stands_for(self, node: ast.AST | None, parameter: bool = False) -> str | None:
+    def stands_for(self, node: ast.AST | None, read: bool = False) -> str | None:
         """Which access of os an expression stands for, or None.
 
-        With ``parameter``, a name ``env`` stands for the environment mapping too.
+        A name binds only to the environment of os itself, so an unrelated ``config.environ``
+        makes no alias. A read is judged more widely, so that none is missed: any attribute
+        named like an access of os (``sys.modules["os"].environ``), and a name or attribute
+        ``env``, a mapping of the environment passed along, stand for the environment.
         """
         if isinstance(node, ast.NamedExpr):
             node = node.value
         if isinstance(node, (ast.Call, ast.Dict)):
-            return next((s for s in (self.stands_for(i, parameter)
+            return next((s for s in (self.stands_for(i, read)
                                      for i in self.copied(node)) if s), None)
+        if read and _name(node) == MAPPING_PARAMETER:
+            return "environ"
         if isinstance(node, ast.Name):
-            if parameter and node.id == MAPPING_PARAMETER:
-                return "environ"
             return self.names.get(node.id)
-        if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_NAMES and \
-                isinstance(node.value, ast.Name) and node.value.id in self.os_modules:
+        if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_NAMES and (
+                read or isinstance(node.value, ast.Name) and node.value.id in self.os_modules):
             return node.attr
         return None
+
+    def _is_parameter(self, node: ast.AST) -> bool:
+        """Whether an expression is the ``env`` mapping passed along, or a copy of it."""
+        return _name(node) == MAPPING_PARAMETER or \
+            any(self._is_parameter(i) for i in self.copied(node))
 
     def _new_bindings(self, tree: ast.AST) -> dict[str, str]:
         bound = {}
@@ -128,7 +136,8 @@ class _Environment:
                 pairs += [(a, d) for a, d in keyword if d]
             for name_node, value in pairs:
                 name = getattr(name_node, "id", getattr(name_node, "arg", None))
-                found = self.stands_for(value)
+                found = self.stands_for(value) or (
+                    "environ" if self._is_parameter(value) else None)
                 if name and found and name not in self.names:
                     bound[name] = found
         return bound
@@ -146,7 +155,7 @@ def environment_reads(path: Path) -> set[str]:
     environment = _Environment(tree)
 
     def is_mapping(node: ast.AST) -> bool:
-        return environment.stands_for(node, parameter=True) in ENVIRONMENT_MAPPINGS
+        return environment.stands_for(node, read=True) in ENVIRONMENT_MAPPINGS
 
     names = set()
     for node in ast.walk(tree):
@@ -157,7 +166,7 @@ def environment_reads(path: Path) -> set[str]:
                 (k.value for k in node.keywords if k.arg == "key"), None)
             if isinstance(func, ast.Attribute) and func.attr in {"get", "setdefault", "pop"}:
                 key = first if is_mapping(func.value) else None
-            elif environment.stands_for(func) in ENVIRONMENT_GETTERS:
+            elif environment.stands_for(func, read=True) in ENVIRONMENT_GETTERS:
                 key = first
         elif isinstance(node, ast.Subscript) and is_mapping(node.value):
             key = node.slice
@@ -297,17 +306,30 @@ def _trailing_backslashes(text: str) -> int:
 
 
 def _fold_balanced(line: str, opener: str) -> str:
-    """The line with each ``opener ... )`` group, nested parentheses included, as X."""
+    """The line with each closed ``opener ... )`` group as X.
+
+    Nested parentheses count, quoted ones do not; a group left open is kept and the search
+    goes on after it.
+    """
     start = line.find(opener)
     while start >= 0:
-        depth, index = 0, start + opener.index("(")
+        depth, index, quote = 0, start + opener.index("("), None
         while index < len(line):
-            depth += {"(": 1, ")": -1}.get(line[index], 0)
-            if depth == 0:
-                break
+            char = line[index]
+            if quote:
+                quote = None if char == quote else quote
+            elif char in "'\"":
+                quote = char
+            elif char == "\\":
+                index += 1
+            else:
+                depth += {"(": 1, ")": -1}.get(char, 0)
+                if depth == 0:
+                    break
             index += 1
         if index >= len(line):
-            return line
+            start = line.find(opener, start + 1)
+            continue
         line = line[:start] + "X" + line[index + 1:]
         start = line.find(opener)
     return line
@@ -343,10 +365,11 @@ def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
     """
     words, found = _raw_words(line), []
     for index, word in enumerate(words):
-        for match in re.finditer(r"(?<!<)<<(?!<)(-?)(.*)$", word):
+        for match in re.finditer(r"(?<!<)<<(?!<)(-?)", word):
             if _scan_quotes(word[:match.start()])[1]:
                 continue
-            delimiter = match.group(2) or (words[index + 1] if index + 1 < len(words) else "")
+            rest = word[match.end():]
+            delimiter = rest or (words[index + 1] if index + 1 < len(words) else "")
             delimiter = delimiter.replace("\\", "").strip("'\"")
             if delimiter:
                 found.append((match.group(1) == "-", delimiter))
@@ -512,30 +535,48 @@ def environment_variables(path: Path) -> set[str]:
 
 
 SCRIPT_PATH = re.compile(r"(?:^|/)scripts/([\w.-]+\.sh)$")
+# Any mention of a script in the raw text: a call may sit in a quoted command string, a
+# substitution, a subshell or before a redirection.
+SCRIPT_MENTION = re.compile(r"(?:^|[\s\"'`(/=])scripts/([\w.-]+\.sh)(?=$|[\s\"'`);&|<>])")
 
 
 def script_calls(line: str) -> list[tuple[str, list[str]]]:
-    """The scripts under scripts/ a line may run, each with the NAME=value words before it.
+    """The scripts a line runs as a word of its own, each with its environment prefix.
 
-    Any whole word that is a path to a script counts, wherever it stands in its command (after
-    if, do, env, nohup, an option and its argument, or as an argument of echo): a word that
-    only names a script is reported too, which fails a test loudly rather than missing a call.
-    A path inside a longer quoted text, as in ``echo "see scripts/a.sh"``, is no word of its
-    own. The NAME=value words are those before the path in its command, quotes removed.
+    The prefix is the NAME=value words that start the command, and those right after ``env``;
+    quotes are removed. A NAME=value word anywhere else is an argument, not the environment.
     """
     calls = []
     for command in commands(line):
-        for index, word in enumerate(command):
-            match = SCRIPT_PATH.search(word)
+        prefix, index = [], 0
+        while index < len(command) and re.match(rf"{NAME}=", command[index]):
+            prefix.append(command[index])
+            index += 1
+        if index < len(command) and command[index] == "env":
+            index += 1
+            while index < len(command) and (re.match(rf"{NAME}=", command[index]) or
+                                            command[index].startswith("-")):
+                if not command[index].startswith("-"):
+                    prefix.append(command[index])
+                index += 1
+        for word in command:
+            # A redirection or a closing parenthesis glued to the path is no part of it.
+            match = SCRIPT_PATH.search(re.split(r"\d*[<>]", word)[0].rstrip(")"))
             if match:
-                prefix = [w for w in command[:index] if re.match(rf"{NAME}=", w)]
                 calls.append((match.group(1), prefix))
     return calls
 
 
-def called_scripts(lines: list[ShellLine]) -> set[str]:
-    """The scripts under scripts/ a script may run, however it calls them.
+def mentioned_scripts(text: str) -> list[str]:
+    """Every script under scripts/ a text names, in order, however it is written."""
+    return SCRIPT_MENTION.findall(text)
 
-    Here-document bodies count too, as one may be piped to a shell.
+
+def called_scripts(lines: list[ShellLine]) -> set[str]:
+    """The scripts under scripts/ a script may run: every one it names.
+
+    A script named in a quoted command string, a substitution or a here-document piped to a
+    shell runs as surely as a plain call, so every mention counts; one that only names a script,
+    as in an echo, is reported too, which fails a test loudly rather than missing a call.
     """
-    return {name for line in lines for name, _ in script_calls(line.text)}
+    return {name for line in lines for name in mentioned_scripts(line.text)}

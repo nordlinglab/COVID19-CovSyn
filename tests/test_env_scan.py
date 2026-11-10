@@ -60,6 +60,10 @@ def _script(text: str) -> list[es.ShellLine]:
     ("import os\nx = {**os.environ, 'B': '1'}\nx.get('A')", {"A"}),
     ("import os\nfrom copy import deepcopy\nx = deepcopy(os.environ)\nx['A']", {"A"}),
     ("import os\nimport copy as cp\nx = cp.copy(os.environ)\nx['A']", {"A"}),
+    ("import sys\nsys.modules['os'].environ['A']", {"A"}),     # any .environ, for a read
+    ("self.env.get('A')", {"A"}),
+    ("def f(env):\n    e = env.copy()\n    return e['A']", {"A"}),
+    ("def f(env):\n    e = dict(env)\n    return e.get('A')", {"A"}),
 ])
 def test_environment_reads_are_found_in_code_only(tmp_path, source, expected):
     """Every spelling of an environment read is found, and nothing in comments or text."""
@@ -176,6 +180,8 @@ def test_a_case_pattern_starts_a_command():
     ("A=1 > out", [["A=1"]]),
     ("A=\"$(cd \"$(dirname x)\" && pwd)\"", [["A=X"]]),
     ("A=1; echo hi", [["A=1"], ["echo", "hi"]]),
+    ('A=$(echo ")")', [["A=X"]]),                                  # a quoted ) is text
+    ("x=$( echo $(a)", [["x=$(", "echo", "X"]]),                   # the closed one still folds
     ("a && b || c | d & e", [["a"], ["b"], ["c"], ["d"], ["e"]]),
 ])
 def test_commands_are_split_into_words(line, words):
@@ -217,6 +223,7 @@ def test_commands_are_split_into_words(line, words):
     (["echo $'a #b'", "A=1", "echo $A"], {"A"}),                  # so is #
     (["func(){", "A=1", "}", "echo $A"], set()),                  # a function body, no spaces
     (['echo x"<<"EOF', "A=1", "echo $A"], {"A"}),                 # a quoted <<, no heredoc
+    (['cat x"<<"<<EOF', "A=1", "EOF", "echo $A"], set()),         # the unquoted << counts
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -240,6 +247,9 @@ def test_a_prefix_assignment_belongs_to_its_own_command():
     assert es.script_calls("P=x bash scripts/a.sh || bash scripts/a.sh") == [
         ("a.sh", ["P=x"]), ("a.sh", [])]
     assert es.script_calls("env P=x bash scripts/a.sh") == [("a.sh", ["P=x"])]
+    assert es.script_calls("echo X=1 scripts/a.sh") == [("a.sh", [])]       # an argument
+    assert es.script_calls("tmux new -e P=1 bash scripts/a.sh") == [("a.sh", [])]
+    assert es.script_calls("P=1 bash scripts/a.sh>log") == [("a.sh", ["P=1"])]
 
 
 @pytest.mark.parametrize(("line", "called"), [
@@ -255,7 +265,13 @@ def test_a_prefix_assignment_belongs_to_its_own_command():
     ('bash "$ROOT"/scripts/a.sh', {"a.sh"}),
     ('bash "${REPO_ROOT}/scripts/a.sh"', {"a.sh"}),
     ("echo done", set()),
-    ('echo "run scripts/a.sh later"', set()),        # named in text, not run
+    ('echo "run scripts/a.sh later"', {"a.sh"}),     # named in text: reported, to be safe
+    ("(bash scripts/a.sh)", {"a.sh"}),
+    ("bash scripts/a.sh>log", {"a.sh"}),
+    ("out=$(bash scripts/a.sh)", {"a.sh"}),
+    ("x=`bash scripts/a.sh`", {"a.sh"}),
+    ('tmux new-session -d -s x "bash scripts/a.sh"', {"a.sh"}),
+    ("echo myscripts/a.sh", set()),
     ("bash -x scripts/a.sh", {"a.sh"}),
     ("bash -o pipefail scripts/a.sh", {"a.sh"}),
     ("if bash scripts/a.sh; then :; fi", {"a.sh"}),
@@ -324,6 +340,23 @@ def test_a_script_path_word_is_always_a_call(words, lead):
 
 
 @given(LINE_TEXT)
-def test_a_path_inside_quoted_text_is_no_call(text):
-    """A script named inside a longer quoted text, as in an echo message, is not run."""
-    assert es.script_calls(f"echo {shlex.quote(text + ' scripts/a.sh')}") == []
+def test_a_path_inside_quoted_text_is_reported(text):
+    """A script named inside quoted text may be a command string, so it is reported."""
+    assert "a.sh" in es.called_scripts([es.ShellLine(f"run {shlex.quote(text + ' scripts/a.sh')}")])
+
+
+@given(st.sampled_from(["", "bash ", "(bash ", "x=$(bash ", "`bash ", "if bash ", '"bash ',
+                        "env P=1 bash ", "nohup "]),
+       st.sampled_from(["", ")", ">log", " >> log", "`", '"', "; :", " || exit 1", "&"]))
+def test_a_script_is_found_in_any_structure(lead, trail):
+    """However a call is wrapped, quoted or redirected, the script is found."""
+    assert es.called_scripts([es.ShellLine(f"{lead}scripts/a.sh{trail}")]) == {"a.sh"}
+
+
+@given(st.from_regex(r"[A-Z][A-Z0-9_]{0,8}", fullmatch=True), PLAIN_WORD,
+       st.sampled_from(["", ">log", " 2>&1", " || exit 1"]))
+def test_a_leading_assignment_is_the_prefix(name, value, trail):
+    """NAME=value starting the command is the call's environment prefix."""
+    value = value.replace("/", "_")
+    assert es.script_calls(f"{name}={value} bash scripts/a.sh{trail}") == [
+        ("a.sh", [f"{name}={value}"])]
