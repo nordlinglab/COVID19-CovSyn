@@ -202,6 +202,12 @@ def test_the_arithmetic_look_ahead_stops_at_an_escaped_newline():
     assert es._arithmetic_closes("A=$((a \\\n) b)", 2)
 
 
+def test_a_process_substitution_in_a_quoted_expansion_is_text():
+    """A quoted "${X:-<(echo hi)}" prints literally in bash, so <( there opens no group."""
+    text = '"${X:-<(echo hi)}"'
+    assert text.index("<") not in es._walk(text).groups
+
+
 def test_a_continued_walk_records_no_foreign_group():
     """A group opened in an earlier text is not recorded with indices from two texts."""
     first = es._walk("$(\n")
@@ -418,6 +424,14 @@ A = "scripts/a.sh"
     ("echo `bash $(pwd)scripts/a.sh`", {"$(pwd)scripts/a.sh"}),  # backticks read again
     ("S=$(pwd)/scripts/a.sh", {"$(pwd)/scripts/a.sh"}),
     ("--file=$(pwd)scripts/a.sh", {"$(pwd)scripts/a.sh"}),
+    ("${X:-`bash scripts/a.sh`}", {"${X:-`bash scripts/a.sh"}),
+    ("echo ${X:-$(echo `bash scripts/a.sh`)}", {"${X:-$(echo `bash scripts/a.sh"}),
+    ("echo $(( ${X:-$(bash scripts/a.sh)} ))", {"${X:-$(bash scripts/a.sh"}),
+    ("(( ${X:-$(bash scripts/a.sh)} ))", {"${X:-$(bash scripts/a.sh"}),
+    ("bash ${X%`echo .sh`}scripts/a.sh", {"${X%`echo .sh`}scripts/a.sh"}),
+    ("echo `bash $(pwd)scripts/a.sh", {"$(pwd)scripts/a.sh"}),   # an open backtick
+    ("host:`pwd`/scripts/a.sh", {"host:`pwd`/scripts/a.sh"}),
+    ("PATH=$PATH:scripts/a.sh", {"PATH=$PATH:scripts/a.sh"}),
     ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):

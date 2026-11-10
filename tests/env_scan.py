@@ -301,8 +301,9 @@ class _Walk:
 
 
 PLAIN = {"top", "$("}                   # commands: where << redirects and # comments
-ACTIVE = PLAIN | {"${", '"'}            # where $(, $((, ${ and $[ open
 ARITHMETIC = {"$((", "((", "$["}
+# Where $(, $((, ${ and $[ open: bash expands them in arithmetic too.
+ACTIVE = PLAIN | {"${", '"'} | ARITHMETIC
 GROUPS = {"$(", "$((", "((", "$[", "${", "`"}
 
 
@@ -423,8 +424,9 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             push("$((", 3)
         elif kind in ACTIVE and text.startswith("$(", index):
             push("$(", 2)
-        elif kind in PLAIN | {"${"} and char in "<>" and text.startswith("(", index + 1) and \
-                previous not in "<>":
+        elif (kind in PLAIN or kind == "${" and stack[-2].kind != '"') and char in "<>" and \
+                text.startswith("(", index + 1) and previous not in "<>":
+            # Inside "${...}" bash reads <( as text.
             push("$(", 2)                   # a process substitution, plain code like $(
         elif kind in ACTIVE and text.startswith("${", index):
             push("${", 2)
@@ -788,32 +790,39 @@ def mentioned_scripts(text: str) -> list[str]:
     """
     plain = re.sub(r"[\\'\"]", "", text)
     walk, found = _walk(plain), []
-    # Parameter expansions as (start, end), an open one ending with the text; the walker opens
-    # none inside arithmetic or backticks, where ${ is read differently.
+    end_of_text = len(plain)
+    # Parameter expansions and backtick groups as (start, end); an open one ends with the text.
     expansions = [(s, e) for s, e in walk.groups.items() if plain.startswith("${", s)]
-    expansions += [(f.start, len(plain)) for f in walk.stack if f.kind == "${" and f.start >= 0]
+    expansions += [(f.start, end_of_text) for f in walk.stack if f.kind == "${"]
     backticks = [(s, e) for s, e in walk.groups.items() if plain.startswith("`", s)]
+    backticks += [(f.start, end_of_text) for f in walk.stack if f.kind == "`"]
+
+    def enclosing(position: int) -> int | None:
+        """The start of the outermost expansion holding a position, if any."""
+        starts = [s for s, e in expansions if s < position <= e]
+        return min(starts) if starts else None
+
+    # Backtick content is read again, unless an expansion holds it, which is reported whole.
+    for start, end in backticks:
+        if enclosing(start) is None:
+            found += mentioned_scripts(plain[start + 1:end])
     # A substitution that ends right before a path joins its word: its closing character mapped
     # to where it opens.
     closed_at = {end: start for start, end in walk.groups.items()
                  if plain.startswith(("$(", "<(", ">(", "`"), start)}
-    for start, end in backticks:
-        found += mentioned_scripts(plain[start + 1:end])
     for match in SCRIPT_MENTION.finditer(plain):
-        if any(s < match.start() < e for s, e in backticks):
-            continue                        # read again above, as bash reads backticks
-        enclosing = sorted(s for s, e in expansions if s < match.start() <= e)
-        if enclosing:
-            opening = enclosing[0]          # the outermost ${ that holds the path
+        opening = enclosing(match.start())
+        if opening is not None:
             if re.fullmatch(r"\w+(?:%%?|##?)\.sh", plain[opening + 2:match.end()]):
                 continue                    # ${f%.sh} removes an extension; it names nothing
             # A path in a default, alternative or pattern (${X:-bash scripts/a.sh}) is
             # reported with the expansion before it, so it differs from every scanned path.
             found.append(plain[opening:match.end()])
             continue
+        if any(s < match.start() <= e for s, e in backticks):
+            continue                        # read again above, as bash reads backticks
         # Text glued before the path, back to a word break, belongs to its word, a
-        # substitution such as $(pwd) included; a leading assignment or option name (S=,
-        # --file=) is dropped.
+        # substitution such as $(pwd) included.
         begin = match.start()
         while begin:
             if begin - 1 in closed_at:
@@ -822,7 +831,12 @@ def mentioned_scripts(text: str) -> list[str]:
                 begin -= 1
             else:
                 break
-        glued = re.sub(r"^(?:[A-Za-z_]\w*|--?[\w-]+)[=:]", "", plain[begin:match.start()])
+        glued = plain[begin:match.start()]
+        # A leading NAME= or --option= whose value is the path alone is dropped; one whose value
+        # holds more, as PATH=$PATH:scripts/a.sh, stays, as does host: before a path.
+        name = re.match(r"(?:[A-Za-z_]\w*|--?[\w-]+)=", glued)
+        if name and ":" not in glued[name.end():]:
+            glued = glued[name.end():]
         found.append(posixpath.normpath(glued + match.group(1)))
     return found
 
