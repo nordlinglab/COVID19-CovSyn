@@ -21,8 +21,8 @@ integer-valued medians (onset_to_confirmation, community_median) are left out: t
 interval reflects the integer grid, not Monte-Carlo noise. The checklist keeps its intervals;
 only the objective aims inside them.
 
-Usage (repository root, PYTHONPATH=src):
-    python -m covsyn.calibration.target_margins CHECKS_JSON [OUT_JSON]
+Usage (repository root, after uv sync):
+    uv run python -m covsyn.calibration.target_margins CHECKS_JSON [OUT_JSON]
 """
 
 from __future__ import annotations

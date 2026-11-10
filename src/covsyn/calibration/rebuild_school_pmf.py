@@ -11,7 +11,7 @@ This script rewrites school_p inside variable/demographic_parameters.pkl using p
 reading the same Ministry of Education files and the same columns as get_school_data(). It is
 idempotent: the result depends only on the raw files, not on the previous contents.
 
-Usage: python -m covsyn.calibration.rebuild_school_pmf [data_dir] [variable_dir]
+Usage: uv run python -m covsyn.calibration.rebuild_school_pmf [data_dir] [variable_dir]
 """
 import pickle
 import shutil

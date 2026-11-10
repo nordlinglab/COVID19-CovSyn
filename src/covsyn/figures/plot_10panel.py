@@ -9,7 +9,7 @@ from pathlib import Path
 from covsyn.model.data_synthesize import Draw_course_of_disease_data
 from covsyn.model.r0_network import R0_average_effective_contact
 
-# Usage: python -m covsyn.figures.plot_10panel [spread_dir] [out_dir] [parameter_dir]
+# Usage: uv run python -m covsyn.figures.plot_10panel [spread_dir] [out_dir] [parameter_dir]
 NB = 'plot_result/plot_synthetic_data.ipynb'
 SYN = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight'
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('.')

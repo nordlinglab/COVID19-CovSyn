@@ -31,12 +31,12 @@ notebooks' errors corrected (finding E90):
   counts are differences of the cumulative series, so the first one belongs to the day after
   the first record; the notebook dated it a day early.
 
-Usage (repository root, PYTHONPATH=src):
-    python -m covsyn.figures.reproduce_wu2025 fig3 FIRST_OUTBREAK_DIR OUT_DIR
-    python -m covsyn.figures.reproduce_wu2025 fig4 FIREFLY_RUN_DIR OUT_DIR [--no-evaluate]
-    python -m covsyn.figures.reproduce_wu2025 fig5 FIRST_OUTBREAK_DIR OUT_DIR
-    python -m covsyn.figures.reproduce_wu2025 fig6 CHENG2020_DIR OUT_DIR
-    python -m covsyn.figures.reproduce_wu2025 fig7 FIRST_OUTBREAK_DIR OUT_DIR
+Usage (repository root, after uv sync):
+    uv run python -m covsyn.figures.reproduce_wu2025 fig3 FIRST_OUTBREAK_DIR OUT_DIR
+    uv run python -m covsyn.figures.reproduce_wu2025 fig4 FIREFLY_RUN_DIR OUT_DIR [--no-evaluate]
+    uv run python -m covsyn.figures.reproduce_wu2025 fig5 FIRST_OUTBREAK_DIR OUT_DIR
+    uv run python -m covsyn.figures.reproduce_wu2025 fig6 CHENG2020_DIR OUT_DIR
+    uv run python -m covsyn.figures.reproduce_wu2025 fig7 FIRST_OUTBREAK_DIR OUT_DIR
 """
 
 from __future__ import annotations

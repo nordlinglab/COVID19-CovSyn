@@ -7,7 +7,9 @@ from pathlib import Path
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
 
-# Usage: python -m covsyn.figures.plot_cheng_attackrate [data_dir] [out_dir]; cheng2020-mode data matches Cheng's design
+# Usage:
+#     uv run python -m covsyn.figures.plot_cheng_attackrate [data_dir] [out_dir]
+# cheng2020-mode data matches Cheng's design
 SYN = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight'
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('.')
 OUT.mkdir(parents=True, exist_ok=True)

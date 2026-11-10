@@ -19,7 +19,7 @@ Outputs (in out_dir):
   constraint_violations.csv   every failing case or transmission with its values
   constraint_table.md         the thesis Table A, with the counts filled in
 
-Usage: python -m covsyn.validation.check_constraints [data_dir ...] [--out out_dir]
+Usage: uv run python -m covsyn.validation.check_constraints [data_dir ...] [--out out_dir]
 """
 import glob
 import sys

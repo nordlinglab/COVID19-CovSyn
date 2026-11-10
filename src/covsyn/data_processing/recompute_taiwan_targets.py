@@ -15,7 +15,7 @@ Inputs (paths relative to the CovSyn root):
 
 Output: validation_reference/recomputed_targets.csv, one row per value, and the same table on stdout.
 
-Usage: python -m covsyn.data_processing.recompute_taiwan_targets [output_csv]
+Usage: uv run python -m covsyn.data_processing.recompute_taiwan_targets [output_csv]
 """
 import sys
 from pathlib import Path

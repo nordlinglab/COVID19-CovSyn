@@ -6,7 +6,7 @@ summarised twice -- over all simulations, and over only those with at least one 
 which is the filter taiwan_first_outbreak.ipynb applies (min_case_num = 29) and which lifts
 the mean. Both numbers have to be on the table when this is compared with the observed 55.
 
-Usage: python -m covsyn.validation.tw_check [run_dir ...]
+Usage: uv run python -m covsyn.validation.tw_check [run_dir ...]
 """
 import glob
 import sys

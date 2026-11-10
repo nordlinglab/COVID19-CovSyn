@@ -39,7 +39,7 @@ not give. Everything this script writes is listed below with the decision it com
                  were converted with, for show_bounds. Not archived by backup_once, which keeps
                  the pre-Phase-D originals, and this file did not exist then.
 
-Usage: python -m covsyn.calibration.apply_phase_d_parameters [variable_dir]
+Usage: uv run python -m covsyn.calibration.apply_phase_d_parameters [variable_dir]
 """
 import json
 import pickle

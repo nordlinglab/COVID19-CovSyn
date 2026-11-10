@@ -20,7 +20,9 @@
                                       from phaseD_checks.json, i.e. the same numbers as the
                                       acceptance checklist (lesson 4).
 
-Usage: python -m covsyn.figures.plot_todolist923 [spread_dir] [firefly_dir] [checks_json] [out_dir]
+Usage:
+    uv run python -m covsyn.figures.plot_todolist923 \
+        [spread_dir] [firefly_dir] [checks_json] [out_dir]
 """
 import glob
 import json

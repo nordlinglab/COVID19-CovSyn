@@ -148,8 +148,10 @@ def test_entry_point_is_installed_and_callable(name, monkeypatch):
 
 
 def _script_files() -> list[Path]:
+    """The scripts, the package modules, whose docstrings give usage lines, and the runner."""
     files = [p for p in (REPO_ROOT / "scripts").rglob("*") if p.suffix in {".sh", ".py"}]
-    return [*files, REPO_ROOT / "tests" / "pipeline_runner.py"]
+    modules = sorted((REPO_ROOT / "src" / "covsyn").rglob("*.py"))
+    return [*files, *modules, REPO_ROOT / "tests" / "pipeline_runner.py"]
 
 
 @pytest.mark.parametrize("path", _script_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
@@ -181,7 +183,7 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
         assert needle in workflow, needle
 
 
-PYTHON_SCRIPT = re.compile(r"\bpython3? [\w./-]+\.py\b")
+PYTHON_SCRIPT = re.compile(r"\bpython3? (?:[\w./-]+\.py\b|-m covsyn\b)")
 # The uv run options that take a value, from `uv run --help` of uv 0.13.6, and the hidden
 # --python-preference and --python-fetch; any other option stands alone.
 UV_VALUE_OPTIONS = "|".join(
@@ -210,13 +212,16 @@ THROUGH_UV = re.compile(
 def test_usage_lines_run_scripts_through_uv(path):
     """Usage lines run a script from the repository root through ``uv run``.
 
-    A bare ``python script.py`` finds no ``covsyn`` without ``PYTHONPATH``.
+    A bare ``python script.py`` finds no ``covsyn`` without ``PYTHONPATH``. A command quoted in
+    prose as a code span (```python -m ...```), as when telling how a past run was started, is
+    history, not a usage line.
     """
     bare = [
         line.strip()
         for line in path.read_text().splitlines()
         for match in PYTHON_SCRIPT.finditer(line)
         if not THROUGH_UV.search(line[: match.start()])
+        and line[match.start() - 1 : match.start()] != "`"
     ]
     assert not bare, bare
 

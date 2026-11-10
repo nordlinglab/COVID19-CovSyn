@@ -9,8 +9,8 @@ case of unknown source (the root). For the 'all' scenario every root is a seed, 
 is all 55 local cases; for 'feb7' only the chains rooted before 2020-02-07 count.
 The simulated local cases of a run are its non-seed cases plus its local seeds.
 
-Usage (repository root, PYTHONPATH=src):
-    python -m covsyn.validation.compare_first_wave RESULT_DIR SEED_CSV
+Usage (repository root, after uv sync):
+    uv run python -m covsyn.validation.compare_first_wave RESULT_DIR SEED_CSV
 """
 
 from __future__ import annotations
