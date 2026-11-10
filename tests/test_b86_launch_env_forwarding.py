@@ -13,6 +13,7 @@ and each candidate took 19-28 minutes against the 4.3 measured in isolation.
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -109,6 +110,15 @@ def test_the_chain_names_only_the_golden_script_lines():
 FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
 
 
+def _parameter_paths(record: Path) -> list[str]:
+    """The --parameter_path of every uv run the stand-in recorded, in order."""
+    paths = []
+    for line in (record / "uv_runs").read_text().splitlines():
+        words = shlex.split(line)
+        paths.append(words[words.index("--parameter_path") + 1])
+    return paths
+
+
 def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
     """Run on its own without PARAMETER_PATH, data_synthesis.sh reads ./<FIREFLY>.
 
@@ -118,8 +128,7 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
         tmp_path, SYNTHESIS, {"_files": {f"{FIREFLY}/firefly_best.txt": "1 2 3\n"}}
     )
     assert status == 0, output
-    args = (record / "uv_run_args").read_text().split("\n")
-    assert args[args.index("--parameter_path") + 1] == f"./{FIREFLY}", output
+    assert _parameter_paths(record) == [f"./{FIREFLY}"] * 2, output  # both modes
 
 
 SYNTHESIS_STAND_IN = (
@@ -347,6 +356,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
+        f'printf "%q " "$@" >> "{record}/uv_runs"; echo >> "{record}/uv_runs"\n'
         'exit "${UV_STATUS:-0}"\n'
     )
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
@@ -512,6 +522,7 @@ def test_the_synthesis_called_by_the_chain_skips_the_check(tmp_path):
     assert status == 0, output
     assert not (record / "uv_sync_environment").exists()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
+    assert _parameter_paths(record) == ["run"] * 2, output  # PARAMETER_PATH is used, both modes
 
 
 def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
