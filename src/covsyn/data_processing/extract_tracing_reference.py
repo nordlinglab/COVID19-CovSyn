@@ -20,7 +20,7 @@ Outputs (validation_reference/):
                                          infector and the mapped layer
 
 Usage:
-    uv run python -m covsyn.data_processing.extract_tracing_reference \
+    uv run python -m covsyn.data_processing.extract_tracing_reference \\
         [forecasting_repo] [output_dir]
 """
 import re

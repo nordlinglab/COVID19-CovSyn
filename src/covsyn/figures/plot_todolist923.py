@@ -21,7 +21,7 @@
                                       acceptance checklist (lesson 4).
 
 Usage:
-    uv run python -m covsyn.figures.plot_todolist923 \
+    uv run python -m covsyn.figures.plot_todolist923 \\
         [spread_dir] [firefly_dir] [checks_json] [out_dir]
 """
 import glob

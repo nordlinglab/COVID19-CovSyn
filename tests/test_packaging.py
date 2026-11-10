@@ -8,6 +8,7 @@ The package installs in editable mode with every dependency pinned in ``pyprojec
 
 from __future__ import annotations
 
+import ast
 import inspect
 import os
 import re
@@ -161,6 +162,22 @@ def test_no_script_sets_pythonpath_or_picks_an_interpreter(path):
     assert "PYTHONPATH" not in text
     assert "PYTHON=" not in text
     assert '"$PYTHON"' not in text
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((REPO_ROOT / "src" / "covsyn").rglob("*.py")),
+    ids=lambda p: str(p.relative_to(REPO_ROOT)),
+)
+def test_usage_lines_survive_docstring_parsing(path):
+    """A usage line wrapped with a backslash keeps its line break in the parsed docstring.
+
+    In a normal string literal a backslash before a newline joins the lines, so help() would
+    show the command run together with a gap; the backslash is written doubled instead.
+    """
+    docstring = ast.get_docstring(ast.parse(path.read_text())) or ""
+    joined = [line for line in docstring.splitlines() if re.search(r"uv run .*\S {4,}\S", line)]
+    assert not joined, joined
 
 
 def test_readme_gives_the_four_install_commands():

@@ -15,7 +15,7 @@ age gradient locked into its input comes out the other end.
 Writes validation_reference/age_rr.json, which verify_phaseD.py reads for B14.
 
 Usage:
-    uv run python -m covsyn.validation.measure_age_rr \
+    uv run python -m covsyn.validation.measure_age_rr \\
         [firefly_result_dir] [n_index_cases] [--workers N]
 """
 import argparse

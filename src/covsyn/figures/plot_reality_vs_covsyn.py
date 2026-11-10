@@ -13,7 +13,7 @@ a literature RANGE rather than a point (the disease-course durations), the midpo
 range is used as the observation and the range is drawn as a band.
 
 Usage:
-    uv run python -m covsyn.figures.plot_reality_vs_covsyn \
+    uv run python -m covsyn.figures.plot_reality_vs_covsyn \\
         [spread_dir] [first_outbreak_dir] [out_dir]
 """
 import glob

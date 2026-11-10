@@ -12,7 +12,7 @@ group is that capped group; fig_workplace_establishment_size_sampling_diagnostic
 validate_layers.py shows the enterprise size against the same census curves.
 
 Usage:
-    uv run python -m covsyn.figures.workplace_sampling_options \
+    uv run python -m covsyn.figures.workplace_sampling_options \\
         [spread_dir] [out_dir] [parameter_dir]
 """
 import glob

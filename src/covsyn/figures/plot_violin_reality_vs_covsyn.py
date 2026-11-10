@@ -12,7 +12,7 @@ half a violin against a point estimate invites reading a spread that was never o
   (d) secondary infections per case and the age of the cases
 
 Usage:
-    uv run python -m covsyn.figures.plot_violin_reality_vs_covsyn \
+    uv run python -m covsyn.figures.plot_violin_reality_vs_covsyn \\
         [spread_dir] [out_dir] [case_timeline_csv]
 """
 import glob
