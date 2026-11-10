@@ -132,15 +132,15 @@ def _records(path: Path, context: str = "") -> list[list[str]]:
     return [call.split("\x1f")[:-1] for call in text.split("\x1e")[:-1]]
 
 
-def _uv_runs(record: Path) -> list[list[str]]:
+def _uv_runs(record: Path, context: str = "") -> list[list[str]]:
     """The arguments of every uv run recorded, in order, leaving out the synthesis stand-in's."""
-    return [call for call in _records(record / "runs") if call[:1] != ["SYNTHESIS"]]
+    return [call for call in _records(record / "runs", context) if call[:1] != ["SYNTHESIS"]]
 
 
-def _synthesis_runs(record: Path) -> list[tuple[str, str]]:
+def _synthesis_runs(record: Path, context: str = "") -> list[tuple[str, str]]:
     """The (--mode, --parameter_path) of every uv run the stand-in recorded, in order."""
     runs = []
-    for words in _uv_runs(record):
+    for words in _uv_runs(record, context):
         assert "--mode" in words and "--parameter_path" in words, words
         runs.append((words[words.index("--mode") + 1], words[words.index("--parameter_path") + 1]))
     return runs
@@ -159,7 +159,7 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain
         tmp_path, SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
     )
     assert status == 0, output
-    assert _synthesis_runs(record) == [(mode, f"./{directory}") for mode in MODES], output
+    assert _synthesis_runs(record, output) == [(mode, f"./{directory}") for mode in MODES], output
 
 
 def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
@@ -168,7 +168,7 @@ def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
         tmp_path, SYNTHESIS, {"PARAMETER_PATH": "run", **SYNTHESIS_FILES}
     )
     assert status == 0, output
-    assert _synthesis_runs(record) == [(mode, "run") for mode in MODES], output
+    assert _synthesis_runs(record, output) == [(mode, "run") for mode in MODES], output
 
 
 def _synthesis_stand_in(record: Path) -> str:
@@ -525,7 +525,7 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
         },
     )
     assert status == 0, output
-    args = _uv_runs(record)[-1]
+    args = _uv_runs(record, output)[-1]
     start = args.index("--warm_start")
     assert args[start + 1 : start + 3] == ["a/firefly_best.txt", "b/firefly_best.txt"]
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
@@ -606,7 +606,7 @@ def test_the_synthesis_called_by_the_chain_skips_the_check(tmp_path):
     assert status == 0, output
     assert not (record / "uv_sync_environment").exists()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
-    assert _synthesis_runs(record) == [(mode, "run") for mode in MODES], output
+    assert _synthesis_runs(record, output) == [(mode, "run") for mode in MODES], output
 
 
 def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
@@ -624,7 +624,7 @@ def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
     # The chain's own run() reached the revalidation, which the stand-in uv fails.
     assert status != 0
     assert "revalidation failed" in (root / "phaseD_chain.log").read_text()
-    assert "covsyn.calibration.revalidation" in _uv_runs(record)[-1]
+    assert "covsyn.calibration.revalidation" in _uv_runs(record, output)[-1]
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
 
 
