@@ -116,11 +116,14 @@ def _read(path: Path) -> str:
         return file.read()
 
 
-def _records(path: Path) -> list[list[str]]:
-    """The calls a stand-in recorded, in order: fields ended by 0x1F, calls by 0x1E."""
-    assert path.exists(), f"no call was recorded in {path.name}"
+def _records(path: Path, context: str = "") -> list[list[str]]:
+    """The calls a stand-in recorded, in order: fields ended by 0x1F, calls by 0x1E.
+
+    ``context``, such as a run's output and log, is added to a failure's message.
+    """
+    assert path.exists(), f"no call was recorded in {path.name}\n{context}"
     text = _read(path)
-    assert text.endswith("\x1e"), f"the last record in {path.name} is cut off"
+    assert text.endswith("\x1e"), f"the last record in {path.name} is cut off\n{context}"
     return [call.split("\x1f")[:-1] for call in text.split("\x1e")[:-1]]
 
 
@@ -163,16 +166,19 @@ def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
     assert _synthesis_runs(record) == [(mode, "run") for mode in MODES], output
 
 
-SYNTHESIS_STAND_IN = (
-    "#!/usr/bin/env bash\n"
-    "set -e\n"
-    ': "${RECORD:?the synthesis stand-in got no RECORD to write its call to}"\n'
-    # Recorded in the uv stand-in's record, in order with the uv runs: SYNTHESIS, then
-    # PARAMETER_PATH as its own field, then the arguments.
-    'printf "%s\\x1f" SYNTHESIS "$PARAMETER_PATH" "$@" >> "$RECORD/runs"\n'
-    'printf "\\x1e" >> "$RECORD/runs"\n'
-    'exit "${SYNTHESIS_STATUS:-0}"\n'
-)
+def _synthesis_stand_in(record: Path) -> str:
+    """A data_synthesis.sh that records its call in the uv stand-in's record.
+
+    The call goes in order with the uv runs (SYNTHESIS, PARAMETER_PATH as its own field, then
+    the arguments), and the stand-in exits with SYNTHESIS_STATUS.
+    """
+    return (
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        f'printf "%s\\x1f" SYNTHESIS "$PARAMETER_PATH" "$@" >> "{record}/runs"\n'
+        f'printf "\\x1e" >> "{record}/runs"\n'
+        'exit "${SYNTHESIS_STATUS:-0}"\n'
+    )
 
 
 class ChainRun(NamedTuple):
@@ -202,15 +208,14 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
             "SYNTHESIS_STATUS": synthesis_status,
             "_files": {
                 "run/firefly_best.txt": "1 2 3\n",
-                "scripts/data_synthesis.sh": SYNTHESIS_STAND_IN,
+                "scripts/data_synthesis.sh": _synthesis_stand_in(tmp_path / "record"),
             },
         },
     )
     log_path = root / "phaseD_chain.log"
     log = _read(log_path) if log_path.exists() else ""
     context = output + log
-    assert (record / "runs").exists(), context
-    syntheses = [call for call in _records(record / "runs") if call[:1] == ["SYNTHESIS"]]
+    syntheses = [call for call in _records(record / "runs", context) if call[:1] == ["SYNTHESIS"]]
     assert len(syntheses) == 1 and syntheses[0][2:] == ["--environment-checked"], context
     path = syntheses[0][1]
     assert path.startswith("./"), context
@@ -483,7 +488,7 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(text)
     bin_dir, record = _stand_ins(tmp_path)
-    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), "RECORD": str(record), **env}
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), **env}
     result = subprocess.run(
         ["bash", str(root / "scripts" / script.name), *args],
         env=env,
