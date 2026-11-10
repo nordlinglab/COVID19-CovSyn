@@ -21,9 +21,10 @@
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
 # Environment: PREVIOUS_CHECKS, FIREFLY_RUN, REVALIDATE, REVALIDATION_BLOCKS, SELECT,
-#              SELECT_TOP, CPU_CORES, VERIFY_WORKERS, FIREFLY_STATUS; launch_phase_d.sh
-#              documents and forwards each, and an empty value means the default, except that
-#              an empty FIREFLY_STATUS (a chain started by hand) skips the firefly status check.
+#              SELECT_TOP, CPU_CORES, VERIFY_WORKERS, FIREFLY_STATUS, UV_PROJECT_ENVIRONMENT,
+#              ENVIRONMENT_CHECKED; launch_phase_d.sh documents and forwards each, and an
+#              empty value means the default, except that an empty FIREFLY_STATUS (a chain
+#              started by hand) skips the firefly status check.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

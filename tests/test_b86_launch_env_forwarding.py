@@ -132,9 +132,10 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     record.mkdir()
     (bin_dir / "uv").write_text(
         "#!/usr/bin/env bash\n"
+        f'echo "${{UV_PROJECT_ENVIRONMENT:-}}" > "{record}/uv_$1_environment"\n'
         f'[ "$1" = run ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
-        f'echo "${{UV_PROJECT_ENVIRONMENT:-}}" > "{record}/uv_run_environment"\n'
+
         'exit "${UV_STATUS:-0}"\n')
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
@@ -214,6 +215,16 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert chain["ENVIRONMENT_CHECKED"] == "1"
     assert (record / "uv_run_environment").read_text().strip() == ".venv"
     assert set(chain) == set(CHAIN_VARIABLES)
+
+
+def test_launch_runs_both_sessions_in_the_environment_the_user_names(tmp_path):
+    """The launcher's uv sync and both sessions' uv run see one UV_PROJECT_ENVIRONMENT."""
+    root, record, status, output = _run(tmp_path, SCRIPT, {"UV_PROJECT_ENVIRONMENT": "/opt/env"})
+    assert status == 0, output
+    assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
+    assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
+    chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
+    assert chain["UV_PROJECT_ENVIRONMENT"] == "/opt/env"
 
 
 def test_launch_uses_a_status_file_the_user_names(tmp_path):
