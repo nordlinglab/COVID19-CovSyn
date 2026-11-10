@@ -20,8 +20,9 @@
 #   9. redraw the Wu & Nordling 2025 comparison figures from the independent seeds (E90, E97)
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
-# Environment: PREVIOUS_CHECKS (optional), REVALIDATE (default 1),
-#              REVALIDATION_BLOCKS (default 10; E95: 4 blocks left the choice noisy).
+# Environment: PREVIOUS_CHECKS, FIREFLY_RUN, REVALIDATE, REVALIDATION_BLOCKS, SELECT,
+#              SELECT_TOP, CPU_CORES, VERIFY_WORKERS; launch_phase_d.sh documents and forwards
+#              each, and an empty value means the default.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

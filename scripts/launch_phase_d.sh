@@ -12,6 +12,14 @@
 #   VERIFY_WORKERS   bootstrap workers for the checklist (B86, E98); each holds about 4.9 GB,
 #                    so the default of min(cores, 32) needs about 157 GB and swaps when the
 #                    machine is shared. Unset means that default.
+#   FIREFLY_RUN      the optimizer output directory the chain reads; default: the directory the
+#                    optimizer's default settings name
+#   REVALIDATE       1 (default) re-scores the candidates on unseen seeds (B56); 0 skips it
+#   REVALIDATION_BLOCKS  unseen seed blocks for that re-scoring (default 10, E95)
+#   SELECT           1 (default) runs the checklist on the best revalidated candidates (B60)
+#   SELECT_TOP       how many candidates that selection checks (default 5)
+#   CPU_CORES        workers for the selection's simulations (default 24)
+# An unset variable reaches the chain empty, which the chain reads as its default.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,7 +40,10 @@ tmux new-session -d -s firefly \
 sleep 2
 tmux new-session -d -s chain \
   "cd '$ROOT' && PREVIOUS_CHECKS='${PREVIOUS_CHECKS:-}' \
-   VERIFY_WORKERS='${VERIFY_WORKERS:-}' bash scripts/phase_d_chain.sh"
+   VERIFY_WORKERS='${VERIFY_WORKERS:-}' FIREFLY_RUN='${FIREFLY_RUN:-}' \
+   REVALIDATE='${REVALIDATE:-}' REVALIDATION_BLOCKS='${REVALIDATION_BLOCKS:-}' \
+   SELECT='${SELECT:-}' SELECT_TOP='${SELECT_TOP:-}' CPU_CORES='${CPU_CORES:-}' \
+   bash scripts/phase_d_chain.sh"
 sleep 1
 tmux ls
 echo "--- firefly log head ---"

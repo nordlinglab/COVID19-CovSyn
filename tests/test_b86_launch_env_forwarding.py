@@ -18,9 +18,21 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "launch_phase_d.sh"
-# Every variable the chain, or anything it starts, reads from the environment.
-# PYTHON is gone: the chain runs every module through uv run (rework plan, Task 1).
-CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS")
+CHAIN = SCRIPT.parent / "phase_d_chain.sh"
+# OPTIMIZER_RUN is set by the chain itself after revalidation, not by the user.
+CHAIN_INTERNAL = {"OPTIMIZER_RUN"}
+# Variables read by what the chain starts rather than by the chain script itself.
+STARTED_BY_CHAIN = ("VERIFY_WORKERS",)
+
+
+def _chain_variables() -> list[str]:
+    """Every variable the chain reads from the environment with a default, plus those its
+    modules read; PYTHON is gone, as the chain runs every module through uv run (Task 1)."""
+    read = set(re.findall(r"\$\{([A-Z_]+):-", CHAIN.read_text(encoding="utf-8")))
+    return sorted((read - CHAIN_INTERNAL) | set(STARTED_BY_CHAIN))
+
+
+CHAIN_VARIABLES = _chain_variables()
 
 
 @pytest.fixture
@@ -44,10 +56,17 @@ def test_verify_workers_is_passed_through_rather_than_fixed(chain_session):
     assert "VERIFY_WORKERS='${VERIFY_WORKERS:-}'" in chain_session
 
 
-def test_the_variable_is_documented_in_the_usage_header():
+def test_the_chain_reads_the_variables_review_found_dropped():
+    """The code review of 2026-11-10 found these five read by the chain but never forwarded."""
+    assert {"CPU_CORES", "REVALIDATE", "REVALIDATION_BLOCKS", "SELECT_TOP"} <= set(CHAIN_VARIABLES)
+    assert '"${SELECT:-1}"' in CHAIN.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("variable", CHAIN_VARIABLES)
+def test_the_variable_is_documented_in_the_usage_header(variable):
     """The header is where a run is configured from, so an undocumented variable is unusable."""
     header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]
-    assert "VERIFY_WORKERS" in header
+    assert variable in header
 
 
 def test_the_checklist_uses_the_shared_helper_for_its_worker_count():
