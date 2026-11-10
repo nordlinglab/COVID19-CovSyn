@@ -232,14 +232,14 @@ def test_usage_lines_run_scripts_through_uv(path):
 
     A bare ``python script.py`` finds no ``covsyn`` without ``PYTHONPATH``. A command quoted in
     prose as a code span (```python -m ...```), as when telling how a past run was started, is
-    history, not a usage line.
+    history, unless its line gives a usage.
     """
     bare = [
         line.strip()
         for line in path.read_text().splitlines()
         for match in PYTHON_SCRIPT.finditer(line)
         if not THROUGH_UV.search(line[: match.start()])
-        and line[match.start() - 1 : match.start()] != "`"
+        and not (line[match.start() - 1 : match.start()] == "`" and "Usage" not in line)
     ]
     assert not bare, bare
 
