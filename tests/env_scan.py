@@ -270,6 +270,7 @@ class _Frame:
     nesting: int = 0
     cases: int = 0
     command_start: bool = True
+    in_pattern: bool = False
 
 
 @dataclass
@@ -300,21 +301,31 @@ ARITHMETIC = {"$((", "((", "$["}
 GROUPS = {"$(", "$((", "((", "$[", "${", "`"}
 
 
-RESERVED_LEADERS = {"then", "do", "else", "elif", "!", "time", "{"}
+# Words after which a command starts on the same line: reserved words, the brace of a group,
+# and the openers whose condition is a command. block_change and _walk share them.
+LEADERS = {"then", "else", "elif", "do", "!", "time", "{", "if", "while", "until"}
+WORD = re.compile(r"[^\s;&|()]*")
 
 
 def _arithmetic_closes(text: str, start: int) -> bool:
     """Whether the ``$((`` at ``start`` closes with ``))``, so that bash reads arithmetic.
 
     bash reads ``$((cd x) | wc)``, whose first group closes with a single ``)``, as a command
-    substitution starting with a subshell. The look-ahead stops at the end of the line, so a
+    substitution starting with a subshell; quoted and escaped parentheses do not count. The
+    look-ahead stops at the end of the line, so a
     walk line by line reads the same as a walk of the whole text; an expansion still open there
     is taken as arithmetic.
     """
-    depth, index = 0, start + 3
+    depth, index, quote = 0, start + 3, None
     while index < len(text) and text[index] != "\n":
         char = text[index]
-        if char == "(":
+        if quote:
+            quote = None if char == quote else quote
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
             depth += 1
         elif char == ")":
             if depth:
@@ -338,7 +349,7 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
     is the character that precedes the text, which decides whether it starts a word; frames
     taken over from ``stack`` record no group, as their start lies in another text.
     """
-    stack = [_Frame(f.kind, -1, f.nesting, f.cases, f.command_start)
+    stack = [_Frame(f.kind, -1, f.nesting, f.cases, f.command_start, f.in_pattern)
              for f in stack] if stack else [_Frame("top", -1)]
     kinds, groups, index, escaped_end = [], {}, 0, -1
 
@@ -412,14 +423,22 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             push(char, 1)
         else:
             if kind == "$(" and word_start and not char.isspace():
-                word = re.match(r"[^\s;&|()]*", text[index:]).group()
+                word = WORD.match(text, index).group()
                 if frame.command_start and word in {"case", "esac"}:
                     frame.cases += 1 if word == "case" else -1
-                frame.command_start = word in RESERVED_LEADERS
-            if kind == "$(" and char in ";&|\n(":
+                    frame.in_pattern = False
+                elif word == "in" and frame.cases > 0 and not frame.in_pattern:
+                    frame.in_pattern = True     # the patterns of a case follow
+                frame.command_start = word in LEADERS or \
+                    (frame.in_pattern and word == "in")
+            if kind == "$(" and char in ";&\n(" or (kind == "$(" and char == "|" and
+                                                      not frame.in_pattern):
                 frame.command_start = True
+            if kind == "$(" and text.startswith(";;", index) and frame.cases > 0:
+                frame.in_pattern = True         # the next pattern, or esac, follows
             if kind == "$(" and char == ")" and frame.nesting == 0 and frame.cases > 0:
-                frame.command_start = True  # a case pattern ends here; its command follows
+                frame.command_start = True      # a case pattern ends; its command follows
+                frame.in_pattern = False
             elif kind in {"$(", "$((", "(("} and char in "()":
                 frame.nesting += 1 if char == "(" else -1
             elif kind == "$[" and char in "[]":
@@ -565,8 +584,9 @@ def shell_lines(text: str) -> list[ShellLine]:
                 lines += bodies
                 bodies = []
             continue
-        walk = _walk(raw, stack, before)
-        code = _code(raw, walk)
+        # The newline belongs to the line, as in bash: it ends a comment and starts a command.
+        walk = _walk(raw + "\n", stack, before)
+        code = _code(raw + "\n", walk)[:-1]
         pending += _heredoc_delimiters(raw, walk.kinds)
         if walk.open:
             buffer, stack, before = buffer + code + "\n", walk.stack, "\n"
@@ -575,7 +595,10 @@ def shell_lines(text: str) -> list[ShellLine]:
             continue
         if _trailing_backslashes(code) % 2:
             buffer, stack = buffer + code[:-1], walk.stack
-            before = code[-2] if len(code) > 1 else before
+            # The next line goes on the same word unless a blank, itself not escaped, ends this.
+            ends_blank = len(code) > 1 and code[-2] in " \t" and \
+                _trailing_backslashes(code[:-2]) % 2 == 0
+            before = " " if ends_blank else ("x" if len(code) > 1 else before)
             continue
         line, buffer, stack, before = buffer + code, "", None, "\n"
         if line.strip():
@@ -620,7 +643,6 @@ def commands(line: str) -> list[list[str]]:
 OPENERS = {"if", "for", "while", "until", "case", "select"}
 CLOSERS = {"fi", "done", "esac"}
 # Reserved words after which a command, and so an opener, may follow on the same command.
-LEADERS = {"then", "else", "elif", "do", "!", "time"}
 
 
 def block_change(line: str) -> int:
@@ -718,7 +740,7 @@ SCRIPT_MENTION = re.compile(
     r"(?:\$\{?ROOT\}?/)?((?:\$\{[^}]*\}|\$\w+|[\w./+@%~,-])*\.sh)(?![\w.-])")
 # A script path inside a parameter expansion's default, alternative or pattern, as in
 # ${X:-scripts/a.sh} or ${X#scripts/a.sh}: reported with the expansion around it.
-DEFAULT_MENTION = re.compile(r"\$\{\w+(?::?[-=+?]|##?|%%?)[^}]*\.sh\}")
+DEFAULT_MENTION = re.compile(r"\$\{\w+(?::?[-=+?]|##?|%%?)[^}]*[\w/]\.sh\}")
 
 
 def mentioned_scripts(text: str) -> list[str]:
@@ -734,8 +756,17 @@ def mentioned_scripts(text: str) -> list[str]:
     plain = re.sub(r"[\\'\"]", "", text)
     found = []
     for match in re.finditer(rf"{DEFAULT_MENTION.pattern}|{SCRIPT_MENTION.pattern}", plain):
-        found.append(match.group(0) if match.group(1) is None else
-                     posixpath.normpath(match.group(1)))
+        if match.group(1) is None:
+            found.append(match.group(0))
+            continue
+        # Text glued before the path, back to a blank or an operator, belongs to its word: an
+        # assignment or option name (S=, --file=) is dropped, anything else is kept.
+        glued = re.search(r"[^\s;&|()<>`]*$", plain[:match.start()]).group()
+        if glued.count("${") > glued.count("}"):
+            continue                        # inside a ${...}, which DEFAULT_MENTION reads
+        if re.fullmatch(r"(?:[A-Za-z_]\w*|--?[\w-]+)[=:]|", glued):
+            glued = ""
+        found.append(posixpath.normpath(glued + match.group(1)))
     return found
 
 

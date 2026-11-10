@@ -191,6 +191,17 @@ def test_a_mention_of_case_does_not_stop_folding():
     assert es._fold_substitutions("echo $(echo case) x") == "echo X x"
 
 
+@pytest.mark.parametrize("line", [
+    "A=$(if case $x in a) echo 1;; esac; then :; fi)",
+    "A=$(while case $x in a) false;; esac; do :; done)",
+    "A=$(case $x in a|esac) true;; esac)",           # esac as a pattern
+    'A=$((echo "))") | wc)',                          # a quoted )) in a subshell
+])
+def test_case_and_subshell_substitutions_fold_whole(line):
+    """Each of these is one command substitution assigned to A."""
+    assert es.commands(line) == [["A=X"]]
+
+
 def test_arithmetic_starting_with_a_parenthesis_folds_whole():
     """$(((1+2)*3)) is one arithmetic expansion, not $( followed by (( )."""
     assert es._fold_arithmetic("echo $(((1+2)*3)) x") == "echo X x"
@@ -291,6 +302,9 @@ def test_commands_are_split_into_words(line, words):
     (["cat <<EOF; echo \"a", 'b"', "body", "EOF", "A=1", "echo $A"], {"A"}),  # body after
     (["X=$((cd /tmp && ls) | wc -l)", "A=1", "echo $A"], {"X", "A"}),  # a subshell, no arithmetic
     (["echo a\\", "#b", "A=1", "echo $A"], {"A"}),                 # #b joins the word a
+    (["echo a\\ \\", "#b $Z", "A=1", "echo $A"], {"A"}),          # after an escaped blank
+    (["X=$(", "echo a", "case $y in", "a) echo;;", "esac", ")", "A=1", "echo $A"],
+     {"X", "A"}),                                                 # case after a command
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -353,9 +367,10 @@ A = "scripts/a.sh"
     ("bash ${SUB:+sub/}scripts/a.sh", {"${SUB:+sub/}scripts/a.sh"}),
     ("cd scripts && bash ./a.sh", {"a.sh"}),
     ('bash "scripts/${step}.sh"', {"scripts/${step}.sh"}),
-    ("bash scripts/{a,b}.sh", {".sh"}),
+    ("bash scripts/{a,b}.sh", {"scripts/{a,b}.sh"}),
     ("bash scripts/a.sh,b.sh", {"scripts/a.sh,b.sh"}),
-    ("bash scripts/a=b.sh", {"b.sh"}),
+    ("bash scripts/a=b.sh", {"scripts/a=b.sh"}),      # the whole word, never its tail
+    ("n=${f%.sh}", set()),                            # an extension removed, no script
 ])
 def test_scripts_are_found_however_named(line, called):
     """Every mention of a shell script counts, as a normalised repository-relative path."""
@@ -493,3 +508,16 @@ def test_walking_line_by_line_equals_walking_whole(text, data):
         kinds += walk.kinds
         stack = walk.stack
     assert kinds == whole
+
+
+ARITHMETIC = st.recursive(st.sampled_from(["1", "x", "2"]),
+                          lambda e: st.builds(lambda a, op, b: f"({a}{op}{b})", e,
+                                              st.sampled_from(["+", "*", "<<"]), e),
+                          max_leaves=5)
+
+
+@given(ARITHMETIC, st.sampled_from(["", "x"]))
+def test_arithmetic_is_told_from_a_subshell(expression, word):
+    """$(( e )) closes with )) and is arithmetic; $((e) word) closes with ) and is not."""
+    assert es._arithmetic_closes(f"$(( {expression} ))", 0)
+    assert not es._arithmetic_closes(f"$(({expression}) {word})", 0)
