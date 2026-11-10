@@ -177,6 +177,7 @@ report_run10_todolist923/
 phaseD_*.txt
 phaseD_*.log
 firefly_phaseD*.log
+firefly_phaseD.exit
 *.log
 *.bak
 *.bak_*

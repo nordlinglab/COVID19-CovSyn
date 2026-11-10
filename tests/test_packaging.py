@@ -182,7 +182,7 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
 
 
 PYTHON_SCRIPT = re.compile(r"\bpython3? [\w./-]+\.py\b")
-THROUGH_UV = re.compile(r"\buv run\b[^|;&]*$")
+THROUGH_UV = re.compile(r"\buv run(?:\s+--?[\w-]+(?:[ =][^\s|;&-][^\s|;&]*)?)*\s+$")
 
 
 @pytest.mark.parametrize("path", _script_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
@@ -198,6 +198,23 @@ def test_usage_lines_run_scripts_through_uv(path):
         if not THROUGH_UV.search(line[: match.start()])
     ]
     assert not bare, bare
+
+
+@pytest.mark.parametrize(
+    ("line", "through_uv"),
+    [
+        ("uv run python scripts/x.py", True),
+        ("uv run --no-sync python scripts/x.py", True),
+        ("uv run --with pandas python scripts/x.py", True),
+        ("uv run --python 3.13 -q python scripts/x.py", True),
+        ("python scripts/x.py", False),
+        ("Requires uv run setup first, then: python scripts/x.py", False),
+    ],
+)
+def test_usage_line_check_accepts_only_uv_options(line, through_uv):
+    """Only option-shaped words may stand between ``uv run`` and ``python``."""
+    match = PYTHON_SCRIPT.search(line)
+    assert bool(THROUGH_UV.search(line[: match.start()])) == through_uv
 
 
 UV_RUN = r"""(?:\buv|['"]?\$\{?UV\}?['"]?) run\b.*"""

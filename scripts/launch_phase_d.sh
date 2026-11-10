@@ -45,18 +45,15 @@ CHAIN_ENV=(PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BL
            SELECT_TOP CPU_CORES)
 chain_env_args=()
 for name in "${CHAIN_ENV[@]}"; do chain_env_args+=(-e "$name=${!name:-}"); done
+# The firefly session writes its exit status, which the chain checks before using FIREFLY_RUN;
+# the previous run's status is removed first.
+rm -f firefly_phaseD.exit
 # shellcheck disable=SC2016
 tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" bash -c \
   'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
-   --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1'
+   --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1; \
+   echo $? > firefly_phaseD.exit'
 sleep 2
-# The chain runs on whatever FIREFLY_RUN holds once the firefly session ends, so a firefly
-# that died at startup would have it report an earlier run's results.
-if ! tmux has-session -t firefly 2>/dev/null; then
-  echo "ERROR: the firefly session ended at startup; not starting the chain"
-  tail -n 20 firefly_phaseD.log 2>/dev/null || true
-  exit 1
-fi
 tmux new-session -d -s chain -c "$ROOT" "${chain_env_args[@]}" bash scripts/phase_d_chain.sh
 sleep 1
 tmux ls

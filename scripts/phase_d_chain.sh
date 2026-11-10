@@ -49,6 +49,13 @@ run() { uv run --no-sync python -m "$@"; }
 
 say 'waiting for the firefly session to finish'
 while tmux has-session -t firefly 2>/dev/null; do sleep 120; done
+# launch_phase_d.sh has the firefly session write its exit status, so a failed optimiser stops
+# the chain instead of letting it report an earlier run's results from FIREFLY_RUN. A chain
+# started on its own, on an existing result, has no status file and goes on.
+if [ -f firefly_phaseD.exit ] && [ "$(cat firefly_phaseD.exit)" != 0 ]; then
+    say "ERROR: the firefly session exited with status $(cat firefly_phaseD.exit), stopping"
+    exit 1
+fi
 # B56 (E87): the objective's 300 fixed seeds pick a vector that sits on the edge of several
 # targets; re-score the final population and every personal best on unseen seed blocks and
 # report the lowest mean instead. REVALIDATE=0 skips it, e.g. for a directory that already
