@@ -5,8 +5,8 @@
 test_b86_launch_env_forwarding.py uses them to check that launch_phase_d.sh forwards every
 variable the Phase D chain reads into its tmux session (B86). A static scan cannot see a name
 built at run time, or a mapping of the environment passed to a parameter by another name than
-``env``; every other uncertainty is resolved towards reporting a read, which fails a test
-loudly rather than letting a variable be dropped unseen.
+``env``; every other uncertainty is resolved towards reporting a read or a script call, which
+fails a test loudly rather than letting a variable be dropped unseen.
 """
 
 from __future__ import annotations
@@ -19,100 +19,119 @@ from pathlib import Path
 
 NAME = r"[A-Z][A-Z0-9_]*"
 SHELL_SPECIAL = {"BASH_SOURCE"}
+
+# --- Python ---------------------------------------------------------------------------------
+
 # One definition of an environment access for both Python scans: the mappings and the getters of
-# os, and a mapping passed in as ``env``, as ``worker_count(os.environ)`` reads VERIFY_WORKERS.
+# os, copies and views of the mappings, and a mapping passed in as ``env``, as
+# ``worker_count(os.environ)`` reads VERIFY_WORKERS.
 ENVIRONMENT_MAPPINGS = {"environ", "environb"}
 ENVIRONMENT_GETTERS = {"getenv", "getenvb"}
 ENVIRONMENT_NAMES = ENVIRONMENT_MAPPINGS | ENVIRONMENT_GETTERS
 MAPPING_PARAMETER = "env"
-# Methods that copy the environment or view it, which read it as surely as a lookup.
-COPIES = {"copy", "keys", "items", "values"}
+VIEW_METHODS = {"copy", "keys", "items", "values"}
 COPY_FUNCTIONS = {"copy", "deepcopy"}
-
-
-# --- Python ---------------------------------------------------------------------------------
 
 
 def _name(node: ast.AST) -> str:
     return getattr(node, "attr", getattr(node, "id", ""))
 
 
-def copied(node: ast.AST) -> list[ast.AST]:
-    """The expressions a copy or view is made of; none for anything else.
+class _Environment:
+    """What in one module stands for the environment of os.
 
-    Covers ``dict(e)``, ``dict(**e)``, ``{**e}``, ``copy.copy(e)``, ``e.copy()`` and
-    ``e.keys()``.
+    Built once per module: the names os and copy are imported as, the names bound to the
+    environment (imported, assigned, annotated, walrus, parameter default, tuple or list
+    unpacking, repeated until no new name appears), and the copies and views of it. Names are
+    not scoped, so an alias in one function also marks the same name elsewhere, which can only
+    report more reads.
     """
-    if isinstance(node, ast.Dict):
-        return [v for k, v in zip(node.keys, node.values, strict=True) if k is None]
-    if not isinstance(node, ast.Call):
+
+    def __init__(self, tree: ast.AST) -> None:
+        self.os_modules, self.copy_modules, self.copy_functions = {"os"}, {"copy"}, set()
+        self.names = {name: name for name in ENVIRONMENT_NAMES}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "os":
+                        self.os_modules.add(alias.asname or "os")
+                    elif alias.name == "copy":
+                        self.copy_modules.add(alias.asname or "copy")
+            elif isinstance(node, ast.ImportFrom) and node.module in {"os", "copy"}:
+                for alias in node.names:
+                    if node.module == "os" and alias.name in ENVIRONMENT_NAMES:
+                        self.names[alias.asname or alias.name] = alias.name
+                    elif node.module == "copy" and alias.name in COPY_FUNCTIONS:
+                        self.copy_functions.add(alias.asname or alias.name)
+        while bound := self._new_bindings(tree):
+            self.names.update(bound)
+
+    def copied(self, node: ast.AST) -> list[ast.AST]:
+        """The expressions a copy or view is made of; none for anything else.
+
+        Covers ``dict(e)``, ``dict(**e)``, ``{**e}``, ``copy.copy(e)`` and ``deepcopy(e)``
+        under any import name, ``e.copy()`` and ``e.keys()``.
+        """
+        if isinstance(node, ast.Dict):
+            return [v for k, v in zip(node.keys, node.values, strict=True) if k is None]
+        if not isinstance(node, ast.Call):
+            return []
+        func = node.func
+        copies = _name(func) == "dict" or (isinstance(func, ast.Name) and
+                                           func.id in self.copy_functions)
+        copies |= isinstance(func, ast.Attribute) and func.attr in COPY_FUNCTIONS and \
+            isinstance(func.value, ast.Name) and func.value.id in self.copy_modules
+        if copies:
+            return [*node.args, *(k.value for k in node.keywords if k.arg is None)]
+        if isinstance(func, ast.Attribute) and func.attr in VIEW_METHODS:
+            return [func.value]
         return []
-    func = node.func
-    if _name(func) == "dict" or (isinstance(func, ast.Attribute) and
-                                 _name(func.value) == "copy" and func.attr in COPY_FUNCTIONS):
-        return [*node.args, *(k.value for k in node.keywords if k.arg is None)]
-    if isinstance(func, ast.Attribute) and func.attr in COPIES:
-        return [func.value]
-    return []
 
+    def stands_for(self, node: ast.AST | None, parameter: bool = False) -> str | None:
+        """Which access of os an expression stands for, or None.
 
-def _environment_names(tree: ast.AST) -> dict[str, str]:
-    """The names a module uses for the environment accesses of os.
-
-    Imported aliases (``from os import environ as e``) and names bound to them or to
-    ``os.environ`` by assignment, annotated assignment, walrus or parameter default, repeated
-    until no new name appears. Names are not scoped, so an alias in one function also marks
-    the same name elsewhere, which can only report more reads.
-    """
-    modules = {"os"}
-    names = {name: name for name in ENVIRONMENT_NAMES}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules |= {a.asname for a in node.names if a.name == "os" and a.asname}
-        elif isinstance(node, ast.ImportFrom) and node.module == "os":
-            for alias in node.names:
-                if alias.name in ENVIRONMENT_NAMES:
-                    names[alias.asname or alias.name] = alias.name
-
-    def target(value: ast.AST | None) -> str | None:
-        # A copy or view of the environment reads it as surely as the environment itself.
-        if isinstance(value, (ast.Call, ast.Dict)):
-            return next((t for t in map(target, copied(value)) if t), None)
-        if isinstance(value, ast.Name) and value.id in names:
-            return names[value.id]
-        if isinstance(value, ast.Attribute) and value.attr in ENVIRONMENT_NAMES and \
-                isinstance(value.value, ast.Name) and value.value.id in modules:
-            return value.attr
+        With ``parameter``, a name ``env`` stands for the environment mapping too.
+        """
+        if isinstance(node, ast.NamedExpr):
+            node = node.value
+        if isinstance(node, (ast.Call, ast.Dict)):
+            return next((s for s in (self.stands_for(i, parameter)
+                                     for i in self.copied(node)) if s), None)
+        if isinstance(node, ast.Name):
+            if parameter and node.id == MAPPING_PARAMETER:
+                return "environ"
+            return self.names.get(node.id)
+        if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_NAMES and \
+                isinstance(node.value, ast.Name) and node.value.id in self.os_modules:
+            return node.attr
         return None
 
-    while True:
+    def _new_bindings(self, tree: ast.AST) -> dict[str, str]:
         bound = {}
         for node in ast.walk(tree):
             pairs = []
             if isinstance(node, ast.Assign):
-                for t in node.targets:
-                    if isinstance(t, (ast.Tuple, ast.List)) and \
+                for target in node.targets:
+                    if isinstance(target, (ast.Tuple, ast.List)) and \
                             isinstance(node.value, (ast.Tuple, ast.List)) and \
-                            len(t.elts) == len(node.value.elts):
-                        pairs += list(zip(t.elts, node.value.elts, strict=True))
+                            len(target.elts) == len(node.value.elts):
+                        pairs += list(zip(target.elts, node.value.elts, strict=True))
                     else:
-                        pairs.append((t, node.value))
+                        pairs.append((target, node.value))
             elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
                 pairs = [(node.target, node.value)]
             elif isinstance(node, ast.arguments):
                 positional = [*node.posonlyargs, *node.args]
-                pairs = list(zip(positional[len(positional) - len(node.defaults):], node.defaults,
-                                 strict=True))
+                pairs = list(zip(positional[len(positional) - len(node.defaults):],
+                                 node.defaults, strict=True))
                 keyword = zip(node.kwonlyargs, node.kw_defaults, strict=True)
                 pairs += [(a, d) for a, d in keyword if d]
             for name_node, value in pairs:
                 name = getattr(name_node, "id", getattr(name_node, "arg", None))
-                found = target(value)
-                if name and found and name not in names:
+                found = self.stands_for(value)
+                if name and found and name not in self.names:
                     bound[name] = found
-        if not bound:
-            return names
-        names.update(bound)
+        return bound
 
 
 def environment_reads(path: Path) -> set[str]:
@@ -124,19 +143,10 @@ def environment_reads(path: Path) -> set[str]:
     to.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    aliases = _environment_names(tree)
+    environment = _Environment(tree)
 
-    def kind(node: ast.AST) -> str:
-        if isinstance(node, ast.NamedExpr):
-            node = node.value
-        if isinstance(node, (ast.Call, ast.Dict)):
-            return "mapping" if any(kind(i) == "mapping" for i in copied(node)) else ""
-        name = _name(node)
-        if isinstance(node, ast.Name):
-            name = aliases.get(name, name)
-        if name in ENVIRONMENT_MAPPINGS or name == MAPPING_PARAMETER:
-            return "mapping"
-        return "getter" if name in ENVIRONMENT_GETTERS else ""
+    def is_mapping(node: ast.AST) -> bool:
+        return environment.stands_for(node, parameter=True) in ENVIRONMENT_MAPPINGS
 
     names = set()
     for node in ast.walk(tree):
@@ -146,15 +156,14 @@ def environment_reads(path: Path) -> set[str]:
             first = node.args[0] if node.args else next(
                 (k.value for k in node.keywords if k.arg == "key"), None)
             if isinstance(func, ast.Attribute) and func.attr in {"get", "setdefault", "pop"}:
-                if kind(func.value) == "mapping":
-                    key = first
-            elif kind(func) == "getter":
+                key = first if is_mapping(func.value) else None
+            elif environment.stands_for(func) in ENVIRONMENT_GETTERS:
                 key = first
-        elif isinstance(node, ast.Subscript) and kind(node.value) == "mapping":
+        elif isinstance(node, ast.Subscript) and is_mapping(node.value):
             key = node.slice
         elif isinstance(node, ast.Compare) and \
                 any(isinstance(o, (ast.In, ast.NotIn)) for o in node.ops):
-            if any(kind(c) == "mapping" for c in node.comparators):
+            if any(is_mapping(c) for c in node.comparators):
                 key = node.left
         if isinstance(key, ast.Constant) and isinstance(key.value, str) and \
                 re.fullmatch(NAME, key.value):
@@ -171,7 +180,7 @@ def mentions_environment(path: Path) -> bool:
     ``vars(os)["environ"]``.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    aliases = _environment_names(tree)
+    environment = _Environment(tree)
     docstrings = {
         id(node.body[0].value)
         for node in ast.walk(tree)
@@ -179,7 +188,7 @@ def mentions_environment(path: Path) -> bool:
         and node.body and isinstance(node.body[0], ast.Expr)
     }
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id in aliases:
+        if isinstance(node, ast.Name) and node.id in environment.names:
             return True
         if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_NAMES:
             return True
@@ -242,20 +251,25 @@ def _scan_quotes(text: str) -> tuple[str, str | None]:
     """A text without its comments, and the quote still open at its end, as bash reads it.
 
     A ``#`` starts a comment at the start of a word, outside quotes, and runs to the end of its
-    line; a backslash outside single quotes escapes the next character, also inside ``$'...'``.
+    line. A backslash outside single quotes escapes the next character; inside ANSI-C quotes
+    ``$'...'`` it does too, and nothing else but the closing ``'`` has a meaning there.
     """
     quote, out, index = None, [], 0
     while index < len(text):
         char = text[index]
         if quote == "'":
             quote = None if char == "'" else quote
+        elif quote == "$'":
+            if char == "\\":
+                out.append(text[index:index + 2])
+                index += 2
+                continue
+            quote = None if char == "'" else quote
         elif quote is None and text.startswith("$'", index):
-            quote = "$'"                        # ANSI-C quoting, where \' escapes a quote
+            quote = "$'"
             out.append("$'")
             index += 2
             continue
-        elif quote == "$'" and char == "'":
-            quote = None
         elif char == "\\":
             out.append(text[index:index + 2])
             index += 2
@@ -282,6 +296,35 @@ def _trailing_backslashes(text: str) -> int:
     return len(text) - len(text.rstrip("\\"))
 
 
+def _fold_balanced(line: str, opener: str) -> str:
+    """The line with each ``opener ... )`` group, nested parentheses included, as X."""
+    start = line.find(opener)
+    while start >= 0:
+        depth, index = 0, start + opener.index("(")
+        while index < len(line):
+            depth += {"(": 1, ")": -1}.get(line[index], 0)
+            if depth == 0:
+                break
+            index += 1
+        if index >= len(line):
+            return line
+        line = line[:start] + "X" + line[index + 1:]
+        start = line.find(opener)
+    return line
+
+
+def _fold_substitutions(line: str) -> str:
+    """The line with each substitution as X.
+
+    Arithmetic expansions and commands, command substitutions and backtick groups, nested
+    parentheses included; one left open at the end of the line stays as it is.
+    """
+    line = re.sub(r"`[^`]*`", "X", line)
+    for opener in ("$((", "$(", "(("):
+        line = _fold_balanced(line, opener)
+    return line
+
+
 def _raw_words(line: str) -> list[str]:
     """A line's words with their quotes kept, substitutions folded; unparsable gives none."""
     lexer = shlex.shlex(_fold_substitutions(line), posix=False, punctuation_chars=";&|")
@@ -296,17 +339,18 @@ def _raw_words(line: str) -> list[str]:
 def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
     """The here-documents a line opens: whether tabs are stripped, and the delimiter.
 
-    ``<<<`` is a here-string and ``<<`` inside quotes or arithmetic is no here-document.
+    ``<<<`` is a here-string, and ``<<`` inside quotes or arithmetic is no here-document.
     """
     words, found = _raw_words(line), []
     for index, word in enumerate(words):
-        match = re.search(r"(?<!<)<<(?!<)(-?)(.*)$", word)
-        if not match or word[0] in "'\"":
-            continue
-        delimiter = match.group(2) or (words[index + 1] if index + 1 < len(words) else "")
-        delimiter = delimiter.replace("\\", "").strip("'\"")
-        if delimiter:
-            found.append((match.group(1) == "-", delimiter))
+        for match in re.finditer(r"(?<!<)<<(?!<)(-?)(.*)$", word):
+            if _scan_quotes(word[:match.start()])[1]:
+                continue
+            delimiter = match.group(2) or (words[index + 1] if index + 1 < len(words) else "")
+            delimiter = delimiter.replace("\\", "").strip("'\"")
+            if delimiter:
+                found.append((match.group(1) == "-", delimiter))
+            break
     return found
 
 
@@ -341,21 +385,6 @@ def shell_lines(text: str) -> list[ShellLine]:
     if buffer.strip():
         lines.append(ShellLine(buffer))
     return lines
-
-
-def _fold_substitutions(line: str) -> str:
-    """The line with each substitution as X.
-
-    Arithmetic expansions and commands, command substitutions and backtick groups.
-    """
-    patterns = (r"\$?\(\([^()]*\)\)", r"\$\([^()]*\)", r"`[^`]*`")
-    while True:
-        folded = line
-        for pattern in patterns:
-            folded = re.sub(pattern, "X", folded)
-        if folded == line:
-            return line
-        line = folded
 
 
 REDIRECTION = re.compile(r"^\d*(?:[<>]|&>)")
@@ -396,12 +425,12 @@ LEADERS = {"then", "else", "elif", "do", "!", "time"}
 def block_change(line: str) -> int:
     """How far a line moves the block depth.
 
-    +1 for each if, loop, case, brace group (a function body included) or subshell it opens,
-    -1 for each it closes; a parenthesis left open at the end of a word, as in ``ARR=(`` or
-    ``$(``, opens one too. An opener counts wherever a command may start, as in ``else if``
-    or after a case pattern; quoted braces and parentheses are text. A subshell closed on a
-    later word of its own line, as in ``(cd x && y)``, leaves the depth raised, which can only
-    report more reads.
+    +1 for each if, loop, case, brace group (a function body included, ``f(){`` too) or
+    subshell it opens, -1 for each it closes; a parenthesis left open at the end of a word, as
+    in ``ARR=(`` or ``$(``, opens one too. An opener counts wherever a command may start, as
+    in ``else if`` or after a case pattern; quoted braces and parentheses are text. A subshell
+    closed on a later word of its own line, as in ``(cd x && y)``, leaves the depth raised,
+    which can only report more reads.
     """
     change, starts_command = 0, True
     for word in _raw_words(line):
@@ -409,9 +438,10 @@ def block_change(line: str) -> int:
             starts_command = True
             continue
         function = word == "()" or word.endswith("()")
-        if word == "{" or (not function and (word == "(" or word.endswith("(") or
-                                            (word.startswith("(") and not word.startswith("((")))):
-            change += 1                     # a group, subshell, array or open substitution
+        if word == "{" or word.endswith("){") or (
+                not function and (word == "(" or word.endswith("(") or
+                                  (word.startswith("(") and not word.startswith("((")))):
+            change += 1                     # a group, function, subshell, array or substitution
             starts_command = True
             continue
         if word in {"}", ")"}:
@@ -482,32 +512,29 @@ def environment_variables(path: Path) -> set[str]:
 
 
 SCRIPT_PATH = re.compile(r"(?:^|/)scripts/([\w.-]+\.sh)$")
-SHELLS = {"bash", "sh", "source", "."}
 
 
 def script_calls(line: str) -> list[tuple[str, list[str]]]:
-    """The scripts under scripts/ a line runs, each with its command's NAME=value prefix.
+    """The scripts under scripts/ a line may run, each with the NAME=value words before it.
 
-    Quotes are removed from the prefix words.
-    A script runs when its path is a command's first word after its assignments, or the first
-    word after bash, sh, source or ``.``; a path elsewhere, as in an echo, is text.
+    Any whole word that is a path to a script counts, wherever it stands in its command (after
+    if, do, env, nohup, an option and its argument, or as an argument of echo): a word that
+    only names a script is reported too, which fails a test loudly rather than missing a call.
+    A path inside a longer quoted text, as in ``echo "see scripts/a.sh"``, is no word of its
+    own. The NAME=value words are those before the path in its command, quotes removed.
     """
     calls = []
     for command in commands(line):
-        index = 0
-        while index < len(command) and re.match(rf"{NAME}=", command[index]):
-            index += 1
-        prefix, rest = command[:index], command[index:]
-        if rest and rest[0] in SHELLS:
-            rest = [w for w in rest[1:] if not w.startswith("-")]
-        match = SCRIPT_PATH.search(rest[0]) if rest else None
-        if match:
-            calls.append((match.group(1), prefix))
+        for index, word in enumerate(command):
+            match = SCRIPT_PATH.search(word)
+            if match:
+                prefix = [w for w in command[:index] if re.match(rf"{NAME}=", w)]
+                calls.append((match.group(1), prefix))
     return calls
 
 
 def called_scripts(lines: list[ShellLine]) -> set[str]:
-    """The scripts under scripts/ a script runs, however it calls them.
+    """The scripts under scripts/ a script may run, however it calls them.
 
     Here-document bodies count too, as one may be piped to a shell.
     """

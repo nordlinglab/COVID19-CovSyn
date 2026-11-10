@@ -75,12 +75,12 @@ def test_the_chain_sets_what_it_does_not_forward(script, values):
     Such a variable is left out of the forwarding, so without it the tmux server's value would
     reach the script.
     """
-    calls = [line.text for line in _lines(CHAIN) if script in es.called_scripts([line])]
-    assert calls, script
+    prefixes = [(line.text, prefix) for line in _lines(CHAIN)
+                for name, prefix in es.script_calls(line.text) if name == script]
+    assert prefixes, script
     expected = [f"{name}={value.strip(chr(34))}" for name, value in values.items()]
-    for line in calls:
-        prefixes = [prefix for name, prefix in es.script_calls(line) if name == script]
-        assert prefixes and all(prefix == expected for prefix in prefixes), line
+    for line, prefix in prefixes:
+        assert prefix == expected, line
 
 
 def test_every_script_the_chain_runs_is_scanned():

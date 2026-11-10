@@ -58,6 +58,8 @@ def _script(text: str) -> list[es.ShellLine]:
     ("import os\nx = dict(**os.environ)\nx['A']", {"A"}),
     ("import copy, os\nx = copy.copy(os.environ)\nx['A']", {"A"}),
     ("import os\nx = {**os.environ, 'B': '1'}\nx.get('A')", {"A"}),
+    ("import os\nfrom copy import deepcopy\nx = deepcopy(os.environ)\nx['A']", {"A"}),
+    ("import os\nimport copy as cp\nx = cp.copy(os.environ)\nx['A']", {"A"}),
 ])
 def test_environment_reads_are_found_in_code_only(tmp_path, source, expected):
     """Every spelling of an environment read is found, and nothing in comments or text."""
@@ -154,6 +156,11 @@ def test_heredoc_bodies_are_text():
     assert {"A", "B"} <= referenced
 
 
+def test_nested_arithmetic_opens_no_block():
+    """An arithmetic expansion with nested parentheses folds into one word."""
+    assert es.block_change("x=$(( (1+2) ))") == 0
+
+
 def test_a_case_pattern_starts_a_command():
     """An opener after a case pattern counts, so a block opened and closed there nets zero."""
     assert es.block_change("case x in a) if y; then z; fi;; esac") == 0
@@ -206,6 +213,10 @@ def test_commands_are_split_into_words(line, words):
     # ANSI-C quoting no longer swallows the rest of the script; shlex cannot parse the value,
     # so X itself is not taken as assigned, which can only report more reads.
     (["X=$'it\\'s'", "A=1", "echo $A"], {"A"}),
+    (["echo $'say \"hi\"'", "A=1", "echo $A"], {"A"}),          # " inside $'...' is text
+    (["echo $'a #b'", "A=1", "echo $A"], {"A"}),                  # so is #
+    (["func(){", "A=1", "}", "echo $A"], set()),                  # a function body, no spaces
+    (['echo x"<<"EOF', "A=1", "echo $A"], {"A"}),                 # a quoted <<, no heredoc
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -228,6 +239,7 @@ def test_a_prefix_assignment_belongs_to_its_own_command():
     assert es.script_calls('P="./$F" true; bash scripts/a.sh') == [("a.sh", [])]
     assert es.script_calls("P=x bash scripts/a.sh || bash scripts/a.sh") == [
         ("a.sh", ["P=x"]), ("a.sh", [])]
+    assert es.script_calls("env P=x bash scripts/a.sh") == [("a.sh", ["P=x"])]
 
 
 @pytest.mark.parametrize(("line", "called"), [
@@ -245,6 +257,14 @@ def test_a_prefix_assignment_belongs_to_its_own_command():
     ("echo done", set()),
     ('echo "run scripts/a.sh later"', set()),        # named in text, not run
     ("bash -x scripts/a.sh", {"a.sh"}),
+    ("bash -o pipefail scripts/a.sh", {"a.sh"}),
+    ("if bash scripts/a.sh; then :; fi", {"a.sh"}),
+    ("do bash scripts/a.sh", {"a.sh"}),
+    ("( bash scripts/a.sh )", {"a.sh"}),
+    ("time bash scripts/a.sh", {"a.sh"}),
+    ("nohup bash scripts/a.sh &", {"a.sh"}),
+    ("tmux new-session -d -s x bash scripts/a.sh", {"a.sh"}),
+    ("echo scripts/a.sh", {"a.sh"}),                 # a word of its own: reported, to be safe
 ])
 def test_script_calls_are_found_however_written(line, called):
     """Every way of running a script under scripts/ is a call."""
@@ -289,3 +309,21 @@ def test_a_called_script_is_found_with_any_name(name):
     """A script is found under its own name, whatever characters the name uses."""
     script = f"{name.replace('/', '_')}.sh"
     assert es.called_scripts([es.ShellLine(f"bash scripts/{script}")]) == {script}
+
+
+@given(st.lists(PLAIN_WORD, max_size=3), st.sampled_from(["bash ", "", "if ", "env P=1 "]))
+def test_a_script_path_word_is_always_a_call(words, lead):
+    """A whole word that is a path to a script is a call wherever it stands.
+
+    Its prefix holds only NAME= words.
+    """
+    line = f"{lead}{' '.join(w.replace('/', '_') for w in words)} scripts/a.sh"
+    calls = es.script_calls(line)
+    assert [name for name, _ in calls] == ["a.sh"]
+    assert all(word.split("=")[0].isupper() for _, prefix in calls for word in prefix)
+
+
+@given(LINE_TEXT)
+def test_a_path_inside_quoted_text_is_no_call(text):
+    """A script named inside a longer quoted text, as in an echo message, is not run."""
+    assert es.script_calls(f"echo {shlex.quote(text + ' scripts/a.sh')}") == []
