@@ -165,6 +165,8 @@ def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
 
 SYNTHESIS_STAND_IN = (
     "#!/usr/bin/env bash\n"
+    "set -e\n"
+    ': "${RECORD:?the synthesis stand-in got no RECORD to write its call to}"\n'
     # Recorded in the uv stand-in's record, in order with the uv runs: SYNTHESIS, then
     # PARAMETER_PATH as its own field, then the arguments.
     'printf "%s\\x1f" SYNTHESIS "$PARAMETER_PATH" "$@" >> "$RECORD/runs"\n'
@@ -207,6 +209,7 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
     log_path = root / "phaseD_chain.log"
     log = _read(log_path) if log_path.exists() else ""
     context = output + log
+    assert (record / "runs").exists(), context
     syntheses = [call for call in _records(record / "runs") if call[:1] == ["SYNTHESIS"]]
     assert len(syntheses) == 1 and syntheses[0][2:] == ["--environment-checked"], context
     path = syntheses[0][1]
