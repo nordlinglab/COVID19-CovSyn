@@ -105,7 +105,16 @@ def test_the_chain_names_only_the_golden_script_lines():
     assert naming == SCRIPT_LINES
 
 
-FIREFLY = next(line.split("=", 1)[1] for line in _code(CHAIN) if line.startswith("FIREFLY="))
+# The fixed directory the chain copies the run onto, which data_synthesis.sh reads by default.
+FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
+
+
+def test_the_chain_and_the_synthesis_agree_on_the_run_directory():
+    """The chain's FIREFLY and data_synthesis.sh's default PARAMETER_PATH name one directory."""
+    assert f"FIREFLY={FIREFLY}" in _code(CHAIN)
+    assert f"./{FIREFLY}" in SYNTHESIS.read_text(encoding="utf-8")
+
+
 SYNTHESIS_STAND_IN = (
     "#!/usr/bin/env bash\n"
     'echo "$PARAMETER_PATH $*" >> synthesis_call\n'
@@ -135,14 +144,16 @@ def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
         },
     )
     log = (root / "phaseD_chain.log").read_text()
+    context = output + log
+    assert (root / "synthesis_call").exists(), context
     calls = (root / "synthesis_call").read_text().splitlines()
-    assert calls == [f"./{FIREFLY} --environment-checked"], output + log
+    assert calls == [f"./{FIREFLY} --environment-checked"], context
     if synthesis_status == "1":
-        assert status != 0
-        assert "] ERROR: data synthesis failed" in log, log
-        assert "synthetic data done" not in log
+        assert status != 0, context
+        assert "] ERROR: data synthesis failed" in log, context
+        assert "synthetic data done" not in log, context
     else:
-        assert "synthetic data done" in log, log
+        assert "synthetic data done" in log, context
 
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
