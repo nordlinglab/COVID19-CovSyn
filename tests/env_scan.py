@@ -306,6 +306,8 @@ GROUPS = {"$(", "$((", "((", "$[", "${", "`"}
 # and the openers whose condition is a command. block_change and _walk share them.
 LEADERS = {"then", "else", "elif", "do", "!", "time", "{", "if", "while", "until"}
 WORD = re.compile(r"[^\s;&|()]*")
+# The characters after which bash starts a new word, so that a # there starts a comment.
+WORD_BREAKS = " \t\n;&|()<>"
 
 
 def _arithmetic_closes(text: str, start: int) -> bool:
@@ -347,7 +349,9 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
     ``$(`` opens plain code again inside double quotes and ``${...}``, but inside backticks it
     is text, as bash reads backtick content as a string. ``$((``, ``((`` at the start of a word
     and ``$[`` open arithmetic. In a command substitution a ``)`` that ends a case pattern does
-    not close it; ``case`` and ``esac`` count only where a command starts. A ``#`` at the
+    not close it; ``case`` and ``esac`` count only where a command starts, and in a case's
+    pattern position (opened by the ``in`` right after its subject and by ``;;``, ``;&`` or
+    ``;;&``) only ``esac`` is reserved, not right after a pattern's optional ``(``. A ``#`` at the
     start of a word in plain code, not after an escaped blank, starts a comment to the end of
     its line. A character that opens or closes a context belongs to the outer one. ``before``
     is the character that precedes the text, which decides whether it starts a word; frames
@@ -375,7 +379,7 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
         frame = stack[-1]
         kind, char = frame.kind, text[index]
         previous = text[index - 1] if index else before
-        word_start = previous in " \t\n;&|(" and escaped_end != index
+        word_start = previous in WORD_BREAKS and escaped_end != index
         if kind == "#":
             if char == "\n":
                 stack.pop()
@@ -428,8 +432,8 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
         else:
             if kind == "$(" and word_start and not char.isspace():
                 word = WORD.match(text, index).group()
-                if frame.command_start and word == "esac" or \
-                        frame.command_start and word == "case" and not frame.in_pattern:
+                if frame.command_start and (word == "esac" or
+                                            (word == "case" and not frame.in_pattern)):
                     # In pattern position only esac is reserved; a pattern may read case.
                     frame.cases += 1 if word == "case" else -1
                     frame.in_pattern, frame.expect_in = False, word == "case"
@@ -439,15 +443,19 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
                     frame.command_start = True  # so that an empty case's esac is read
                 else:
                     frame.command_start = word in LEADERS
-            if kind == "$(" and char in ";&\n(" or (kind == "$(" and char == "|" and
-                                                      not frame.in_pattern):
+            pattern_paren = kind == "$(" and char == "(" and frame.in_pattern and \
+                frame.nesting == 0
+            if kind == "$(" and (char in ";&\n" or (char == "(" and not pattern_paren) or
+                                 (char == "|" and not frame.in_pattern)):
                 frame.command_start = True
-            if kind == "$(" and text.startswith(";;", index) and frame.cases > 0:
-                frame.in_pattern = True         # the next pattern, or esac, follows
+            elif pattern_paren:
+                frame.command_start = False     # bash: no esac right after a pattern's (
+            if kind == "$(" and re.match(r";;&?|;&", text[index:index + 3]) and frame.cases > 0:
+                frame.in_pattern = True         # after ;; ;& ;;& the next pattern or esac
             if kind == "$(" and char == ")" and frame.nesting == 0 and frame.cases > 0:
                 frame.command_start = True      # a case pattern ends; its command follows
                 frame.in_pattern = False
-            elif kind == "$(" and char == "(" and frame.in_pattern and frame.nesting == 0:
+            elif pattern_paren:
                 pass                            # the optional ( before a case pattern
             elif kind in {"$(", "$((", "(("} and char in "()":
                 frame.nesting += 1 if char == "(" else -1
@@ -598,14 +606,16 @@ def shell_lines(text: str) -> list[ShellLine]:
         walk = _walk(raw + "\n", stack, before)
         code = _code(raw + "\n", walk)[:-1]
         pending += _heredoc_delimiters(raw, walk.kinds)
-        continues = _trailing_backslashes(code) % 2 and not (walk.open and walk.open[-1] == "'")
+        # Inside '...' and $'...' a backslash-newline is text, which bash keeps.
+        continues = _trailing_backslashes(code) % 2 and \
+            not (walk.open and walk.open[-1] in {"'", "$'"})
         if continues:
             buffer, stack = buffer + code[:-1], walk.stack
             # The next line goes on the same word unless a blank or an operator, itself not
             # escaped, ends this one.
             last = code[-2] if len(code) > 1 else before
             escaped = len(code) > 1 and _trailing_backslashes(code[:-2]) % 2 == 1
-            before = last if last in " \t;&|(" and not escaped else "x"
+            before = last if last in WORD_BREAKS and not escaped else "x"
             continue
         if walk.open:
             buffer, stack, before = buffer + code + "\n", walk.stack, "\n"
@@ -749,9 +759,6 @@ def environment_variables(path: Path) -> set[str]:
 # ``${ROOT}/`` prefix, the repository root in every script, is dropped.
 SCRIPT_MENTION = re.compile(
     r"(?:\$\{?ROOT\}?/)?((?:\$\{[^}]*\}|\$\w+|[\w./+@%~,-])*\.sh)(?![\w.-])")
-# A script path inside a parameter expansion's default, alternative or pattern, as in
-# ${X:-scripts/a.sh} or ${X#scripts/a.sh}: reported with the expansion around it.
-DEFAULT_MENTION = re.compile(r"\$\{\w+(?::?[-=+?]|##?|%%?)[^}]*[^}%#]\.sh\}")
 
 
 def mentioned_scripts(text: str) -> list[str]:
@@ -766,10 +773,7 @@ def mentioned_scripts(text: str) -> list[str]:
     """
     plain = re.sub(r"[\\'\"]", "", text)
     found = []
-    for match in re.finditer(rf"{DEFAULT_MENTION.pattern}|{SCRIPT_MENTION.pattern}", plain):
-        if match.group(1) is None:
-            found.append(match.group(0))
-            continue
+    for match in SCRIPT_MENTION.finditer(plain):
         # Text glued before the path, back to a blank or an operator, belongs to its word: an
         # assignment or option name (S=, --file=) is dropped, anything else is kept.
         glued = re.search(r"[^\s;&|()<>`]*$", plain[:match.start()]).group()
@@ -777,7 +781,9 @@ def mentioned_scripts(text: str) -> list[str]:
             inside = (glued + match.group(1)).rsplit("${", 1)[1]
             if re.fullmatch(r"\w+(?:%%?|##?)\.sh", inside):
                 continue                    # ${f%.sh} removes an extension; it names nothing
-            found.append(glued + match.group(1))    # any other path in a ${...}: loud
+            # A path in a default, alternative or pattern (${X:-scripts/a.sh}) is reported
+            # with the open expansion, so it differs from every scanned path.
+            found.append(glued + match.group(1))
             continue
         if re.fullmatch(r"(?:[A-Za-z_]\w*|--?[\w-]+)[=:]|", glued):
             glued = ""

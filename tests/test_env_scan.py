@@ -180,6 +180,11 @@ def test_a_heredoc_body_follows_its_command():
     assert [line.heredoc for line in lines] == [False, True]
 
 
+def test_a_backslash_newline_in_ansi_c_quotes_is_kept():
+    """A backslash and a newline inside $'...' stay, as in bash, so the line is not joined."""
+    assert es.shell_lines("echo $'a\\\nb'\n") == [es.ShellLine("echo $'a\\\nb'")]
+
+
 def test_scan_reads_a_comment_after_an_operator_continuation():
     """After a semicolon and a continuation the next line starts a word, so # comments."""
     assert "Z" not in es.shell_variables(es.shell_lines("A=1;\\\n#b $Z\n"))[0]
@@ -209,6 +214,8 @@ def test_a_mention_of_case_does_not_stop_folding():
     "A=$(case $x in a) for i in 1; do echo | case $y in b) :;; esac; done;; c) :;; esac)",
     "A=$(case $x in case) :;; esac)",                 # a pattern spelled case
     "A=$(case $x in (a) case $y in b) :;; esac;; c) :;; esac)",
+    "A=$(case $x in (esac) :;; esac)",               # bash: esac after ( is a pattern
+    "A=$(case $x in a) :;& case) :;; esac)",          # a pattern after ;& reads case
 ])
 def test_case_and_subshell_substitutions_fold_whole(line):
     """Each of these is one command substitution assigned to A."""
@@ -319,6 +326,7 @@ def test_commands_are_split_into_words(line, words):
     (["X=$(", "echo a", "case $y in", "a) echo;;", "esac", ")", "A=1", "echo $A"],
      {"X", "A"}),                                                 # case after a command
     (["B=1;\\", "#b $Z", "echo $B"], {"B"}),                       # # after ; is a comment
+    (["cmd >#; A=1", "echo $A"], set()),                         # bash: # after > comments
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
@@ -363,9 +371,9 @@ A = "scripts/a.sh"
     ("true&&scripts/a.sh", {A}),
     ("x;scripts/a.sh", {A}),
     ("a|scripts/a.sh", {A}),
-    ("${X:-scripts/a.sh}", {"${X:-scripts/a.sh}"}),   # a default value: reported, differs
-    ("bash ${X:=scripts/a.sh}", {"${X:=scripts/a.sh}"}),
-    ("bash ${X#scripts/a.sh}", {"${X#scripts/a.sh}"}),
+    ("${X:-scripts/a.sh}", {"${X:-scripts/a.sh"}),   # a default value: reported, differs
+    ("bash ${X:=scripts/a.sh}", {"${X:=scripts/a.sh"}),
+    ("bash ${X#scripts/a.sh}", {"${X#scripts/a.sh"}),
     ("bash --file=scripts/a.sh", {A}),                # after an option or an assignment
     ("S=scripts/a.sh", {A}),
     ("bash -o pipefail scripts/a.sh", {A}),
@@ -388,7 +396,7 @@ A = "scripts/a.sh"
     ("n=${f%.sh}", set()),                            # an extension removed, no script
     ("${X/old/scripts/a.sh}", {"${X/old/scripts/a.sh"}),   # any other expansion: loud
     ("${CMD:-scripts/run.sh --flag}", {"${CMD:-scripts/run.sh"}),
-    ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh}"}),
+    ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):
     """Every mention of a shell script counts, as a normalised repository-relative path."""
