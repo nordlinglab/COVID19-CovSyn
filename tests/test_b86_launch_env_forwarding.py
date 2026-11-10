@@ -34,7 +34,8 @@ CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDA
 # Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
-SYNTHESIS_CALL = re.compile(r'^\s*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh\b')
+SYNTHESIS_CALL = re.compile(
+    r'^\s*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh --environment-checked\b')
 
 
 def _code(path: Path) -> list[str]:
@@ -153,18 +154,23 @@ def test_every_module_environment_read_is_forwarded_or_cleared():
         assert unset < first_verify, name
 
 
-def test_the_chain_tells_the_synthesis_only_when_launched_that_the_environment_was_checked():
-    """The chain passes --environment-checked only when the launcher started it.
+def test_the_chain_checks_the_environment_once_before_it_waits(tmp_path):
+    """The chain checks the environment against uv.lock at its start, before anything runs.
 
-    The launcher checked the environment at the launch, so a lock pulled during the run must not
-    stop the chain halfway; a chain started by hand has no FIREFLY_STATUS and lets the synthesis
-    check. An argument reaches that one process, unlike a variable a tmux session would hand on
-    to every window opened in it later.
+    The check changes nothing, so it is safe while the optimiser runs; done at the start, it
+    stops a chain on a stale environment before hours of work, and a lock pulled later does not
+    stop the chain halfway. uv's own message is kept in the log.
     """
-    code = "\n".join(_code(CHAIN))
-    assert 'checked_flag=""' in code
-    assert re.search(r'if \[ -n "\$\{FIREFLY_STATUS:-\}" \]; then checked_flag=1; fi', code)
-    assert "bash scripts/data_synthesis.sh ${checked_flag:+--environment-checked}" in code
+    root, record, status, output = _run(tmp_path, CHAIN, {
+        "FIREFLY_RUN": "run", "UV_SYNC_STATUS": "2",
+        "_files": {"run/firefly_result.txt": "1 2 3\n"}})
+    log = (root / "phaseD_chain.log").read_text()
+    assert status != 0
+    assert "differs from uv.lock" in log
+    calls = (record / "uv_calls").read_text().splitlines()
+    assert calls == ["sync --locked --check --inexact"]   # nothing ran on it
+
+
 
 def test_the_firefly_modules_do_not_read_the_environment():
     """The firefly session gets WARM_START alone, which the shell passes as an argument."""
@@ -189,6 +195,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "uv").write_text(
         "#!/usr/bin/env bash\n"
         f'echo "${{UV_PROJECT_ENVIRONMENT:-}}" > "{record}/uv_$1_environment"\n'
+        f'echo "$*" | cut -d" " -f1-4 >> "{record}/uv_calls"\n'
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
@@ -301,7 +308,19 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
     assert status == 1
     assert "/opt/env differs from uv.lock" in output
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
+    assert (record / "uv_calls").read_text().splitlines() == ["sync --locked --check --inexact"]
     assert not (record / "uv_run_args").exists()
+
+
+@pytest.mark.parametrize("args", [["--environment_checked"], ["run10"],
+                                  ["--environment-checked", "extra"]])
+def test_the_synthesis_rejects_an_argument_it_does_not_know(tmp_path, args):
+    """A misspelled option or a stray argument stops the script before 2000 simulations."""
+    root, record, status, output = _run(tmp_path, SYNTHESIS, {
+        "PARAMETER_PATH": "run", "_args": args, **SYNTHESIS_FILES})
+    assert status == 2
+    assert "Usage" in output
+    assert not (record / "uv_calls").exists()
 
 
 def test_the_synthesis_under_the_launcher_skips_the_check(tmp_path):
@@ -445,7 +464,7 @@ def test_the_variable_is_documented_in_the_usage_header(variable):
     text = SCRIPT.read_text(encoding="utf-8")
     header, marker, _ = text.partition("set -euo pipefail")
     assert marker, "launch_phase_d.sh no longer has its set -euo pipefail line"
-    assert re.search(rf"^#\s+{variable}\s", header, re.MULTILINE), variable
+    assert re.search(rf"^#   {variable} +\S", header, re.MULTILINE), variable
 
 
 def test_the_checklist_uses_the_shared_helper_for_its_worker_count():

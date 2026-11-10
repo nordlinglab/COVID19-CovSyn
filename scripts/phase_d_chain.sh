@@ -53,6 +53,16 @@ say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 # it from reinstalling packages under the optimiser, which may still be running.
 run() { uv run --no-sync python -m "$@"; }
 
+# Every step runs uv run --no-sync, so the environment is checked against uv.lock once, here,
+# before the chain waits: the check changes nothing, so it is safe while the optimiser runs, it
+# stops a chain on a stale environment before hours of work, and a lock pulled later does not
+# stop the chain halfway. uv's own message goes to the log.
+command -v uv >/dev/null || { say 'ERROR: uv not found on PATH; see the README'; exit 1; }
+if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
+    say "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; run uv sync"
+    exit 1
+fi
+
 say 'waiting for the firefly session to finish'
 # "=" matches the session name exactly, not as a prefix (firefly_old would match).
 while tmux has-session -t =firefly 2>/dev/null; do sleep 120; done
@@ -110,14 +120,9 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
 done
 say 'generating synthetic data (2 modes x 1000 Monte-Carlo runs)'
 # PARAMETER_PATH is set here, so a value left in the tmux server's environment cannot point the
-# synthesis at another run than the one copied onto $FIREFLY. The launcher checked the
-# environment at the launch, and FIREFLY_STATUS is set only then, so the synthesis need not check
-# it again: a lock pulled during the run must not stop the chain halfway, as every step runs in
-# the environment the launcher checked. A chain started by hand lets the synthesis check.
-checked_flag=""
-if [ -n "${FIREFLY_STATUS:-}" ]; then checked_flag=1; fi
-PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh ${checked_flag:+--environment-checked} \
-    >> "$LOG" 2>&1 \
+# synthesis at another run than the one copied onto $FIREFLY. The chain checked the environment
+# at its start, so the synthesis does not check it again.
+PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked >> "$LOG" 2>&1 \
     || { say 'ERROR: data synthesis failed'; exit 1; }
 say 'synthetic data done'
 
