@@ -249,6 +249,11 @@ def test_case_and_subshell_substitutions_fold_whole(line):
     assert es.commands(line) == [["A=X"]]
 
 
+def test_arithmetic_left_open_at_the_end_of_the_text_waits():
+    """For $(( ${X:-(} )) bash -n reports EOF: the arithmetic is still open there."""
+    assert es._walk("echo $(( ${X:-(} ))").open == ["$(("]
+
+
 def test_arithmetic_starting_with_a_parenthesis_folds_whole():
     """$(((1+2)*3)) is one arithmetic expansion, not $( followed by (( )."""
     assert es._fold_arithmetic("echo $(((1+2)*3)) x") == "echo X x"
@@ -363,7 +368,7 @@ def test_commands_are_split_into_words(line, words):
     (['echo "${A:-${B:-<(cat <<E)}}"', "C=1", "E", "echo $C"], set()),  # a here-document
     (["echo $(( ${X:-<(echo })} ))", "A=1", "echo $A"], {"A"}),    # } inside the group
     (['echo "${X:-<(echo })"', "A=1", 'echo "$A"'], set()),         # bash: an open quote
-    (["echo $(( ${X:-(} ))", "A=1", "echo $A"], set()),             # bash: ( counts
+    (["X=$((1+2)", ")", "A=1", "echo $A"], {"X", "A"}),             # bash: a subshell
     (["(( $(cat <<E) ))", "A=1", "E", "B=1", "echo $B"], {"B"}),   # bash: a here-document
     (["A=$(case a in a) echo hi;; esac>/dev/null)", "B=1", "echo $B"], {"A", "B"}),
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word

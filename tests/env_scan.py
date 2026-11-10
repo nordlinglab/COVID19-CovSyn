@@ -343,10 +343,10 @@ def _arithmetic_closes(text: str, start: int) -> bool:
             if depth:
                 depth -= 1
             else:
-                # The first unmatched ) decides: )) is arithmetic, a ) before more text is a
-                # subshell, and one ending the line leaves bash waiting for the second ).
-                rest = text[index + 1:index + 2]
-                return rest in {")", "", "\n"}
+                # The first unmatched ) decides: )) is arithmetic, and so is one ending the
+                # whole text, where bash waits for more; one before anything else, a newline
+                # included, makes bash read a subshell (bash 5: $((1+2)\n) is one).
+                return text[index + 1:index + 2] in {")", ""}
         index += 1
     return True
 
