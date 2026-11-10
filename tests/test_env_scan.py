@@ -162,19 +162,33 @@ def test_heredoc_bodies_are_text():
     assert {"A", "B"} <= referenced
 
 
-def test_a_case_statement_in_a_substitution_is_left_unfolded():
-    """The unpaired ) of a case pattern cannot end its command substitution.
-
-    The line then assigns nothing, which can only report more reads.
-    """
+def test_a_case_statement_in_a_substitution_folds_whole():
+    """The unpaired ) of a case pattern does not end its command substitution."""
     line = "A=$(case $x in a) echo 1;; esac)"
-    assert "X" not in es.commands(line)[0][0]
-    assert es.assignment(line) is None
+    assert es.commands(line) == [["A=X"]]
+    assert es.assignment(line) == "A"
 
 
 def test_nested_arithmetic_opens_no_block():
     """An arithmetic expansion with nested parentheses folds into one word."""
     assert es.block_change("x=$(( (1+2) ))") == 0
+
+
+def test_a_heredoc_body_follows_its_command():
+    """The body of a here-document opened in a multi-line substitution comes after the line."""
+    lines = es.shell_lines("X=$(cat <<EOF\nhello\nEOF\n)\n")
+    assert [line.heredoc for line in lines] == [False, True]
+
+
+def test_a_continued_walk_records_no_foreign_group():
+    """A group opened in an earlier text is not recorded with indices from two texts."""
+    first = es._walk("$(\n")
+    assert es._walk("echo)", first.stack).groups == {}
+
+
+def test_a_mention_of_case_does_not_stop_folding():
+    """Only a case statement keeps a substitution unfolded, not the word case."""
+    assert es._fold_substitutions("echo $(echo case) x") == "echo X x"
 
 
 def test_arithmetic_starting_with_a_parenthesis_folds_whole():
@@ -269,7 +283,14 @@ def test_commands_are_split_into_words(line, words):
     (["X=$(cat <<EOF", "hello", "don't", "EOF", ")", "A=1", "echo $A"], {"X", "A"}),
     (['X="$(cat <<EOF', "hello", "EOF", ')"', "A=1", "echo $A"], {"X", "A"}),
     (["echo '`' && while read x; do echo '`'", "A=1", "done", "echo $A"], set()),
-    (["X=$(", "case $y in", "a) echo;;", "esac", ")", "A=1", "echo $A"], {"A"}),
+    (["X=$(", "case $y in", "a) echo;;", "esac", ")", "A=1", "echo $A"], {"X", "A"}),
+    (["X=$(echo case)", "A=1", "echo $A"], {"X", "A"}),          # case as an argument
+    (["X=$(grep -w esac f)", "A=1", "echo $A"], {"X", "A"}),
+    (["X=$(case $y in (a) echo;; esac)", "A=1", "echo $A"], {"X", "A"}),
+    (["X=$(case $y in a) (cd /; ls);; esac)", "A=1", "echo $A"], {"X", "A"}),
+    (["cat <<EOF; echo \"a", 'b"', "body", "EOF", "A=1", "echo $A"], {"A"}),  # body after
+    (["X=$((cd /tmp && ls) | wc -l)", "A=1", "echo $A"], {"X", "A"}),  # a subshell, no arithmetic
+    (["echo a\\", "#b", "A=1", "echo $A"], {"A"}),                 # #b joins the word a
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
@@ -313,9 +334,11 @@ A = "scripts/a.sh"
     ("true&&scripts/a.sh", {A}),
     ("x;scripts/a.sh", {A}),
     ("a|scripts/a.sh", {A}),
-    ("${X:-scripts/a.sh}", {"X:-scripts/a.sh"}),     # a default value: reported, differs
-    ("bash ${X:=scripts/a.sh}", {"X:=scripts/a.sh"}),
-    ("bash ${X#scripts/a.sh}", {"X#scripts/a.sh"}),
+    ("${X:-scripts/a.sh}", {"${X:-scripts/a.sh}"}),   # a default value: reported, differs
+    ("bash ${X:=scripts/a.sh}", {"${X:=scripts/a.sh}"}),
+    ("bash ${X#scripts/a.sh}", {"${X#scripts/a.sh}"}),
+    ("bash --file=scripts/a.sh", {A}),                # after an option or an assignment
+    ("S=scripts/a.sh", {A}),
     ("bash -o pipefail scripts/a.sh", {A}),
     ("if bash scripts/a.sh; then :; fi", {A}),
     ("nohup bash scripts/a.sh &", {A}),
@@ -332,7 +355,7 @@ A = "scripts/a.sh"
     ('bash "scripts/${step}.sh"', {"scripts/${step}.sh"}),
     ("bash scripts/{a,b}.sh", {".sh"}),
     ("bash scripts/a.sh,b.sh", {"scripts/a.sh,b.sh"}),
-    ("bash scripts/a=b.sh", {"scripts/a=b.sh"}),
+    ("bash scripts/a=b.sh", {"b.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):
     """Every mention of a shell script counts, as a normalised repository-relative path."""
@@ -430,6 +453,10 @@ BALANCED = st.recursive(
         st.builds(lambda w: f"${{X:-{w}}}", inner),
         st.builds(lambda w: f"`{w}`", WORD),
         st.builds(lambda a, b: f"{a} {b}", inner, inner),
+        st.builds(lambda w: f"$(case x in a) {w};; esac)", inner),
+        st.builds(lambda w: f"$(case x in (a) {w};; esac)", inner),
+        st.builds(lambda w: f"( {w} )", inner),
+        st.builds(lambda w: f"a\\ {w}", inner),
     ),
     max_leaves=8,
 )
@@ -449,14 +476,20 @@ def test_balanced_text_leaves_nothing_open(text):
         assert text[: end + 1].endswith(closers[opener])
 
 
-@given(st.lists(BALANCED, min_size=1, max_size=4))
-def test_walking_line_by_line_equals_walking_whole(parts):
-    """A walk that goes on from the previous line's stack reads each line as a whole walk."""
-    text = "\n".join(parts)
-    whole = es._walk(text).kinds
+@given(BALANCED, st.data())
+def test_walking_line_by_line_equals_walking_whole(text, data):
+    """A walk that goes on from the previous line's stack reads each line as a whole walk.
+
+    The balanced text is cut at newlines put anywhere in it, also inside open contexts.
+    """
+    cuts = sorted(data.draw(st.sets(st.integers(0, len(text)), max_size=3)))
+    parts = [text[a:b] for a, b in zip([0, *cuts], [*cuts, len(text)], strict=True)]
+    joined = "\n".join(parts)
+    whole = es._walk(joined).kinds
     stack, kinds = None, []
     for index, part in enumerate(parts):
-        walk = es._walk(part + ("\n" if index < len(parts) - 1 else ""), stack)
+        last = index == len(parts) - 1
+        walk = es._walk(part + ("" if last else "\n"), stack)
         kinds += walk.kinds
         stack = walk.stack
     assert kinds == whole
