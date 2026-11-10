@@ -423,7 +423,7 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             push("$((", 3)
         elif kind in ACTIVE and text.startswith("$(", index):
             push("$(", 2)
-        elif kind in PLAIN and char in "<>" and text.startswith("(", index + 1) and \
+        elif kind in PLAIN | {"${"} and char in "<>" and text.startswith("(", index + 1) and \
                 previous not in "<>":
             push("$(", 2)                   # a process substitution, plain code like $(
         elif kind in ACTIVE and text.startswith("${", index):
@@ -779,22 +779,30 @@ def mentioned_scripts(text: str) -> list[str]:
     """Every shell script a text names, in order, as a normalised repository-relative path.
 
     Every way of naming a script counts, in a quoted command string, a substitution, a
-    subshell, after an option or an assignment, or glued to other text. A name that cannot be
-    resolved to a path, such as ``${step}.sh``, ``{a,b}.sh``, ``$SCRIPT_DIR/a.sh``,
-    ``${DIR}scripts/a.sh``, a default value ``${X:-scripts/a.sh}`` or ``./a.sh`` after a cd,
+    subshell, after an option or an assignment, or glued to other text; backtick content is
+    read again, as bash does. A name that cannot be resolved to a path, such as
+    ``${step}.sh``, ``{a,b}.sh``, ``$SCRIPT_DIR/a.sh``, ``${DIR}scripts/a.sh``,
+    ``$(pwd)scripts/a.sh``, a default value ``${X:-scripts/a.sh}`` or ``./a.sh`` after a cd,
     comes out with its variable parts kept, which differs from every scanned path, so a test
     comparing them fails loudly rather than taking it for one already scanned.
     """
     plain = re.sub(r"[\\'\"]", "", text)
     walk, found = _walk(plain), []
-    opened = [start for start in range(len(plain)) if plain.startswith("${", start)]
+    # Parameter expansions as (start, end), an open one ending with the text; the walker opens
+    # none inside arithmetic or backticks, where ${ is read differently.
+    expansions = [(s, e) for s, e in walk.groups.items() if plain.startswith("${", s)]
+    expansions += [(f.start, len(plain)) for f in walk.stack if f.kind == "${" and f.start >= 0]
+    backticks = [(s, e) for s, e in walk.groups.items() if plain.startswith("`", s)]
     # A substitution that ends right before a path joins its word: its closing character mapped
     # to where it opens.
     closed_at = {end: start for start, end in walk.groups.items()
                  if plain.startswith(("$(", "<(", ">(", "`"), start)}
+    for start, end in backticks:
+        found += mentioned_scripts(plain[start + 1:end])
     for match in SCRIPT_MENTION.finditer(plain):
-        enclosing = [s for s in opened if s < match.start() and
-                     walk.groups.get(s, len(plain)) >= match.start()]
+        if any(s < match.start() < e for s, e in backticks):
+            continue                        # read again above, as bash reads backticks
+        enclosing = sorted(s for s, e in expansions if s < match.start() <= e)
         if enclosing:
             opening = enclosing[0]          # the outermost ${ that holds the path
             if re.fullmatch(r"\w+(?:%%?|##?)\.sh", plain[opening + 2:match.end()]):
@@ -804,8 +812,8 @@ def mentioned_scripts(text: str) -> list[str]:
             found.append(plain[opening:match.end()])
             continue
         # Text glued before the path, back to a word break, belongs to its word, a
-        # substitution such as $(pwd) included: an assignment or option name (S=, --file=) is
-        # dropped, anything else is kept.
+        # substitution such as $(pwd) included; a leading assignment or option name (S=,
+        # --file=) is dropped.
         begin = match.start()
         while begin:
             if begin - 1 in closed_at:
@@ -814,9 +822,7 @@ def mentioned_scripts(text: str) -> list[str]:
                 begin -= 1
             else:
                 break
-        glued = plain[begin:match.start()]
-        if re.fullmatch(r"(?:[A-Za-z_]\w*|--?[\w-]+)[=:]|", glued):
-            glued = ""
+        glued = re.sub(r"^(?:[A-Za-z_]\w*|--?[\w-]+)[=:]", "", plain[begin:match.start()])
         found.append(posixpath.normpath(glued + match.group(1)))
     return found
 

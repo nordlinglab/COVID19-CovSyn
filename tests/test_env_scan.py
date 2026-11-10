@@ -337,6 +337,7 @@ def test_commands_are_split_into_words(line, words):
     (["echo $(echo a)#$Z", "A=1", "echo $A"], {"A"}),             # ) of $( ) is no break
     (["cat <((echo p) | cat)", "A=1", "echo $A"], {"A"}),         # process substitution
     (["((1))#it's", "A=1", "echo $A $Q"], {"A"}),                 # # after (( )) comments
+    (["echo ${X:-<(echo })}#$Z", "A=1", "echo $A"], {"A"}),       # <( inside ${
     (["A=$(case a in a) echo hi;; esac>/dev/null)", "B=1", "echo $B"], {"A", "B"}),
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
 ])
@@ -411,6 +412,12 @@ A = "scripts/a.sh"
     ("${X:-${Y} scripts/a.sh}", {"${X:-${Y} scripts/a.sh"}),   # the outermost expansion
     ("${X:-$(bash scripts/a.sh)}", {"${X:-$(bash scripts/a.sh"}),
     ("bash $(cd x; pwd)scripts/a.sh", {"$(cd x; pwd)scripts/a.sh"}),  # a built path
+    ("echo $((${N}+1)); bash scripts/a.sh", {A}),     # ${ inside arithmetic is closed
+    ("echo `echo ${X}` ; bash scripts/a.sh", {A}),
+    ("echo $[${N}]; bash scripts/a.sh", {A}),
+    ("echo `bash $(pwd)scripts/a.sh`", {"$(pwd)scripts/a.sh"}),  # backticks read again
+    ("S=$(pwd)/scripts/a.sh", {"$(pwd)/scripts/a.sh"}),
+    ("--file=$(pwd)scripts/a.sh", {"$(pwd)scripts/a.sh"}),
     ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):
@@ -513,6 +520,8 @@ BALANCED = st.recursive(
         st.builds(lambda w: f"$(case x in (a) {w};; esac)", inner),
         st.builds(lambda w: f"( {w} )", inner),
         st.builds(lambda w: f"a\\ {w}", inner),
+        st.builds(lambda w: f"cat <({w})", inner),
+        st.builds(lambda w: f"${{X:-<({w})}}", inner),
     ),
     max_leaves=8,
 )
@@ -526,11 +535,12 @@ def test_balanced_text_leaves_nothing_open(text):
     """
     walk = es._walk(text)
     assert walk.open == []
-    # $(( may be arithmetic, closed by )), or a $( starting with a subshell, closed by ).
-    closers = {"$((": ("))", ")"), "((": ("))",), "$(": (")",), "${": ("}",), "$[": ("]",),
-               "`": ("`",)}
+    closers = {"$((": "))", "((": "))", "$(": ")", "${": "}", "$[": "]", "`": "`",
+               "<(": ")", ">(": ")"}
     for start, end in walk.groups.items():
         opener = next(o for o in closers if text.startswith(o, start))
+        if opener == "$((" and not es._arithmetic_closes(text, start):
+            opener = "$("                   # a $( that starts with a subshell
         assert text[: end + 1].endswith(closers[opener])
 
 
