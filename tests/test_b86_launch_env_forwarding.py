@@ -154,10 +154,9 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain
 
     The directory comes from a chain run, so no directory name is written in the test.
     """
-    print(chain_at_step_2.context)  # the shared run printed only in the first test's setup
     directory = chain_at_step_2.directory
     root, record, status, output = _run(
-        tmp_path, SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
+        tmp_path / "alone", SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
     )
     assert status == 0, output
     assert _synthesis_runs(record, output) == [(mode, f"./{directory}") for mode in MODES], output
@@ -228,10 +227,13 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
     return ChainRun(root, record, status, context, log, path[2:])
 
 
-@pytest.fixture(scope="module")
-def chain_at_step_2(tmp_path_factory) -> ChainRun:
-    """One chain run to step 2 with a synthesis that succeeds, shared by the tests below."""
-    return _chain_to_step_2(tmp_path_factory.mktemp("chain"), "0")
+@pytest.fixture
+def chain_at_step_2(tmp_path) -> ChainRun:
+    """A chain run to step 2 with a synthesis that succeeds.
+
+    One per test, so a failing run shows its output in the test it fails.
+    """
+    return _chain_to_step_2(tmp_path / "chain", "0")
 
 
 def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2):
@@ -241,7 +243,6 @@ def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2
     Only this path is run; other settings reach the same call by reading of the script.
     """
     run = chain_at_step_2
-    print(run.context)  # the shared run printed only in the first test's setup
     assert (run.root / run.directory / "firefly_best.txt").exists(), run.context
     assert run.directory == pipeline_runner.COMPAT_DIR, run.context
     assert "synthetic data done" in run.log, run.context
@@ -513,7 +514,8 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
             env=env,
             cwd=root,
             capture_output=True,
-            text=True,
+            encoding="utf-8",  # as the timeout path decodes, and never failing on a byte
+            errors="replace",
             timeout=60,
             check=False,
         )
