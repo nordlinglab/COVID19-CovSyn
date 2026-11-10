@@ -125,8 +125,8 @@ def _records(path: Path) -> list[list[str]]:
 
 
 def _uv_runs(record: Path) -> list[list[str]]:
-    """The arguments of every uv run the stand-in recorded, in order."""
-    return _records(record / "uv_runs")
+    """The arguments of every uv run recorded, in order, leaving out the synthesis stand-in's."""
+    return [call for call in _records(record / "runs") if call[:1] != ["SYNTHESIS"]]
 
 
 def _synthesis_runs(record: Path) -> list[tuple[str, str]]:
@@ -165,8 +165,10 @@ def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
 
 SYNTHESIS_STAND_IN = (
     "#!/usr/bin/env bash\n"
-    # PARAMETER_PATH as its own field, then the arguments, in the uv stand-in's record format.
-    'printf "%s\\x1f" "$PARAMETER_PATH" "$@" >> synthesis_call; printf "\\x1e" >> synthesis_call\n'
+    # Recorded in the uv stand-in's record, in order with the uv runs: SYNTHESIS, then
+    # PARAMETER_PATH as its own field, then the arguments.
+    'printf "%s\\x1f" SYNTHESIS "$PARAMETER_PATH" "$@" >> "$RECORD/runs"\n'
+    'printf "\\x1e" >> "$RECORD/runs"\n'
     'exit "${SYNTHESIS_STATUS:-0}"\n'
 )
 
@@ -205,10 +207,9 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
     log_path = root / "phaseD_chain.log"
     log = _read(log_path) if log_path.exists() else ""
     context = output + log
-    assert (root / "synthesis_call").exists(), context
-    calls = _records(root / "synthesis_call")
-    assert len(calls) == 1 and calls[0][1:] == ["--environment-checked"], context
-    path = calls[0][0]
+    syntheses = [call for call in _records(record / "runs") if call[:1] == ["SYNTHESIS"]]
+    assert len(syntheses) == 1 and syntheses[0][2:] == ["--environment-checked"], context
+    path = syntheses[0][1]
     assert path.startswith("./"), context
     return ChainRun(root, record, status, context, log, path[2:])
 
@@ -229,17 +230,18 @@ def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2
     assert (run.root / run.directory / "firefly_best.txt").exists(), run.context
     assert run.directory == pipeline_runner.COMPAT_DIR, run.context
     assert "synthetic data done" in run.log, run.context
-    # The steps after it run uv, which the stop test relies on not seeing after a failure.
-    assert (run.record / "uv_runs").exists(), run.context
+    # The steps after it run uv: recorded after the synthesis, in order.
+    calls = _records(run.record / "runs")
+    assert calls[0][0] == "SYNTHESIS" and len(calls) > 1, run.context
 
 
 def test_a_failed_synthesis_stops_the_chain(tmp_path):
     """A failed synthesis stops the chain, and the log, which the user reads, says so."""
     run = _chain_to_step_2(tmp_path, "1")
     assert run.status != 0, run.context
-    # No uv run is recorded: none comes before the synthesis (REVALIDATE=0), and a chain that
-    # went on would run uv in its next step, as the success test shows.
-    assert not (run.record / "uv_runs").exists(), run.context
+    # The synthesis is the only call recorded: none comes before it (REVALIDATE=0), and a chain
+    # that went on would run uv in its next step.
+    assert [call[0] for call in _records(run.record / "runs")] == ["SYNTHESIS"], run.context
     assert "] ERROR: data synthesis failed" in run.log, run.context
     assert "synthetic data done" not in run.log, run.context
 
@@ -427,7 +429,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         '[ "$1" = run ] || exit 0\n'
         # One record per run: arguments ended by \x1f, the run by \x1e, so any argument,
         # newlines included, comes back as it was.
-        f'printf "%s\\x1f" "$@" >> "{record}/uv_runs"; printf "\\x1e" >> "{record}/uv_runs"\n'
+        f'printf "%s\\x1f" "$@" >> "{record}/runs"; printf "\\x1e" >> "{record}/runs"\n'
         'exit "${UV_STATUS:-0}"\n'
     )
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
@@ -478,7 +480,7 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(text)
     bin_dir, record = _stand_ins(tmp_path)
-    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), **env}
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), "RECORD": str(record), **env}
     result = subprocess.run(
         ["bash", str(root / "scripts" / script.name), *args],
         env=env,
@@ -555,7 +557,7 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
     assert "/opt/env differs from uv.lock" in output
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
     assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
-    assert not (record / "uv_runs").exists()
+    assert not (record / "runs").exists()
 
 
 @pytest.mark.parametrize(
@@ -717,7 +719,7 @@ def test_the_chain_stops_when_the_firefly_failed(tmp_path, content, launched, st
     log = (root / "phaseD_chain.log").read_text()
     assert status != 0, output
     assert ("the firefly session ended with status" in log) == stops, log
-    assert (record / "uv_runs").exists() != stops
+    assert (record / "runs").exists() != stops
 
 
 @pytest.mark.parametrize("live", ["firefly", "chain"])
@@ -733,7 +735,7 @@ def test_launch_refuses_while_a_session_runs(tmp_path, live):
     )
     assert status == 1
     assert "already running" in output
-    assert not (record / "uv_runs").exists()
+    assert not (record / "runs").exists()
     assert (root / "firefly_phaseD.exit").read_text() == "0\n"
 
 
