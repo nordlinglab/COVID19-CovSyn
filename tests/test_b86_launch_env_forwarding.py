@@ -28,20 +28,30 @@ SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
 # Every variable the chain, data_synthesis.sh or a module they run reads from the environment;
 # the launcher passes each into the chain session. VERIFY_WORKERS is read by the checklist
 # module (worker_count), the others by the two scripts.
-CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDATE",
-                   "REVALIDATION_BLOCKS", "SELECT", "SELECT_TOP", "CPU_CORES", "FIREFLY_STATUS",
-                   "UV_PROJECT_ENVIRONMENT")
+CHAIN_VARIABLES = (
+    "PREVIOUS_CHECKS",
+    "VERIFY_WORKERS",
+    "FIREFLY_RUN",
+    "REVALIDATE",
+    "REVALIDATION_BLOCKS",
+    "SELECT",
+    "SELECT_TOP",
+    "CPU_CORES",
+    "FIREFLY_STATUS",
+    "UV_PROJECT_ENVIRONMENT",
+)
 # Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
-SYNTHESIS_CALL = re.compile(
-    r'^[ \t]*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh --environment-checked\b')
 
 
 def _code(path: Path) -> list[str]:
     """A script's lines without its comment lines."""
-    return [line for line in path.read_text(encoding="utf-8").splitlines()
-            if not line.lstrip().startswith("#")]
+    return [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    ]
 
 
 def _defaults(path: Path) -> set[str]:
@@ -72,87 +82,33 @@ def test_the_list_holds_every_default_the_scripts_read():
     assert read <= set(CHAIN_VARIABLES)
 
 
-def _allowed_script_line(line: str) -> bool:
-    """Whether a chain line that names a script is, as a whole, the fixed call or a message.
-
-    Rather than tell every way a shell can run a script, any line naming one must be exactly
-    the fixed synthesis call (with only its log redirection and a continuation backslash at the
-    very end, or blanks, after it), or exactly one say with a quoted message free of $ and
-    backticks, and in double quotes of backslashes too, so nothing can run there.
-    """
-    if not re.search(r"\.sh\b", line):
-        return True
-    # Blanks are what bash takes for blanks, space and tab, not any Unicode white space.
-    call = SYNTHESIS_CALL.pattern + r'(?:[ \t]+>>[ \t]*"\$LOG"[ \t]+2>&1)?(?:[ \t]+\\|[ \t]*)'
-    message = r"""[ \t]*say[ \t]+(?:'[^'$`]*'|"[^"$`\\]*")[ \t]*"""
-    return bool(re.fullmatch(call, line) or re.fullmatch(message, line))
-
-
-@pytest.mark.parametrize(("line", "allowed"), [
-    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
-     '>> "$LOG" 2>&1 \\', True),
-    ('    say "then start scripts/phase_d_chain.sh itself"', True),
-    ("echo hi", True),
-    ("    . scripts/data_synthesis.sh", False),
-    ('  [ -f x ] && ./scripts/data_synthesis.sh >> "$LOG" 2>&1', False),
-    ("  if ./scripts/data_synthesis.sh; then", False),
-    ("bash scripts/data_synthesis.sh --environment-checked", False),        # no PARAMETER_PATH
-    ('say "$(bash scripts/other.sh)"', False),
-    ("    say 'ERROR: see launch_phase_d.sh'", True),                  # single quotes
-    ('say "synthesising" && bash scripts/other.sh', False),          # a call after a message
-    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked; '
-     "bash scripts/other.sh", False),                                 # a call after the call
-    ('say "see scripts/x.sh\\"', False),                               # an escaped quote
-    ("    say 'see C:\\tmp\\x.sh'", True),                              # literal in '...'
-    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
-     '>> "$LOG" 2>&1 ', True),                                        # a trailing blank
-    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked\xa0',
-     False),                                                          # not a bash blank
-    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
-     '>> "$LOG" 2>&1 \\ ', False),                                    # an escaped space
-])
-
-def test_a_line_naming_a_script_is_the_fixed_call_or_a_message(line, allowed):
-    """Calls in any form, indented, after && or in an if, are caught; messages are not."""
-    assert _allowed_script_line(line) == allowed
-
-
-ALLOWED_LINES = st.sampled_from([
-    'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked',
+# The only chain lines that name a script, word for word: one message and the fixed call. A
+# golden list, not a parser of bash: any change to a line naming a script fails here, to be
+# checked by hand.
+SCRIPT_LINES = [
+    '    say "then start scripts/phase_d_chain.sh itself '
+    '(not launch_phase_d.sh, which starts a new"',
     'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
-    '>> "$LOG" 2>&1',
-    "    say 'see launch_phase_d.sh'",
-    '    say "then start scripts/phase_d_chain.sh"',
-])
-
-
-@given(ALLOWED_LINES, st.sampled_from([";", " &&", " ||", " |", " &", "\xa0", "\u3000"]),
-       st.sampled_from(["bash x.sh", "./x.sh", ". x.sh", "source x.sh", ""]))
-def test_nothing_can_follow_an_allowed_line(line, separator, call):
-    """No separator, call or non-bash blank may follow an allowed line."""
-    assert _allowed_script_line(line)
-    assert not _allowed_script_line(f"{line}{separator}{' ' + call if call else ''}")
-
-
-@given(st.text(), st.sampled_from(["'", '"']))
-def test_a_message_is_allowed_exactly_without_a_refused_character(text, quote):
-    """Any text inside a say message is allowed exactly when it holds no refused character.
-
-    The refused characters are the quote itself, $ or a backtick, and in double quotes a
-    backslash. In single quotes $ and a backtick are literal in bash, so the rule is
-    deliberately stricter than bash there; in double quotes they could run a command.
-    """
-    forbidden = set(quote + "$`") | ({"\\"} if quote == '"' else set())
-    line = f"    say {quote}{text} x.sh{quote}"
-    assert _allowed_script_line(line) == (not forbidden & set(text))
+    '>> "$LOG" 2>&1 \\',
+]
 
 
 def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
-    """The chain calls data_synthesis.sh in one fixed form, setting PARAMETER_PATH itself."""
-    code = _code(CHAIN)
-    assert any(SYNTHESIS_CALL.match(line) for line in code)
-    for line in code:
-        assert _allowed_script_line(line), line
+    """The lines naming a script are exactly the golden ones, and the fixed call is a command.
+
+    Lines are split at newlines only and a comment is a line whose first character after
+    spaces and tabs is #, as bash reads them, so no other character hides a line or a call.
+    """
+    lines = CHAIN.read_text(encoding="utf-8").split("\n")
+    naming = [
+        line
+        for line in lines
+        if re.search(r"\.sh\b", line) and not line.lstrip(" \t").startswith("#")
+    ]
+    assert naming == SCRIPT_LINES
+    call = lines.index(SCRIPT_LINES[1])
+    assert not lines[call - 1].endswith("\\")  # not an argument of the line before
+
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
 # sets AGE_RR_FILE per candidate, so the chain clears any value the tmux server holds.
@@ -164,7 +120,8 @@ CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
 # mapping of it passed as env (worker_count). A del is left out by _environment_reads.
 ENVIRONMENT_READ = re.compile(
     r"""\b(?:environ\.get|getenv|env\.get)\(\s*['"]([A-Z][A-Z0-9_]*)"""
-    r"""|\benviron\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
+    r"""|\benviron\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])"""
+)
 
 
 def _environment_reads(text: str) -> set[str]:
@@ -176,34 +133,40 @@ def _environment_reads(text: str) -> set[str]:
     for match in ENVIRONMENT_READ.finditer(text):
         line_start = text.rfind("\n", 0, match.start()) + 1
         if re.match(r"\s*del\s", text[line_start:]):
-            continue                            # every item of a del statement
+            continue  # every item of a del statement
         names.add(match.group(1) or match.group(2))
     return names
 
 
-@pytest.mark.parametrize(("text", "names"), [
-    ("os.environ.get('A')", {"A"}),
-    ("os.getenv('A')", {"A"}),
-    ("os.environ['A']", {"A"}),
-    ("environ['A']", {"A"}),
-    ("os.environ['A'] == 'x'", {"A"}),
-    ("env.get('A')", {"A"}),
-    ("os.environ['A'] = '1'", set()),              # sets it for a child process
-    ("del os.environ['A']", set()),
-    ("del  os.environ['A']", set()),
-    ("del environ['A']", set()),
-    ("myenviron['A']", set()),
-    ("myenviron.get('A')", set()),
-    ("_os.environ['A']", {"A"}),                   # os imported under another name
-    ("del os.environ['A'], os.environ['B']", set()),
-])
+@pytest.mark.parametrize(
+    ("text", "names"),
+    [
+        ("os.environ.get('A')", {"A"}),
+        ("os.getenv('A')", {"A"}),
+        ("os.environ['A']", {"A"}),
+        ("environ['A']", {"A"}),
+        ("os.environ['A'] == 'x'", {"A"}),
+        ("env.get('A')", {"A"}),
+        ("os.environ['A'] = '1'", set()),  # sets it for a child process
+        ("del os.environ['A']", set()),
+        ("del  os.environ['A']", set()),
+        ("del environ['A']", set()),
+        ("myenviron['A']", set()),
+        ("myenviron.get('A')", set()),
+        ("_os.environ['A']", {"A"}),  # os imported under another name
+        ("del os.environ['A'], os.environ['B']", set()),
+    ],
+)
 def test_environment_reads_are_told_from_writes(text, names):
     """A read counts; an assignment or a del of os.environ[...] does not."""
     assert _environment_reads(text) == names
 
 
-@given(st.from_regex(r"[A-Z][A-Z0-9_]{0,10}", fullmatch=True), st.integers(1, 3),
-       st.sampled_from(["os.environ", "environ", "_os.environ"]))
+@given(
+    st.from_regex(r"[A-Z][A-Z0-9_]{0,10}", fullmatch=True),
+    st.integers(1, 3),
+    st.sampled_from(["os.environ", "environ", "_os.environ"]),
+)
 def test_reads_and_dels_of_any_name_are_told_apart(name, spaces, mapping):
     """For any variable name, a subscript read counts and a del of it does not."""
     assert _environment_reads(f"x = {mapping}['{name}']") == {name}
@@ -219,7 +182,7 @@ def test_every_module_environment_read_is_forwarded_or_cleared():
     read = set()
     for path in SOURCE.rglob("*.py"):
         read |= _environment_reads(path.read_text(encoding="utf-8"))
-    assert "VERIFY_WORKERS" in read                 # read through worker_count's env mapping
+    assert "VERIFY_WORKERS" in read  # read through worker_count's env mapping
     assert read <= set(CHAIN_VARIABLES) | CLEARED_BY_CHAIN
     code = _code(CHAIN)
     first_verify = next(i for i, line in enumerate(code) if "verify_phase_d" in line)
@@ -235,9 +198,16 @@ def test_the_chain_checks_the_environment_once_before_it_waits(tmp_path):
     stops a chain on a stale environment before hours of work, and a lock pulled later does not
     stop the chain halfway. uv's own message is kept in the log.
     """
-    root, record, status, output = _run(tmp_path, CHAIN, {
-        "FIREFLY_RUN": "run", "UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env",
-        "_files": {"run/firefly_result.txt": "1 2 3\n"}})
+    root, record, status, output = _run(
+        tmp_path,
+        CHAIN,
+        {
+            "FIREFLY_RUN": "run",
+            "UV_SYNC_STATUS": "2",
+            "UV_PROJECT_ENVIRONMENT": "/opt/env",
+            "_files": {"run/firefly_result.txt": "1 2 3\n"},
+        },
+    )
     log = (root / "phaseD_chain.log").read_text()
     assert status != 0
     assert "/opt/env differs from uv.lock" in log
@@ -269,7 +239,7 @@ def test_a_failed_check_says_how_to_go_on(tmp_path, launched):
     assert ("  -e FIREFLY_STATUS=firefly.exit" in log) == launched
     shown = [line.split("  -e ", 1)[1] for line in log.splitlines() if "  -e " in line]
     assert sorted(item.split("=", 1)[0] for item in shown) == sorted(CHAIN_VARIABLES)
-    assert "SELECT=" in shown                                       # an empty one is shown too
+    assert "SELECT=" in shown  # an empty one is shown too
     assert "  -e UV_PROJECT_ENVIRONMENT=/opt/env" in log
 
 
@@ -280,14 +250,18 @@ def test_the_failed_check_lists_every_forwarded_variable():
     assert match, "the chain no longer lists its settings on a failed check"
     assert sorted(match.group(1).split()) == sorted(CHAIN_VARIABLES)
 
+
 def test_the_chain_checks_before_it_waits_for_the_optimiser(tmp_path):
     """A passing check comes before the first look for the firefly session."""
-    root, record, status, output = _run(tmp_path, CHAIN, {
-        "FIREFLY_RUN": "run", "UV_STATUS": "9", "_files": {"run/firefly_result.txt": "1 2 3\n"}})
+    root, record, status, output = _run(
+        tmp_path,
+        CHAIN,
+        {"FIREFLY_RUN": "run", "UV_STATUS": "9", "_files": {"run/firefly_result.txt": "1 2 3\n"}},
+    )
     calls = (record / "calls").read_text().splitlines()
     assert calls[0] == "uv sync --locked --check --inexact"
     assert calls[1] == "tmux has-session -t =firefly"
-    assert sum(call.startswith("uv sync") for call in calls) == 1     # checked once
+    assert sum(call.startswith("uv sync") for call in calls) == 1  # checked once
     assert status != 0 and "revalidation failed" in (root / "phaseD_chain.log").read_text()
 
 
@@ -318,7 +292,8 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
-        'exit "${UV_STATUS:-0}"\n')
+        'exit "${UV_STATUS:-0}"\n'
+    )
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
 case "$1" in
@@ -368,8 +343,15 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
         (root / name).write_text(text)
     bin_dir, record = _stand_ins(tmp_path)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), **env}
-    result = subprocess.run(["bash", str(root / "scripts" / script.name), *args], env=env, cwd=root,
-                            capture_output=True, text=True, timeout=60, check=False)
+    result = subprocess.run(
+        ["bash", str(root / "scripts" / script.name), *args],
+        env=env,
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
     return root, record, result.returncode, result.stdout + result.stderr
 
 
@@ -380,16 +362,20 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     WARM_START reaches the optimiser as separate files whatever the user's login shell, and
     the firefly session leaves the optimiser's exit status where the chain looks for it.
     """
-    root, record, status, output = _run(tmp_path, SCRIPT, {
-        "WARM_START": "a/firefly_best.txt b/firefly_best.txt",
-        "FIREFLY_RUN": "run's dir",
-        "CPU_CORES": "8",
-        "_files": {"firefly_phaseD.exit": "1\n"},
-    })
+    root, record, status, output = _run(
+        tmp_path,
+        SCRIPT,
+        {
+            "WARM_START": "a/firefly_best.txt b/firefly_best.txt",
+            "FIREFLY_RUN": "run's dir",
+            "CPU_CORES": "8",
+            "_files": {"firefly_phaseD.exit": "1\n"},
+        },
+    )
     assert status == 0, output
     args = (record / "uv_run_args").read_text().split("\n")
     start = args.index("--warm_start")
-    assert args[start + 1:start + 3] == ["a/firefly_best.txt", "b/firefly_best.txt"]
+    assert args[start + 1 : start + 3] == ["a/firefly_best.txt", "b/firefly_best.txt"]
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
     assert (root / chain["FIREFLY_STATUS"]).read_text().strip() == "0"
     assert chain["FIREFLY_RUN"] == "run's dir"
@@ -422,9 +408,16 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
 
     Its message names the environment in use.
     """
-    root, record, status, output = _run(tmp_path, SYNTHESIS, {
-        "PARAMETER_PATH": "run", "UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env",
-        **SYNTHESIS_FILES})
+    root, record, status, output = _run(
+        tmp_path,
+        SYNTHESIS,
+        {
+            "PARAMETER_PATH": "run",
+            "UV_SYNC_STATUS": "2",
+            "UV_PROJECT_ENVIRONMENT": "/opt/env",
+            **SYNTHESIS_FILES,
+        },
+    )
     assert status == 1
     assert "/opt/env differs from uv.lock" in output
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
@@ -432,12 +425,14 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
     assert not (record / "uv_run_args").exists()
 
 
-@pytest.mark.parametrize("args", [["--environment_checked"], ["run10"],
-                                  ["--environment-checked", "extra"]])
+@pytest.mark.parametrize(
+    "args", [["--environment_checked"], ["run10"], ["--environment-checked", "extra"]]
+)
 def test_the_synthesis_rejects_an_argument_it_does_not_know(tmp_path, args):
     """A misspelled option or a stray argument stops the script before 2000 simulations."""
-    root, record, status, output = _run(tmp_path, SYNTHESIS, {
-        "PARAMETER_PATH": "run", "_args": args, **SYNTHESIS_FILES})
+    root, record, status, output = _run(
+        tmp_path, SYNTHESIS, {"PARAMETER_PATH": "run", "_args": args, **SYNTHESIS_FILES}
+    )
     assert status == 2
     assert "Usage" in output
     assert not (record / "calls").exists()
@@ -448,9 +443,17 @@ def test_the_synthesis_called_by_the_chain_skips_the_check(tmp_path):
 
     The chain checked the environment at its start, and the synthesis runs in it.
     """
-    root, record, status, output = _run(tmp_path, SYNTHESIS, {
-        "PARAMETER_PATH": "run", "UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env",
-        "_args": ["--environment-checked"], **SYNTHESIS_FILES})
+    root, record, status, output = _run(
+        tmp_path,
+        SYNTHESIS,
+        {
+            "PARAMETER_PATH": "run",
+            "UV_SYNC_STATUS": "2",
+            "UV_PROJECT_ENVIRONMENT": "/opt/env",
+            "_args": ["--environment-checked"],
+            **SYNTHESIS_FILES,
+        },
+    )
     assert status == 0, output
     assert not (record / "uv_sync_environment").exists()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
@@ -458,9 +461,16 @@ def test_the_synthesis_called_by_the_chain_skips_the_check(tmp_path):
 
 def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
     """The chain's own uv run uses the UV_PROJECT_ENVIRONMENT the launcher passes."""
-    root, record, status, output = _run(tmp_path, CHAIN, {
-        "FIREFLY_RUN": "run", "UV_STATUS": "9", "UV_PROJECT_ENVIRONMENT": "/opt/env",
-        "_files": {"run/firefly_result.txt": "1 2 3\n"}})
+    root, record, status, output = _run(
+        tmp_path,
+        CHAIN,
+        {
+            "FIREFLY_RUN": "run",
+            "UV_STATUS": "9",
+            "UV_PROJECT_ENVIRONMENT": "/opt/env",
+            "_files": {"run/firefly_result.txt": "1 2 3\n"},
+        },
+    )
     # The chain's own run() reached the revalidation, which the stand-in uv fails.
     assert status != 0
     assert "revalidation failed" in (root / "phaseD_chain.log").read_text()
@@ -473,9 +483,14 @@ def test_launch_uses_a_status_file_the_user_names(tmp_path):
 
     The path is relative to the repository root.
     """
-    root, record, status, output = _run(tmp_path, SCRIPT, {
-        "FIREFLY_STATUS": "runs/x.exit", "_files": {"runs/.keep": ""},
-    })
+    root, record, status, output = _run(
+        tmp_path,
+        SCRIPT,
+        {
+            "FIREFLY_STATUS": "runs/x.exit",
+            "_files": {"runs/.keep": ""},
+        },
+    )
     assert status == 0, output
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
     assert chain["FIREFLY_STATUS"] == "runs/x.exit"
@@ -522,8 +537,9 @@ def test_an_optimiser_exiting_during_the_check_keeps_its_status(tmp_path, exit_s
 
     The status is read again once the session is gone, so the exit is not reported as killed.
     """
-    root, record, status, output = _run(tmp_path, SCRIPT, {"KILL_FIREFLY": "1",
-                                                          "STATUS_ON_CHECK": exit_status})
+    root, record, status, output = _run(
+        tmp_path, SCRIPT, {"KILL_FIREFLY": "1", "STATUS_ON_CHECK": exit_status}
+    )
     assert (status == 0) == launched, output
     assert "killed" not in output
     assert (record / "chain_env").exists() == launched
@@ -531,22 +547,26 @@ def test_an_optimiser_exiting_during_the_check_keeps_its_status(tmp_path, exit_s
 
 def test_a_running_firefly_session_starts_the_chain(tmp_path):
     """While the optimiser still runs at the check, the launcher starts the chain."""
-    root, record, status, output = _run(tmp_path, SCRIPT, {"KILL_FIREFLY": "1",
-                                                          "FIREFLY_LIVE": "1"})
+    root, record, status, output = _run(
+        tmp_path, SCRIPT, {"KILL_FIREFLY": "1", "FIREFLY_LIVE": "1"}
+    )
     assert status == 0, output
     assert (root / "firefly_phaseD.exit").read_text().strip() == "running"
     assert (record / "chain_env").exists()
 
 
-@pytest.mark.parametrize(("content", "launched", "stops"), [
-    ("1", True, True),
-    ("137", True, True),
-    ("running", True, True),    # killed before the optimiser exited
-    (None, True, True),         # status file gone
-    ("0", True, False),
-    ("1", False, False),        # a hand-run chain ignores a stale status
-    (None, False, False),
-])
+@pytest.mark.parametrize(
+    ("content", "launched", "stops"),
+    [
+        ("1", True, True),
+        ("137", True, True),
+        ("running", True, True),  # killed before the optimiser exited
+        (None, True, True),  # status file gone
+        ("0", True, False),
+        ("1", False, False),  # a hand-run chain ignores a stale status
+        (None, False, False),
+    ],
+)
 def test_the_chain_stops_when_the_firefly_failed(tmp_path, content, launched, stops):
     """A failed or killed optimiser stops a launched chain before it reads FIREFLY_RUN.
 
@@ -569,9 +589,14 @@ def test_the_chain_stops_when_the_firefly_failed(tmp_path, content, launched, st
 @pytest.mark.parametrize("live", ["firefly", "chain"])
 def test_launch_refuses_while_a_session_runs(tmp_path, live):
     """A second launch beside a live firefly or chain session stops before touching anything."""
-    root, record, status, output = _run(tmp_path, SCRIPT, {
-        "LIVE_SESSIONS": live, "_files": {"firefly_phaseD.exit": "0\n"},
-    })
+    root, record, status, output = _run(
+        tmp_path,
+        SCRIPT,
+        {
+            "LIVE_SESSIONS": live,
+            "_files": {"firefly_phaseD.exit": "0\n"},
+        },
+    )
     assert status == 1
     assert "already running" in output
     assert not (record / "uv_run_args").exists()
@@ -589,20 +614,25 @@ def test_the_variable_is_documented_in_the_usage_header(variable):
 
 def test_the_checklist_uses_the_shared_helper_for_its_worker_count():
     """Both the forwarding and the parsing have to agree on one definition."""
-    checklist = (SCRIPT.parent.parent / "src" / "covsyn" / "validation"
-                 / "verify_phase_d.py").read_text(encoding="utf-8")
+    checklist = (
+        SCRIPT.parent.parent / "src" / "covsyn" / "validation" / "verify_phase_d.py"
+    ).read_text(encoding="utf-8")
     assert "worker_count(" in checklist
 
 
-@pytest.mark.parametrize(("value", "expected"), [
-    ("8", 8),        # E98's setting for this shared machine, about 39 GB
-    ("1", 1),
-    ("64", 64),      # above the cap, because the cap is only a default
-    (" 8 ", 8),      # a forwarded value can carry whitespace
-])
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("8", 8),  # E98's setting for this shared machine, about 39 GB
+        ("1", 1),
+        ("64", 64),  # above the cap, because the cap is only a default
+        (" 8 ", 8),  # a forwarded value can carry whitespace
+    ],
+)
 def test_an_explicit_worker_count_is_taken_as_given(value, expected):
     """An explicit setting overrides the default, above the cap included."""
     from covsyn.validation.acceptance import worker_count
+
     assert worker_count({"VERIFY_WORKERS": value}, cpus=32) == expected
 
 
@@ -610,13 +640,15 @@ def test_an_explicit_worker_count_is_taken_as_given(value, expected):
 def test_an_unset_or_empty_value_falls_back_to_the_default(value):
     """The shell forwards '' when the variable is unset, which must not raise or mean zero."""
     from covsyn.validation.acceptance import worker_count
+
     env = {} if value is None else {"VERIFY_WORKERS": value}
-    assert worker_count(env, cpus=48) == 32      # the cap
-    assert worker_count(env, cpus=4) == 4        # fewer cores than the cap
+    assert worker_count(env, cpus=48) == 32  # the cap
+    assert worker_count(env, cpus=4) == 4  # fewer cores than the cap
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nonsense", "3.5"])
 def test_a_value_that_is_not_a_positive_count_falls_back(value):
     """A typo must not silently run the checklist on one worker or crash it."""
     from covsyn.validation.acceptance import worker_count
+
     assert worker_count({"VERIFY_WORKERS": value}, cpus=32) == 32
