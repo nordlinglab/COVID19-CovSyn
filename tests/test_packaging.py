@@ -166,7 +166,7 @@ def test_no_script_sets_pythonpath_or_picks_an_interpreter(path):
 
 @pytest.mark.parametrize(
     "path",
-    sorted((REPO_ROOT / "src" / "covsyn").rglob("*.py")),
+    [p for p in _script_files() if p.suffix == ".py"],
     ids=lambda p: str(p.relative_to(REPO_ROOT)),
 )
 def test_usage_lines_survive_docstring_parsing(path):
