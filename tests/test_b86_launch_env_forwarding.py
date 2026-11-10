@@ -90,7 +90,39 @@ CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
 # passed as env (worker_count).
 ENVIRONMENT_READ = re.compile(
     r"""(?:environ\.get|getenv|\benv\.get)\(\s*['"]([A-Z][A-Z0-9_]*)"""
-    r"""|(?<!del )\b(?:os\.)?environ\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
+    r"""|(?<![\w.])(?:os\.)?environ\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
+
+
+def _environment_reads(text: str) -> set[str]:
+    """The variables a module's text reads from the environment, as ENVIRONMENT_READ finds them.
+
+    A del of os.environ[...] is left out, as it sets nothing for this process to read.
+    """
+    names = set()
+    for match in ENVIRONMENT_READ.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        if text[line_start:match.start()].strip().endswith("del"):
+            continue
+        names.add(match.group(1) or match.group(2))
+    return names
+
+
+@pytest.mark.parametrize(("text", "names"), [
+    ("os.environ.get('A')", {"A"}),
+    ("os.getenv('A')", {"A"}),
+    ("os.environ['A']", {"A"}),
+    ("environ['A']", {"A"}),
+    ("os.environ['A'] == 'x'", {"A"}),
+    ("env.get('A')", {"A"}),
+    ("os.environ['A'] = '1'", set()),              # sets it for a child process
+    ("del os.environ['A']", set()),
+    ("del  os.environ['A']", set()),
+    ("del environ['A']", set()),
+    ("myenviron['A']", set()),
+])
+def test_environment_reads_are_told_from_writes(text, names):
+    """A read counts; an assignment or a del of os.environ[...] does not."""
+    assert _environment_reads(text) == names
 
 
 def test_every_module_environment_read_is_forwarded_or_cleared():
@@ -100,8 +132,7 @@ def test_every_module_environment_read_is_forwarded_or_cleared():
     """
     read = set()
     for path in SOURCE.rglob("*.py"):
-        for match in ENVIRONMENT_READ.finditer(path.read_text(encoding="utf-8")):
-            read.add(match.group(1) or match.group(2))
+        read |= _environment_reads(path.read_text(encoding="utf-8"))
     assert "VERIFY_WORKERS" in read                 # read through worker_count's env mapping
     assert read <= set(CHAIN_VARIABLES) | CLEARED_BY_CHAIN
     code = _code(CHAIN)
@@ -235,8 +266,9 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert (record / "uv_run_environment").read_text().strip() == ".venv"
     # ENVIRONMENT_CHECKED goes to the chain process only, not to its session.
     command = (record / "chain_command").read_text().split("\n")
-    assert command[:4] == ["env", "ENVIRONMENT_CHECKED=1", "bash", "scripts/phase_d_chain.sh"]
-    assert "ENVIRONMENT_CHECKED" not in chain
+    prefix = ["env", *(f"{name}=1" for name in sorted(SET_FOR_THE_CHAIN_PROCESS))]
+    assert command[:len(prefix) + 2] == [*prefix, "bash", "scripts/phase_d_chain.sh"]
+    assert not SET_FOR_THE_CHAIN_PROCESS & set(chain)
     assert set(chain) == set(CHAIN_VARIABLES)
 
 
@@ -263,7 +295,7 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
         **SYNTHESIS_FILES})
     assert status == 1
     assert "/opt/env differs from uv.lock" in output
-    assert (record / "uv_sync_environment").exists()
+    assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
     assert not (record / "uv_run_args").exists()
 
 
@@ -285,6 +317,10 @@ def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
     root, record, status, output = _run(tmp_path, CHAIN, {
         "FIREFLY_RUN": "run", "UV_STATUS": "9", "UV_PROJECT_ENVIRONMENT": "/opt/env",
         "_files": {"run/firefly_result.txt": "1 2 3\n"}})
+    # The chain's own run() reached the revalidation, which the stand-in uv fails.
+    assert status != 0
+    assert "revalidation failed" in (root / "phaseD_chain.log").read_text()
+    assert "covsyn.calibration.revalidation" in (record / "uv_run_args").read_text()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
 
 
@@ -398,7 +434,7 @@ def test_launch_refuses_while_a_session_runs(tmp_path, live):
     assert (root / "firefly_phaseD.exit").read_text() == "0\n"
 
 
-@pytest.mark.parametrize("variable", CHAIN_VARIABLES)
+@pytest.mark.parametrize("variable", [*CHAIN_VARIABLES, *sorted(SET_FOR_THE_CHAIN_PROCESS)])
 def test_the_variable_is_documented_in_the_usage_header(variable):
     """The header is where a run is configured from, so an undocumented variable is unusable."""
     header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]

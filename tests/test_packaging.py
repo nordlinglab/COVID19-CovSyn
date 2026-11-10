@@ -150,7 +150,7 @@ def test_entry_point_is_installed_and_callable(name, monkeypatch):
 
 def _script_files() -> list[Path]:
     """The scripts, the package modules, whose docstrings give usage lines, and the runner."""
-    files = [p for p in (REPO_ROOT / "scripts").rglob("*") if p.suffix in {".sh", ".py"}]
+    files = sorted(p for p in (REPO_ROOT / "scripts").rglob("*") if p.suffix in {".sh", ".py"})
     modules = sorted((REPO_ROOT / "src" / "covsyn").rglob("*.py"))
     return [*files, *modules, REPO_ROOT / "tests" / "pipeline_runner.py"]
 
