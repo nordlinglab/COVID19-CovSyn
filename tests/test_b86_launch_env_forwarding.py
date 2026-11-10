@@ -74,7 +74,8 @@ def test_the_list_holds_every_default_the_scripts_read():
 
 def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
     """The chain calls data_synthesis.sh in one fixed form, setting PARAMETER_PATH itself."""
-    calls = [line for line in _code(CHAIN) if re.search(r"\.sh\b", line)]
+    calls = [line for line in _code(CHAIN)
+             if re.search(r"\.sh\b", line) and not line.lstrip().startswith("say ")]
     assert calls
     for line in calls:
         assert SYNTHESIS_CALL.match(line), line
@@ -167,10 +168,44 @@ def test_the_chain_checks_the_environment_once_before_it_waits(tmp_path):
     log = (root / "phaseD_chain.log").read_text()
     assert status != 0
     assert "/opt/env differs from uv.lock" in log
-    assert "once the firefly session has ended" in log   # not uv sync beside the optimiser
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
-    # The check is the first call, before the wait for the firefly session, and nothing ran.
+    # The failing check is the only call: nothing ran on the stale environment.
     assert (record / "calls").read_text().splitlines() == ["uv sync --locked --check --inexact"]
+
+
+def test_a_launched_chain_tells_how_to_restart_it_with_its_settings(tmp_path):
+    """A launched chain that stops on its check prints a restart command with its settings.
+
+    It says to sync with the launcher's options once the firefly session has ended (not beside
+    the optimiser), and the command carries FIREFLY_STATUS, so the restarted chain still checks
+    how the optimiser ended.
+    """
+    root, record, status, output = _run(tmp_path, CHAIN, {
+        "FIREFLY_RUN": "run's dir", "UV_SYNC_STATUS": "2", "FIREFLY_STATUS": "firefly.exit",
+        "UV_PROJECT_ENVIRONMENT": "/opt/env", "_files": {"run's dir/firefly_result.txt": "1\n"}})
+    log = (root / "phaseD_chain.log").read_text()
+    assert "Once the firefly session has ended, run uv sync --locked --inexact" in log
+    restart = next(line for line in log.splitlines() if "bash scripts/phase_d_chain.sh" in line)
+    assert "FIREFLY_STATUS=firefly.exit" in restart
+    assert "FIREFLY_RUN=run\\'s\\ dir" in restart         # quoted for the shell
+    assert "UV_PROJECT_ENVIRONMENT=/opt/env" in restart
+
+
+def test_a_chain_started_by_hand_mentions_no_firefly_session(tmp_path):
+    """Without FIREFLY_STATUS there is no firefly session to wait for."""
+    root, record, status, output = _run(tmp_path, CHAIN, {
+        "FIREFLY_RUN": "run", "UV_SYNC_STATUS": "2", "_files": {"run/firefly_result.txt": "1\n"}})
+    log = (root / "phaseD_chain.log").read_text()
+    assert "firefly session" not in log
+    assert "Run uv sync --locked --inexact" in log
+
+
+def test_the_restart_command_carries_every_forwarded_variable():
+    """The chain's list for its restart command is the launcher's list."""
+    code = "\n".join(_code(CHAIN)).replace("\\\n", " ")
+    match = re.search(r"for name in ([A-Z_ ]+); do", code)
+    assert match, "the chain no longer builds its restart command from a list"
+    assert sorted(match.group(1).split()) == sorted(CHAIN_VARIABLES)
 
 
 def test_the_chain_checks_before_it_waits_for_the_optimiser(tmp_path):
@@ -179,7 +214,9 @@ def test_the_chain_checks_before_it_waits_for_the_optimiser(tmp_path):
         "FIREFLY_RUN": "run", "UV_STATUS": "9", "_files": {"run/firefly_result.txt": "1 2 3\n"}})
     calls = (record / "calls").read_text().splitlines()
     assert calls[0] == "uv sync --locked --check --inexact"
-    assert calls[1] == "tmux has-session =firefly"
+    assert calls[1] == "tmux has-session -t =firefly"
+    assert sum(call.startswith("uv sync") for call in calls) == 1     # checked once
+    assert status != 0 and "revalidation failed" in (root / "phaseD_chain.log").read_text()
 
 
 def test_the_firefly_modules_do_not_read_the_environment():
@@ -214,7 +251,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
 case "$1" in
   has-session)
-    echo "tmux $1 $3" >> "{record}/calls"
+    echo "tmux $*" >> "{record}/calls"
     case " ${{LIVE_SESSIONS:-}} " in *" ${{3#=}} "*) exit 0 ;; esac
     # STATUS_ON_CHECK: the optimiser exits, with that status, while the launcher checks.
     if [ -n "${{STATUS_ON_CHECK:-}}" ] && [ -e "{record}/firefly_started" ]; then
@@ -301,7 +338,6 @@ def test_launch_runs_both_sessions_in_the_environment_the_user_names(tmp_path):
     assert status == 0, output
     assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
-    assert (record / "uv_sync_environment").read_text().strip() == "/opt/env"
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
     assert chain["UV_PROJECT_ENVIRONMENT"] == "/opt/env"
 

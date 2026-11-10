@@ -60,7 +60,19 @@ run() { uv run --no-sync python -m "$@"; }
 command -v uv >/dev/null || { say 'ERROR: uv not found on PATH; see the README'; exit 1; }
 if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
     say "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; the chain stops."
-    say "Run uv sync once the firefly session has ended, then start the chain again."
+    # The restart command carries every setting the launcher passed (FIREFLY_STATUS included,
+    # so the restarted chain still checks how the optimiser ended), quoted for the shell.
+    restart="cd $(printf %q "$ROOT") &&"
+    for name in PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
+            SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
+        if [ -n "${!name:-}" ]; then restart="$restart $name=$(printf %q "${!name}")"; fi
+    done
+    if [ -n "${FIREFLY_STATUS:-}" ]; then
+        say "Once the firefly session has ended, run uv sync --locked --inexact, then:"
+    else
+        say "Run uv sync --locked --inexact, then:"
+    fi
+    say "$restart bash scripts/phase_d_chain.sh"
     exit 1
 fi
 
