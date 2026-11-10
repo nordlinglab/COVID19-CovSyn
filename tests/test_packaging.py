@@ -201,7 +201,7 @@ UV_SHORT_VALUE = "".join(o[1] for o in UV_VALUE_OPTIONS.split("|") if re.fullmat
 THROUGH_UV = re.compile(
     rf"\buv run(?:\s+(?:(?:{UV_VALUE_OPTIONS})(?:\s+|=)[^\s|;&]+"
     rf"|-[A-Za-z]*[{UV_SHORT_VALUE}](?:\s+|=)?[^\s|;&=-][^\s|;&]*"
-    rf"|(?!(?:{UV_VALUE_OPTIONS})(?:\s|=|$))--?[\w-]+(?:=[^\s|;&]+)?))*"
+    rf"|(?!(?:{UV_VALUE_OPTIONS}|-[A-Za-z]*[{UV_SHORT_VALUE}])(?:\s|=|$))--?[\w-]+(?:=[^\s|;&]+)?))*"
     r"\s+$"
 )
 
@@ -239,6 +239,8 @@ def test_usage_lines_run_scripts_through_uv(path):
         ("uv run --with python scripts/x.py", False),
         ("uv run -qp 3.12 python scripts/x.py", True),
         ("uv run -p= python scripts/x.py", False),
+        ("uv run -qp python scripts/x.py", False),
+        ("uv run -qw python scripts/x.py", False),
     ],
 )
 def test_usage_line_check_accepts_only_uv_options(line, through_uv):

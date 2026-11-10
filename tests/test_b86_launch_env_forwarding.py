@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -45,21 +46,33 @@ def _name(node: ast.AST) -> str:
 
 
 def _environment_names(tree: ast.AST) -> dict[str, str]:
-    """The names a module uses for the environment accesses of os, imported aliases included."""
+    """The names a module uses for the environment accesses of os.
+
+    Imported aliases (``from os import environ as e``) and local ones (``e = os.environ``)
+    included.
+    """
     names = {name: name for name in ENVIRONMENT_NAMES}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "os":
             for alias in node.names:
                 if alias.name in ENVIRONMENT_NAMES:
                     names[alias.asname or alias.name] = alias.name
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Name, ast.Attribute)):
+            value = _name(node.value)
+            value = names.get(value, value) if isinstance(node.value, ast.Name) else value
+            if value in ENVIRONMENT_NAMES:
+                names.update({t.id: value for t in node.targets if isinstance(t, ast.Name)})
     return names
 
 
 def _environment_reads(path: Path) -> set[str]:
     """Names a module reads from the environment, found in its code, not its comments.
 
-    Covers subscripts, ``.get``, ``.setdefault`` and ``in`` on ``os.environ`` or on a mapping
-    passed in as ``env``, and ``getenv``, under any name the module imports them as.
+    Covers subscripts, ``.get``, ``.setdefault``, ``.pop`` and ``in`` on ``os.environ`` or on
+    a mapping passed in as ``env``, and ``getenv`` with the key given by position or as
+    ``key=``, under any name the module imports or assigns them to. A mapping parameter by
+    another name than ``env``, or a key built at run time, is beyond a static scan.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     aliases = _environment_names(tree)
@@ -75,13 +88,15 @@ def _environment_reads(path: Path) -> set[str]:
     names = set()
     for node in ast.walk(tree):
         key = None
-        if isinstance(node, ast.Call) and node.args:
+        if isinstance(node, ast.Call):
             func = node.func
-            if isinstance(func, ast.Attribute) and func.attr in {"get", "setdefault"}:
+            first = node.args[0] if node.args else next(
+                (k.value for k in node.keywords if k.arg == "key"), None)
+            if isinstance(func, ast.Attribute) and func.attr in {"get", "setdefault", "pop"}:
                 if kind(func.value) == "mapping":
-                    key = node.args[0]
+                    key = first
             elif kind(func) == "getter":
-                key = node.args[0]
+                key = first
         elif isinstance(node, ast.Subscript) and kind(node.value) == "mapping":
             key = node.slice
         elif isinstance(node, ast.Compare) and any(isinstance(o, ast.In) for o in node.ops):
@@ -99,11 +114,17 @@ def _mentions_environment(path: Path) -> bool:
     A copy, an alias or a mapping handed to a reader such as ``worker_count`` reads the
     environment as surely as a lookup does, so the firefly session's modules may not touch it:
     no environment access of os under any name, and no such name as a string outside a
-    docstring, which covers ``getattr(os, "environ")`` and ``vars(os)["environ"]``.
+    docstring, which covers ``getattr(os, "environ")`` and ``vars(os)["environ"]``. A name
+    built at run time (``"env" + "iron"``) is beyond a static scan.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     aliases = _environment_names(tree)
-    docstrings = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Expr)}
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body and isinstance(node.body[0], ast.Expr)
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id in aliases:
             return True
@@ -158,21 +179,58 @@ FIREFLY_FILES = _import_closure("covsyn.calibration.firefly_optimizer")
 
 
 def _shell_lines(path: Path) -> list[str]:
-    """A shell script's lines, continuation lines joined and comment lines dropped."""
-    text = re.sub(r"\\\n", " ", path.read_text(encoding="utf-8"))
-    return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    """A shell script's lines, comment lines dropped first and continuation lines then joined.
+
+    bash does not continue a comment onto the next line, so the order matters.
+    """
+    lines, pending = [], ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not pending and line.lstrip().startswith("#"):
+            continue
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        lines.append(pending + line)
+        pending = ""
+    return [*lines, pending] if pending else lines
 
 
-# NAME=value alone on its line; NAME=value followed by a command sets NAME for that command only.
-ASSIGNMENT = re.compile(rf"^\s*({NAME})=")
-COMMAND_PREFIX = re.compile(rf"""^\s*{NAME}=(?:"[^"]*"|'[^']*'|[^\s"'$(]*)\s+[^\s#|;&]""")
+def _first_command(line: str) -> list[str]:
+    """The words of a line's first command, command substitutions folded into one word."""
+    while (folded := re.sub(r"\$\([^()]*\)", "X", line)) != line:
+        line = folded
+    try:
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
+        words = list(lexer)
+    except ValueError:
+        return []
+    command = []
+    for word in words:
+        if word and set(word) <= set(";&|"):
+            break
+        command.append(word)
+    return command
+
+
+def _top_level_assignment(line: str) -> str | None:
+    """The name a line assigns, when it assigns it unconditionally.
+
+    Only NAME=value at the very start of a line, as the whole first command, counts: an
+    indented one may sit in a branch that does not run, and NAME=value followed by a command
+    sets NAME for that command only.
+    """
+    match = re.match(rf"({NAME})=", line)
+    if match and len(_first_command(line)) == 1:
+        return match.group(1)
+    return None
 
 
 def _shell_variables(lines: list[str]) -> tuple[set[str], set[str], set[str]]:
     """The names a script references, assigns and reads with a ``${NAME:-}`` default.
 
-    A name counts as assigned only when the script assigns it, with NAME= on a line of its own,
-    before it first uses it; a script that uses a name first reads it from the environment.
+    A name counts as assigned only when the script assigns it unconditionally, at the top
+    level, before it first uses it; a script that uses a name first, or assigns it only in a
+    branch, reads it from the environment.
     """
     referenced, defaulted, first_use, first_assignment = set(), set(), {}, {}
     for number, line in enumerate(lines):
@@ -180,9 +238,9 @@ def _shell_variables(lines: list[str]) -> tuple[set[str], set[str], set[str]]:
             referenced.add(name)
             first_use.setdefault(name, number)
         defaulted |= set(re.findall(rf"\$\{{({NAME}):-", line))
-        match = ASSIGNMENT.match(line)
-        if match and not COMMAND_PREFIX.match(line):
-            first_assignment.setdefault(match.group(1), number)
+        name = _top_level_assignment(line)
+        if name:
+            first_assignment.setdefault(name, number)
     assigned = {name for name, number in first_assignment.items()
                 if number < first_use.get(name, len(lines))}
     return referenced - SHELL_SPECIAL, assigned, defaulted
@@ -238,6 +296,19 @@ def test_the_chain_sets_what_it_does_not_forward(script, names):
             assert re.match(rf"^\s*{name}=\S+\s+bash scripts/{script}", line), line
 
 
+def test_every_script_the_chain_runs_is_scanned():
+    """A script the chain runs and the scan skips would have its variables dropped unseen."""
+    called = set(re.findall(r"\b(?:bash|sh|source|\.)\s+scripts/(\S+\.sh)",
+                            "\n".join(_shell_lines(CHAIN))))
+    assert called == {script.name for script in CHAIN_SCRIPTS}
+
+
+def test_the_synthesis_runs_on_the_copied_run():
+    """The chain points the synthesis at the run it copied onto $FIREFLY, nothing else."""
+    calls = [line for line in _shell_lines(CHAIN) if "scripts/data_synthesis.sh" in line]
+    assert calls and all(line.lstrip().startswith('PARAMETER_PATH="./$FIREFLY" ') for line in calls)
+
+
 def test_the_firefly_modules_do_not_touch_the_environment():
     """No module the firefly session imports reads the environment.
 
@@ -261,6 +332,7 @@ def test_the_firefly_modules_do_not_touch_the_environment():
     ("def worker_count(env):\n    return env.get('A')", False),
     ("# os.environ\nprint('os.environ')", False),
     ("def f():\n    '''environ'''", False),
+    ("x = 1\n'environ'", True),     # a bare string statement that is no docstring
 ])
 def test_touching_the_environment_is_found(tmp_path, source, touches):
     """Copies and aliases of the environment count, a mapping parameter or text does not."""
@@ -298,7 +370,10 @@ def test_the_scripts_follow_the_convention(script):
 
 @pytest.mark.parametrize(("lines", "assigned"), [
     (["A=1", "echo $A"], {"A"}),
-    (["    A=\"$(cd \"$(dirname x)\" && pwd)\"", "echo $A"], {"A"}),
+    (["A=\"$(cd \"$(dirname x)\" && pwd)\"", "echo $A"], {"A"}),
+    (["A=1; echo hi", "echo $A"], {"A"}),
+    (["A=$B cmd", "echo $A"], set()),
+    (["if x; then", "  A=1", "fi", "echo $A"], set()),   # may not run
     (["echo A=1"], set()),
     (["A=1 cmd", "echo $A"], set()),                # sets A for cmd only
     (["A=\"x y\" cmd"], set()),
@@ -308,6 +383,13 @@ def test_the_scripts_follow_the_convention(script):
 def test_the_scan_takes_only_assignments_made_before_use(lines, assigned):
     """Only NAME= on a line of its own, before the first use, makes a name the script's own."""
     assert _shell_variables(lines)[1] == assigned
+
+
+def test_a_comment_does_not_continue(tmp_path):
+    """A comment ending in a backslash does not swallow the next line, as in bash."""
+    script = tmp_path / "s.sh"
+    script.write_text("# note \\\necho ${SECRET:-x}\n")
+    assert _environment_variables(script) == {"SECRET"}
 
 
 def test_continuation_lines_are_joined(tmp_path):
@@ -327,6 +409,9 @@ def test_continuation_lines_are_joined(tmp_path):
     ("from os import environ\nenviron['A']", {"A"}),
     ("from os import getenv as g\ng('A')", {"A"}),
     ("from os import environ as e\ne.get('A')", {"A"}),
+    ("import os\ne = os.environ\ne.get('A')", {"A"}),
+    ("import os\nos.environ.pop('A')", {"A"}),
+    ("import os\nos.getenv(key='A')", {"A"}),
     ("def f(env):\n    return env.get('A')", {"A"}),
     ("# os.environ['A']\nprint('os.getenv(B)')", set()),
     ("d = {}\nd.get('A')", set()),
