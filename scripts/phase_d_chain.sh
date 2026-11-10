@@ -24,9 +24,7 @@
 #              SELECT_TOP, CPU_CORES, VERIFY_WORKERS, FIREFLY_STATUS, UV_PROJECT_ENVIRONMENT;
 #              launch_phase_d.sh documents and forwards each, and an empty value means the
 #              default, except that an empty FIREFLY_STATUS (a chain started by hand) skips the
-#              firefly status check. The launcher also sets ENVIRONMENT_CHECKED on this process
-#              alone, for data_synthesis.sh; a chain started by hand lacks it, and the
-#              synthesis then checks the environment itself.
+#              firefly status check.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -112,8 +110,14 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
 done
 say 'generating synthetic data (2 modes x 1000 Monte-Carlo runs)'
 # PARAMETER_PATH is set here, so a value left in the tmux server's environment cannot point the
-# synthesis at another run than the one copied onto $FIREFLY.
-PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh >> "$LOG" 2>&1 \
+# synthesis at another run than the one copied onto $FIREFLY. The launcher checked the
+# environment at the launch, and FIREFLY_STATUS is set only then, so the synthesis need not check
+# it again: a lock pulled during the run must not stop the chain halfway, as every step runs in
+# the environment the launcher checked. A chain started by hand lets the synthesis check.
+checked_flag=""
+if [ -n "${FIREFLY_STATUS:-}" ]; then checked_flag=1; fi
+PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh ${checked_flag:+--environment-checked} \
+    >> "$LOG" 2>&1 \
     || { say 'ERROR: data synthesis failed'; exit 1; }
 say 'synthetic data done'
 

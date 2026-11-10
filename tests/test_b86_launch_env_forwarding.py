@@ -34,9 +34,6 @@ CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDA
 # Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
-# Set by the launcher on the chain process alone, not on its tmux session, so that a window
-# opened there later does not inherit it.
-SET_FOR_THE_CHAIN_PROCESS = {"ENVIRONMENT_CHECKED"}
 SYNTHESIS_CALL = re.compile(r'^\s*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh\b')
 
 
@@ -70,7 +67,7 @@ def test_the_list_holds_every_default_the_scripts_read():
     The scripts read the environment only this way; a variable read otherwise is not caught
     here, a limit accepted for scripts that Task 4 of the rework plan replaces.
     """
-    read = (_defaults(CHAIN) | _defaults(SYNTHESIS)) - SET_BY_CHAIN - SET_FOR_THE_CHAIN_PROCESS
+    read = (_defaults(CHAIN) | _defaults(SYNTHESIS)) - SET_BY_CHAIN
     assert read <= set(CHAIN_VARIABLES)
 
 
@@ -156,22 +153,18 @@ def test_every_module_environment_read_is_forwarded_or_cleared():
         assert unset < first_verify, name
 
 
-def test_the_synthesis_checks_the_environment_unless_the_launcher_did():
-    """data_synthesis.sh checks the environment against uv.lock before it runs without syncing.
+def test_the_chain_tells_the_synthesis_only_when_launched_that_the_environment_was_checked():
+    """The chain passes --environment-checked only when the launcher started it.
 
-    Run on its own, as the README shows, nothing else checks it. Under the launcher, which
-    checked it once and sets ENVIRONMENT_CHECKED, a lock pulled during the run must not stop the
-    chain halfway, as every step runs in the environment the launcher checked. uv's own message
-    is kept, as it names what differs.
+    The launcher checked the environment at the launch, so a lock pulled during the run must not
+    stop the chain halfway; a chain started by hand has no FIREFLY_STATUS and lets the synthesis
+    check. An argument reaches that one process, unlike a variable a tmux session would hand on
+    to every window opened in it later.
     """
-    code = "\n".join(_code(SYNTHESIS))
-    check = re.search(r'if \[ -z "\$\{ENVIRONMENT_CHECKED:-\}" \]; then\n(.*?)\nfi', code, re.S)
-    assert check, "the check no longer depends on ENVIRONMENT_CHECKED"
-    sync = next(line for line in check.group(1).splitlines() if "uv sync" in line)
-    assert "--locked --check --inexact" in sync
-    assert "/dev/null" not in sync                  # uv's message names what differs
-    assert code.index("uv sync --locked --check") < code.index("uv run --no-sync")
-
+    code = "\n".join(_code(CHAIN))
+    assert 'checked_flag=""' in code
+    assert re.search(r'if \[ -n "\$\{FIREFLY_STATUS:-\}" \]; then checked_flag=1; fi', code)
+    assert "bash scripts/data_synthesis.sh ${checked_flag:+--environment-checked}" in code
 
 def test_the_firefly_modules_do_not_read_the_environment():
     """The firefly session gets WARM_START alone, which the shell passes as an argument."""
@@ -242,12 +235,13 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
     root = tmp_path / "repo"
     (root / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy(script, root / "scripts" / script.name)
+    args = env.pop("_args", [])
     for name, text in env.pop("_files", {}).items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(text)
     bin_dir, record = _stand_ins(tmp_path)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), **env}
-    result = subprocess.run(["bash", str(root / "scripts" / script.name)], env=env, cwd=root,
+    result = subprocess.run(["bash", str(root / "scripts" / script.name), *args], env=env, cwd=root,
                             capture_output=True, text=True, timeout=60, check=False)
     return root, record, result.returncode, result.stdout + result.stderr
 
@@ -278,12 +272,8 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert chain["UV_PROJECT_ENVIRONMENT"] == ".venv"
     assert (record / "uv_sync_environment").read_text().strip() == ".venv"
     assert (record / "uv_run_environment").read_text().strip() == ".venv"
-    # ENVIRONMENT_CHECKED goes to the chain process only, not to its session.
     command = (record / "chain_command").read_text().split("\n")
-    script = command.index("scripts/phase_d_chain.sh")
-    assert command[0] == "env" and command[script - 1] == "bash"
-    assert set(command[1:script - 1]) == {f"{name}=1" for name in SET_FOR_THE_CHAIN_PROCESS}
-    assert not SET_FOR_THE_CHAIN_PROCESS & set(chain)
+    assert command[:2] == ["bash", "scripts/phase_d_chain.sh"]
     assert set(chain) == set(CHAIN_VARIABLES)
 
 
@@ -315,13 +305,13 @@ def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
 
 
 def test_the_synthesis_under_the_launcher_skips_the_check(tmp_path):
-    """With ENVIRONMENT_CHECKED, a lock that changed mid-run does not stop the synthesis.
+    """With --environment-checked, a lock that changed mid-run does not stop the synthesis.
 
     It runs in the environment the launcher checked.
     """
     root, record, status, output = _run(tmp_path, SYNTHESIS, {
-        "PARAMETER_PATH": "run", "UV_SYNC_STATUS": "2", "ENVIRONMENT_CHECKED": "1",
-        "UV_PROJECT_ENVIRONMENT": "/opt/env", **SYNTHESIS_FILES})
+        "PARAMETER_PATH": "run", "UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env",
+        "_args": ["--environment-checked"], **SYNTHESIS_FILES})
     assert status == 0, output
     assert not (record / "uv_sync_environment").exists()
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
@@ -449,32 +439,13 @@ def test_launch_refuses_while_a_session_runs(tmp_path, live):
     assert (root / "firefly_phaseD.exit").read_text() == "0\n"
 
 
-def _header_sections() -> tuple[str, str]:
-    """The launcher header's inputs, and what it sets whatever the caller sets."""
-    header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]
-    inputs, marker, set_by_it = header.partition("# Set by this script")
-    assert marker, "the launcher header no longer has a '# Set by this script' section"
-    return inputs, set_by_it
-
-
-@pytest.mark.parametrize("variable", sorted(SET_FOR_THE_CHAIN_PROCESS))
-def test_what_the_launcher_sets_is_documented_as_set_by_it(variable):
-    """A variable the launcher sets whatever the caller sets is documented apart from inputs.
-
-    The launcher also clears a value the caller exports before any tmux server starts.
-    """
-    inputs, set_by_it = _header_sections()
-    assert variable in set_by_it
-    assert variable not in inputs
-    code = _code(SCRIPT)
-    unset = code.index(f"unset {variable}")
-    assert unset < next(i for i, line in enumerate(code) if "tmux new-session" in line)
-
-
 @pytest.mark.parametrize("variable", CHAIN_VARIABLES)
 def test_the_variable_is_documented_in_the_usage_header(variable):
-    """The header's inputs are where a run is configured from; an undocumented one is unusable."""
-    assert variable in _header_sections()[0]
+    """The header is where a run is configured from, so each variable needs its own entry."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    header, marker, _ = text.partition("set -euo pipefail")
+    assert marker, "launch_phase_d.sh no longer has its set -euo pipefail line"
+    assert re.search(rf"^#\s+{variable}\s", header, re.MULTILINE), variable
 
 
 def test_the_checklist_uses_the_shared_helper_for_its_worker_count():

@@ -29,16 +29,10 @@
 #                    .venv
 # An unset variable reaches the chain empty, which the chain reads as its default; the launcher
 # always gives FIREFLY_STATUS and UV_PROJECT_ENVIRONMENT a value.
-# Set by this script, whatever the caller sets:
-#   ENVIRONMENT_CHECKED  1, on the chain process alone, after the environment is checked, so
-#                    that data_synthesis.sh does not check it again
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-# A value the caller exports would reach a tmux server this script starts, and every window
-# opened there later; this script sets ENVIRONMENT_CHECKED on the chain process alone.
-unset ENVIRONMENT_CHECKED
 WARM_START="${WARM_START:-firefly_result/phaseD_run10/firefly_best.txt}"
 
 if tmux has-session -t =firefly 2>/dev/null || tmux has-session -t =chain 2>/dev/null; then
@@ -89,11 +83,7 @@ if [ "$status" != running ] && [ "$status" != 0 ]; then
   tail -n 20 firefly_phaseD.log 2>/dev/null || true
   exit 1
 fi
-# ENVIRONMENT_CHECKED tells data_synthesis.sh the environment was checked above; it is set on
-# the chain process alone, so that a window opened in the chain session later does not skip the
-# check.
-tmux new-session -d -s chain -c "$ROOT" "${chain_env_args[@]}" \
-  env ENVIRONMENT_CHECKED=1 bash scripts/phase_d_chain.sh
+tmux new-session -d -s chain -c "$ROOT" "${chain_env_args[@]}" bash scripts/phase_d_chain.sh
 sleep 1
 tmux ls
 echo "--- firefly log head ---"

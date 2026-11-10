@@ -8,13 +8,14 @@
 # output compared with a real epidemic curve), so it is generated alongside the single-seed
 # spread data that every validation figure uses.
 #
-# Usage: scripts/data_synthesis.sh
+# Usage: scripts/data_synthesis.sh [--environment-checked]
+#   --environment-checked  the caller (the chain under launch_phase_d.sh) checked the
+#                    environment against uv.lock, so this script does not check it again
 # Environment:
 #   CPU_CORES       worker processes (default 24)
 #   PARAMETER_PATH  directory holding firefly_best.txt (default: the name phase_d_chain.sh copies
 #                   the run onto)
 #   UV_PROJECT_ENVIRONMENT  the environment the runs use (default .venv)
-#   ENVIRONMENT_CHECKED  set by launch_phase_d.sh, which checked the environment at the launch
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,9 +33,8 @@ fi
 
 # The runs below use the environment as it is (--no-sync), so run on its own this script checks
 # it against uv.lock first; the check changes nothing, and uv's message names what differs.
-# Under the launcher, which checked it once, every step of the chain runs in that environment,
-# so a lock pulled during the run must not stop the chain here.
-if [ -z "${ENVIRONMENT_CHECKED:-}" ]; then
+# The chain under the launcher, which checked it once, passes --environment-checked.
+if [ "${1:-}" != --environment-checked ]; then
     command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"; exit 1; }
     uv sync --locked --check --inexact \
         || { echo "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; run uv sync"
