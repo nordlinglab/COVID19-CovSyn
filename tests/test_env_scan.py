@@ -203,21 +203,23 @@ def test_the_arithmetic_look_ahead_stops_at_an_escaped_newline():
 
 
 @pytest.mark.parametrize("text", [
-    '"${X:-<(echo hi)}"',
-    '"${A:-${B:-<(echo hi)}}"',                       # nested in a quoted expansion
-    "echo $(( ${X:-<(echo hi)} ))",                   # arithmetic: <( stays literal in bash
+    "cat <(echo hi)",
+    "echo ${X:-<(echo hi)}",
+    '"${X:-<(echo hi)}"',                             # parsed as a group, though not run
+    '"${A:-${B:-<(echo hi)}}"',
+    "echo $(( ${X:-<(echo hi)} ))",
     "(( ${X:-<(echo hi)} ))",
     "echo $[ ${X:-<(echo hi)} ]",
 ])
-def test_a_process_substitution_where_bash_reads_text_opens_no_group(text):
-    """These <( print literally in bash, so the walker opens no group there."""
+def test_a_process_substitution_in_an_expansion_is_parsed_as_a_group(text):
+    """A <( in plain code or in any ${...} is a bracketed group to bash."""
+    assert text.index("<") in es._walk(text).groups
+
+
+def test_a_process_substitution_directly_in_double_quotes_is_text():
+    """Inside double quotes, outside any ${...}, <( is plain text to bash."""
+    text = '"<(echo hi)"'
     assert text.index("<") not in es._walk(text).groups
-
-
-def test_a_process_substitution_in_plain_code_or_its_expansion_is_a_group():
-    """In plain code and in a ${...} reached from it, <( substitutes a process."""
-    for text in ["cat <(echo hi)", "echo ${X:-<(echo hi)}"]:
-        assert text.index("<") in es._walk(text).groups
 
 
 def test_a_continued_walk_records_no_foreign_group():
@@ -356,8 +358,12 @@ def test_commands_are_split_into_words(line, words):
     (["cat <((echo p) | cat)", "A=1", "echo $A"], {"A"}),         # process substitution
     (["((1))#it's", "A=1", "echo $A $Q"], {"A"}),                 # # after (( )) comments
     (["echo ${X:-<(echo })}#$Z", "A=1", "echo $A"], {"A"}),       # <( inside ${
-    (["(( ${X:-<(echo <<E)} ))", "A=1", "echo $A"], {"A"}),       # no heredoc: <( is text
-    (['echo "${C:-${B:-<(#)}}" $Z', "A=1", "echo $A"], {"A"}),
+    (["(( ${X:-<(echo <<E)} ))", "A=1", "echo $A"], set()),       # bash parses <( and <<E
+    (['echo "${C:-${B:-<(#)}}" $Z', "A=1", "echo $A"], set()),    # bash: # comments in <(
+    (['echo "${A:-${B:-<(cat <<E)}}"', "C=1", "E", "echo $C"], set()),  # a here-document
+    (["echo $(( ${X:-<(echo })} ))", "A=1", "echo $A"], {"A"}),    # } inside the group
+    (['echo "${X:-<(echo })"', "A=1", 'echo "$A"'], set()),         # bash: an open quote
+    (["echo $(( ${X:-(} ))", "A=1", "echo $A"], set()),             # bash: ( counts
     (["(( $(cat <<E) ))", "A=1", "E", "B=1", "echo $B"], {"B"}),   # bash: a here-document
     (["A=$(case a in a) echo hi;; esac>/dev/null)", "B=1", "echo $B"], {"A", "B"}),
     (["X=$(echo a\\", "#b)", "A=1", "echo $A"], {"X", "A"}),       # a#b, one word
@@ -448,6 +454,7 @@ A = "scripts/a.sh"
     ("host:`pwd`/scripts/a.sh", {"host:`pwd`/scripts/a.sh"}),
     ("PATH=$PATH:scripts/a.sh", {"PATH=$PATH:scripts/a.sh"}),
     ("S=$(echo a:b)/scripts/a.sh", {"$(echo a:b)/scripts/a.sh"}),   # a : inside $( )
+    ("S=<(echo a:b)/scripts/a.sh", {"<(echo a:b)/scripts/a.sh"}),
     ("${X:-scripts/a-.sh}", {"${X:-scripts/a-.sh"}),
 ])
 def test_scripts_are_found_however_named(line, called):

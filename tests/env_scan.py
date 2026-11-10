@@ -343,41 +343,46 @@ def _arithmetic_closes(text: str, start: int) -> bool:
             if depth:
                 depth -= 1
             else:
-                return text.startswith("))", index)
+                # The first unmatched ) decides: )) is arithmetic, a ) before more text is a
+                # subshell, and one ending the line leaves bash waiting for the second ).
+                rest = text[index + 1:index + 2]
+                return rest in {")", "", "\n"}
         index += 1
     return True
 
 
-def _substitutes_processes(stack: list[_Frame]) -> bool:
-    """Whether bash performs a process substitution ``<(`` in the innermost open context.
+def _arithmetic_frame(stack: list[_Frame]) -> _Frame | None:
+    """The arithmetic frame a ${...} sits in, through any number of ${...}, or None.
 
-    It does in plain code and in a ``${...}`` reached from plain code; inside double quotes or
-    arithmetic, through any number of ``${...}``, it reads ``<(`` as text.
+    bash counts every parenthesis up to the closing )) of an arithmetic expansion or command,
+    those inside a nested ${...} included.
     """
     for frame in reversed(stack):
-        if frame.kind in PLAIN:
-            return True
+        if frame.kind in ARITHMETIC:
+            return frame
         if frame.kind != "${":
-            return False
-    return False
+            return None
+    return None
 
 
 def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _Walk:
     """Walk a text as bash reads its quoting, going on from ``stack`` when one is given.
 
-    A backslash escapes the next character outside single quotes, inside ``$'...'`` too. A
-    ``$(`` opens plain code again inside double quotes, ``${...}`` and arithmetic, where
-    ``${``, ``$((`` and ``$[`` open too, as bash expands them there; inside backticks it is
-    text, as bash reads backtick content as a string. ``<(`` and ``>(`` substitute processes
-    only where _substitutes_processes says. ``$((``, ``((`` at the start of a word
-    and ``$[`` open arithmetic. In a command substitution a ``)`` that ends a case pattern does
-    not close it; ``case`` and ``esac`` count only where a command starts, and in a case's
-    pattern position (opened by the ``in`` right after its subject and by ``;;``, ``;&`` or
-    ``;;&``) only ``esac`` is reserved, not right after a pattern's optional ``(``. A ``#`` at the
-    start of a word in plain code, not after an escaped blank, starts a comment to the end of
-    its line. A character that opens or closes a context belongs to the outer one. ``before``
-    is the character that precedes the text, which decides whether it starts a word; frames
-    taken over from ``stack`` record no group, as their start lies in another text.
+    A backslash escapes the next character outside single quotes, inside ``$'...'`` too. A ``$(``
+    opens plain code again inside double quotes, ``${...}`` and arithmetic, where ``${``, ``$((``
+    and ``$[`` open too, as bash expands them there; inside backticks it is text, as bash reads
+    backtick content as a string. ``<(`` and ``>(`` open a group in plain code and in any
+    ``${...}``, also one inside double quotes or arithmetic, where bash parses the group although it
+    does not run it; directly inside double quotes they are text. ``$((``, ``((`` at the start of a
+    word and ``$[`` open arithmetic, which counts the parentheses of a nested ``${...}`` too. In a
+    command substitution a ``)`` that ends a case pattern does not close it; ``case`` and ``esac``
+    count only where a command starts, and in a case's pattern position (opened by the ``in`` right
+    after its subject and by ``;;``, ``;&`` or ``;;&``) only ``esac`` is reserved, not right after a
+    pattern's optional ``(``. A ``#`` at the start of a word in plain code, not after an escaped
+    blank, starts a comment to the end of its line. A character that opens or closes a context
+    belongs to the outer one. ``before`` is the character that precedes the text, which decides
+    whether it starts a word; frames taken over from ``stack`` record no group, as their start lies
+    in another text.
     """
     stack = [_Frame(f.kind, -1, f.nesting, f.cases, f.command_start, f.in_pattern, f.expect_in)
              for f in stack] if stack else [_Frame("top", -1)]
@@ -440,9 +445,9 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
             push("$((", 3)
         elif kind in ACTIVE and text.startswith("$(", index):
             push("$(", 2)
-        elif char in "<>" and text.startswith("(", index + 1) and previous not in "<>" and \
-                _substitutes_processes(stack):
-            push("$(", 2)                   # a process substitution, plain code like $(
+        elif kind in PLAIN | {"${"} and char in "<>" and text.startswith("(", index + 1) and \
+                previous not in "<>":
+            push("$(", 2)                   # a process substitution, parsed like $(
         elif kind in ACTIVE and text.startswith("${", index):
             push("${", 2)
         elif kind in ACTIVE and text.startswith("$[", index):
@@ -491,6 +496,8 @@ def _walk(text: str, stack: list[_Frame] | None = None, before: str = "\n") -> _
                 frame.nesting += 1 if char == "(" else -1
             elif kind == "$[" and char in "[]":
                 frame.nesting += 1 if char == "[" else -1
+            elif kind == "${" and char in "()" and (arithmetic := _arithmetic_frame(stack)):
+                arithmetic.nesting += 1 if char == "(" else -1
             kinds.append(kind)
             index += 1
     while stack[-1].kind == "#":            # a comment ends with its line
@@ -546,8 +553,8 @@ def _fold_arithmetic(line: str) -> str:
 
 
 def _fold_substitutions(line: str) -> str:
-    """The line with each substitution as X: arithmetic, ``$( )`` and backtick groups."""
-    return _fold(line, ("$((", "((", "$[", "$(", "`"))
+    """The line with each substitution as X: arithmetic, ``$( )``, ``<( )`` and backticks."""
+    return _fold(line, ("$((", "((", "$[", "$(", "`", "<(", ">("))
 
 
 def _raw_words(line: str) -> list[str]:
@@ -825,6 +832,8 @@ def mentioned_scripts(text: str) -> list[str]:
     # to where it opens.
     closed_at = {end: start for start, end in walk.groups.items()
                  if plain.startswith(("$(", "<(", ">(", "`"), start)}
+    inside_groups = {i for start, end in walk.groups.items()
+                     if not plain.startswith("${", start) for i in range(start, end + 1)}
     for match in SCRIPT_MENTION.finditer(plain):
         opening = enclosing(match.start())
         if opening is not None:
@@ -851,7 +860,9 @@ def mentioned_scripts(text: str) -> list[str]:
         # is a : list, as PATH=$PATH:scripts/a.sh, stays, as does host: before a path. A colon
         # inside a substitution does not count.
         name = re.match(r"(?:[A-Za-z_]\w*|--?[\w-]+)=", glued)
-        if name and ":" not in _fold_substitutions(glued[name.end():]):
+        value = range(begin + (name.end() if name else 0), match.start())
+        colon = any(plain[i] == ":" and i not in inside_groups for i in value)
+        if name and not colon:
             glued = glued[name.end():]
         found.append(posixpath.normpath(glued + match.group(1)))
     return found
