@@ -28,10 +28,13 @@ SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
 # module (worker_count), the others by the two scripts.
 CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDATE",
                    "REVALIDATION_BLOCKS", "SELECT", "SELECT_TOP", "CPU_CORES", "FIREFLY_STATUS",
-                   "UV_PROJECT_ENVIRONMENT", "ENVIRONMENT_CHECKED")
+                   "UV_PROJECT_ENVIRONMENT")
 # Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
+# Set by the launcher on the chain process alone, not on its tmux session, so that a window
+# opened there later does not inherit it.
+SET_FOR_THE_CHAIN_PROCESS = {"ENVIRONMENT_CHECKED"}
 SYNTHESIS_CALL = re.compile(r'^\s*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh\b')
 
 
@@ -65,7 +68,7 @@ def test_the_list_holds_every_default_the_scripts_read():
     The scripts read the environment only this way; a variable read otherwise is not caught
     here, a limit accepted for scripts that Task 4 of the rework plan replaces.
     """
-    read = (_defaults(CHAIN) | _defaults(SYNTHESIS)) - SET_BY_CHAIN
+    read = (_defaults(CHAIN) | _defaults(SYNTHESIS)) - SET_BY_CHAIN - SET_FOR_THE_CHAIN_PROCESS
     assert read <= set(CHAIN_VARIABLES)
 
 
@@ -83,9 +86,11 @@ CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
 
 
 # The ways a module reads the environment in this code base: os.environ.get, os.getenv,
-# os.environ[...] and a mapping of it passed as env (worker_count).
+# os.environ[...] (not an assignment or del, which set it for a child) and a mapping of it
+# passed as env (worker_count).
 ENVIRONMENT_READ = re.compile(
-    r"""(?:environ\.get|getenv|\benv\.get)\(\s*['"]([A-Z][A-Z0-9_]*)|environ\[\s*['"]([A-Z][A-Z0-9_]*)""")
+    r"""(?:environ\.get|getenv|\benv\.get)\(\s*['"]([A-Z][A-Z0-9_]*)"""
+    r"""|(?<!del )\b(?:os\.)?environ\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
 
 
 def test_every_module_environment_read_is_forwarded_or_cleared():
@@ -146,9 +151,9 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
     (bin_dir / "uv").write_text(
         "#!/usr/bin/env bash\n"
         f'echo "${{UV_PROJECT_ENVIRONMENT:-}}" > "{record}/uv_$1_environment"\n'
-        f'[ "$1" = run ] || exit 0\n'
+        '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
+        '[ "$1" = run ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
-
         'exit "${UV_STATUS:-0}"\n')
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
@@ -179,6 +184,7 @@ if [ "$name" = firefly ]; then
     env -i PATH="$PATH" UV_STATUS="${{UV_STATUS:-0}}" "${{envs[@]}}" "$@")
 else
   env -i "${{envs[@]}}" > "{record}/chain_env"
+  printf "%s\\n" "$@" > "{record}/chain_command"
 fi
 """)
     for tool in ("uv", "sleep", "tmux"):
@@ -225,8 +231,12 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert chain["SELECT_TOP"] == ""
     # uv sync in the launcher and uv run in both sessions use the same environment.
     assert chain["UV_PROJECT_ENVIRONMENT"] == ".venv"
-    assert chain["ENVIRONMENT_CHECKED"] == "1"
+    assert (record / "uv_sync_environment").read_text().strip() == ".venv"
     assert (record / "uv_run_environment").read_text().strip() == ".venv"
+    # ENVIRONMENT_CHECKED goes to the chain process only, not to its session.
+    command = (record / "chain_command").read_text().split("\n")
+    assert command[:4] == ["env", "ENVIRONMENT_CHECKED=1", "bash", "scripts/phase_d_chain.sh"]
+    assert "ENVIRONMENT_CHECKED" not in chain
     assert set(chain) == set(CHAIN_VARIABLES)
 
 
@@ -238,6 +248,44 @@ def test_launch_runs_both_sessions_in_the_environment_the_user_names(tmp_path):
     assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
     assert chain["UV_PROJECT_ENVIRONMENT"] == "/opt/env"
+
+
+SYNTHESIS_FILES = {"_files": {"run/firefly_best.txt": "1 2 3\n"}}
+
+
+def test_the_synthesis_alone_stops_on_an_environment_that_differs(tmp_path):
+    """Run on its own, data_synthesis.sh stops before any run when the check fails.
+
+    Its message names the environment in use.
+    """
+    root, record, status, output = _run(tmp_path, SYNTHESIS, {
+        "PARAMETER_PATH": "run", "UV_SYNC_STATUS": "2", "UV_PROJECT_ENVIRONMENT": "/opt/env",
+        **SYNTHESIS_FILES})
+    assert status == 1
+    assert "/opt/env differs from uv.lock" in output
+    assert (record / "uv_sync_environment").exists()
+    assert not (record / "uv_run_args").exists()
+
+
+def test_the_synthesis_under_the_launcher_skips_the_check(tmp_path):
+    """With ENVIRONMENT_CHECKED, a lock that changed mid-run does not stop the synthesis.
+
+    It runs in the environment the launcher checked.
+    """
+    root, record, status, output = _run(tmp_path, SYNTHESIS, {
+        "PARAMETER_PATH": "run", "UV_SYNC_STATUS": "2", "ENVIRONMENT_CHECKED": "1",
+        "UV_PROJECT_ENVIRONMENT": "/opt/env", **SYNTHESIS_FILES})
+    assert status == 0, output
+    assert not (record / "uv_sync_environment").exists()
+    assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
+
+
+def test_the_chain_runs_in_the_environment_it_is_given(tmp_path):
+    """The chain's own uv run uses the UV_PROJECT_ENVIRONMENT the launcher passes."""
+    root, record, status, output = _run(tmp_path, CHAIN, {
+        "FIREFLY_RUN": "run", "UV_STATUS": "9", "UV_PROJECT_ENVIRONMENT": "/opt/env",
+        "_files": {"run/firefly_result.txt": "1 2 3\n"}})
+    assert (record / "uv_run_environment").read_text().strip() == "/opt/env"
 
 
 def test_launch_uses_a_status_file_the_user_names(tmp_path):
