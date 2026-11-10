@@ -136,7 +136,7 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 
 ## 6. 由資料計算的數值：重新計算結果（2026-10-15）
 
-程式：`src/covsyn/data_processing/recompute_taiwan_targets.py`（在 CovSyn 根目錄執行 `python -m covsyn.data_processing.recompute_taiwan_targets`），輸出 `validation_reference/recomputed_targets.csv`。
+程式：`src/covsyn/data_processing/recompute_taiwan_targets.py`（在 CovSyn 根目錄執行 `uv run python -m covsyn.data_processing.recompute_taiwan_targets`），輸出 `validation_reference/recomputed_targets.csv`。
 區間是 bootstrap 95%（20,000 次、種子 0）。
 個案資料是 Wu & Nordling 資料集（`wu2024DatasetTracingSciData`）的公開版 `figshare_taiwan_covid.xlsx`（578 列，缺案 530）；疫調接觸的三個 CSV 由 `extract_tracing_reference.py` 與 `extract_coworker_contacts.py` 從 forecasting repo 的活頁簿擷取，該活頁簿不在本機，所以擷取這一步本次沒有重跑。
 
