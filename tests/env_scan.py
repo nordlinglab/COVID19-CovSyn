@@ -554,9 +554,13 @@ def _fold_arithmetic(line: str) -> str:
     return _fold(line, ("$((", "((", "$["))
 
 
+# The openers of every substitution: arithmetic, command, process and backtick.
+SUBSTITUTIONS = ("$((", "((", "$[", "$(", "`", "<(", ">(")
+
+
 def _fold_substitutions(line: str) -> str:
     """The line with each substitution as X: arithmetic, ``$( )``, ``<( )`` and backticks."""
-    return _fold(line, ("$((", "((", "$[", "$(", "`", "<(", ">("))
+    return _fold(line, SUBSTITUTIONS)
 
 
 def _raw_words(line: str) -> list[str]:
@@ -836,10 +840,9 @@ def mentioned_scripts(text: str) -> list[str]:
             found += mentioned_scripts(plain[start + 1:end])
     # A substitution that ends right before a path joins its word: its closing character mapped
     # to where it opens.
-    closed_at = {end: start for start, end in walk.groups.items()
-                 if plain.startswith(("$(", "<(", ">(", "`"), start)}
-    inside_groups = {i for start, end in walk.groups.items()
-                     if not plain.startswith("${", start) for i in range(start, end + 1)}
+    substitutions = [(start, end) for start, end in walk.groups.items()
+                     if plain.startswith(SUBSTITUTIONS, start)]
+    closed_at = {end: start for start, end in substitutions}
     for match in SCRIPT_MENTION.finditer(plain):
         opening = enclosing(match.start())
         if opening is not None:
@@ -867,7 +870,8 @@ def mentioned_scripts(text: str) -> list[str]:
         # inside a substitution does not count.
         name = re.match(r"(?:[A-Za-z_]\w*|--?[\w-]+)=", glued)
         value = range(begin + (name.end() if name else 0), match.start())
-        colon = any(plain[i] == ":" and i not in inside_groups for i in value)
+        colon = any(plain[i] == ":" and not any(s <= i <= e for s, e in substitutions)
+                    for i in value)
         if name and not colon:
             glued = glued[name.end():]
         found.append(posixpath.normpath(glued + match.group(1)))
