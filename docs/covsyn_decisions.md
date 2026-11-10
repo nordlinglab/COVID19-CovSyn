@@ -621,7 +621,7 @@ T 編號對應 covid19-research `doc/plan_Nordling2026_CovSynFireflyNordlingLab.
 
 | ID | 狀態 | 決定 | Commit |
 |---|---|---|---|
-| T1 | 🔨 | **用 uv 安裝**。`pyproject.toml` 加 `[project]`（`requires-python = ">=3.13,<3.14"`，requirements.txt 的版本原封不動，加 psutil）、uv_build、dev 群組（pytest、ruff、hypothesis），以及最佳化器與 chain 中有 `main()` 的模組共 12 個 entry point；`uv.lock`、`.python-version` 取代 `requirements.txt`；腳本、測試、README 一律 `uv run`，不再設 `PYTHONPATH`、`PYTHON`；GitHub Actions 在 ubuntu-latest、macos-latest 跑快速測試。chain 中 import 時就執行的 12 個模組暫時用 `uv run python -m`，T4 改寫 pipeline 時再包成函式。`firefly_optimizer.main()` 仍寫入模組層的 `result_path`，T3 改為明確的 run 目錄。Python 3.13 不改變任何輸出：Linux 上 3.10.22 與 3.13.18、macOS 上 3.10.20 與 3.13.14，cost 與 checklist 輸出逐位元相同。驗收：macOS 658 通過、2 失敗；Linux 657 通過、3 失敗；失敗都在改動前就存在（E103、E104）。 | `e9ea137` |
+| T1 | ✅ | **用 uv 安裝**。`pyproject.toml` 加 `[project]`（`requires-python = ">=3.13,<3.14"`，requirements.txt 的版本原封不動，加 psutil）、uv_build、dev 群組（pytest、ruff、hypothesis），以及最佳化器與 chain 中有 `main()` 的模組共 12 個 entry point；`uv.lock`、`.python-version` 取代 `requirements.txt`；腳本、測試、README 一律 `uv run`，不再設 `PYTHONPATH`、`PYTHON`；GitHub Actions 在 ubuntu-latest、macos-latest 跑快速測試。chain 中 import 時就執行的 12 個模組暫時用 `uv run python -m`，T4 改寫 pipeline 時再包成函式。`firefly_optimizer.main()` 仍寫入模組層的 `result_path`，T3 改為明確的 run 目錄。Python 3.13 不改變任何輸出：Linux 上 3.10.22 與 3.13.18、macOS 上 3.10.20 與 3.13.14，cost 與 checklist 輸出逐位元相同。驗收：macOS 上 `uv sync` 後 `uv run pytest` 660 通過、1 跳過（`test_b87_sklearn_parameter_name.py`，改動前就跳過），內容同 `eff406b`；Linux 只剩改動前就存在的 E103（`test_regression.py` 的 cost、`test_pipeline.py` 的 verify_phaseD_json）。 | `e9ea137` |
 
 ---
 
@@ -757,4 +757,5 @@ T 編號對應 covid19-research `doc/plan_Nordling2026_CovSynFireflyNordlingLab.
 - 2026-11-09（同上）：獨立種子（500000 起）的合成失敗時 `phase_d_chain.sh` 立即停止，因為報告的 checklist 與圖都用它；Fig 6 的 cheng2020 合成失敗時同樣停止，並先刪除上一輪的 Fig 6。
 - 2026-11-09（同上）：firefly 第 0 代沿用初始族群在 block 0 的分數，不再於 block 300 重算（每次 run 少 30,000 次模擬）；cost function 不變，但之後的 run 路徑與 run 20–22 不同，無法逐位元重現（使用者裁決不需要）。
 - 2026-11-10：新增 **H 區**（優化重構，T 編號對應計畫的 Task）與 **T1**（uv 安裝）；新增 **E103**（Linux 與 macOS 目標函數值不同）與 **E104**（pipeline fixtures 未隨 11-09 修正更新），兩者都在改動前就存在。
+- 2026-11-10：T1 在 macOS 驗收通過（660 通過、1 跳過），狀態改為 ✅；E104 由 `eff406b` 修正。
 - 2026-11-10：E104 改為 ✅（`eff406b` 重新產生 pipeline fixture）；E103 補上原因（energy 距離的 BLAS 捨入、offspring k 擬合的平台捨入）。
