@@ -182,7 +182,7 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
 
 
 PYTHON_SCRIPT = re.compile(r"\bpython3? [\w./-]+\.py\b")
-THROUGH_UV = re.compile(r"\buv run(?: --[\w-]+)* $")
+THROUGH_UV = re.compile(r"\buv run\b[^|;&]*$")
 
 
 @pytest.mark.parametrize("path", _script_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))

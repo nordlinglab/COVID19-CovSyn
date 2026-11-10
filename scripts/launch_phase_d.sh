@@ -33,24 +33,31 @@ if tmux has-session -t firefly 2>/dev/null || tmux has-session -t chain 2>/dev/n
 fi
 command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"; exit 1; }
 # The sessions run uv run --no-sync, so the environment is checked against uv.lock here, once,
-# before anything runs on it.
-uv sync --locked
+# before anything runs on it; --inexact leaves alone packages the lock does not list.
+uv sync --locked --inexact
 # A tmux session gets the tmux server's environment, not this shell's, so every variable a
 # session reads is passed with -e. PATH is the exception: tmux gives a new session the PATH of
 # the shell that runs new-session (tested on tmux 3.6), so the uv found above is found there.
-# The commands are single-quoted: the session expands them, so a quote in a value cannot break
-# the command line.
+# Each session command is given as separate arguments, which tmux runs directly rather than
+# through the user's default shell: bash then expands the variables, so WARM_START splits into
+# its files under any login shell, and a quote in a value cannot break the command line.
+CHAIN_ENV=(PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT
+           SELECT_TOP CPU_CORES)
+chain_env_args=()
+for name in "${CHAIN_ENV[@]}"; do chain_env_args+=(-e "$name=${!name:-}"); done
 # shellcheck disable=SC2016
-tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
+tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" bash -c \
   'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1'
 sleep 2
-tmux new-session -d -s chain -c "$ROOT" \
-  -e "PREVIOUS_CHECKS=${PREVIOUS_CHECKS:-}" -e "VERIFY_WORKERS=${VERIFY_WORKERS:-}" \
-  -e "FIREFLY_RUN=${FIREFLY_RUN:-}" -e "REVALIDATE=${REVALIDATE:-}" \
-  -e "REVALIDATION_BLOCKS=${REVALIDATION_BLOCKS:-}" -e "SELECT=${SELECT:-}" \
-  -e "SELECT_TOP=${SELECT_TOP:-}" -e "CPU_CORES=${CPU_CORES:-}" \
-  bash scripts/phase_d_chain.sh
+# The chain runs on whatever FIREFLY_RUN holds once the firefly session ends, so a firefly
+# that died at startup would have it report an earlier run's results.
+if ! tmux has-session -t firefly 2>/dev/null; then
+  echo "ERROR: the firefly session ended at startup; not starting the chain"
+  tail -n 20 firefly_phaseD.log 2>/dev/null || true
+  exit 1
+fi
+tmux new-session -d -s chain -c "$ROOT" "${chain_env_args[@]}" bash scripts/phase_d_chain.sh
 sleep 1
 tmux ls
 echo "--- firefly log head ---"
