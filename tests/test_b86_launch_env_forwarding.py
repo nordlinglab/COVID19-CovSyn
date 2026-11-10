@@ -46,12 +46,13 @@ SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
 
 
 def _code(path: Path) -> list[str]:
-    """A script's lines without its comment lines."""
-    return [
-        line
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if not line.lstrip().startswith("#")
-    ]
+    """A script's lines without its comment lines.
+
+    Split at newlines only, and a comment is a line whose first character after spaces and
+    tabs is #, as bash reads a line; other white space or separators hide nothing.
+    """
+    lines = path.read_text(encoding="utf-8").split("\n")
+    return [line for line in lines if not line.lstrip(" \t").startswith("#")]
 
 
 def _defaults(path: Path) -> set[str]:
@@ -93,21 +94,49 @@ SCRIPT_LINES = [
 ]
 
 
-def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
-    """The lines naming a script are exactly the golden ones, and the fixed call is a command.
+def test_the_chain_names_only_the_golden_script_lines():
+    """The code lines naming a script are word for word the golden ones.
 
-    Lines are split at newlines only and a comment is a line whose first character after
-    spaces and tabs is #, as bash reads them, so no other character hides a line or a call.
+    This checks the spelling only; test_the_chain_runs_the_synthesis_at_step_2 checks what
+    bash runs.
     """
-    lines = CHAIN.read_text(encoding="utf-8").split("\n")
-    naming = [
-        line
-        for line in lines
-        if re.search(r"\.sh\b", line) and not line.lstrip(" \t").startswith("#")
-    ]
+    naming = [line for line in _code(CHAIN) if re.search(r"\.sh\b", line)]
     assert naming == SCRIPT_LINES
-    call = lines.index(SCRIPT_LINES[1])
-    assert not lines[call - 1].endswith("\\")  # not an argument of the line before
+
+
+FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
+SYNTHESIS_STAND_IN = (
+    "#!/usr/bin/env bash\n"
+    'echo "$PARAMETER_PATH $*" > synthesis_call\n'
+    'exit "${SYNTHESIS_STATUS:-0}"\n'
+)
+
+
+@pytest.mark.parametrize("synthesis_status", ["0", "1"])
+def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
+    """Run to step 2: the synthesis runs on the copied run with --environment-checked.
+
+    It runs unconditionally, and a failed synthesis stops the chain.
+    """
+    root, record, status, output = _run(
+        tmp_path,
+        CHAIN,
+        {
+            "FIREFLY_RUN": "run",
+            "REVALIDATE": "0",
+            "UV_STATUS": "9",  # the step after the synthesis fails, ending the run there
+            "SYNTHESIS_STATUS": synthesis_status,
+            "_files": {
+                "run/firefly_best.txt": "1 2 3\n",
+                "scripts/data_synthesis.sh": SYNTHESIS_STAND_IN,
+            },
+        },
+    )
+    log = (root / "phaseD_chain.log").read_text()
+    assert (root / "synthesis_call").read_text().strip() == f"./{FIREFLY} --environment-checked"
+    assert status != 0
+    assert ("] ERROR: data synthesis failed" in log) == (synthesis_status == "1")
+    assert ("synthetic data done" in log) == (synthesis_status == "0")
 
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
