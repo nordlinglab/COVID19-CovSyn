@@ -27,10 +27,11 @@
 #                    stops the chain.
 #   UV_PROJECT_ENVIRONMENT  the environment uv checks here and both sessions run in; default
 #                    .venv
-#   ENVIRONMENT_CHECKED  set by this script on the chain process after it checks the
-#                    environment, so that data_synthesis.sh does not check it again
 # An unset variable reaches the chain empty, which the chain reads as its default; the launcher
 # always gives FIREFLY_STATUS and UV_PROJECT_ENVIRONMENT a value.
+# Set by this script, whatever the caller sets:
+#   ENVIRONMENT_CHECKED  1, on the chain process alone, after the environment is checked, so
+#                    that data_synthesis.sh does not check it again
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

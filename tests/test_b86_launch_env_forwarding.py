@@ -18,6 +18,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "launch_phase_d.sh"
 CHAIN = SCRIPT.parent / "phase_d_chain.sh"
@@ -86,11 +88,11 @@ CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
 
 
 # The ways a module reads the environment in this code base: os.environ.get, os.getenv,
-# os.environ[...] (not an assignment or del, which set it for a child) and a mapping of it
-# passed as env (worker_count).
+# environ[...] under any module name (not an assignment, which sets it for a child) and a
+# mapping of it passed as env (worker_count). A del is left out by _environment_reads.
 ENVIRONMENT_READ = re.compile(
     r"""(?:environ\.get|getenv|\benv\.get)\(\s*['"]([A-Z][A-Z0-9_]*)"""
-    r"""|(?<![\w.])(?:os\.)?environ\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
+    r"""|\b(?:\w+\.)?environ\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])""")
 
 
 def _environment_reads(text: str) -> set[str]:
@@ -101,8 +103,8 @@ def _environment_reads(text: str) -> set[str]:
     names = set()
     for match in ENVIRONMENT_READ.finditer(text):
         line_start = text.rfind("\n", 0, match.start()) + 1
-        if text[line_start:match.start()].strip().endswith("del"):
-            continue
+        if re.match(r"\s*del\s", text[line_start:]):
+            continue                            # every item of a del statement
         names.add(match.group(1) or match.group(2))
     return names
 
@@ -119,10 +121,21 @@ def _environment_reads(text: str) -> set[str]:
     ("del  os.environ['A']", set()),
     ("del environ['A']", set()),
     ("myenviron['A']", set()),
+    ("_os.environ['A']", {"A"}),                   # os imported under another name
+    ("del os.environ['A'], os.environ['B']", set()),
 ])
 def test_environment_reads_are_told_from_writes(text, names):
     """A read counts; an assignment or a del of os.environ[...] does not."""
     assert _environment_reads(text) == names
+
+
+@given(st.from_regex(r"[A-Z][A-Z0-9_]{0,10}", fullmatch=True), st.integers(1, 3),
+       st.sampled_from(["os.environ", "environ", "_os.environ"]))
+def test_reads_and_dels_of_any_name_are_told_apart(name, spaces, mapping):
+    """For any variable name, a subscript read counts and a del of it does not."""
+    assert _environment_reads(f"x = {mapping}['{name}']") == {name}
+    assert _environment_reads(f"del{' ' * spaces}{mapping}['{name}']") == set()
+    assert _environment_reads(f"{mapping}['{name}'] = '1'") == set()
 
 
 def test_every_module_environment_read_is_forwarded_or_cleared():
@@ -266,8 +279,10 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert (record / "uv_run_environment").read_text().strip() == ".venv"
     # ENVIRONMENT_CHECKED goes to the chain process only, not to its session.
     command = (record / "chain_command").read_text().split("\n")
-    prefix = ["env", *(f"{name}=1" for name in sorted(SET_FOR_THE_CHAIN_PROCESS))]
-    assert command[:len(prefix) + 2] == [*prefix, "bash", "scripts/phase_d_chain.sh"]
+    script = command.index("scripts/phase_d_chain.sh")
+    assert command[0] == "env" and command[script - 1] == "bash"
+    assigned = {word.split("=", 1)[0] for word in command[1:script - 1]}
+    assert assigned == SET_FOR_THE_CHAIN_PROCESS
     assert not SET_FOR_THE_CHAIN_PROCESS & set(chain)
     assert set(chain) == set(CHAIN_VARIABLES)
 
@@ -434,7 +449,14 @@ def test_launch_refuses_while_a_session_runs(tmp_path, live):
     assert (root / "firefly_phaseD.exit").read_text() == "0\n"
 
 
-@pytest.mark.parametrize("variable", [*CHAIN_VARIABLES, *sorted(SET_FOR_THE_CHAIN_PROCESS)])
+@pytest.mark.parametrize("variable", sorted(SET_FOR_THE_CHAIN_PROCESS))
+def test_what_the_launcher_sets_is_documented_as_set_by_it(variable):
+    """A variable the launcher sets whatever the caller sets is documented apart from inputs."""
+    header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]
+    assert variable in header.split("# Set by this script")[1]
+
+
+@pytest.mark.parametrize("variable", CHAIN_VARIABLES)
 def test_the_variable_is_documented_in_the_usage_header(variable):
     """The header is where a run is configured from, so an undocumented variable is unusable."""
     header = SCRIPT.read_text(encoding="utf-8").split("set -euo pipefail")[0]
