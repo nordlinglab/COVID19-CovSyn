@@ -181,7 +181,8 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
         assert needle in workflow, needle
 
 
-BARE_PYTHON = re.compile(r"(?<!uv run )\bpython3? [\w./-]+\.py\b")
+PYTHON_SCRIPT = re.compile(r"\bpython3? [\w./-]+\.py\b")
+THROUGH_UV = re.compile(r"\buv run(?: --[\w-]+)* $")
 
 
 @pytest.mark.parametrize("path", _script_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
@@ -190,8 +191,16 @@ def test_usage_lines_run_scripts_through_uv(path):
 
     A bare ``python script.py`` finds no ``covsyn`` without ``PYTHONPATH``.
     """
-    lines = [line.strip() for line in path.read_text().splitlines() if BARE_PYTHON.search(line)]
-    assert not lines, lines
+    bare = [
+        line.strip()
+        for line in path.read_text().splitlines()
+        for match in PYTHON_SCRIPT.finditer(line)
+        if not THROUGH_UV.search(line[: match.start()])
+    ]
+    assert not bare, bare
+
+
+UV_RUN = r"""(?:\buv|['"]?\$\{?UV\}?['"]?) run\b.*"""
 
 
 def test_chain_scripts_do_not_resync_the_environment():
@@ -202,17 +211,26 @@ def test_chain_scripts_do_not_resync_the_environment():
     """
     for name in ("phase_d_chain.sh", "data_synthesis.sh", "launch_phase_d.sh"):
         text = (REPO_ROOT / "scripts" / name).read_text()
-        commands = re.findall(r"(?:\buv|'\$UV') run\b.*", text)
+        code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+        commands = [c for line in code for c in re.findall(UV_RUN, line)]
         assert commands, name
         for command in commands:
             assert "--no-sync" in command, (name, command)
 
 
-def test_launch_resolves_uv_for_the_tmux_session():
-    """The tmux session gets uv's absolute path, as it inherits the tmux server's PATH."""
+def test_launch_checks_uv_and_the_environment_before_the_sessions():
+    """The launcher checks uv and the environment once, before the sessions start.
+
+    It stops with a message when uv is missing, and checks the environment against uv.lock,
+    as the sessions run with --no-sync.
+
+    tmux gives a new session the PATH of the shell that runs new-session, so the uv found
+    here is the uv both sessions find.
+    """
     text = (REPO_ROOT / "scripts" / "launch_phase_d.sh").read_text()
-    assert 'UV="$(command -v uv)"' in text
-    assert "'$UV' run" in text
+    first_session = text.index("tmux new-session")
+    assert "command -v uv >/dev/null || {" in text[:first_session]
+    assert "uv sync --locked" in text[:first_session]
 
 
 def test_readme_explains_the_slow_tests_on_linux():

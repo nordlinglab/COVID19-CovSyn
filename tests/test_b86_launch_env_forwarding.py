@@ -19,17 +19,29 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "launch_phase_d.sh"
 CHAIN = SCRIPT.parent / "phase_d_chain.sh"
-# OPTIMIZER_RUN is set by the chain itself after revalidation, not by the user.
-CHAIN_INTERNAL = {"OPTIMIZER_RUN"}
-# Variables read by what the chain starts rather than by the chain script itself.
-STARTED_BY_CHAIN = ("VERIFY_WORKERS",)
+SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
+# Set by the chain or its modules themselves, not by the user: OPTIMIZER_RUN after
+# revalidation, AGE_RR_FILE by select_by_checklist for each candidate's checklist.
+CHAIN_INTERNAL = {"OPTIMIZER_RUN", "AGE_RR_FILE"}
+SHELL_SPECIAL = {"BASH_SOURCE"}
+NAME = r"[A-Z][A-Z0-9_]*"
 
 
 def _chain_variables() -> list[str]:
-    """Every variable the chain reads from the environment with a default, plus those its
-    modules read; PYTHON is gone, as the chain runs every module through uv run (Task 1)."""
-    read = set(re.findall(r"\$\{([A-Z_]+):-", CHAIN.read_text(encoding="utf-8")))
-    return sorted((read - CHAIN_INTERNAL) | set(STARTED_BY_CHAIN))
+    """Every variable the chain or a covsyn module reads from the environment.
+
+    The chain reads one when it gives it a default or uses it without assigning it; a module
+    reads one through ``os.environ`` or a mapping passed from it, as ``worker_count`` does.
+    PYTHON is gone, as the chain runs every module through uv run (Task 1).
+    """
+    chain = CHAIN.read_text(encoding="utf-8")
+    referenced = set(re.findall(rf"\$\{{?({NAME})", chain))
+    assigned = set(re.findall(rf"^\s*({NAME})=", chain, re.MULTILINE))
+    defaulted = set(re.findall(rf"\$\{{({NAME}):-", chain))
+    modules = " ".join(p.read_text(encoding="utf-8") for p in SOURCE.rglob("*.py"))
+    from_modules = set(re.findall(rf"(?:environ|env)(?:\.get\(|\[)\s*['\"]({NAME})", modules))
+    found = (referenced - assigned) | defaulted | from_modules
+    return sorted(found - CHAIN_INTERNAL - SHELL_SPECIAL)
 
 
 CHAIN_VARIABLES = _chain_variables()
@@ -39,8 +51,7 @@ CHAIN_VARIABLES = _chain_variables()
 def chain_session() -> str:
     """The tmux command that starts the chain session, however many lines it spans."""
     text = SCRIPT.read_text(encoding="utf-8")
-    match = re.search(r"tmux new-session -d -s chain\b(.*?phase_d_chain\.sh\s*\")", text,
-                      re.DOTALL)
+    match = re.search(r"tmux new-session -d -s chain\b(.*?phase_d_chain\.sh)", text, re.DOTALL)
     assert match, "the chain session is no longer started by a tmux new-session command"
     return match.group(1)
 
@@ -51,15 +62,24 @@ def test_the_chain_session_is_given_every_variable_it_reads(chain_session, varia
     assert f"{variable}=" in chain_session
 
 
-def test_verify_workers_is_passed_through_rather_than_fixed(chain_session):
-    """The script must not hard-code a worker count: the right one depends on free memory."""
-    assert "VERIFY_WORKERS='${VERIFY_WORKERS:-}'" in chain_session
+@pytest.mark.parametrize("variable", CHAIN_VARIABLES)
+def test_each_variable_is_passed_through_rather_than_fixed(chain_session, variable):
+    """Each value goes through tmux -e unchanged, never pasted into the command line.
+
+    A quote in a value then cannot break the command, and no count is hard-coded: the right
+    worker count depends on free memory.
+    """
+    assert f'-e "{variable}=${{{variable}:-}}"' in chain_session
 
 
 def test_the_chain_reads_the_variables_review_found_dropped():
-    """The code review of 2026-11-10 found these five read by the chain but never forwarded."""
-    assert {"CPU_CORES", "REVALIDATE", "REVALIDATION_BLOCKS", "SELECT_TOP"} <= set(CHAIN_VARIABLES)
-    assert '"${SELECT:-1}"' in CHAIN.read_text(encoding="utf-8")
+    """The variables the 2026-11-10 code reviews found dropped are all found by the scan.
+
+    Six are read by the chain itself; VERIFY_WORKERS (B86) by the checklist module.
+    """
+    dropped = {"CPU_CORES", "FIREFLY_RUN", "REVALIDATE", "REVALIDATION_BLOCKS", "SELECT",
+               "SELECT_TOP", "VERIFY_WORKERS", "PREVIOUS_CHECKS"}
+    assert dropped <= set(CHAIN_VARIABLES)
 
 
 @pytest.mark.parametrize("variable", CHAIN_VARIABLES)

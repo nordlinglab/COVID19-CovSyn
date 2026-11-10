@@ -31,19 +31,26 @@ if tmux has-session -t firefly 2>/dev/null || tmux has-session -t chain 2>/dev/n
   tmux ls
   exit 1
 fi
-# tmux does not pass this shell's environment to a new session, so it is given explicitly;
-# the session inherits the tmux server's PATH, which may lack uv, so uv goes by its full path.
-UV="$(command -v uv)"
-tmux new-session -d -s firefly \
-  "cd '$ROOT' && '$UV' run --no-sync python -m covsyn.calibration.firefly_optimizer \
-   --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1"
+command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"; exit 1; }
+# The sessions run uv run --no-sync, so the environment is checked against uv.lock here, once,
+# before anything runs on it.
+uv sync --locked
+# A tmux session gets the tmux server's environment, not this shell's, so every variable a
+# session reads is passed with -e. PATH is the exception: tmux gives a new session the PATH of
+# the shell that runs new-session (tested on tmux 3.6), so the uv found above is found there.
+# The commands are single-quoted: the session expands them, so a quote in a value cannot break
+# the command line.
+# shellcheck disable=SC2016
+tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
+  'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
+   --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1'
 sleep 2
-tmux new-session -d -s chain \
-  "cd '$ROOT' && PREVIOUS_CHECKS='${PREVIOUS_CHECKS:-}' \
-   VERIFY_WORKERS='${VERIFY_WORKERS:-}' FIREFLY_RUN='${FIREFLY_RUN:-}' \
-   REVALIDATE='${REVALIDATE:-}' REVALIDATION_BLOCKS='${REVALIDATION_BLOCKS:-}' \
-   SELECT='${SELECT:-}' SELECT_TOP='${SELECT_TOP:-}' CPU_CORES='${CPU_CORES:-}' \
-   bash scripts/phase_d_chain.sh"
+tmux new-session -d -s chain -c "$ROOT" \
+  -e "PREVIOUS_CHECKS=${PREVIOUS_CHECKS:-}" -e "VERIFY_WORKERS=${VERIFY_WORKERS:-}" \
+  -e "FIREFLY_RUN=${FIREFLY_RUN:-}" -e "REVALIDATE=${REVALIDATE:-}" \
+  -e "REVALIDATION_BLOCKS=${REVALIDATION_BLOCKS:-}" -e "SELECT=${SELECT:-}" \
+  -e "SELECT_TOP=${SELECT_TOP:-}" -e "CPU_CORES=${CPU_CORES:-}" \
+  bash scripts/phase_d_chain.sh
 sleep 1
 tmux ls
 echo "--- firefly log head ---"
