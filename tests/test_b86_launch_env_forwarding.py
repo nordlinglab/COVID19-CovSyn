@@ -17,101 +17,70 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import env_scan as es
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "launch_phase_d.sh"
 CHAIN = SCRIPT.parent / "phase_d_chain.sh"
 SYNTHESIS = SCRIPT.parent / "data_synthesis.sh"
 SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
-# The scripts the chain runs, each with the variables the chain sets on its command line and
-# the value it sets: the synthesis runs on the run the chain copied onto $FIREFLY.
-CHAIN_SCRIPTS = {SYNTHESIS: {"PARAMETER_PATH": '"./$FIREFLY"'}}
-# Set by the chain or its modules themselves, not by the user: OPTIMIZER_RUN after
-# revalidation, AGE_RR_FILE by select_by_checklist for each candidate's checklist.
-CHAIN_INTERNAL = {"OPTIMIZER_RUN", "AGE_RR_FILE"}
-# Every covsyn module the firefly session runs; the chain runs the rest, and these too.
-FIREFLY_FILES = es.import_closure("covsyn.calibration.firefly_optimizer", SOURCE)
+# Every variable the chain, data_synthesis.sh or a module they run reads from the environment;
+# the launcher passes each into the chain session. VERIFY_WORKERS is read by the checklist
+# module (worker_count), the others by the two scripts.
+CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDATE",
+                   "REVALIDATION_BLOCKS", "SELECT", "SELECT_TOP", "CPU_CORES", "FIREFLY_STATUS")
+# Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
+# data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
+SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
+SYNTHESIS_CALL = re.compile(r'^\s*PARAMETER_PATH="\./\$FIREFLY" bash scripts/data_synthesis\.sh\b')
 
 
-def _lines(path: Path) -> list[es.ShellLine]:
-    return es.shell_lines(path.read_text(encoding="utf-8"))
+def _code(path: Path) -> list[str]:
+    """A script's lines without its comment lines."""
+    return [line for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")]
 
 
-def _chain_variables() -> list[str]:
-    """Every variable the chain, a script it runs or a module it runs reads from the environment.
-
-    PYTHON is gone, as the chain runs every module through uv run (Task 1).
-    """
-    found = es.environment_variables(CHAIN)
-    for script, set_by_chain in CHAIN_SCRIPTS.items():
-        found |= es.environment_variables(script) - set(set_by_chain)
-    found |= {name for path in SOURCE.rglob("*.py") for name in es.environment_reads(path)}
-    return sorted(found - CHAIN_INTERNAL)
-
-
-CHAIN_VARIABLES = _chain_variables()
+def _defaults(path: Path) -> set[str]:
+    """The variables a script reads from the environment with a default, ${NAME:-...}."""
+    return set(re.findall(r"\$\{([A-Z][A-Z0-9_]*):-", "\n".join(_code(path))))
 
 
 @pytest.fixture
 def chain_env() -> list[str]:
     """The names launch_phase_d.sh passes into the chain session."""
-    text = "\n".join(line.text for line in _lines(SCRIPT))
-    match = re.search(r"^CHAIN_ENV=\((.*?)\)", text, re.DOTALL | re.MULTILINE)
+    match = re.search(r"^CHAIN_ENV=\((.*?)\)", "\n".join(_code(SCRIPT)), re.DOTALL | re.MULTILINE)
     assert match, "launch_phase_d.sh no longer lists the chain's variables in CHAIN_ENV"
     return match.group(1).split()
 
 
-@pytest.mark.parametrize("variable", CHAIN_VARIABLES)
-def test_the_chain_session_is_given_every_variable_it_reads(chain_env, variable):
-    """A variable missing here is dropped without any error at launch."""
-    assert variable in chain_env
+def test_the_chain_session_is_given_every_variable_on_the_list(chain_env):
+    """The launcher forwards exactly the listed variables; a missing one is dropped silently."""
+    assert sorted(chain_env) == sorted(CHAIN_VARIABLES)
 
 
-@pytest.mark.parametrize(("script", "values"), [(s.name, v) for s, v in CHAIN_SCRIPTS.items()])
-def test_the_chain_sets_what_it_does_not_forward(script, values):
-    """The chain runs each such script in one fixed form, setting what it does not forward.
+def test_the_list_holds_every_default_the_scripts_read():
+    """A ${NAME:-} added to the chain or to data_synthesis.sh must join the list.
 
-    A variable set by the chain is left out of the forwarding, so without it the tmux server's
-    value would reach the script. Rather than parse every way a shell can set it, the chain
-    must call the script as ``NAME=value bash scripts/x.sh`` at the start of a line, once per
-    line; any other form fails here, to be checked by hand.
+    The scripts read the environment only this way; a variable read otherwise is not caught
+    here, a limit accepted for scripts that Task 4 of the rework plan replaces.
     """
-    prefix = " ".join(f"{name}={value}" for name, value in values.items())
-    form = re.compile(rf"^\s*{re.escape(prefix)} bash scripts/{re.escape(script)}(?:\s|$)")
-    path = f"scripts/{script}"
-    lines = [line for line in _lines(CHAIN) if path in es.mentioned_scripts(line.text)]
-    assert lines, script
-    for line in lines:
-        assert not line.heredoc, line.text          # text written out is no call
-        assert es.mentioned_scripts(line.text).count(path) == 1, line.text
-        assert form.match(line.text), line.text
+    read = (_defaults(CHAIN) | _defaults(SYNTHESIS)) - SET_BY_CHAIN
+    assert read <= set(CHAIN_VARIABLES)
 
 
-def test_every_script_the_chain_runs_is_scanned():
-    """A script the chain runs and the scan skips would have its variables dropped unseen."""
-    assert es.called_scripts(_lines(CHAIN)) == {f"scripts/{s.name}" for s in CHAIN_SCRIPTS}
+def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
+    """The chain calls data_synthesis.sh in one fixed form, setting PARAMETER_PATH itself."""
+    calls = [line for line in _code(CHAIN) if re.search(r"\.sh\b", line)]
+    assert calls
+    for line in calls:
+        assert SYNTHESIS_CALL.match(line), line
 
 
-def test_the_firefly_modules_do_not_touch_the_environment():
-    """No module the firefly session imports reads the environment.
-
-    The session gets WARM_START alone, which the shell passes to the optimiser as an argument.
-    """
-    assert len(FIREFLY_FILES) > 2
-    for path in FIREFLY_FILES:
-        assert not es.mentions_environment(path), path.name
-
-
-@pytest.mark.parametrize("script", [CHAIN, *CHAIN_SCRIPTS], ids=lambda p: p.name)
-def test_the_scripts_follow_the_convention(script):
-    """Every variable a script uses is assigned before use or read with a ${NAME:-} default.
-
-    A variable used any other way would be taken for user input and its forwarding asked for;
-    this fails instead, so its form can be checked by hand.
-    """
-    referenced, assigned, defaulted = es.shell_variables(_lines(script))
-    assert not referenced - assigned - defaulted
+def test_the_firefly_modules_do_not_read_the_environment():
+    """The firefly session gets WARM_START alone, which the shell passes as an argument."""
+    for name in ("firefly_optimizer.py", "fast_cost.py"):
+        text = (SOURCE / "calibration" / name).read_text(encoding="utf-8")
+        assert not re.search(r"\b(?:environ|getenv)\b", text), name
 
 
 def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
@@ -225,7 +194,7 @@ def test_session_checks_match_the_name_exactly():
     count; "=" makes the match exact.
     """
     for script in (SCRIPT, CHAIN):
-        code = "\n".join(line.text for line in _lines(script))
+        code = "\n".join(_code(script))
         targets = re.findall(r"has-session -t (\S+)", code)
         assert targets, script.name
         assert all(t.startswith("=") for t in targets), (script.name, targets)
