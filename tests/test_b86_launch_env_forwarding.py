@@ -51,7 +51,8 @@ def _code(path: Path) -> list[str]:
     Split at newlines only, and a comment is a line whose first character after spaces and
     tabs is #, as bash reads a line; other white space or separators hide nothing.
     """
-    lines = path.read_text(encoding="utf-8").split("\n")
+    with path.open(encoding="utf-8", newline="") as file:  # keep a lone CR, as bash does
+        lines = file.read().split("\n")
     return [line for line in lines if not line.lstrip(" \t").startswith("#")]
 
 
@@ -104,19 +105,20 @@ def test_the_chain_names_only_the_golden_script_lines():
     assert naming == SCRIPT_LINES
 
 
-FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
+FIREFLY = next(line.split("=", 1)[1] for line in _code(CHAIN) if line.startswith("FIREFLY="))
 SYNTHESIS_STAND_IN = (
     "#!/usr/bin/env bash\n"
-    'echo "$PARAMETER_PATH $*" > synthesis_call\n'
+    'echo "$PARAMETER_PATH $*" >> synthesis_call\n'
     'exit "${SYNTHESIS_STATUS:-0}"\n'
 )
 
 
 @pytest.mark.parametrize("synthesis_status", ["0", "1"])
 def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
-    """Run to step 2: the synthesis runs on the copied run with --environment-checked.
+    """Run to step 2 with REVALIDATE=0: the synthesis runs once, on the copied run.
 
-    It runs unconditionally, and a failed synthesis stops the chain.
+    It gets --environment-checked, and a failed synthesis stops the chain.
+    Only this path is run; other settings reach the same call by reading of the script.
     """
     root, record, status, output = _run(
         tmp_path,
@@ -124,7 +126,7 @@ def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
         {
             "FIREFLY_RUN": "run",
             "REVALIDATE": "0",
-            "UV_STATUS": "9",  # the step after the synthesis fails, ending the run there
+            "UV_STATUS": "9",  # every later module fails; step 3b stops the run
             "SYNTHESIS_STATUS": synthesis_status,
             "_files": {
                 "run/firefly_best.txt": "1 2 3\n",
@@ -133,10 +135,14 @@ def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
         },
     )
     log = (root / "phaseD_chain.log").read_text()
-    assert (root / "synthesis_call").read_text().strip() == f"./{FIREFLY} --environment-checked"
-    assert status != 0
-    assert ("] ERROR: data synthesis failed" in log) == (synthesis_status == "1")
-    assert ("synthetic data done" in log) == (synthesis_status == "0")
+    calls = (root / "synthesis_call").read_text().splitlines()
+    assert calls == [f"./{FIREFLY} --environment-checked"], output + log
+    if synthesis_status == "1":
+        assert status != 0
+        assert "] ERROR: data synthesis failed" in log, log
+        assert "synthetic data done" not in log
+    else:
+        assert "synthetic data done" in log, log
 
 
 # Read by a module but set by the chain's own code where it needs a value: select_by_checklist
