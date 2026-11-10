@@ -81,8 +81,8 @@ def _allowed_script_line(line: str) -> bool:
     """
     if not re.search(r"\.sh\b", line):
         return True
-    call = SYNTHESIS_CALL.pattern + r'(?:\s+>>\s*"\$LOG"\s+2>&1)?\s*\\?\s*'
-    message = r"""\s*say\s+(?:'[^'$`]*'|"[^"$`]*")\s*"""
+    call = SYNTHESIS_CALL.pattern + r'(?:\s+>>\s*"\$LOG"\s+2>&1)?(?:\s+\\)?'
+    message = r"""\s*say\s+(?:'[^'$`\\]*'|"[^"$`\\]*")\s*"""
     return bool(re.fullmatch(call, line) or re.fullmatch(message, line))
 
 
@@ -100,10 +100,30 @@ def _allowed_script_line(line: str) -> bool:
     ('say "synthesising" && bash scripts/other.sh', False),          # a call after a message
     ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked; '
      "bash scripts/other.sh", False),                                 # a call after the call
+    ('say "see scripts/x.sh\\"', False),                               # an escaped quote
+    ('PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
+     '>> "$LOG" 2>&1 \\ ', False),                                    # an escaped space
 ])
+
 def test_a_line_naming_a_script_is_the_fixed_call_or_a_message(line, allowed):
     """Calls in any form, indented, after && or in an if, are caught; messages are not."""
     assert _allowed_script_line(line) == allowed
+
+VALID_LINES = st.sampled_from([
+    'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked',
+    'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
+    '>> "$LOG" 2>&1',
+    "    say 'see launch_phase_d.sh'",
+    '    say "then start scripts/phase_d_chain.sh"',
+])
+
+
+@given(VALID_LINES, st.sampled_from([";", " &&", " ||", " |", " &"]),
+       st.sampled_from(["bash x.sh", "./x.sh", ". x.sh", "source x.sh"]))
+def test_no_call_can_follow_an_allowed_line(line, separator, call):
+    """Whatever separator and call follow an allowed line, the line is refused."""
+    assert _allowed_script_line(line)
+    assert not _allowed_script_line(f"{line}{separator} {call}")
 
 
 def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
