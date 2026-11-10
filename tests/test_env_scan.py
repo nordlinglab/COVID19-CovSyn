@@ -49,6 +49,10 @@ def _script(text: str) -> list[es.ShellLine]:
     ("# os.environ['A']\nprint('os.getenv(B)')", set()),
     ("d = {}\nd.get('A')", set()),
     ("x = config.environ\nx.get('A')", set()),              # not the environment of os
+    ("import os\ncfg = os.environ.copy()\ncfg['A']", {"A"}),
+    ("import os\ne = dict(os.environ)\ne.get('A')", {"A"}),
+    ("import os\n'A' in os.environ.keys()", {"A"}),
+    ("import os\ne, f = os.environ, 1\ne.get('A')", {"A"}),
 ])
 def test_environment_reads_are_found_in_code_only(tmp_path, source, expected):
     """Every spelling of an environment read is found, and nothing in comments or text."""
@@ -112,6 +116,23 @@ def test_a_comment_does_not_continue():
     assert es.shell_lines("B=1  # see \\\necho $B\n")[1] == es.ShellLine("echo $B")
 
 
+def test_a_quoted_string_spans_lines():
+    """The lines inside a multi-line quoted string are text, not commands or comments."""
+    lines = _script('MSG="x\nA=1\n"\necho $A\necho "a \\\n# ${X}"\n')
+    assert es.shell_variables(lines)[1] == {"MSG"}
+    assert "X" in es.shell_variables(lines)[0]
+
+
+@pytest.mark.parametrize(("text", "continues"), [
+    ("echo a\\\nB=1\n", True),          # one backslash: a continuation
+    ("echo a\\\\\nB=1\n", False),     # two: an escaped backslash
+    ("echo a\\\\\\\nB=1\n", True),  # three: escaped backslash, then a continuation
+])
+def test_an_odd_run_of_backslashes_continues(text, continues):
+    """Only an odd run of trailing backslashes ends in an unescaped one."""
+    assert (len(_script(text)) == 1) == continues
+
+
 def test_continuation_lines_are_joined():
     """A NAME= argument on a continuation line belongs to the command it continues."""
     lines = _script("run x \\\n  A=1\necho $A\n")
@@ -161,10 +182,32 @@ def test_commands_are_split_into_words(line, words):
     (["for i in 1; do", "A=1", "done", "echo $A"], set()),
     (["if x; then y; fi", "A=1", "echo $A"], {"A"}),         # the block closed on its line
     (["for A in 1; do :; done"], set()),
+    (["if a; then", ":", "else if b; then", ":", "fi", "A=1", "fi", "echo $A"], set()),
+    (["if x; then", 'echo "}"', "A=1", "fi", "echo $A"], set()),   # a quoted brace is text
+    (["(", "A=1", ")", "echo $A"], set()),                        # a subshell
+    (["cat <<\\EOF", "A=1", "EOF", "echo $A"], set()),           # a backslash-quoted delimiter
+    (["x=$((1<<2))", "A=1", "echo $A"], {"A"}),                   # a shift, no here-document
+    (["cat <<< word", "A=1", "echo $A"], {"A"}),                  # a here-string
 ])
 def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     """A name is the script's own only when assigned outside every block before its first use."""
-    assert es.shell_variables([es.ShellLine(line) for line in lines])[1] == assigned
+    assert es.shell_variables(es.shell_lines("\n".join(lines)))[1] == assigned
+
+
+@pytest.mark.parametrize(("line", "names"), [
+    ("echo ${#A} ${!B} $((C+1))", {"A", "B", "C"}),
+    ("(( D > 0 ))", {"D"}),
+    ("echo $E ${F:-x}", {"E", "F"}),
+])
+def test_every_form_of_reading_a_variable_is_a_reference(line, names):
+    """Length, indirection and arithmetic read a variable too."""
+    assert es.references(line) == names
+
+
+def test_a_prefix_assignment_belongs_to_its_own_command():
+    """NAME=value sets the variable only for the command it prefixes."""
+    assert es.script_call_prefix('P="./$F" bash scripts/a.sh', "a.sh") == ["P=./$F"]
+    assert es.script_call_prefix('P="./$F" true; bash scripts/a.sh', "a.sh") == []
 
 
 @pytest.mark.parametrize(("line", "called"), [
@@ -177,6 +220,8 @@ def test_only_assignments_that_always_run_before_use_count(lines, assigned):
     ("bash ./scripts/a.sh", {"a.sh"}),
     ('bash "$ROOT/scripts/a.sh"', {"a.sh"}),
     ("P=1 bash scripts/a.sh >> log", {"a.sh"}),
+    ('bash "$ROOT"/scripts/a.sh', {"a.sh"}),
+    ('bash "${REPO_ROOT}/scripts/a.sh"', {"a.sh"}),
     ("echo done", set()),
 ])
 def test_script_calls_are_found_however_written(line, called):

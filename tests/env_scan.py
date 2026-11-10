@@ -25,6 +25,8 @@ ENVIRONMENT_MAPPINGS = {"environ", "environb"}
 ENVIRONMENT_GETTERS = {"getenv", "getenvb"}
 ENVIRONMENT_NAMES = ENVIRONMENT_MAPPINGS | ENVIRONMENT_GETTERS
 MAPPING_PARAMETER = "env"
+# Methods that copy the environment or view it, which read it as surely as a lookup.
+COPIES = {"copy", "keys", "items", "values"}
 
 
 # --- Python ---------------------------------------------------------------------------------
@@ -53,6 +55,13 @@ def _environment_names(tree: ast.AST) -> dict[str, str]:
                     names[alias.asname or alias.name] = alias.name
 
     def target(value: ast.AST | None) -> str | None:
+        # A copy or view of the environment reads it as surely: dict(e), e.copy().
+        if isinstance(value, ast.Call):
+            if _name(value.func) == "dict" and len(value.args) == 1:
+                return target(value.args[0])
+            if isinstance(value.func, ast.Attribute) and value.func.attr in COPIES:
+                return target(value.func.value)
+            return None
         if isinstance(value, ast.Name) and value.id in names:
             return names[value.id]
         if isinstance(value, ast.Attribute) and value.attr in ENVIRONMENT_NAMES and \
@@ -65,7 +74,12 @@ def _environment_names(tree: ast.AST) -> dict[str, str]:
         for node in ast.walk(tree):
             pairs = []
             if isinstance(node, ast.Assign):
-                pairs = [(t, node.value) for t in node.targets]
+                for t in node.targets:
+                    if isinstance(t, ast.Tuple) and isinstance(node.value, ast.Tuple) and \
+                            len(t.elts) == len(node.value.elts):
+                        pairs += list(zip(t.elts, node.value.elts, strict=True))
+                    else:
+                        pairs.append((t, node.value))
             elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
                 pairs = [(node.target, node.value)]
             elif isinstance(node, ast.arguments):
@@ -88,8 +102,9 @@ def environment_reads(path: Path) -> set[str]:
     """Names a module reads from the environment, found in its code, not its comments.
 
     Covers subscripts, ``.get``, ``.setdefault``, ``.pop``, ``in`` and ``not in`` on the
-    environment or on a mapping passed in as ``env``, and ``getenv`` with the key given by
-    position or as ``key=``, under any name the module imports or binds them to.
+    environment, a copy or view of it, or a mapping passed in as ``env``, and ``getenv`` with
+    the key given by position or as ``key=``, under any name the module imports or binds them
+    to.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     aliases = _environment_names(tree)
@@ -97,6 +112,11 @@ def environment_reads(path: Path) -> set[str]:
     def kind(node: ast.AST) -> str:
         if isinstance(node, ast.NamedExpr):
             node = node.value
+        if isinstance(node, ast.Call):
+            inner = node.args[0] if _name(node.func) == "dict" and len(node.args) == 1 else (
+                node.func.value if isinstance(node.func, ast.Attribute)
+                and node.func.attr in COPIES else None)
+            return kind(inner) if inner is not None else ""
         name = _name(node)
         if isinstance(node, ast.Name):
             name = aliases.get(name, name)
@@ -204,41 +224,80 @@ class ShellLine:
     heredoc: bool = False
 
 
-def strip_comment(line: str) -> str:
-    """A line without its comment, as bash reads it.
+def _scan_quotes(text: str) -> tuple[str, str | None]:
+    """A text without its comments, and the quote still open at its end, as bash reads it.
 
-    A ``#`` starts a comment at the start of a word, outside quotes; a backslash outside single
-    quotes escapes the next character.
+    A ``#`` starts a comment at the start of a word, outside quotes, and runs to the end of its
+    line; a backslash outside single quotes escapes the next character.
     """
-    quote = None
-    index = 0
-    while index < len(line):
-        char = line[index]
+    quote, out, index = None, [], 0
+    while index < len(text):
+        char = text[index]
         if quote == "'":
             quote = None if char == "'" else quote
         elif char == "\\":
-            index += 1
+            out.append(text[index:index + 2])
+            index += 2
+            continue
         elif quote == '"':
             quote = None if char == '"' else quote
         elif char in "'\"":
             quote = char
-        elif char == "#" and (index == 0 or line[index - 1] in " \t;&|("):
-            return line[:index]
+        elif char == "#" and (index == 0 or text[index - 1] in " \t\n;&|("):
+            end = text.find("\n", index)
+            index = len(text) if end < 0 else end
+            continue
+        out.append(char)
         index += 1
-    return line
+    return "".join(out), quote
 
 
-HEREDOC = re.compile(r"<<(-?)\s*(['\"]?)([\w.-]+)\2")
+def strip_comment(line: str) -> str:
+    """A line without its comment, as bash reads it."""
+    return _scan_quotes(line)[0]
+
+
+def _trailing_backslashes(text: str) -> int:
+    return len(text) - len(text.rstrip("\\"))
+
+
+def _raw_words(line: str) -> list[str]:
+    """A line's words with their quotes kept, substitutions folded; unparsable gives none."""
+    lexer = shlex.shlex(_fold_substitutions(line), posix=False, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        return list(lexer)
+    except ValueError:
+        return []
+
+
+def _heredoc_delimiters(line: str) -> list[tuple[bool, str]]:
+    """The here-documents a line opens: whether tabs are stripped, and the delimiter.
+
+    ``<<<`` is a here-string and ``<<`` inside quotes or arithmetic is no here-document.
+    """
+    words, found = _raw_words(line), []
+    for index, word in enumerate(words):
+        match = re.match(r"^\d*<<(?!<)(-?)(.*)$", word)
+        if not match:
+            continue
+        delimiter = match.group(2) or (words[index + 1] if index + 1 < len(words) else "")
+        delimiter = delimiter.replace("\\", "").strip("'\"")
+        if delimiter:
+            found.append((match.group(1) == "-", delimiter))
+    return found
 
 
 def shell_lines(text: str) -> list[ShellLine]:
     """A script's logical lines.
 
-    Comments are dropped first and continuation lines then joined, as bash does not continue a
-    comment; blank lines are left out, and here-document bodies are kept as such, since they
-    hold text, not commands.
+    A line still inside a quote at its end goes on with the next, comments are dropped before
+    continuation lines are joined (bash does not continue a comment), an odd run of trailing
+    backslashes continues a line, blank lines are left out, and here-document bodies are kept
+    as such, since they hold text, not commands.
     """
-    lines, pending, delimiters = [], "", []
+    lines, buffer, delimiters = [], "", []
     for raw in text.splitlines():
         if delimiters:
             strip_tabs, word = delimiters[0]
@@ -247,17 +306,19 @@ def shell_lines(text: str) -> list[ShellLine]:
             else:
                 lines.append(ShellLine(raw, heredoc=True))
             continue
-        code = strip_comment(raw)
-        if code.endswith("\\") and not code.endswith("\\\\"):
-            pending += code[:-1] + " "
+        code, open_quote = _scan_quotes(buffer + raw)
+        if open_quote:
+            buffer += raw + "\n"
             continue
-        line = pending + code
-        pending = ""
-        if line.strip():
-            lines.append(ShellLine(line))
-        delimiters = [(m.group(1) == "-", m.group(3)) for m in HEREDOC.finditer(line)]
-    if pending:
-        lines.append(ShellLine(pending))
+        if _trailing_backslashes(code) % 2:
+            buffer = code[:-1] + " "
+            continue
+        buffer = ""
+        if code.strip():
+            lines.append(ShellLine(code))
+            delimiters = _heredoc_delimiters(code)
+    if buffer.strip():
+        lines.append(ShellLine(buffer))
     return lines
 
 
@@ -277,7 +338,7 @@ REDIRECTION = re.compile(r"^\d*(?:[<>]|&>)")
 
 
 def commands(line: str) -> list[list[str]]:
-    """The commands of a line as lists of words, without redirections.
+    """The commands of a line as lists of words, quotes removed and redirections dropped.
 
     Commands split at ``;``, ``&&``, ``||``, ``|`` and ``&``; an unparsable line gives none.
     """
@@ -304,18 +365,33 @@ def commands(line: str) -> list[list[str]]:
 
 OPENERS = {"if", "for", "while", "until", "case", "select"}
 CLOSERS = {"fi", "done", "esac"}
+# Reserved words after which a command, and so an opener, may follow on the same command.
+LEADERS = {"then", "else", "elif", "do", "!", "time"}
 
 
 def block_change(line: str) -> int:
     """How far a line moves the block depth.
 
-    +1 for each if, loop, case or brace group (a function body included) it opens, -1 for each
-    it closes.
+    +1 for each if, loop, case, brace group (a function body included) or subshell it opens,
+    -1 for each it closes. An opener counts wherever a command may start, as in ``else if``;
+    quoted braces and parentheses are text. A subshell closed on a later word of its own line,
+    as in ``(cd x && y)``, leaves the depth raised, which can only report more reads.
     """
-    change = 0
-    for command in commands(line):
-        change += (command[0] in OPENERS) - (command[0] in CLOSERS)
-        change += command.count("{") - command.count("}")
+    change, starts_command = 0, True
+    for word in _raw_words(line):
+        if word and set(word) <= set(";&|"):
+            starts_command = True
+            continue
+        if word in {"{", "("} or (word.startswith("(") and not word.startswith("((")):
+            change += 1
+            starts_command = True
+            continue
+        if word in {"}", ")"}:
+            change -= 1
+            continue
+        if starts_command:
+            change += (word in OPENERS) - (word in CLOSERS)
+            starts_command = word in LEADERS
     return change
 
 
@@ -332,6 +408,18 @@ def assignment(line: str) -> str | None:
     return None
 
 
+def references(text: str) -> set[str]:
+    """The names a line reads.
+
+    ``$NAME``, ``${NAME...}``, ``${#NAME}``, ``${!NAME}`` and the bare names of arithmetic,
+    ``$(( ))`` and ``(( ))``.
+    """
+    names = set(re.findall(rf"\$\{{?[#!]?({NAME})", text))
+    for expression in re.findall(r"\(\((.*?)\)\)", text):
+        names |= set(re.findall(rf"\b({NAME})\b", expression))
+    return names
+
+
 def shell_variables(lines: list[ShellLine]) -> tuple[set[str], set[str], set[str]]:
     """The names a script references, assigns and reads with a ``${NAME:-}`` default.
 
@@ -342,7 +430,7 @@ def shell_variables(lines: list[ShellLine]) -> tuple[set[str], set[str], set[str
     referenced, defaulted, first_use, first_assignment = set(), set(), {}, {}
     depth = 0
     for number, line in enumerate(lines):
-        for name in re.findall(rf"\$\{{?({NAME})", line.text):
+        for name in references(line.text):
             referenced.add(name)
             first_use.setdefault(name, number)
         defaulted |= set(re.findall(rf"\$\{{({NAME}):-", line.text))
@@ -364,9 +452,25 @@ def environment_variables(path: Path) -> set[str]:
 
 
 SCRIPT_CALL = re.compile(
-    r"(?:^|[\s;&|(])(?:(?:bash|sh|source|\.)\s+)?[\"']?(?:\$\{?ROOT\}?/|\./)?scripts/([\w.-]+\.sh)")
+    r"(?:^|[\s;&|(<])(?:(?:bash|sh|source|\.)\s+)?[\"']?"
+    r"(?:\$\{?\w+\}?[\"']?/|\./)?scripts/([\w.-]+\.sh)")
 
 
 def called_scripts(lines: list[ShellLine]) -> set[str]:
-    """The scripts under scripts/ a script runs, however it calls them."""
-    return {name for line in lines if not line.heredoc for name in SCRIPT_CALL.findall(line.text)}
+    """The scripts under scripts/ a script runs, however it calls them.
+
+    Here-document bodies count too, as one may be piped to a shell.
+    """
+    return {name for line in lines for name in SCRIPT_CALL.findall(line.text)}
+
+
+def script_call_prefix(line: str, script: str) -> list[str]:
+    """The NAME=value words that prefix the command running a script, quotes removed."""
+    for command in commands(line):
+        for index, word in enumerate(command):
+            if word.endswith(f"scripts/{script}"):
+                prefix = command[:index]
+                if prefix and prefix[-1] in {"bash", "sh", "source", "."}:
+                    prefix = prefix[:-1]
+                return [w for w in prefix if re.match(rf"{NAME}=", w)]
+    return []

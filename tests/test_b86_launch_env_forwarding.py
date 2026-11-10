@@ -77,9 +77,9 @@ def test_the_chain_sets_what_it_does_not_forward(script, values):
     """
     calls = [line.text for line in _lines(CHAIN) if script in es.called_scripts([line])]
     assert calls, script
+    expected = [f"{name}={value.strip(chr(34))}" for name, value in values.items()]
     for line in calls:
-        for name, value in values.items():
-            assert re.match(rf"^\s*{name}={re.escape(value)}\s", line), line
+        assert es.script_call_prefix(line, script) == expected, line
 
 
 def test_every_script_the_chain_runs_is_scanned():
