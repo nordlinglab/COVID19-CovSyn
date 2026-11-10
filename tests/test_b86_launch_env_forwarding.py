@@ -154,6 +154,7 @@ def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain
 
     The directory comes from a chain run, so no directory name is written in the test.
     """
+    print(chain_at_step_2.context)  # the shared run printed only in the first test's setup
     directory = chain_at_step_2.directory
     root, record, status, output = _run(
         tmp_path, SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
@@ -240,6 +241,7 @@ def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2
     Only this path is run; other settings reach the same call by reading of the script.
     """
     run = chain_at_step_2
+    print(run.context)  # the shared run printed only in the first test's setup
     assert (run.root / run.directory / "firefly_best.txt").exists(), run.context
     assert run.directory == pipeline_runner.COMPAT_DIR, run.context
     assert "synthetic data done" in run.log, run.context
@@ -495,22 +497,33 @@ def _run(tmp_path: Path, script: Path, env: dict[str, str]) -> tuple[Path, Path,
         (root / name).write_text(text)
     bin_dir, record = _stand_ins(tmp_path)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path), **env}
-    result = subprocess.run(
-        ["bash", str(root / "scripts" / script.name), *args],
-        env=env,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    output = result.stdout + result.stderr
-    # Printed for pytest, which shows a failing test's captured output: whichever check fails,
-    # and however (an assertion or an error), the script's output and the chain log are there.
-    print(f"--- {script.name} exited {result.returncode}; its output:\n{output}")
     log = root / "phaseD_chain.log"
-    if log.exists():
-        print(f"--- phaseD_chain.log:\n{_read(log)}")
+
+    def show(how: str, output: str) -> None:
+        # Printed for pytest, which shows a failing test's captured output: whichever check
+        # fails, and however (an assertion, an error or a timeout), the output and the chain
+        # log are there. Undecodable bytes are replaced, so showing them never fails a test.
+        print(f"--- {script.name} {how}; its output:\n{output}")
+        if log.exists():
+            print(f"--- phaseD_chain.log:\n{log.read_bytes().decode('utf-8', 'replace')}")
+
+    try:
+        result = subprocess.run(
+            ["bash", str(root / "scripts" / script.name), *args],
+            env=env,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as timeout:
+        # A timeout's captured output is bytes, whatever text=True says.
+        parts = [timeout.stdout or b"", timeout.stderr or b""]
+        show("timed out", "".join(p.decode("utf-8", "replace") for p in parts))
+        raise
+    output = result.stdout + result.stderr
+    show(f"exited {result.returncode}", output)
     return root, record, result.returncode, output
 
 
