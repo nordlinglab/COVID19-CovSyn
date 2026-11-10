@@ -109,17 +109,17 @@ def test_the_chain_names_only_the_golden_script_lines():
 FIREFLY = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
 
 
-def test_the_chain_and_the_synthesis_agree_on_the_run_directory():
-    """The chain's FIREFLY and data_synthesis.sh's default PARAMETER_PATH name one directory."""
-    # Each set exactly once, word for word, and not indented (a cheap sign of top level; an
-    # unindented line in a block is not caught).
-    chain = [line for line in _code(CHAIN) if re.match(r"[ \t]*FIREFLY=", line)]
-    assert chain == [f"FIREFLY={FIREFLY}"]
-    synthesis = [line for line in _code(SYNTHESIS) if re.match(r"[ \t]*parameter_path=", line)]
-    assert synthesis == [f'parameter_path="${{PARAMETER_PATH:-./{FIREFLY}}}"']
-    # and that is the only default directory the synthesis reads
-    defaults = re.findall(r"\$\{PARAMETER_PATH:-[^}]*\}", "\n".join(_code(SYNTHESIS)))
-    assert defaults == [f"${{PARAMETER_PATH:-./{FIREFLY}}}"]
+def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path):
+    """Run on its own without PARAMETER_PATH, data_synthesis.sh reads ./<FIREFLY>.
+
+    That is the directory the chain copies the run onto; checked by a run, not by the text.
+    """
+    root, record, status, output = _run(
+        tmp_path, SYNTHESIS, {"_files": {f"{FIREFLY}/firefly_best.txt": "1 2 3\n"}}
+    )
+    assert status == 0, output
+    args = (record / "uv_run_args").read_text().split("\n")
+    assert args[args.index("--parameter_path") + 1] == f"./{FIREFLY}", output
 
 
 SYNTHESIS_STAND_IN = (
@@ -156,6 +156,7 @@ def test_the_chain_runs_the_synthesis_at_step_2(tmp_path, synthesis_status):
     assert (root / "synthesis_call").exists(), context
     calls = (root / "synthesis_call").read_text().splitlines()
     assert calls == [f"./{FIREFLY} --environment-checked"], context
+    assert (root / FIREFLY / "firefly_best.txt").exists(), context  # the run copied there
     if synthesis_status == "1":
         assert status != 0, context
         assert "] ERROR: data synthesis failed" in log, context
