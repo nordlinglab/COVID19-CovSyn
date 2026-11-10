@@ -27,6 +27,14 @@
 #              firefly status check.
 set -euo pipefail
 
+# The settings this chain was started with, taken before any default fills one in, as tmux -e
+# options for the restart command printed when the environment check below fails.
+given=""
+for name in PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
+        SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
+    if [ -n "${!name:-}" ]; then given="$given -e $(printf %q "$name=${!name}")"; fi
+done
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 LOG=phaseD_chain.log
@@ -60,19 +68,18 @@ run() { uv run --no-sync python -m "$@"; }
 command -v uv >/dev/null || { say 'ERROR: uv not found on PATH; see the README'; exit 1; }
 if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
     say "ERROR: ${UV_PROJECT_ENVIRONMENT:-.venv} differs from uv.lock; the chain stops."
-    # The restart command carries every setting the launcher passed (FIREFLY_STATUS included,
-    # so the restarted chain still checks how the optimiser ended), quoted for the shell.
-    restart="cd $(printf %q "$ROOT") &&"
-    for name in PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
-            SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
-        if [ -n "${!name:-}" ]; then restart="$restart $name=$(printf %q "${!name}")"; fi
-    done
+    # One line to paste, without the log prefix: sync the environment checked here from the
+    # repository root, then start the chain again in its own tmux session with the settings it
+    # was given, FIREFLY_STATUS included, so that it still checks how the optimiser ended.
     if [ -n "${FIREFLY_STATUS:-}" ]; then
-        say "Once the firefly session has ended, run uv sync --locked --inexact, then:"
+        say "Once the firefly session has ended, run this line:"
     else
-        say "Run uv sync --locked --inexact, then:"
+        say "Run this line:"
     fi
-    say "$restart bash scripts/phase_d_chain.sh"
+    root=$(printf %q "$ROOT")
+    environment=$(printf %q "UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-.venv}")
+    echo "cd $root && $environment uv sync --locked --inexact &&" \
+        "tmux new-session -d -s chain -c $root$given bash scripts/phase_d_chain.sh" | tee -a "$LOG"
     exit 1
 fi
 
