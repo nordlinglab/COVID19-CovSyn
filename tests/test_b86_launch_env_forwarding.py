@@ -12,244 +12,30 @@ and each candidate took 19-28 minutes against the 4.3 measured in isolation.
 
 from __future__ import annotations
 
-import ast
 import re
-import shlex
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
+import env_scan as es
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "launch_phase_d.sh"
 CHAIN = SCRIPT.parent / "phase_d_chain.sh"
 SYNTHESIS = SCRIPT.parent / "data_synthesis.sh"
 SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
-# The scripts the chain runs, each with the variables the chain sets on its command line.
-CHAIN_SCRIPTS = {SYNTHESIS: {"PARAMETER_PATH"}}
+# The scripts the chain runs, each with the variables the chain sets on its command line and
+# the value it sets: the synthesis runs on the run the chain copied onto $FIREFLY.
+CHAIN_SCRIPTS = {SYNTHESIS: {"PARAMETER_PATH": '"./$FIREFLY"'}}
 # Set by the chain or its modules themselves, not by the user: OPTIMIZER_RUN after
 # revalidation, AGE_RR_FILE by select_by_checklist for each candidate's checklist.
 CHAIN_INTERNAL = {"OPTIMIZER_RUN", "AGE_RR_FILE"}
-SHELL_SPECIAL = {"BASH_SOURCE"}
-NAME = r"[A-Z][A-Z0-9_]*"
-# One definition of an environment access for both scans: the mappings and the getters of os,
-# and a mapping passed in as ``env``, as ``worker_count(os.environ)`` reads VERIFY_WORKERS.
-ENVIRONMENT_MAPPINGS = {"environ", "environb"}
-ENVIRONMENT_GETTERS = {"getenv", "getenvb"}
-ENVIRONMENT_NAMES = ENVIRONMENT_MAPPINGS | ENVIRONMENT_GETTERS
-MAPPING_PARAMETER = "env"
-
-
-def _name(node: ast.AST) -> str:
-    return getattr(node, "attr", getattr(node, "id", ""))
-
-
-def _environment_names(tree: ast.AST) -> dict[str, str]:
-    """The names a module uses for the environment accesses of os.
-
-    Imported aliases (``from os import environ as e``) and local ones (``e = os.environ``)
-    included.
-    """
-    names = {name: name for name in ENVIRONMENT_NAMES}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "os":
-            for alias in node.names:
-                if alias.name in ENVIRONMENT_NAMES:
-                    names[alias.asname or alias.name] = alias.name
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Name, ast.Attribute)):
-            value = _name(node.value)
-            value = names.get(value, value) if isinstance(node.value, ast.Name) else value
-            if value in ENVIRONMENT_NAMES:
-                names.update({t.id: value for t in node.targets if isinstance(t, ast.Name)})
-    return names
-
-
-def _environment_reads(path: Path) -> set[str]:
-    """Names a module reads from the environment, found in its code, not its comments.
-
-    Covers subscripts, ``.get``, ``.setdefault``, ``.pop`` and ``in`` on ``os.environ`` or on
-    a mapping passed in as ``env``, and ``getenv`` with the key given by position or as
-    ``key=``, under any name the module imports or assigns them to. A mapping parameter by
-    another name than ``env``, or a key built at run time, is beyond a static scan.
-    """
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    aliases = _environment_names(tree)
-
-    def kind(node: ast.AST) -> str:
-        name = _name(node)
-        if isinstance(node, ast.Name):
-            name = aliases.get(name, name)
-        if name in ENVIRONMENT_MAPPINGS or name == MAPPING_PARAMETER:
-            return "mapping"
-        return "getter" if name in ENVIRONMENT_GETTERS else ""
-
-    names = set()
-    for node in ast.walk(tree):
-        key = None
-        if isinstance(node, ast.Call):
-            func = node.func
-            first = node.args[0] if node.args else next(
-                (k.value for k in node.keywords if k.arg == "key"), None)
-            if isinstance(func, ast.Attribute) and func.attr in {"get", "setdefault", "pop"}:
-                if kind(func.value) == "mapping":
-                    key = first
-            elif kind(func) == "getter":
-                key = first
-        elif isinstance(node, ast.Subscript) and kind(node.value) == "mapping":
-            key = node.slice
-        elif isinstance(node, ast.Compare) and any(isinstance(o, ast.In) for o in node.ops):
-            if any(kind(c) == "mapping" for c in node.comparators):
-                key = node.left
-        if isinstance(key, ast.Constant) and isinstance(key.value, str) and \
-                re.fullmatch(NAME, key.value):
-            names.add(key.value)
-    return names
-
-
-def _mentions_environment(path: Path) -> bool:
-    """Whether a module touches the environment at all.
-
-    A copy, an alias or a mapping handed to a reader such as ``worker_count`` reads the
-    environment as surely as a lookup does, so the firefly session's modules may not touch it:
-    no environment access of os under any name, and no such name as a string outside a
-    docstring, which covers ``getattr(os, "environ")`` and ``vars(os)["environ"]``. A name
-    built at run time (``"env" + "iron"``) is beyond a static scan.
-    """
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    aliases = _environment_names(tree)
-    docstrings = {
-        id(node.body[0].value)
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.body and isinstance(node.body[0], ast.Expr)
-    }
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id in aliases:
-            return True
-        if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_NAMES:
-            return True
-        if isinstance(node, ast.ImportFrom) and node.module == "os" and \
-                any(a.name in ENVIRONMENT_NAMES or a.name == "*" for a in node.names):
-            return True
-        if isinstance(node, ast.Constant) and node.value in ENVIRONMENT_NAMES and \
-                id(node) not in docstrings:
-            return True
-    return False
-
-
-def _import_closure(module: str) -> set[Path]:
-    """The covsyn source files a module imports, directly or through other covsyn modules.
-
-    Relative imports resolve against the importing module, and each package's ``__init__.py``
-    counts, as it runs on every import of the package.
-    """
-    seen, todo, files = set(), [module], set()
-    while todo:
-        name = todo.pop()
-        if name in seen or not name.startswith("covsyn"):
-            continue
-        seen.add(name)
-        parts = name.split(".")
-        for depth in range(1, len(parts)):
-            init = SOURCE.parent.joinpath(*parts[:depth], "__init__.py")
-            if init.is_file():
-                files.add(init)
-        path = SOURCE.parent / (name.replace(".", "/") + ".py")
-        package = SOURCE.parent.joinpath(*parts, "__init__.py")
-        path = path if path.is_file() else package
-        if not path.is_file():
-            continue
-        files.add(path)
-        base = parts if path.name == "__init__.py" else parts[:-1]
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ImportFrom):
-                prefix = base[: len(base) - node.level + 1] if node.level else []
-                target = ".".join([*prefix, *(node.module or "").split(".")]).strip(".")
-                todo.append(target)
-                todo.extend(f"{target}.{alias.name}" for alias in node.names)
-            elif isinstance(node, ast.Import):
-                todo.extend(a.name for a in node.names)
-    return files
-
-
 # Every covsyn module the firefly session runs; the chain runs the rest, and these too.
-FIREFLY_FILES = _import_closure("covsyn.calibration.firefly_optimizer")
+FIREFLY_FILES = es.import_closure("covsyn.calibration.firefly_optimizer", SOURCE)
 
 
-def _shell_lines(path: Path) -> list[str]:
-    """A shell script's lines, comment lines dropped first and continuation lines then joined.
-
-    bash does not continue a comment onto the next line, so the order matters.
-    """
-    lines, pending = [], ""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not pending and line.lstrip().startswith("#"):
-            continue
-        if line.endswith("\\"):
-            pending += line[:-1] + " "
-            continue
-        lines.append(pending + line)
-        pending = ""
-    return [*lines, pending] if pending else lines
-
-
-def _first_command(line: str) -> list[str]:
-    """The words of a line's first command, command substitutions folded into one word."""
-    while (folded := re.sub(r"\$\([^()]*\)", "X", line)) != line:
-        line = folded
-    try:
-        lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
-        words = list(lexer)
-    except ValueError:
-        return []
-    command = []
-    for word in words:
-        if word and set(word) <= set(";&|"):
-            break
-        command.append(word)
-    return command
-
-
-def _top_level_assignment(line: str) -> str | None:
-    """The name a line assigns, when it assigns it unconditionally.
-
-    Only NAME=value at the very start of a line, as the whole first command, counts: an
-    indented one may sit in a branch that does not run, and NAME=value followed by a command
-    sets NAME for that command only.
-    """
-    match = re.match(rf"({NAME})=", line)
-    if match and len(_first_command(line)) == 1:
-        return match.group(1)
-    return None
-
-
-def _shell_variables(lines: list[str]) -> tuple[set[str], set[str], set[str]]:
-    """The names a script references, assigns and reads with a ``${NAME:-}`` default.
-
-    A name counts as assigned only when the script assigns it unconditionally, at the top
-    level, before it first uses it; a script that uses a name first, or assigns it only in a
-    branch, reads it from the environment.
-    """
-    referenced, defaulted, first_use, first_assignment = set(), set(), {}, {}
-    for number, line in enumerate(lines):
-        for name in re.findall(rf"\$\{{?({NAME})", line):
-            referenced.add(name)
-            first_use.setdefault(name, number)
-        defaulted |= set(re.findall(rf"\$\{{({NAME}):-", line))
-        name = _top_level_assignment(line)
-        if name:
-            first_assignment.setdefault(name, number)
-    assigned = {name for name, number in first_assignment.items()
-                if number < first_use.get(name, len(lines))}
-    return referenced - SHELL_SPECIAL, assigned, defaulted
-
-
-def _environment_variables(path: Path) -> set[str]:
-    """The names a script reads from the environment: defaulted or used before assigned."""
-    referenced, assigned, defaulted = _shell_variables(_shell_lines(path))
-    return (referenced - assigned) | defaulted
+def _lines(path: Path) -> list[es.ShellLine]:
+    return es.shell_lines(path.read_text(encoding="utf-8"))
 
 
 def _chain_variables() -> list[str]:
@@ -257,10 +43,10 @@ def _chain_variables() -> list[str]:
 
     PYTHON is gone, as the chain runs every module through uv run (Task 1).
     """
-    found = _environment_variables(CHAIN)
+    found = es.environment_variables(CHAIN)
     for script, set_by_chain in CHAIN_SCRIPTS.items():
-        found |= _environment_variables(script) - set_by_chain
-    found |= {name for path in SOURCE.rglob("*.py") for name in _environment_reads(path)}
+        found |= es.environment_variables(script) - set(set_by_chain)
+    found |= {name for path in SOURCE.rglob("*.py") for name in es.environment_reads(path)}
     return sorted(found - CHAIN_INTERNAL)
 
 
@@ -270,7 +56,7 @@ CHAIN_VARIABLES = _chain_variables()
 @pytest.fixture
 def chain_env() -> list[str]:
     """The names launch_phase_d.sh passes into the chain session."""
-    text = "\n".join(_shell_lines(SCRIPT))
+    text = "\n".join(line.text for line in _lines(SCRIPT))
     match = re.search(r"^CHAIN_ENV=\((.*?)\)", text, re.DOTALL | re.MULTILINE)
     assert match, "launch_phase_d.sh no longer lists the chain's variables in CHAIN_ENV"
     return match.group(1).split()
@@ -282,31 +68,23 @@ def test_the_chain_session_is_given_every_variable_it_reads(chain_env, variable)
     assert variable in chain_env
 
 
-@pytest.mark.parametrize(("script", "names"), [(s.name, n) for s, n in CHAIN_SCRIPTS.items()])
-def test_the_chain_sets_what_it_does_not_forward(script, names):
+@pytest.mark.parametrize(("script", "values"), [(s.name, v) for s, v in CHAIN_SCRIPTS.items()])
+def test_the_chain_sets_what_it_does_not_forward(script, values):
     """The chain sets on a script's command line every variable it does not forward.
 
     Such a variable is left out of the forwarding, so without it the tmux server's value would
     reach the script.
     """
-    calls = [line for line in _shell_lines(CHAIN) if f"scripts/{script}" in line]
+    calls = [line.text for line in _lines(CHAIN) if script in es.called_scripts([line])]
     assert calls, script
     for line in calls:
-        for name in names:
-            assert re.match(rf"^\s*{name}=\S+\s+bash scripts/{script}", line), line
+        for name, value in values.items():
+            assert re.match(rf"^\s*{name}={re.escape(value)}\s", line), line
 
 
 def test_every_script_the_chain_runs_is_scanned():
     """A script the chain runs and the scan skips would have its variables dropped unseen."""
-    called = set(re.findall(r"\b(?:bash|sh|source|\.)\s+scripts/(\S+\.sh)",
-                            "\n".join(_shell_lines(CHAIN))))
-    assert called == {script.name for script in CHAIN_SCRIPTS}
-
-
-def test_the_synthesis_runs_on_the_copied_run():
-    """The chain points the synthesis at the run it copied onto $FIREFLY, nothing else."""
-    calls = [line for line in _shell_lines(CHAIN) if "scripts/data_synthesis.sh" in line]
-    assert calls and all(line.lstrip().startswith('PARAMETER_PATH="./$FIREFLY" ') for line in calls)
+    assert es.called_scripts(_lines(CHAIN)) == {script.name for script in CHAIN_SCRIPTS}
 
 
 def test_the_firefly_modules_do_not_touch_the_environment():
@@ -316,111 +94,18 @@ def test_the_firefly_modules_do_not_touch_the_environment():
     """
     assert len(FIREFLY_FILES) > 2
     for path in FIREFLY_FILES:
-        assert not _mentions_environment(path), path.name
-
-
-@pytest.mark.parametrize(("source", "touches"), [
-    ("import os\nworker_count(dict(os.environ))", True),
-    ("import os\nenv = os.environ\nworker_count(env)", True),
-    ("from os import getenv\ngetenv('A')", True),
-    ("from os import environ as e\nworker_count(e)", True),
-    ("from os import getenv as g\ng('A')", True),
-    ("import os\nos.environb", True),
-    ("import os\ngetattr(os, 'environ')", True),
-    ("import os as o\ngetattr(o, 'environ')", True),
-    ("import os\nvars(os)['environ']", True),
-    ("def worker_count(env):\n    return env.get('A')", False),
-    ("# os.environ\nprint('os.environ')", False),
-    ("def f():\n    '''environ'''", False),
-    ("x = 1\n'environ'", True),     # a bare string statement that is no docstring
-])
-def test_touching_the_environment_is_found(tmp_path, source, touches):
-    """Copies and aliases of the environment count, a mapping parameter or text does not."""
-    path = tmp_path / "module.py"
-    path.write_text(source)
-    assert _mentions_environment(path) == touches
-
-
-def test_the_import_closure_follows_relative_imports_and_packages(tmp_path, monkeypatch):
-    """A relative import and a package ``__init__.py`` are part of what a module runs."""
-    package = tmp_path / "covsyn" / "calibration"
-    package.mkdir(parents=True)
-    (tmp_path / "covsyn" / "__init__.py").write_text("")
-    (package / "__init__.py").write_text("import os\nos.environ['B']")
-    (package / "main.py").write_text("from .helper import f\n")
-    (package / "helper.py").write_text("def f():\n    pass\n")
-    monkeypatch.setattr(sys.modules[__name__], "SOURCE", tmp_path / "covsyn")
-    closure = _import_closure("covsyn.calibration.main")
-    files = {p.relative_to(tmp_path).as_posix() for p in closure}
-    assert files == {"covsyn/__init__.py", "covsyn/calibration/__init__.py",
-                     "covsyn/calibration/main.py", "covsyn/calibration/helper.py"}
-    assert any(_mentions_environment(p) for p in closure)
+        assert not es.mentions_environment(path), path.name
 
 
 @pytest.mark.parametrize("script", [CHAIN, *CHAIN_SCRIPTS], ids=lambda p: p.name)
 def test_the_scripts_follow_the_convention(script):
-    """Every variable a script uses is assigned with NAME= or read with a ${NAME:-} default.
+    """Every variable a script uses is assigned before use or read with a ${NAME:-} default.
 
-    A variable used any other way, say by for, read or local, would be taken for user input
-    and its forwarding asked for; this fails instead, so its form can be checked by hand.
+    A variable used any other way would be taken for user input and its forwarding asked for;
+    this fails instead, so its form can be checked by hand.
     """
-    referenced, assigned, defaulted = _shell_variables(_shell_lines(script))
+    referenced, assigned, defaulted = es.shell_variables(_lines(script))
     assert not referenced - assigned - defaulted
-
-
-@pytest.mark.parametrize(("lines", "assigned"), [
-    (["A=1", "echo $A"], {"A"}),
-    (["A=\"$(cd \"$(dirname x)\" && pwd)\"", "echo $A"], {"A"}),
-    (["A=1; echo hi", "echo $A"], {"A"}),
-    (["A=$B cmd", "echo $A"], set()),
-    (["if x; then", "  A=1", "fi", "echo $A"], set()),   # may not run
-    (["echo A=1"], set()),
-    (["A=1 cmd", "echo $A"], set()),                # sets A for cmd only
-    (["A=\"x y\" cmd"], set()),
-    (["echo $A", "A=1"], set()),                    # read before it is assigned
-    (["for A in 1; do :; done"], set()),
-])
-def test_the_scan_takes_only_assignments_made_before_use(lines, assigned):
-    """Only NAME= on a line of its own, before the first use, makes a name the script's own."""
-    assert _shell_variables(lines)[1] == assigned
-
-
-def test_a_comment_does_not_continue(tmp_path):
-    """A comment ending in a backslash does not swallow the next line, as in bash."""
-    script = tmp_path / "s.sh"
-    script.write_text("# note \\\necho ${SECRET:-x}\n")
-    assert _environment_variables(script) == {"SECRET"}
-
-
-def test_continuation_lines_are_joined(tmp_path):
-    """A NAME= argument on a continuation line belongs to the command it continues."""
-    script = tmp_path / "s.sh"
-    script.write_text("run x \\\n  A=1\necho $A\n")
-    assert _shell_variables(_shell_lines(script))[1] == set()
-
-
-@pytest.mark.parametrize(("source", "expected"), [
-    ("import os\nos.environ['A']", {"A"}),
-    ("import os\nos.environ.get('A')", {"A"}),
-    ("import os\nos.environ.setdefault('A', '1')", {"A"}),
-    ("import os\nos.getenv('A')", {"A"}),
-    ("from os import getenv\ngetenv('A')", {"A"}),
-    ("from os import environ\n'A' in environ", {"A"}),
-    ("from os import environ\nenviron['A']", {"A"}),
-    ("from os import getenv as g\ng('A')", {"A"}),
-    ("from os import environ as e\ne.get('A')", {"A"}),
-    ("import os\ne = os.environ\ne.get('A')", {"A"}),
-    ("import os\nos.environ.pop('A')", {"A"}),
-    ("import os\nos.getenv(key='A')", {"A"}),
-    ("def f(env):\n    return env.get('A')", {"A"}),
-    ("# os.environ['A']\nprint('os.getenv(B)')", set()),
-    ("d = {}\nd.get('A')", set()),
-])
-def test_environment_reads_are_found_in_code_only(tmp_path, source, expected):
-    """The scan finds every spelling of an environment read and nothing in comments or text."""
-    path = tmp_path / "module.py"
-    path.write_text(source)
-    assert _environment_reads(path) == expected
 
 
 def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
@@ -534,7 +219,8 @@ def test_session_checks_match_the_name_exactly():
     count; "=" makes the match exact.
     """
     for script in (SCRIPT, CHAIN):
-        targets = re.findall(r"has-session -t (\S+)", "\n".join(_shell_lines(script)))
+        code = "\n".join(line.text for line in _lines(script))
+        targets = re.findall(r"has-session -t (\S+)", code)
         assert targets, script.name
         assert all(t.startswith("=") for t in targets), (script.name, targets)
 
