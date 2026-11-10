@@ -28,6 +28,11 @@ if [ ! -f "$parameter_path/firefly_best.txt" ]; then
     exit 1
 fi
 
+# The runs below use the environment as it is (--no-sync), so it is checked against uv.lock
+# first; the check changes nothing, so the chain can call this script without reinstalling.
+uv sync --locked --check --inexact >/dev/null 2>&1 \
+    || { echo "ERROR: .venv differs from uv.lock; run uv sync"; exit 1; }
+
 for mode in "${modes[@]}"; do
     result_path="./synthetic_data_results_$mode"
     mkdir -p "$result_path"

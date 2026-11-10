@@ -92,6 +92,18 @@ def test_every_module_environment_read_is_forwarded_or_cleared():
         assert any(re.fullmatch(rf"\s*unset {name}", line) for line in _code(CHAIN)), name
 
 
+def test_the_synthesis_checks_the_environment_before_running_without_sync():
+    """data_synthesis.sh checks .venv against uv.lock before it runs without syncing.
+
+    Run on its own, as the README shows, nothing else checks it; the check changes nothing, so
+    the chain may call the script too.
+    """
+    code = _code(SYNTHESIS)
+    check = next(i for i, line in enumerate(code) if "uv sync --locked --check" in line)
+    first_run = next(i for i, line in enumerate(code) if "uv run --no-sync" in line)
+    assert check < first_run
+
+
 def test_the_firefly_modules_do_not_read_the_environment():
     """The firefly session gets WARM_START alone, which the shell passes as an argument."""
     for name in ("firefly_optimizer.py", "fast_cost.py"):
