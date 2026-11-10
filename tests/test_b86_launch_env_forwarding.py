@@ -74,8 +74,11 @@ def test_the_list_holds_every_default_the_scripts_read():
 
 def test_the_chain_runs_only_the_synthesis_script_and_sets_its_parameter_path():
     """The chain calls data_synthesis.sh in one fixed form, setting PARAMETER_PATH itself."""
-    # A call is bash followed by a script path; a message that names a script is no call.
-    calls = [line for line in _code(CHAIN) if re.search(r"\bbash\s+[^\s\"]*\.sh\b", line)]
+    # A call runs a script: bash, source or . before its path, or the path first in its command
+    # (after NAME= prefixes); a message that only names a script is no call.
+    run_by_shell = re.compile(r"(?:\bbash|\bsource|(?:^|[;&|]\s*)\.)\s+[^\s\"]*\.sh\b")
+    run_directly = re.compile(r"^\s*(?:[A-Z_][A-Z0-9_]*=\S+\s+)*[^\s\"=]*\.sh\b")
+    calls = [line for line in _code(CHAIN) if run_by_shell.search(line) or run_directly.match(line)]
     assert calls
     for line in calls:
         assert SYNTHESIS_CALL.match(line), line
@@ -191,7 +194,8 @@ def test_a_failed_check_says_how_to_go_on(tmp_path, launched):
     assert "Nothing has run" in log and f"run in {root}" in log
     assert "UV_PROJECT_ENVIRONMENT=/opt/env uv sync --locked --inexact" in log
     assert "not launch_phase_d.sh" in log
-    assert ("  FIREFLY_STATUS=firefly.exit" in log) == launched
+    assert "as a tmux new-session" in log
+    assert ("  -e FIREFLY_STATUS=firefly.exit" in log) == launched
 
 
 def test_the_failed_check_lists_every_forwarded_variable():
