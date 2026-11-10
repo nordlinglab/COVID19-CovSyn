@@ -179,6 +179,7 @@ def test_ci_workflow_runs_the_fast_tests_on_both_systems():
         "macos-latest",
         "uv sync --locked",
         'uv run pytest -m "not slow"',
+        "permissions:\n  contents: read",
     ):
         assert needle in workflow, needle
 
