@@ -25,8 +25,10 @@
 #                    relative to the repository root. The launcher fails if the firefly session
 #                    ends within its first 2 s with a status other than 0; a later failure
 #                    stops the chain.
+#   UV_PROJECT_ENVIRONMENT  the environment uv checks here and both sessions run in; default
+#                    .venv
 # An unset variable reaches the chain empty, which the chain reads as its default; the launcher
-# always gives FIREFLY_STATUS a value.
+# always gives FIREFLY_STATUS and UV_PROJECT_ENVIRONMENT a value.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,7 +42,10 @@ if tmux has-session -t =firefly 2>/dev/null || tmux has-session -t =chain 2>/dev
 fi
 command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"; exit 1; }
 # The sessions run uv run --no-sync, so the environment is checked against uv.lock here, once,
-# before anything runs on it; --inexact leaves alone packages the lock does not list.
+# before anything runs on it; --inexact leaves alone packages the lock does not list. The
+# sessions get the tmux server's environment, so the environment checked here is passed to
+# them, lest they run in another one.
+export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-.venv}"
 uv sync --locked --inexact
 # A tmux session gets the tmux server's environment, not this shell's, so every variable a
 # session reads is passed with -e. PATH is the exception: tmux gives a new session the PATH of
@@ -49,7 +54,7 @@ uv sync --locked --inexact
 # through the user's default shell: bash then expands the variables, so WARM_START splits into
 # its files under any login shell, and a quote in a value cannot break the command line.
 CHAIN_ENV=(PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT
-           SELECT_TOP CPU_CORES FIREFLY_STATUS)
+           SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT)
 # The firefly session replaces "running" with the optimiser's exit status, so a session that is
 # killed before the optimiser exits leaves "running", which stops the chain too.
 FIREFLY_STATUS="${FIREFLY_STATUS:-firefly_phaseD.exit}"
@@ -58,6 +63,7 @@ chain_env_args=()
 for name in "${CHAIN_ENV[@]}"; do chain_env_args+=(-e "$name=${!name:-}"); done
 # shellcheck disable=SC2016
 tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
+  -e "UV_PROJECT_ENVIRONMENT=$UV_PROJECT_ENVIRONMENT" \
   -e "FIREFLY_STATUS=$FIREFLY_STATUS" bash -c \
   'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1; \

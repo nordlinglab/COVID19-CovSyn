@@ -27,7 +27,8 @@ SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
 # the launcher passes each into the chain session. VERIFY_WORKERS is read by the checklist
 # module (worker_count), the others by the two scripts.
 CHAIN_VARIABLES = ("PREVIOUS_CHECKS", "VERIFY_WORKERS", "FIREFLY_RUN", "REVALIDATE",
-                   "REVALIDATION_BLOCKS", "SELECT", "SELECT_TOP", "CPU_CORES", "FIREFLY_STATUS")
+                   "REVALIDATION_BLOCKS", "SELECT", "SELECT_TOP", "CPU_CORES", "FIREFLY_STATUS",
+                   "UV_PROJECT_ENVIRONMENT")
 # Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
@@ -128,6 +129,7 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         "#!/usr/bin/env bash\n"
         f'[ "$1" = run ] || exit 0\n'
         f'printf "%s\\n" "$@" > "{record}/uv_run_args"\n'
+        f'echo "${{UV_PROJECT_ENVIRONMENT:-}}" > "{record}/uv_run_environment"\n'
         'exit "${UV_STATUS:-0}"\n')
     (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
     (bin_dir / "tmux").write_text(f"""#!/usr/bin/env bash
@@ -202,6 +204,9 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     assert chain["FIREFLY_RUN"] == "run's dir"
     assert chain["CPU_CORES"] == "8"
     assert chain["SELECT_TOP"] == ""
+    # uv sync in the launcher and uv run in both sessions use the same environment.
+    assert chain["UV_PROJECT_ENVIRONMENT"] == ".venv"
+    assert (record / "uv_run_environment").read_text().strip() == ".venv"
     assert set(chain) == set(CHAIN_VARIABLES)
 
 
