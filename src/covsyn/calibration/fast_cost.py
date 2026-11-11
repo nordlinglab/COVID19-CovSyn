@@ -392,7 +392,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
     for i, row in enumerate(rows[:case_limit]):
         synthetic_data_matrix[i] = row
-    _, energy_cost, _ = fo.estat(taiwan_data_matrix, synthetic_data_matrix, nboot=1)
+    energy_cost = fo.energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
 
     energy_weight = 1
     contact_cost = sum(contact_costs)

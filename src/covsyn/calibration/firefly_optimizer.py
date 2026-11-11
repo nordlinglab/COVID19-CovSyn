@@ -34,7 +34,6 @@ from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_
 # Note: RW_nan_euclidean_distances is a copy code from sklearn but only comment out the weighting parts.
 # "distances /= present_count" and "distances *= X.shape[1]"
 from sklearn.metrics.pairwise import *
-from sklearn.utils._mask import _get_mask
 from sklearn.utils.validation import _deprecate_positional_args
 from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
@@ -59,8 +58,9 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
     This is where it departs from sklearn's ``nan_euclidean_distances``, which this function
     was copied from: sklearn multiplies the squared distance by
     ``total coordinates / present coordinates``, so that pairs observed on different numbers of
-    coordinates are comparable. Those two lines are present below but commented out, and have
-    been since the first commit, so the behaviour is inherited rather than decided here.
+    coordinates are comparable. This function never did (the two lines were commented out
+    from the first commit until B91 rewrote the computation), so the behaviour is inherited
+    rather than decided here.
 
     B90 (2026-11-06) measured what restoring them would do, because it is not obvious: the
     objective's data matrix is only 36% present, its rows carry 3 to 6 of 9 coordinates, and
@@ -132,44 +132,38 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
     ensure_all_finite = 'allow-nan' if is_scalar_nan(missing_values) else True
     X, Y = check_pairwise_arrays(X, Y, accept_sparse=False,
                                  ensure_all_finite=ensure_all_finite, copy=copy)
-    # Get missing mask for X
-    missing_X = _get_mask(X, missing_values)
-
-    # Get missing mask for Y
-    missing_Y = missing_X if Y is X else _get_mask(Y, missing_values)
-
-    # set missing values to zero
-    X[missing_X] = 0
-    Y[missing_Y] = 0
-
-    distances = euclidean_distances(X, Y, squared=True)
-
-    # Adjust distances for missing values
-    XX = X * X
-    YY = Y * Y
-    distances -= np.dot(XX, missing_Y.T)
-    distances -= np.dot(missing_X, YY.T)
-
-    np.clip(distances, 0, None, out=distances)
-
-    if X is Y:
-        # Ensure that distances between vectors and themselves are set to 0.0.
-        # This may not be the case due to floating point rounding errors.
-        np.fill_diagonal(distances, 0.0)
-
-    present_X = 1 - missing_X
-    present_Y = present_X if Y is X else ~missing_Y
-    present_count = np.dot(present_X, present_Y.T)
-    distances[present_count == 0] = np.nan
-    # avoid divide by zero
-    np.maximum(1, present_count, out=present_count)
-    # distances /= present_count
-    # distances *= X.shape[1]
-
-    if not squared:
-        np.sqrt(distances, out=distances)
-
+    if not is_scalar_nan(missing_values):
+        X = np.where(X == missing_values, np.nan, X)
+        Y = np.where(Y == missing_values, np.nan, Y)
+    # B91 (2026-11-12): subtract coordinate by coordinate instead of expanding
+    # |x|^2 - 2x.y + |y|^2 through the platform's BLAS. The expansion left identical cases
+    # 3-8e-8 apart on OpenBLAS but 0 on Accelerate, and energy() takes log(d + 1e-16), so the
+    # objective differed between Linux and macOS (E103). Exact differences make equal cases
+    # exactly 0 on every platform.
+    squared_sum = np.zeros((X.shape[0], Y.shape[0]))
+    shared = np.zeros((X.shape[0], Y.shape[0]), dtype=bool)
+    for k in range(X.shape[1]):
+        difference = X[:, k, None] - Y[None, :, k]
+        present = ~np.isnan(difference)
+        squared_sum += np.where(present, difference * difference, 0.0)
+        shared |= present
+    distances = squared_sum if squared else np.sqrt(squared_sum)
+    distances[~shared] = np.nan
     return distances
+
+
+def _standardised_stack(x, y):
+    stack = np.vstack([x, y])
+    return (stack - np.nanmean(stack, axis=0))/np.nanstd(stack, axis=0)
+
+
+def energy_statistic(x, y, method='log'):
+    """The statistic of estat, without its bootstrap (B91).
+
+    The objective discarded the one bootstrap draw it asked estat for, so it computed the
+    energy twice and drew from the global random state; this computes it once.
+    """
+    return energy(*np.split(_standardised_stack(x, y), [len(x)]), method)
 
 
 def estat(x, y, nboot=1000, replace=False, method='log', fitting=False):
@@ -186,8 +180,7 @@ def estat(x, y, nboot=1000, replace=False, method='log', fitting=False):
 
     '''
     n, N = len(x), len(x) + len(y)
-    stack = np.vstack([x, y])
-    stack = (stack - np.nanmean(stack, axis=0))/np.nanstd(stack, axis=0)
+    stack = _standardised_stack(x, y)
     if replace:
         def rand(x): return np.random.randint(x, size=x)
     else:
@@ -1232,8 +1225,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
     synthetic_data_matrix = convert_synthetic_data_to_test_matrix(
         results, taiwan_data_matrix, source_case_number * repeat_number)
-    _, energy_cost, _ = estat(
-        taiwan_data_matrix, synthetic_data_matrix, nboot=1)
+    energy_cost = energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
     # energy_cost = max(energy_cost, 0)  # Prevent negative energy cost
     # Objective function
     # print('Energy cost: ', energy_cost)
