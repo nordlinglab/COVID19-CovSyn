@@ -20,8 +20,9 @@ from pathlib import Path
 
 import numpy as np
 
-from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_in_tracing_window,
-                                            tracing_window_counts,
+from covsyn.model.contact_measures import (TAIWAN_TRACING_CASES, TAIWAN_TRACING_LARGEST,
+                                            at_work_days_before_onset, contacts_in_tracing_window,
+                                            largest_spreader_percentile, tracing_window_counts,
                                             contacts_per_case, contacts_per_day_at_work,
                                             contacts_per_day_before_onset,
                                             offspring_dispersion, one_day_counts, one_day_shape)
@@ -31,7 +32,7 @@ from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootst
                                           json_band, percentile_intervals, verdict,
                                           worker_count)
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
-from covsyn.validation.compare_first_wave import is_local_case, reference_percentile
+from covsyn.validation.compare_first_wave import is_local_case
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
@@ -52,8 +53,6 @@ JIAN_LOCAL_PER_CASE = 1435 / 55
 JIAN_IMPORTED_PER_CASE = 6616 / 432
 JIAN_IMPORTED_NO_FLIGHT_PER_CASE = 3093 / 432
 # B71: Taiwan first-wave tracing records, infected contacts per case (E80, E15).
-TAIWAN_TRACING_CASES = 579
-TAIWAN_TRACING_LARGEST = 8
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix') for L in LAYERS}
 
 results = []
@@ -339,11 +338,12 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # check passes when 8 is not in either 2.5% tail of the simulated largest. The largest is
     # discrete and ties at 8 often, so a tie counts as half a sample, as in B85's
     # reference_percentile; counting every tie as below failed an 8 that sat in neither tail
-    # (code review 2026-11-09, F4).
+    # (code review 2026-11-09, F4). B92: the percentile is computed exactly, by the function the
+    # objective charges; the resampled maxima remain only for the median and range in the note.
     rng = np.random.default_rng(0)
     largest = np.array([rng.choice(counts, TAIWAN_TRACING_CASES).max() for _ in range(2000)])
     check('B17', f'samples of {TAIWAN_TRACING_CASES} cases, percentile of a largest of '
-          f'{TAIWAN_TRACING_LARGEST}', reference_percentile(largest, TAIWAN_TRACING_LARGEST), (2.5, 97.5),
+          f'{TAIWAN_TRACING_LARGEST}', largest_spreader_percentile(counts), (2.5, 97.5),
           '%', interval=False,
           note=f'B71: Taiwan tracing largest {TAIWAN_TRACING_LARGEST} over {TAIWAN_TRACING_CASES} '
                f'cases (confirmed contacts, an upper bound, E80); simulated median '

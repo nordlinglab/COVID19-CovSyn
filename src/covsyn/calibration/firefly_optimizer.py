@@ -21,7 +21,7 @@ from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULAT
                                             health_care_contact_floor)
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
-                                           offspring_dispersion,
+                                           largest_spreader_percentile, offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
@@ -507,6 +507,17 @@ OUTCOME_TARGETS = {
     # dispersion and makes every layer attack rate impossible to measure from a few hundred
     # index cases, because the infections then cluster into a handful of them (E38).
     'offspring_k':            (0.20, 0.35, 1.0),
+    # B92 (2026-11-12, professor): B71's check, charged. Taiwan's largest tracing count (8 over
+    # 579 cases) must not fall in either 2.5% tail of the largest of 579 simulated index cases.
+    # Run 23 failed it on independent seeds (1.0%: 7 of 1000 index cases infected 9 or more),
+    # and the largest spreader was not in the objective, so re-optimising alone could not fix
+    # it. The miss is in units of the lower bound (OUTCOME_SCALE_BY_LOWER_BOUND): in units of
+    # the band's width, 95 points, falling from 2.5% to 0% would cost almost nothing.
+    # Only the lower tail is charged (user, 2026-11-12): 100% means no case reached 8, which
+    # with 300 cases per evaluation, fewer than Taiwan's 579, happens about 70% of the time
+    # even when the model matches Taiwan; charging it cost run 10 a flat 6.0. The checklist,
+    # on 1000 or more cases, still judges both tails.
+    'largest_spreader_percentile': (2.5, np.inf, 1.0),
     # B25: close contacts per day BEFORE symptom onset, from the 2020 national survey
     # (6.03 contacts/day) split by the setting composition of Fu 2012.
     # B61 (2026-10-15): checked against Fu 2010's national contact diaries (Zenodo
@@ -816,6 +827,7 @@ def measure_outcomes(index_cases):
     k = offspring_dispersion(offspring)
     if np.isfinite(k):
         measured['offspring_k'] = k
+    measured['largest_spreader_percentile'] = largest_spreader_percentile(offspring)  # B92
 
     for layer in layers:
         # B55: ordinary contacts only, see contact_measures.contacts_per_day_before_onset.
@@ -994,7 +1006,9 @@ MAX_INTERVAL_WIDTH_OVER_CENTRE = 0.5
 # measured in units of the lower bound instead of B43's capped width, so the target still bites
 # near its lower end. Kept to the one target that needs it.
 # B76: a floor with no upper bound has no width either, so its miss is in units of the floor.
-OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio', 'health_care_contacts_per_index'}
+# B92: the largest-spreader percentile is a floor, 2.5 points above 0.
+OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio', 'health_care_contacts_per_index',
+                                'largest_spreader_percentile'}
 
 
 # B60: the intervals the objective charges, from target_margins.py; OUTCOME_TARGETS keeps the
