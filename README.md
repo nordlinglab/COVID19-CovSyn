@@ -37,7 +37,7 @@ Every command below runs from the repository root, because the modules read thei
 | `scripts/` | `launch_phase_d.sh`, `phase_d_chain.sh`, `data_synthesis.sh`; `gates/` (checks before a run), `probes/` and `benchmarks/` (the tools behind findings in the decision register) |
 | `tests/` | Regression, pipeline and unit tests; fixtures in `tests/fixtures/` |
 | `variable/`, `data/`, `validation_reference/` | Fitted parameters, raw inputs, and reference distributions |
-| `firefly_result/phaseD_run10/` | Best vector, bounds and progress of Phase D run 10 |
+| `results/models/phaseD_run10/` | Best vector, bounds and progress of Phase D run 10 |
 | `docs/` | `covsyn_decisions.md` (every modelling decision and finding) and Phase D notes |
 | `notebooks/` | Analysis notebooks |
 
@@ -61,7 +61,7 @@ uv run python -m covsyn.calibration.apply_phase_d_parameters
 
 ```bash
 uv run pytest
-uv run python scripts/gates/verify_fast_cost.py firefly_result/phaseD_run10 --workers 8 --vectors 4
+uv run python scripts/gates/verify_fast_cost.py results/models/phaseD_run10 --workers 8 --vectors 4
 uv run python scripts/gates/smoke_test.py
 ```
 
@@ -81,7 +81,7 @@ The run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit
 ### 4. Data synthesis
 
 ```bash
-PARAMETER_PATH=firefly_result/phaseD_run10 scripts/data_synthesis.sh
+PARAMETER_PATH=results/models/phaseD_run10 scripts/data_synthesis.sh
 ```
 
 ## Tests

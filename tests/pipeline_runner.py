@@ -24,7 +24,7 @@ from pathlib import Path
 import regression_digest as rd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RUN_DIR = "firefly_result/phaseD_run10"
+RUN_DIR = "results/models/phaseD_run10"
 MONTE_CARLO = 40
 MODES = ("spread_Taiwan_weight", "taiwan_first_outbreak")
 

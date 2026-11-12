@@ -94,7 +94,7 @@ Also: every `*.bak_run*`, `__pycache__/`, `old/`, `old_covsyn/`, `.codex-tools/`
 |---|---|
 | `variable/` | commit the Phase D parameter files (they are modified tracked files; needed to reproduce run 10) |
 | `validation_reference/*.csv` | commit (small, derived from the public tracing workbook) |
-| `firefly_result/…/firefly_best.txt` of run 10 | commit the best vector (small) so run 10 can be reproduced |
+| `results/models/phaseD_run10/firefly_best.txt` | commit the best vector (small) so run 10 can be reproduced |
 | `ARCHIVE_*`, `synthetic_data_results_*`, figures, `diagnostic_figures/` | do not commit (large, regenerable) |
 
 Note: the thesis repo's own `src/README.md` (issue 1) wants data out of `src/`. Because `src/covsyn` is the upstream

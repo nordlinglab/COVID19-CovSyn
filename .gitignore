@@ -196,3 +196,11 @@ CLAUDE.md
 .codex-tools/
 # Literature tooling, not part of CovSyn.
 tools/
+# Task 3: runs write under results/ and are not committed, except the runs named here.
+/results/*
+!/results/models/
+/results/models/*
+!/results/models/phaseD_run10/
+!/results/models/phaseD_run18/
+!/results/models/phaseD_run19/
+!/results/models/legacy_gamma0131_g200/

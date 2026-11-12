@@ -126,11 +126,11 @@ CHENG2020_LOCAL_SCALE = ((CHENG2020_LOCAL_INFECTIONS / CHENG2020_LOCAL_INDEX_CAS
 # CovSyn candidate contacts per index case (verify_phase_d, 1000 index cases). Re-measure and
 # update between runs.
 # 2026-11-01 (run 19 preparation, B75): run 18 candidate 80 under the B75 work calendar, 1000
-# spread_Taiwan_weight simulations, firefly_result/phaseD_run18/checks_b75.txt. Run 17 had
+# spread_Taiwan_weight simulations, results/models/phaseD_run18/checks_b75.txt. Run 17 had
 # {2.605, 3.657, 2.144, 4.759, 23.874}: health care fell 4.759 -> 2.597 with run 18's vector,
 # which raises the health care anchor and its uncapped daily ceiling to 2.9x the household's (E61).
 # 2026-11-02 (run 20 preparation, B77): run 19's selected vector (candidate 60) under the B77
-# school calendar, 1000 spread_Taiwan_weight simulations, firefly_result/phaseD_run19/
+# school calendar, 1000 spread_Taiwan_weight simulations, results/models/phaseD_run19/
 # checks_b77.txt. Health care rose 2.597 -> 5.807 and workplace fell 3.842 -> 2.832 with run 19's
 # vector (B76's floor charges health care contacts); school 2.305 -> 2.361.
 COVSYN_CANDIDATE_CONTACTS = {'household': 2.592, 'school': 2.361, 'workplace': 2.832,
@@ -324,13 +324,13 @@ def health_care_contact_floor() -> float:
 # fell 8.87 -> 3.15, about the share of days at work (5 x 0.691 + 0.0199) / 7 = 0.50 plus the
 # coworkers met only on days off dropping out; household 10.27 -> 9.68, school 6.61 -> 7.41,
 # health care 2.70 -> 2.26, community 1.21 -> 1.59 move with run 18's vector, not with B75.
-# Vector and measure_days output: firefly_result/phaseD_run18/ (commit 890da02).
+# Vector and measure_days output: results/models/phaseD_run18/ (commit 890da02).
 #
 # 2026-11-02 (run 20 preparation, B77): re-measured with run 19's selected vector (candidate 60)
 # under the B77 school calendar, which closes school at weekends in undated runs. School days
 # fell 7.41 -> 5.30, a factor 0.72 against 5/7 = 0.71; household 9.68 -> 9.27, workplace
 # 3.15 -> 3.48, health care 2.26 -> 2.94, community 1.59 -> 1.77 move with run 19's vector.
-# Vector and measure_days output: firefly_result/phaseD_run19/.
+# Vector and measure_days output: results/models/phaseD_run19/.
 MEAN_CONTACT_DAYS = {'household': 9.27, 'school': 5.30, 'workplace': 3.48,
                      'health_care': 2.94, 'municipality': 1.77}
 CONTACT_DAYS_MEASURED_ON = ('Phase D run 19 candidate 60 under B77 '

@@ -10,7 +10,7 @@ The B77 code was the uncommitted working tree of 2026-11-02 on top of `c23b99c` 
 for mode in spread_Taiwan_weight taiwan_first_outbreak; do
   mkdir -p b77_$mode && \
     python -m covsyn.model.data_synthesis_main --mode $mode --monte_carlo_number 1000 \
-      --result_path b77_$mode --cpu_cores 32 --parameter_path firefly_result/phaseD_run19
+      --result_path b77_$mode --cpu_cores 32 --parameter_path results/models/phaseD_run19
 done
 python -m covsyn.validation.measure_days b77_spread_Taiwan_weight
 python -m covsyn.validation.verify_phase_d b77_spread_Taiwan_weight b77_taiwan_first_outbreak \
