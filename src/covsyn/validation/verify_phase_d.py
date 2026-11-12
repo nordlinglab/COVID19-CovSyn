@@ -22,7 +22,8 @@ import numpy as np
 
 from covsyn.model.contact_measures import (TAIWAN_TRACING_CASES, TAIWAN_TRACING_LARGEST,
                                             at_work_days_before_onset, contacts_in_tracing_window,
-                                            largest_spreader_percentile, tracing_window_counts,
+                                            largest_spreader_percentile, layer_offspring,
+                                            tracing_window_counts,
                                             contacts_per_case, contacts_per_day_at_work,
                                             contacts_per_day_before_onset,
                                             offspring_dispersion, one_day_counts, one_day_shape)
@@ -349,6 +350,16 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                f'cases (confirmed contacts, an upper bound, E80); simulated median '
                f'{np.median(largest):.0f}, 95% {np.percentile(largest, 2.5):.0f}-'
                f'{np.percentile(largest, 97.5):.0f}, largest of all {counts.max():.0f}')
+    # B93 (2026-11-12): the professor asked for a hospital-cluster mechanism only if the data has
+    # one. It does (links 34 -> 42, 34 -> 45, 27 -> 32, all "the same hospital"), but run 23
+    # already produced it at Taiwan's rate (8.2% and 1.8% against 9.1% and 1.8%), so it is
+    # reported, not charged: 55 local cases cannot set a band.
+    health_care = layer_offspring(index_contact, 'health_care')
+    for at_least, taiwan in ((1, '5 of 55 = 9.1% (exact 95% 3.0-20.0)'),
+                             (2, '1 of 55 = 1.8% (exact 95% 0.0-9.7)')):
+        check('B23', f'index cases infecting {at_least} or more in health care',
+              100 * np.mean(health_care >= at_least) if len(health_care) else np.nan, None, '%',
+              note=f'B93: Taiwan first-wave local cases {taiwan}, taiwan_tracing_contacts_per_case')
 
     community = np.array([len(c['municipality_effective_contacts']) for c in index_contact], dtype=float)
     # B63 (E100): informational. Under B62 it cannot coexist with the one-day Fu 2010 shape

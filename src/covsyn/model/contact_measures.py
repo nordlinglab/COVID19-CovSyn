@@ -325,3 +325,18 @@ def largest_spreader_percentile(counts: Any, cases: int = TAIWAN_TRACING_CASES,
     below = float(np.mean(x < reference)) ** cases
     at_most = float(np.mean(x <= reference)) ** cases
     return 100.0 * (below + at_most) / 2.0
+
+
+def layer_offspring(contacts: Iterable[Mapping[str, Any]], layer: str) -> np.ndarray:
+    """People each index case infected in one contact layer (B93).
+
+    Args:
+        contacts: Contact dict of every index case.
+        layer: Layer name, as in '<layer>_effective_contacts'.
+
+    Returns:
+        One count per case; NaN entries and a missing list count as no infection.
+    """
+    key = f"{layer}_effective_contacts"
+    return np.array([float(np.nansum(np.asarray(c[key] or [], dtype=float))) for c in contacts],
+                    dtype=float)
