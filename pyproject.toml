@@ -39,6 +39,7 @@ covsyn-compare-phase-d-runs = "covsyn.validation.compare_phase_d_runs:main"
 covsyn-plot-todolist923 = "covsyn.figures.plot_todolist923:main"
 covsyn-check-constraints = "covsyn.validation.check_constraints:main"
 covsyn-reproduce-wu2025 = "covsyn.figures.reproduce_wu2025:main"
+covsyn-cores = "covsyn.runtime.hardware:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14"]
