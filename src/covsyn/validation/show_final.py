@@ -1,10 +1,12 @@
 """Show the final generation's decoded metrics and which penalty terms are still active."""
+import sys
 import csv
 import numpy as np
 from pathlib import Path
 from covsyn.calibration.firefly_optimizer import PHYSIOLOGY_PENALTY_WEIGHT
+from covsyn.runtime.runs import run_dir_argument
 
-D = Path('Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+D = run_dir_argument(sys.argv, 1, 'uv run python -m covsyn.validation.show_final RUN_DIR')
 rows = list(csv.DictReader(open(D / 'progress_metrics.csv')))
 last = rows[-1]
 print('=== final generation (%s of %d) ===' % (last['generation'], len(rows)))

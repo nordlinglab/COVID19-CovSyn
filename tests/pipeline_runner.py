@@ -17,7 +17,6 @@ import json
 import math
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,9 +25,6 @@ import regression_digest as rd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUN_DIR = "firefly_result/phaseD_run10"
-# Several report scripts read the optimizer output from this fixed name, which
-# phaseD_chain.sh creates by copying the run directory onto it.
-COMPAT_DIR = "Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200"
 MONTE_CARLO = 40
 MODES = ("spread_Taiwan_weight", "taiwan_first_outbreak")
 
@@ -46,8 +42,6 @@ def file_digest(path: Path) -> str:
 
 def build_dataset(workdir: Path) -> dict[str, str]:
     """Synthesise both pipeline modes into ``workdir``; return a digest per data file."""
-    shutil.rmtree(REPO_ROOT / COMPAT_DIR, ignore_errors=True)
-    shutil.copytree(REPO_ROOT / RUN_DIR, REPO_ROOT / COMPAT_DIR)
     digests = {}
     for mode in MODES:
         out = workdir / mode
@@ -69,15 +63,15 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
     # Order matters and follows phaseD_chain.sh: measure_age_rr.py writes
     # validation_reference/age_rr.json, which verify_phaseD.py reads.
     return {
-        "measure_age_rr": ["-m", "covsyn.validation.measure_age_rr", COMPAT_DIR, "400"],
+        "measure_age_rr": ["-m", "covsyn.validation.measure_age_rr", RUN_DIR, "400"],
         "verify_phaseD": ["-m", "covsyn.validation.verify_phase_d", spread, first, checks],
         "check_constraints": ["-m", "covsyn.validation.check_constraints", spread, first, "--out",
                               str(workdir / "constraint_check")],
         "rr_exact": ["-m", "covsyn.validation.rr_exact", spread],
         "tw_check": ["-m", "covsyn.validation.tw_check", first],
         "measure_days": ["-m", "covsyn.validation.measure_days", spread],
-        "show_final": ["-m", "covsyn.validation.show_final"],
-        "check_gap": ["-m", "covsyn.validation.check_gap"],
+        "show_final": ["-m", "covsyn.validation.show_final", RUN_DIR],
+        "check_gap": ["-m", "covsyn.validation.check_gap", RUN_DIR],
         "show_bounds": ["-m", "covsyn.validation.show_bounds"],
     }
 
@@ -88,14 +82,15 @@ def figure_steps(workdir: Path) -> dict[str, list[str]]:
     figs = str(workdir / "figures")
     checks = str(workdir / "phaseD_checks.json")
     return {
-        "validate_layers": ["-m", "covsyn.figures.validate_layers", spread, figs],
+        "validate_layers": ["-m", "covsyn.figures.validate_layers", spread, figs, RUN_DIR],
         "validate_infection": ["-m", "covsyn.figures.validate_infection", spread, figs],
         "plot_diagnostics": ["-m", "covsyn.figures.plot_diagnostics", spread, figs],
-        "plot_10panel": ["-m", "covsyn.figures.plot_10panel", spread, figs],
+        "plot_10panel": ["-m", "covsyn.figures.plot_10panel", spread, figs, RUN_DIR],
         "plot_cheng_attackrate": ["-m", "covsyn.figures.plot_cheng_attackrate", spread, figs],
-        "plot_vs_notebook_literature": ["-m", "covsyn.figures.plot_vs_notebook_literature", spread, figs],
-        "plot_validation": ["-m", "covsyn.figures.plot_validation", COMPAT_DIR, figs],
-        "workplace_sampling_options": ["-m", "covsyn.figures.workplace_sampling_options", spread, figs, COMPAT_DIR],
+        "plot_vs_notebook_literature": ["-m", "covsyn.figures.plot_vs_notebook_literature", spread, figs,
+                                        RUN_DIR],
+        "plot_validation": ["-m", "covsyn.figures.plot_validation", RUN_DIR, figs],
+        "workplace_sampling_options": ["-m", "covsyn.figures.workplace_sampling_options", spread, figs, RUN_DIR],
         "plot_reality_vs_covsyn": ["-m", "covsyn.figures.plot_reality_vs_covsyn", spread, first, figs],
         "plot_violin_reality_vs_covsyn": ["-m", "covsyn.figures.plot_violin_reality_vs_covsyn", spread, figs],
         "compare_healthcare_municipality": ["-m", "covsyn.figures.compare_healthcare_municipality", spread, figs],

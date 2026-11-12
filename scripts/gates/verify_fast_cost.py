@@ -7,7 +7,7 @@ the same parameter vectors through both and compares the total cost and all 31+ 
 Run with a small --workers while another job owns the machine: correctness does not need speed.
 Timing is only meaningful on an idle machine, so it is reported but flagged.
 
-Usage: uv run python scripts/gates/verify_fast_cost.py [--workers N] [--vectors N]
+Usage: uv run python scripts/gates/verify_fast_cost.py RUN_DIR [--workers N] [--vectors N]
 """
 import os
 import argparse
@@ -24,10 +24,9 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.runtime import hardware
 
 
-def load_vectors(count):
-    """Parameter vectors to test: the run 5 best, the worst, and evenly spaced others."""
-    for directory in sorted(Path('.').glob('Firefly_result_pop_size_100_*')):
-        best = directory / 'firefly_best.txt'
+def load_vectors(count, directory):
+    """Parameter vectors to test from a run: its best, its worst, and evenly spaced others."""
+    for best in [Path(directory) / 'firefly_best.txt']:
         if best.exists():
             res = np.loadtxt(best)
             order = [int(np.argmin(res[:, -1])), int(np.argmax(res[:, -1]))]
@@ -42,13 +41,14 @@ def load_vectors(count):
                     break
             print(f'parameter vectors from {directory}')
             return [(i, res[i, 1:-1]) for i in rows]
-    raise SystemExit('no firefly result directory found to take parameter vectors from')
+    raise SystemExit(f'{directory}/firefly_best.txt not found')
 
 
 def main():
     parser = argparse.ArgumentParser()
     hardware.add_workers_argument(parser)  # Task 2 (D3)
     parser.add_argument('--vectors', type=int, default=4)
+    parser.add_argument('run_dir', help='run directory to take vectors from (Task 3)')
     args = parser.parse_args()
     args.workers = hardware.resolve_workers(args.workers, os.environ, None)
 
@@ -59,7 +59,7 @@ def main():
     cheng = (ct['Cheng_contact_array'], ct['Cheng_attack_rate'], ct['norm_weights'])
     columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
 
-    vectors = load_vectors(args.vectors)
+    vectors = load_vectors(args.vectors, args.run_dir)
     print(f'{fo.SIMULATIONS_PER_EVALUATION} simulations per evaluation, '
           f'{fo.SIMULATIONS_PER_TASK} per task, {args.workers} workers\n')
 

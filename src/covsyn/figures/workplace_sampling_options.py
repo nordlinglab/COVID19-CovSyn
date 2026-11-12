@@ -26,12 +26,13 @@ import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
+from covsyn.runtime.runs import run_dir_argument
 from covsyn.data_processing.taiwan_reference import (REF_COLOR, SIM_COLOR, half_violin, load_demographics, to_axis, tracing_contacts,
                               workplace_establishment_distributions)
 
 SPREAD = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight_MC1000'
 OUT = Path(sys.argv[2] if len(sys.argv) > 2 else 'validation_figures_run5')
-PARAM = Path(sys.argv[3] if len(sys.argv) > 3 else 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+PARAM = run_dir_argument(sys.argv, 3, 'uv run python -m covsyn.figures.workplace_sampling_options SPREAD OUT RUN_DIR')
 OUT.mkdir(parents=True, exist_ok=True)
 RNG = np.random.default_rng(0)
 N = 200000

@@ -40,10 +40,11 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from covsyn.validation.acceptance import band_from_json
+from covsyn.runtime.runs import run_dir_argument
 
 SPREAD = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight'
-FIREFLY = sys.argv[2] if len(sys.argv) > 2 else \
-    'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200'
+# Task 3: required, but checked in main(), so importing the entry point needs no argument.
+FIREFLY = sys.argv[2] if len(sys.argv) > 2 else ''
 CHECKS = sys.argv[3] if len(sys.argv) > 3 else 'validation_reference/phaseD_checks.json'
 OUT = Path(sys.argv[4] if len(sys.argv) > 4 else 'validation_figures_todolist923')
 OUT.mkdir(parents=True, exist_ok=True)
@@ -542,6 +543,8 @@ def figure_t4(checks):
 
 
 def main():
+    global FIREFLY
+    FIREFLY = str(run_dir_argument(sys.argv, 2, 'uv run python -m covsyn.figures.plot_todolist923 SPREAD RUN_DIR [CHECKS] [OUT]'))
     checks = json.load(open(CHECKS, encoding='utf-8'))['checks']
     lit = notebook_dicts()
     courses = drawn_courses(best_vector())

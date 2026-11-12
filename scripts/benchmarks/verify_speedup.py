@@ -5,6 +5,7 @@ firefly_optimizer, evaluates the same parameter vector through both, and compare
 cost and every entry of LAST_COST_PARTS exactly. Also times both.
 """
 import os
+import sys
 import concurrent.futures
 import pickle
 import time
@@ -14,9 +15,10 @@ import numpy as np
 
 from covsyn.calibration import firefly_optimizer as new
 from covsyn.runtime import hardware
+from covsyn.runtime.runs import run_dir_argument
 import firefly_optimizer_baseline as old
 
-D = Path('Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+D = run_dir_argument(sys.argv, 1, 'uv run python scripts/benchmarks/verify_speedup.py RUN_DIR')
 
 
 def main():

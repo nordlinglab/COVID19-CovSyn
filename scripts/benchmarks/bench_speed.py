@@ -11,6 +11,7 @@ Nothing is written; this only reads variable/ and the run 5 firefly result.
 """
 import cProfile
 import os
+import sys
 import concurrent.futures
 import io
 import pickle
@@ -23,8 +24,9 @@ import numpy as np
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.runtime import hardware
+from covsyn.runtime.runs import run_dir_argument
 
-D = Path('Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+D = run_dir_argument(sys.argv, 1, 'uv run python scripts/benchmarks/bench_speed.py RUN_DIR')
 
 
 def main():

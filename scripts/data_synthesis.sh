@@ -13,8 +13,8 @@
 #                    uv.lock, so this script does not check it again
 # Environment:
 #   COVSYN_WORKERS  worker processes (default: the performance cores, Task 2)
-#   PARAMETER_PATH  directory holding firefly_best.txt (default: the name phase_d_chain.sh copies
-#                   the run onto)
+#   PARAMETER_PATH  run directory holding firefly_best.txt, such as results/models/<run-id>;
+#                   required (Task 3)
 #   UV_PROJECT_ENVIRONMENT  the environment the runs use (default .venv)
 set -euo pipefail
 
@@ -27,10 +27,14 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 modes=('spread_Taiwan_weight' 'taiwan_first_outbreak')
-parameter_path="${PARAMETER_PATH:-./Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200}"
+parameter_path="${PARAMETER_PATH:-}"
 # A5: at least 1000 Monte Carlo runs; 100 was shown to be unreliable.
 monte_carlo_number=1000
 
+if [ -z "$parameter_path" ]; then
+    echo "ERROR: PARAMETER_PATH is not set; set it to the run directory, results/models/<run-id>."
+    exit 1
+fi
 if [ ! -f "$parameter_path/firefly_best.txt" ]; then
     echo "ERROR: $parameter_path/firefly_best.txt not found; set PARAMETER_PATH to the fitted run."
     exit 1

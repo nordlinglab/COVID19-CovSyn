@@ -30,9 +30,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 LOG=phaseD_chain.log
-# The firefly names its output directory after its settings, while the report scripts read the
-# optimizer output from one fixed name. The run directory is copied onto that name below.
-FIREFLY=Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200
 # Task 3: a run directory has a time-stamped name the chain cannot guess; the launcher sets it,
 # and the chain stops below, after its environment check, if it is missing.
 FIREFLY_RUN="${FIREFLY_RUN:-}"
@@ -110,30 +107,29 @@ fi
 # holds a revalidated choice.
 if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
     say "re-scoring the candidates of $FIREFLY_RUN on unseen seeds (E87)"
-    run covsyn.calibration.revalidation "$FIREFLY_RUN" revalidation "${REVALIDATION_BLOCKS:-10}" >> "$LOG" 2>&1 \
+    run covsyn.calibration.revalidation "$FIREFLY_RUN" "$FIREFLY_RUN/revalidation" \
+        "${REVALIDATION_BLOCKS:-10}" >> "$LOG" 2>&1 \
         || { say 'ERROR: revalidation failed, stopping'; exit 1; }
     say "$(grep 'validation best' "$LOG" | tail -1)"
+    # Task 3: the revalidation and the selection live inside the run directory.
     OPTIMIZER_RUN="$FIREFLY_RUN"
-    FIREFLY_RUN=revalidation
+    FIREFLY_RUN="$OPTIMIZER_RUN/revalidation"
     # B60: run the full checklist for the best revalidated candidates and keep the one with
     # the fewest failures. Only right after this chain's own revalidation; SELECT=0 skips it,
     # SELECT_TOP sets how many candidates (default 5).
     if [ "${SELECT:-1}" = 1 ]; then
         say "running the checklist on the best ${SELECT_TOP:-5} revalidated candidates (B60)"
-        run covsyn.calibration.select_by_checklist revalidation selected "${SELECT_TOP:-5}" \
+        run covsyn.calibration.select_by_checklist "$OPTIMIZER_RUN/revalidation" \
+            "$OPTIMIZER_RUN/selected" "${SELECT_TOP:-5}" \
             >> "$LOG" 2>&1 \
             || { say 'ERROR: checklist selection failed, stopping'; exit 1; }
         say "$(grep 'checklist choice' "$LOG" | tail -1)"
-        FIREFLY_RUN=selected
+        FIREFLY_RUN="$OPTIMIZER_RUN/selected"
     fi
 fi
-if [ -f "$FIREFLY_RUN/firefly_best.txt" ]; then
-    rm -rf "$FIREFLY"
-    cp -R "$FIREFLY_RUN" "$FIREFLY"
-    say "copied $FIREFLY_RUN to $FIREFLY for the report scripts"
-fi
-if [ ! -f "$FIREFLY/firefly_best.txt" ]; then
-    say "ERROR: $FIREFLY/firefly_best.txt missing, stopping"
+# Task 3: every report step is given the run directory; nothing is copied onto a legacy name.
+if [ ! -f "$FIREFLY_RUN/firefly_best.txt" ]; then
+    say "ERROR: $FIREFLY_RUN/firefly_best.txt missing, stopping"
     exit 1
 fi
 say "firefly finished: $(grep -v 'it/s]' firefly_phaseD.log | tail -1 || true)"
@@ -147,9 +143,9 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
 done
 say 'generating synthetic data (2 modes x 1000 Monte-Carlo runs)'
 # PARAMETER_PATH is set here, so a value left in the tmux server's environment cannot point the
-# synthesis at another run than the one copied onto $FIREFLY. The chain checked the environment
-# at its start, so the synthesis does not check it again.
-PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked >> "$LOG" 2>&1 \
+# synthesis at another run than the one the chain reports, $FIREFLY_RUN. The chain checked the
+# environment at its start, so the synthesis does not check it again.
+PARAMETER_PATH="$FIREFLY_RUN" bash scripts/data_synthesis.sh --environment-checked >> "$LOG" 2>&1 \
     || { say 'ERROR: data synthesis failed'; exit 1; }
 say 'synthetic data done'
 
@@ -159,7 +155,7 @@ say 'synthetic data done'
 # and the interval was wider than the acceptance band (E68). 20000 index cases take about
 # 30 s and give ~4300 infections. It must run BEFORE verify_phase_d, which reads the JSON.
 say 'measuring the age risk ratio on 20000 index cases'
-run covsyn.validation.measure_age_rr "$FIREFLY" 20000 >> phaseD_report.txt 2>&1 \
+run covsyn.validation.measure_age_rr "$FIREFLY_RUN" 20000 >> phaseD_report.txt 2>&1 \
   || say 'WARNING: the age risk ratio measurement failed, B14 falls back to the spread output'
 
 # ---------------------------------------------------------------- 3. checklist
@@ -183,7 +179,7 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
     mkdir -p "independent_$mode"
     run covsyn.model.data_synthesis_main --mode "$mode" --monte_carlo_number 1000 \
         --result_path "independent_$mode" \
-        --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
+        --parameter_path "$FIREFLY_RUN" --seed_start 500000 >> "$LOG" 2>&1 \
         || { say "ERROR: independent data synthesis failed for $mode, stopping"; exit 1; }
 done
 run covsyn.validation.verify_phase_d independent_spread_Taiwan_weight \
@@ -195,8 +191,8 @@ tail -3 phaseD_checks_independent.txt | tee -a "$LOG"
 # ---------------------------------------------------------------- 4. standard run report
 say 'running the standard run report'
 {
-  echo '=== show_final ==='   ; run covsyn.validation.show_final
-  echo '=== check_gap ==='    ; run covsyn.validation.check_gap
+  echo '=== show_final ==='   ; run covsyn.validation.show_final "$FIREFLY_RUN"
+  echo '=== check_gap ==='    ; run covsyn.validation.check_gap "$FIREFLY_RUN"
   echo '=== rr_exact ==='     ; run covsyn.validation.rr_exact "$SPREAD"
   echo '=== tw_check ==='     ; run covsyn.validation.tw_check "$FIRST"
   echo '=== show_bounds ===' ; run covsyn.validation.show_bounds
@@ -215,14 +211,14 @@ done
 mkdir -p "$FIGS"
 say "drawing the validation figures into $FIGS from $REPORT_SPREAD and $REPORT_FIRST (E97)"
 {
-  run covsyn.figures.validate_layers               "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.validate_layers               "$REPORT_SPREAD" "$FIGS" "$FIREFLY_RUN"
   run covsyn.figures.validate_infection            "$REPORT_SPREAD" "$FIGS"
   run covsyn.figures.plot_diagnostics              "$REPORT_SPREAD" "$FIGS"
-  run covsyn.figures.plot_10panel                  "$REPORT_SPREAD" "$FIGS"
+  run covsyn.figures.plot_10panel                  "$REPORT_SPREAD" "$FIGS" "$FIREFLY_RUN"
   run covsyn.figures.plot_cheng_attackrate         "$REPORT_SPREAD" "$FIGS"
-  run covsyn.figures.plot_vs_notebook_literature   "$REPORT_SPREAD" "$FIGS"
-  run covsyn.figures.plot_validation               "$FIREFLY" "$FIGS"
-  run covsyn.figures.workplace_sampling_options    "$REPORT_SPREAD" "$FIGS" "$FIREFLY"
+  run covsyn.figures.plot_vs_notebook_literature   "$REPORT_SPREAD" "$FIGS" "$FIREFLY_RUN"
+  run covsyn.figures.plot_validation               "$FIREFLY_RUN" "$FIGS"
+  run covsyn.figures.workplace_sampling_options    "$REPORT_SPREAD" "$FIGS" "$FIREFLY_RUN"
   run covsyn.figures.plot_reality_vs_covsyn        "$REPORT_SPREAD" "$REPORT_FIRST" "$FIGS"
   run covsyn.figures.plot_violin_reality_vs_covsyn "$REPORT_SPREAD" "$FIGS"
   run covsyn.figures.compare_healthcare_municipality "$REPORT_SPREAD" "$FIGS"
@@ -290,7 +286,7 @@ rm -rf "$REPORT_CHENG"
 mkdir -p "$REPORT_CHENG"
 run covsyn.model.data_synthesis_main --mode cheng2020 --monte_carlo_number 1000 \
     --result_path "$REPORT_CHENG" \
-    --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
+    --parameter_path "$FIREFLY_RUN" --seed_start 500000 >> "$LOG" 2>&1 \
     || { say "ERROR: independent cheng2020 synthesis failed, so Fig 6 is missing;${FIGURES_FAILED:+ also failed:$FIGURES_FAILED;} stopping"
          exit 1; }
 run covsyn.figures.reproduce_wu2025 fig6 "$REPORT_CHENG" wu2025_figures >> "$LOG" 2>&1 \

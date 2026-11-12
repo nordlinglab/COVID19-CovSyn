@@ -61,7 +61,7 @@ uv run python -m covsyn.calibration.apply_phase_d_parameters
 
 ```bash
 uv run pytest
-uv run python scripts/gates/verify_fast_cost.py --workers 8 --vectors 4
+uv run python scripts/gates/verify_fast_cost.py firefly_result/phaseD_run10 --workers 8 --vectors 4
 uv run python scripts/gates/smoke_test.py
 ```
 

@@ -93,7 +93,7 @@ def test_the_list_holds_every_default_the_scripts_read():
 SCRIPT_LINES = [
     '    say "then start scripts/phase_d_chain.sh itself '
     '(not launch_phase_d.sh, which starts a new"',
-    'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
+    'PARAMETER_PATH="$FIREFLY_RUN" bash scripts/data_synthesis.sh --environment-checked '
     '>> "$LOG" 2>&1 \\',
 ]
 
@@ -150,17 +150,14 @@ def _synthesis_runs(record: Path, context: str = "") -> list[tuple[str, str]]:
 MODES = list(pipeline_runner.MODES)
 
 
-def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain_at_step_2):
-    """Run on its own without PARAMETER_PATH, data_synthesis.sh reads the chain's copy.
+def test_the_synthesis_alone_needs_the_run_directory(tmp_path):
+    """Task 3: run on its own without PARAMETER_PATH, data_synthesis.sh stops and says why.
 
-    The directory comes from a chain run, so no directory name is written in the test.
+    There is no legacy copy to fall back on, and a time-stamped run name cannot be guessed.
     """
-    directory = chain_at_step_2.directory
-    root, record, status, output = _run(
-        tmp_path / "alone", SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
-    )
-    assert status == 0, output
-    assert _synthesis_runs(record, output) == [(mode, f"./{directory}") for mode in MODES], output
+    root, record, status, output = _run(tmp_path, SYNTHESIS, dict(SYNTHESIS_FILES))
+    assert status != 0 and "PARAMETER_PATH is not set" in output, output
+    assert not (record / "runs").exists(), output  # nothing ran
 
 
 def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
@@ -195,7 +192,7 @@ class ChainRun(NamedTuple):
     status: int
     context: str  # output and log, for assertion messages
     log: str  # phaseD_chain.log, which the user reads
-    directory: str  # what the synthesis was told to read: PARAMETER_PATH without ./
+    directory: str  # what the synthesis was told to read: PARAMETER_PATH
 
 
 def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
@@ -223,9 +220,7 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
     context = output + log
     syntheses = [call for call in _records(record / "runs", context) if call[:1] == ["SYNTHESIS"]]
     assert len(syntheses) == 1 and syntheses[0][2:] == ["--environment-checked"], context
-    path = syntheses[0][1]
-    assert path.startswith("./"), context
-    return ChainRun(root, record, status, context, log, path[2:])
+    return ChainRun(root, record, status, context, log, syntheses[0][1])
 
 
 @pytest.fixture
@@ -237,15 +232,15 @@ def chain_at_step_2(tmp_path) -> ChainRun:
     return _chain_to_step_2(tmp_path / "chain", "0")
 
 
-def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2):
-    """Run to step 2 with REVALIDATE=0: the synthesis runs once, on the run's copy.
+def test_the_chain_runs_the_synthesis_at_step_2_on_the_run_directory(chain_at_step_2):
+    """Run to step 2 with REVALIDATE=0: the synthesis runs once, on FIREFLY_RUN itself.
 
-    That copy is the directory the regression harness checks, and the log reports success.
-    Only this path is run; other settings reach the same call by reading of the script.
+    Task 3 removed the copy onto a legacy name, and the log reports success. Only this path is
+    run; other settings reach the same call by reading of the script.
     """
     run = chain_at_step_2
-    assert (run.root / run.directory / "firefly_best.txt").exists(), run.context
-    assert run.directory == pipeline_runner.COMPAT_DIR, run.context
+    assert run.directory == "run", run.context
+    assert [p.name for p in run.root.iterdir() if p.name.startswith("Firefly_result")] == []
     assert "synthetic data done" in run.log, run.context
     # The steps after it run uv: recorded after the synthesis, in order.
     calls = _records(run.record / "runs", run.context)

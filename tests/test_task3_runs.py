@@ -147,3 +147,25 @@ def test_config_refuses_settings_json_cannot_hold(tmp_path):
             initial_population=None,
             lock=tmp_path / "uv.lock",
         )
+
+
+def test_a_script_reads_the_run_directory_from_its_arguments():
+    """Task 3: every script that reads a run takes its directory as an argument."""
+    from pathlib import Path
+
+    argv = ["show_final", "results/models/r"]
+    assert runs.run_dir_argument(argv, 1, "show_final RUN_DIR") == Path("results/models/r")
+
+
+def test_a_missing_run_directory_stops_with_the_usage(capsys):
+    """No legacy default: without the argument the script says what it needs and stops."""
+    with pytest.raises(SystemExit) as stop:
+        runs.run_dir_argument(["show_final"], 1, "show_final RUN_DIR")
+    assert stop.value.code == 2
+    assert "usage: show_final RUN_DIR" in capsys.readouterr().err
+
+
+def test_an_empty_run_directory_argument_is_missing():
+    """The shell passes '' for an unset variable; that names no run."""
+    with pytest.raises(SystemExit):
+        runs.run_dir_argument(["x", ""], 1, "x RUN_DIR")

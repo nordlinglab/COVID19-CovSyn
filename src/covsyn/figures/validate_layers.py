@@ -27,6 +27,7 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
 from covsyn.model.data_synthesize import model_community_mean
+from covsyn.runtime.runs import run_dir_argument
 from covsyn.data_processing.taiwan_reference import (EFF_COLOR, IMPORTED_COLOR, LEVELS, MARKER_NOTE, REF_COLOR, RNG, SIM_COLOR,
                               half_points, half_violin, household_pmfs, load_demographics,
                               municipality_population, pmf_samples, school_classmates_all, school_reference,
@@ -37,8 +38,9 @@ SPREAD = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Ta
 OUT = Path(sys.argv[2] if len(sys.argv) > 2 else 'validation_figures_phaseD')
 # Optional third argument: a separate dataset to take the index cases from. Without it the
 # index cases are the first case of every spread simulation, which is what they are.
-INDEX = sys.argv[3] if len(sys.argv) > 3 else None
-PARAM = Path('Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+# Task 3: the run directory is required, so it comes before the optional index-case table.
+PARAM = run_dir_argument(sys.argv, 3, 'uv run python -m covsyn.figures.validate_layers SPREAD OUT RUN_DIR [INDEX]')
+INDEX = sys.argv[4] if len(sys.argv) > 4 else None
 OUT.mkdir(exist_ok=True)
 for superseded in ('fig_household_candidate_contacts.png', 'fig_school_candidate_contacts.png'):
     (OUT / superseded).unlink(missing_ok=True)

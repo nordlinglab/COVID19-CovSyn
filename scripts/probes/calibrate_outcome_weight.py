@@ -9,13 +9,13 @@ cost_outcome 0.0419 -- i.e. every Phase D decision together was 2.2% of the obje
 Usage: uv run python scripts/probes/calibrate_outcome_weight.py [firefly_result_dir]
 """
 import csv
-import glob
 import os
 import sys
 
 import numpy as np
 
 from covsyn.calibration import firefly_optimizer as fo
+from covsyn.runtime.runs import run_dir_argument
 
 COST_CONTACT_RUN6 = 1.6956
 COST_ATTACK_RUN6 = 0.3092
@@ -38,11 +38,7 @@ def shaped(miss):
 
 
 def main():
-    if len(sys.argv) > 1:
-        directory = sys.argv[1]
-    else:
-        directory = [d for d in sorted(glob.glob('Firefly_result_pop_size_100_*'))
-                     if os.path.exists(d + '/progress_metrics.csv')][0]
+    directory = str(run_dir_argument(sys.argv, 1, 'uv run python scripts/probes/calibrate_outcome_weight.py RUN_DIR'))
     rows = list(csv.DictReader(open(directory + '/progress_metrics.csv')))
     last = rows[-1]
     print('measured values from %s, generation %s\n' % (directory, last['generation']))

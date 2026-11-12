@@ -8,7 +8,7 @@ parent repository's layout: ``results/models/<run-id>/`` (parameters, population
 :func:`run_directory` is the only place these directories are created, so a fresh clone needs
 none of them in advance.
 
-Usage: ``python -m covsyn.runtime.runs CONFIG_NAME`` prints a new run id, which
+Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` prints a new run id, which
 launch_phase_d.sh passes to the optimiser and the chain.
 """
 
@@ -94,6 +94,21 @@ def run_directory(run_id: str, kind: str = "models", root: Path = RESULTS_ROOT) 
     path = Path(root) / kind / run_id
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def run_dir_argument(argv: list[str], position: int, usage: str) -> Path:
+    """The run directory a script was given at ``argv[position]``.
+
+    Scripts that read a run take its directory as an argument instead of a fixed legacy name,
+    so without it this prints the usage and exits with status 2, as argparse does.
+    """
+    if len(argv) > position and argv[position]:
+        return Path(argv[position])
+    print(
+        f"usage: {usage}\nthe run directory, such as results/models/<run-id>, is required",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 def _cpu_model() -> str:

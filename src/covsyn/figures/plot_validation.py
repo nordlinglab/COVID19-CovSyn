@@ -21,9 +21,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from covsyn.model.data_synthesize import Draw_course_of_disease_data
+from covsyn.runtime.runs import run_dir_argument
 
-PARAM = Path(sys.argv[1] if len(sys.argv) > 1 else
-             'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+PARAM = run_dir_argument(sys.argv, 1, 'uv run python -m covsyn.figures.plot_validation RUN_DIR [OUT] [N]')
 OUT = Path(sys.argv[2] if len(sys.argv) > 2 else '.')
 N = int(sys.argv[3]) if len(sys.argv) > 3 else 20000
 OUT.mkdir(parents=True, exist_ok=True)
