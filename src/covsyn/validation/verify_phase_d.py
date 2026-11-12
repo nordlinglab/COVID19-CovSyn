@@ -83,6 +83,20 @@ def check(decision, name, value, target, unit='', ok=None, note='', ci=None, int
 # Memory is the binding constraint, not cores: each worker holds 4.9 GB, so main() sizes the
 # pool by cores and available memory (Task 2), overridden by COVSYN_WORKERS.
 _WORKER_RUNS: list | None = None
+
+
+def bootstrap_workers() -> int:
+    """Workers for the bootstrap: cores and memory at 4.9 GB each, or COVSYN_WORKERS (Task 2).
+
+    Short of memory for even one worker it returns 1, the serial path, which needs no worker
+    memory because this process already holds the runs, rather than stopping the checklist after
+    its point checks.
+    """
+    try:
+        return hardware.resolve_workers(None, os.environ, hardware.CHECKLIST_GB_PER_WORKER)
+    except hardware.InsufficientMemory as error:
+        print(f'{error}; computing the bootstrap intervals in this process')
+        return 1
 _WORKER_FIRST: list | None = None
 
 
@@ -744,13 +758,7 @@ def main():
 
         # The spread and first-outbreak runs are resampled independently: they are separate
         # scenarios and need not be equal in number.
-        try:
-            workers = hardware.resolve_workers(None, os.environ,
-                                               hardware.CHECKLIST_GB_PER_WORKER)
-        except hardware.InsufficientMemory as error:
-            # The serial path needs no worker memory: this process already holds the runs.
-            print(f'{error}; computing the bootstrap intervals in this process')
-            workers = 1
+        workers = bootstrap_workers()
         if workers > 1:
             intervals = bootstrap_in_parallel(SPREAD, FIRST, (len(runs), len(first_runs)),
                                               BOOTSTRAP_REPLICATES, workers)

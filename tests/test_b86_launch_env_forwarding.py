@@ -840,8 +840,10 @@ def test_a_value_that_is_not_a_positive_count_falls_back(value):
 
 
 @pytest.mark.parametrize("script", [SCRIPT, CHAIN])
-def test_a_removed_worker_variable_is_reported(tmp_path, script):
+def test_a_removed_worker_variable_is_reported(script):
     """VERIFY_WORKERS and CPU_CORES are gone (Task 2); a run still setting them is told so."""
-    text = script.read_text(encoding="utf-8")
-    for name in ("VERIFY_WORKERS", "CPU_CORES"):
-        assert re.search(rf'\$\{{{name}:-\}}.*COVSYN_WORKERS', text, re.DOTALL), name
+    code = _code(script)
+    check = next(i for i, line in enumerate(code)
+                 if line == 'if [ -n "${VERIFY_WORKERS:-}${CPU_CORES:-}" ]; then')
+    assert "WARNING: VERIFY_WORKERS and CPU_CORES are no longer read" in code[check + 1]
+    assert "COVSYN_WORKERS" in code[check + 1] and code[check + 2] == "fi"

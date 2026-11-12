@@ -320,10 +320,16 @@ def test_an_override_above_the_memory_is_capped_with_a_warning(caplog):
     with caplog.at_level(logging.WARNING, logger=hw.__name__):
         assert (
             hw.resolve_workers(None, {"COVSYN_WORKERS": "64"}, 4.9, cores=64, available_gb=50.0)
-            == 8
+            == 10  # floor(50 / 4.9): all of the available memory, not 80%
         )
-        assert hw.resolve_workers(64, {}, 4.9, cores=64, available_gb=50.0) == 8
-    assert "memory" in caplog.text
+        assert hw.resolve_workers(64, {}, 4.9, cores=64, available_gb=50.0) == 10
+    assert "available 50.0 GB holds 10" in caplog.text
+
+
+def test_e98s_setting_fits_where_the_default_would_be_lower():
+    """8 workers of 4.9 GB fit in 45 GB, although the default keeps 20% free and gives 7."""
+    assert hw.default_workers(4.9, cores=32, available_gb=45.0) == 7
+    assert hw.resolve_workers(None, {"COVSYN_WORKERS": "8"}, 4.9, cores=32, available_gb=45.0) == 8
 
 
 def test_an_override_below_the_memory_is_taken_as_given():
@@ -347,9 +353,49 @@ def test_the_workers_option_rejects_non_positive_values_at_parsing(value):
         parser.parse_args(["--workers", value])
 
 
-def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory():
+def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory(monkeypatch):
     """Short of memory, the checklist computes the intervals in its own process."""
-    text = (Path(hw.__file__).parents[1] / "validation" / "verify_phase_d.py").read_text(
-        encoding="utf-8"
-    )
-    assert "except hardware.InsufficientMemory" in text
+    import importlib
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["verify_phase_d"])
+    verify = importlib.import_module("covsyn.validation.verify_phase_d")
+
+    def no_memory(*args, **kwargs):
+        raise hw.InsufficientMemory("one worker needs 4.9 GB")
+
+    monkeypatch.setattr(verify.hardware, "resolve_workers", no_memory)
+    assert verify.bootstrap_workers() == 1
+
+
+def test_the_fallback_applies_the_cgroup_quota(tmp_path, caplog):
+    """No topology to read, but a container quota of 4 CPUs: 4, not os.cpu_count()."""
+    (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("400000 100000\n")
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        found = hw.performance_core_count(linux(tmp_path, 32))
+    assert (found.count, found.method) == (4, "os.cpu_count() fallback")
+
+
+def test_the_root_cgroup_path_is_read_once(tmp_path, caplog):
+    """'0::/' (a container's own namespace) names the root, whose bad file warns once."""
+    write_topology(tmp_path, smt_topology(8))
+    (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("garbage\n")
+    (tmp_path / "proc" / "self").mkdir(parents=True)
+    (tmp_path / "proc" / "self" / "cgroup").write_text("0::/\n")
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        assert hw.performance_core_count(linux(tmp_path, 16)).count == 8
+    assert caplog.text.count("ignoring the CPU quota") == 1
+
+
+def test_a_cgroup_outside_the_namespace_is_not_followed(tmp_path):
+    """'..' in /proc/self/cgroup would lead outside /sys/fs/cgroup; only the root is read."""
+    write_topology(tmp_path, smt_topology(8))
+    (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    outside = tmp_path / "fs" / "x"
+    outside.mkdir(parents=True)
+    (outside / "cpu.max").write_text("100000 100000\n")
+    (tmp_path / "proc" / "self").mkdir(parents=True)
+    (tmp_path / "proc" / "self" / "cgroup").write_text("0::/../x\n")
+    assert hw.performance_core_count(linux(tmp_path, 16)).count == 8
