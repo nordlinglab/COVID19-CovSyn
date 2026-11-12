@@ -5,7 +5,7 @@
   "cost_contact_healthcare": 0.19196402958908224,
   "cost_contact_household": 0.04864837227203996,
   "cost_contact_others": 0.8941014099898626,
-  "cost_energy": -0.2375598341091963,
+  "cost_energy": -0.2850911786518801,
   "cost_outcome": 71.74061897087856,
   "cost_penalty": 0.0,
   "measured_asymptomatic_share": 0.27,
@@ -35,6 +35,7 @@
   "measured_infections_per_index_school": 0.026907965342203775,
   "measured_infections_per_index_workplace": 0.03168042500813802,
   "measured_infectious_after_onset_median": 5.0,
+  "measured_largest_spreader_percentile": 100.0,
   "measured_medical_early_share": 0.41807044410413474,
   "measured_medical_late_share": 0.3767228177641654,
   "measured_offspring_k": 0.21064710358391645,
@@ -51,8 +52,8 @@
   "measured_workplace_day_p90": 5.0,
   "measured_workplace_day_zero_share": 0.13992869875222816
  },
- "cost_total": 72.9278694577941,
- "generated_at_commit": "42be0f1a5948942fcf24017fa4ec37185fe1e88b",
+ "cost_total": 72.88033811325143,
+ "generated_at_commit": "4bd04baa3be806ddb1b5510564be93b1f7c1e8f2",
  "parameter_vector": "firefly_result/phaseD_run10/firefly_best.txt (lowest-cost row)",
  "synthesis_digests": {
   "result/0": "901b44421b1a5106b1739e751c75f86b9b5246d1ea4e5bcd0604e6133585e1f1",

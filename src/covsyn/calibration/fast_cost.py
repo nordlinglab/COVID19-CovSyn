@@ -40,7 +40,7 @@ from covsyn.model.data_synthesis_main import run_covid
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
-                                           offspring_dispersion,
+                                           largest_spreader_percentile, offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 
@@ -215,6 +215,7 @@ def reduce_outcomes(scalars):
     k = offspring_dispersion(offspring)  # B61, same estimator as measure_outcomes()
     if np.isfinite(k):
         measured['offspring_k'] = k
+    measured['largest_spreader_percentile'] = largest_spreader_percentile(offspring)  # B92
 
     use_expected = all(s['expected'] is not None for s in scalars)
     for layer in LAYERS:
@@ -392,7 +393,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
     for i, row in enumerate(rows[:case_limit]):
         synthetic_data_matrix[i] = row
-    _, energy_cost, _ = fo.estat(taiwan_data_matrix, synthetic_data_matrix, nboot=1)
+    energy_cost = fo.energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
 
     energy_weight = 1
     contact_cost = sum(contact_costs)

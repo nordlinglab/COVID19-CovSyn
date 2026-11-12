@@ -5,15 +5,14 @@
 The fixture ``tests/fixtures/regression_run10.json`` was written by
 ``tests/make_regression_fixtures.py`` with the run 10 vector, at the commit recorded in the
 fixture (regenerated whenever a decision changes the output; last for B75).
-Every value is compared for exact equality: the objective is deterministic on its fixed seeds
-(finding E30), so any difference is a change in behaviour, not noise.
-
-The fixture therefore also pins the environment it was written in, which
-``make_regression_fixtures.py`` requires to be the compute server's. Exact equality does not
-survive a different platform, BLAS or scikit-learn: after B87 the cost reproduces bit for bit
-on the server, 72.9278694577941, while the same commit gives 72.9305393810959 under WSL on
-x86 with scikit-learn 1.9.1, a relative difference of 4e-5. A failure here on another machine
-is that, not a regression; run it on the server before reading anything into it.
+The objective is deterministic on its fixed seeds (finding E30), and the simulation outputs
+are compared by digest, exactly. The cost is compared to a relative 1e-6: the professor
+(2026-11-12) accepted reproduction "to within normal precision differences between the
+packages" in place of bit-identical results on any machine. Before B91 the platforms differed
+by 4e-5 (E103: 72.9278694577941 on the macOS server, 72.9305393810959 under WSL on x86), because
+the energy term's BLAS distances turned rounding into log(1e-16) against log(5e-8); B91
+computes them exactly. A behavioural change moves the cost far more than 1e-6 (B90's rescaling
+moved it by 1%).
 """
 
 from __future__ import annotations
@@ -38,23 +37,28 @@ def _same(a: float, b: float) -> bool:
     return a == b or (math.isnan(a) and math.isnan(b))
 
 
+def _close(a: float, b: float) -> bool:
+    """Equal to normal precision across platforms (B91); NaN only matches NaN."""
+    return _same(a, b) or math.isclose(a, b, rel_tol=rd.PLATFORM_REL_TOL)
+
+
 def test_cost_function_reproduces_run10(
     run10_vector: np.ndarray,
     demographic_parameters: Any,
     cheng_data: tuple[np.ndarray, np.ndarray, np.ndarray],
     cost_pool: concurrent.futures.ProcessPoolExecutor,
 ) -> None:
-    """The objective returns the recorded total and every recorded cost part, bit for bit."""
+    """The objective returns the recorded total and every recorded cost part (B91 tolerance)."""
     from covsyn.calibration import fast_cost
     from covsyn.calibration.cost_parts import LAST
 
     total = fast_cost.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data)
     parts = dict(LAST)
 
-    assert _same(float(total), rd.decode_float(FIXTURE["cost_total"]))
+    assert _close(float(total), rd.decode_float(FIXTURE["cost_total"]))
     expected = FIXTURE["cost_parts"]
     assert set(parts) == set(expected)
-    mismatched = [k for k in expected if not _same(float(parts[k]), rd.decode_float(expected[k]))]
+    mismatched = [k for k in expected if not _close(float(parts[k]), rd.decode_float(expected[k]))]
     assert mismatched == []
 
 

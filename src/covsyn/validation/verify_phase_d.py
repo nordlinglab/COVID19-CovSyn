@@ -20,7 +20,9 @@ from pathlib import Path
 
 import numpy as np
 
-from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_in_tracing_window,
+from covsyn.model.contact_measures import (TAIWAN_TRACING_CASES, TAIWAN_TRACING_LARGEST,
+                                            at_work_days_before_onset, contacts_in_tracing_window,
+                                            largest_spreader_percentile, layer_offspring,
                                             tracing_window_counts,
                                             contacts_per_case, contacts_per_day_at_work,
                                             contacts_per_day_before_onset,
@@ -31,7 +33,7 @@ from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootst
                                           json_band, percentile_intervals, verdict,
                                           worker_count)
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
-from covsyn.validation.compare_first_wave import is_local_case, reference_percentile
+from covsyn.validation.compare_first_wave import is_local_case
 
 SPREAD = Path(sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight')
 FIRST = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('synthetic_data_results_taiwan_first_outbreak')
@@ -52,8 +54,6 @@ JIAN_LOCAL_PER_CASE = 1435 / 55
 JIAN_IMPORTED_PER_CASE = 6616 / 432
 JIAN_IMPORTED_NO_FLIGHT_PER_CASE = 3093 / 432
 # B71: Taiwan first-wave tracing records, infected contacts per case (E80, E15).
-TAIWAN_TRACING_CASES = 579
-TAIWAN_TRACING_LARGEST = 8
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix') for L in LAYERS}
 
 results = []
@@ -73,18 +73,15 @@ def check(decision, name, value, target, unit='', ok=None, note='', ci=None, int
 
 
 # S1 (2026-11-03): the 200 bootstrap replicates are independent, and on run 20 they were 68 of
-# the checklist's 66-69 minutes (20.4 s each, measured) on one core of 32. They now run in
-# a
+# the checklist's 66-69 minutes (20.4 s each, measured) on one core of 32. They now run in a
 # pool. The values do not change: every index set is drawn in the parent, in the order
 # acceptance.bootstrap_index_sets defines, and compute_checks is pure with respect to its
-# arguments -- its only generator, below, is built fresh on every call, and the permutation
-# test's generator is not reached with permutations=False. Each worker LOADS the
-# simulations
-# itself (15.8 s, measured) instead of receiving them: one process holds 4.9 GB of
-# them, so
-# sending them to every worker would cost more than the replicates do. Memory is the
-# binding
-# constraint, not cores: VERIFY_WORKERS workers hold VERIFY_WORKERS * 4.9 GB.
+# arguments -- it draws no random numbers since B92 replaced the offspring maximum's
+# resampling, and the permutation test's generator is not reached with permutations=False. Each
+# worker LOADS the simulations itself (15.8 s, measured) instead of receiving them: one process
+# holds 4.9 GB of them, so sending them to every worker would cost more than the replicates do.
+# Memory is the binding constraint, not cores: VERIFY_WORKERS workers hold
+# VERIFY_WORKERS * 4.9 GB.
 WORKER_COUNT = worker_count(os.environ)
 _WORKER_RUNS: list | None = None
 _WORKER_FIRST: list | None = None
@@ -152,6 +149,26 @@ def load(directory):
 def offspring_counts(contacts):
     return np.array([sum(np.nansum(np.asarray(c[f'{L}_effective_contacts'], dtype=float)) for L in LAYERS)
                      for c in contacts], dtype=float)
+
+
+def largest_spreader_note(counts: np.ndarray) -> str:
+    """The B71 note: the counts the exact verdict is computed from (B92).
+
+    No range of quantiles shares the verdict's mid-rank tie rule, so a range could contradict
+    it; the counts above and at Taiwan's largest cannot (code review 2026-11-12).
+
+    Args:
+        counts: Offspring count of every simulated index case.
+
+    Returns:
+        The note text; the largest is 'none' when there are no counts.
+    """
+    reference = TAIWAN_TRACING_LARGEST
+    largest = f'{counts.max():.0f}' if len(counts) else 'none'
+    return (f'B71: Taiwan tracing largest {reference} over {TAIWAN_TRACING_CASES} cases '
+            f'(confirmed contacts, an upper bound, E80); simulated index cases infecting more '
+            f'than {reference}: {int(np.sum(counts > reference))} of {len(counts)}; exactly '
+            f'{reference}: {int(np.sum(counts == reference))}; largest: {largest}')
 
 
 def negative_binomial_k(counts):
@@ -339,16 +356,22 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # check passes when 8 is not in either 2.5% tail of the simulated largest. The largest is
     # discrete and ties at 8 often, so a tie counts as half a sample, as in B85's
     # reference_percentile; counting every tie as below failed an 8 that sat in neither tail
-    # (code review 2026-11-09, F4).
-    rng = np.random.default_rng(0)
-    largest = np.array([rng.choice(counts, TAIWAN_TRACING_CASES).max() for _ in range(2000)])
+    # (code review 2026-11-09, F4). B92: the percentile is computed exactly, by the function the
+    # objective charges; largest_spreader_note says why the note lists counts, not a range.
     check('B17', f'samples of {TAIWAN_TRACING_CASES} cases, percentile of a largest of '
-          f'{TAIWAN_TRACING_LARGEST}', reference_percentile(largest, TAIWAN_TRACING_LARGEST), (2.5, 97.5),
+          f'{TAIWAN_TRACING_LARGEST}', largest_spreader_percentile(counts), (2.5, 97.5),
           '%', interval=False,
-          note=f'B71: Taiwan tracing largest {TAIWAN_TRACING_LARGEST} over {TAIWAN_TRACING_CASES} '
-               f'cases (confirmed contacts, an upper bound, E80); simulated median '
-               f'{np.median(largest):.0f}, 95% {np.percentile(largest, 2.5):.0f}-'
-               f'{np.percentile(largest, 97.5):.0f}, largest of all {counts.max():.0f}')
+          note=largest_spreader_note(counts))
+    # B93 (2026-11-12): the professor asked for a hospital-cluster mechanism only if the data has
+    # one. It does (links 34 -> 42, 34 -> 45, 27 -> 32, all "the same hospital"), but run 23
+    # already produced it at Taiwan's rate (8.2% and 1.8% against 9.1% and 1.8%), so it is
+    # reported, not charged: 55 local cases cannot set a band.
+    health_care = layer_offspring(index_contact, 'health_care')
+    for at_least, taiwan in ((1, '5 of 55 = 9.1% (exact 95% 3.0-20.0)'),
+                             (2, '1 of 55 = 1.8% (exact 95% 0.0-9.7)')):
+        check('B23', f'index cases infecting {at_least} or more in health care',
+              100 * np.mean(health_care >= at_least) if len(health_care) else np.nan, None, '%',
+              note=f'B93: Taiwan first-wave local cases {taiwan}, taiwan_tracing_contacts_per_case')
 
     community = np.array([len(c['municipality_effective_contacts']) for c in index_contact], dtype=float)
     # B63 (E100): informational. Under B62 it cannot coexist with the one-day Fu 2010 shape

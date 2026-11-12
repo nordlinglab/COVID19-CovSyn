@@ -294,3 +294,53 @@ def offspring_dispersion(counts: Any) -> float:
                                    method="bounded", options={"xatol": 1e-10})
     k = float(np.exp(fit.x))
     return NO_OVERDISPERSION_K if k >= 0.999 * NO_OVERDISPERSION_K else k
+
+
+# B71: Taiwan's first-wave tracing set has 579 cases, and the most any of them infected was 8
+# (confirmed contacts, an upper bound on the people a case infected, E80).
+TAIWAN_TRACING_CASES = 579
+TAIWAN_TRACING_LARGEST = 8
+
+
+def largest_spreader_percentile(counts: Any, cases: int = TAIWAN_TRACING_CASES,
+                                reference: int = TAIWAN_TRACING_LARGEST) -> float:
+    """Percentile of Taiwan's largest count among the largest of `cases` simulated cases (B92).
+
+    The exact value of what B71 estimated from 2000 resampled maxima: with each case drawn
+    independently from the simulated counts, P(max < reference) + P(max = reference) / 2, the
+    tie counted as half as in reference_percentile (B85). Exact, so the objective and the
+    checklist judge the same number without resampling noise.
+
+    Args:
+        counts: Offspring count of every simulated index case.
+        cases: Number of cases in each draw.
+        reference: The observed largest count.
+
+    Returns:
+        The percentile, 0 to 100; NaN when there are no counts.
+    """
+    x = np.asarray(counts, dtype=float)
+    if not len(x):
+        return float("nan")
+    below = float(np.mean(x < reference)) ** cases
+    at_most = float(np.mean(x <= reference)) ** cases
+    return 100.0 * (below + at_most) / 2.0
+
+
+def layer_offspring(contacts: Iterable[Mapping[str, Any]], layer: str) -> np.ndarray:
+    """People each index case infected in one contact layer (B93).
+
+    Args:
+        contacts: Contact dict of every index case.
+        layer: Layer name, as in '<layer>_effective_contacts'.
+
+    Returns:
+        One count per case; NaN entries and a list that is None count as no infection
+        (np.asarray(None, dtype=float) is NaN, which np.nansum adds as 0).
+
+    Raises:
+        KeyError: When a case has no such layer, so a misspelt layer does not read as zero.
+    """
+    key = f"{layer}_effective_contacts"
+    return np.array([float(np.nansum(np.asarray(c[key], dtype=float))) for c in contacts],
+                    dtype=float)

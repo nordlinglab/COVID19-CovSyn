@@ -21,7 +21,7 @@ from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULAT
                                             health_care_contact_floor)
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
-                                           offspring_dispersion,
+                                           largest_spreader_percentile, offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
@@ -34,7 +34,6 @@ from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_
 # Note: RW_nan_euclidean_distances is a copy code from sklearn but only comment out the weighting parts.
 # "distances /= present_count" and "distances *= X.shape[1]"
 from sklearn.metrics.pairwise import *
-from sklearn.utils._mask import _get_mask
 from sklearn.utils.validation import _deprecate_positional_args
 from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
@@ -59,8 +58,9 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
     This is where it departs from sklearn's ``nan_euclidean_distances``, which this function
     was copied from: sklearn multiplies the squared distance by
     ``total coordinates / present coordinates``, so that pairs observed on different numbers of
-    coordinates are comparable. Those two lines are present below but commented out, and have
-    been since the first commit, so the behaviour is inherited rather than decided here.
+    coordinates are comparable. This function never did (the two lines were commented out
+    from the first commit until B91 rewrote the computation), so the behaviour is inherited
+    rather than decided here.
 
     B90 (2026-11-06) measured what restoring them would do, because it is not obvious: the
     objective's data matrix is only 36% present, its rows carry 3 to 6 of 9 coordinates, and
@@ -90,7 +90,9 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
         Representation of missing value.
 
     copy : bool, default=True
-        Make and use a deep copy of X and Y (if Y exists).
+        Ignored since B91: the inputs are never written, so they need no protective copy
+        (check_pairwise_arrays may still convert them, e.g. lists or integers); the parameter
+        is kept so existing calls stay valid.
 
     Returns
     -------
@@ -131,45 +133,50 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
     # both, so the compute server kept working and hid it.
     ensure_all_finite = 'allow-nan' if is_scalar_nan(missing_values) else True
     X, Y = check_pairwise_arrays(X, Y, accept_sparse=False,
-                                 ensure_all_finite=ensure_all_finite, copy=copy)
-    # Get missing mask for X
-    missing_X = _get_mask(X, missing_values)
-
-    # Get missing mask for Y
-    missing_Y = missing_X if Y is X else _get_mask(Y, missing_values)
-
-    # set missing values to zero
-    X[missing_X] = 0
-    Y[missing_Y] = 0
-
-    distances = euclidean_distances(X, Y, squared=True)
-
-    # Adjust distances for missing values
-    XX = X * X
-    YY = Y * Y
-    distances -= np.dot(XX, missing_Y.T)
-    distances -= np.dot(missing_X, YY.T)
-
-    np.clip(distances, 0, None, out=distances)
-
-    if X is Y:
-        # Ensure that distances between vectors and themselves are set to 0.0.
-        # This may not be the case due to floating point rounding errors.
-        np.fill_diagonal(distances, 0.0)
-
-    present_X = 1 - missing_X
-    present_Y = present_X if Y is X else ~missing_Y
-    present_count = np.dot(present_X, present_Y.T)
-    distances[present_count == 0] = np.nan
-    # avoid divide by zero
-    np.maximum(1, present_count, out=present_count)
-    # distances /= present_count
-    # distances *= X.shape[1]
-
-    if not squared:
-        np.sqrt(distances, out=distances)
-
+                                 ensure_all_finite=ensure_all_finite, copy=False)
+    # copy is ignored since B91: nothing below writes to X or Y, so copying them on each of
+    # energy()'s three calls only allocated (code review 2026-11-12).
+    if not is_scalar_nan(missing_values):
+        X = np.where(X == missing_values, np.nan, X)
+        Y = np.where(Y == missing_values, np.nan, Y)
+    # B91 (2026-11-12): subtract coordinate by coordinate instead of expanding
+    # |x|^2 - 2x.y + |y|^2 through the platform's BLAS. The expansion left identical cases
+    # 3-8e-8 apart on OpenBLAS but 0 on Accelerate, and energy() takes log(d + 1e-16), so the
+    # objective differed between Linux and macOS (E103). Exact differences make equal cases
+    # exactly 0 on every platform.
+    # The work arrays are allocated once and reused across coordinates (code review
+    # 2026-11-12). Each difference is squared in the inputs' own precision and summed in
+    # float64, and a missing difference is set to 0 before squaring, which adds exactly what
+    # np.where(present, d*d, 0) added: bit for bit the first B91 version, float32 or float64.
+    shape = (X.shape[0], Y.shape[0])
+    squared_sum = np.zeros(shape)
+    none_shared = np.ones(shape, dtype=bool)
+    difference = np.empty(shape, dtype=X.dtype)  # check_pairwise_arrays gave X and Y one dtype
+    missing = np.empty(shape, dtype=bool)
+    for k in range(X.shape[1]):
+        np.subtract(X[:, k, None], Y[None, :, k], out=difference)
+        np.isnan(difference, out=missing)
+        np.copyto(difference, 0.0, where=missing)
+        np.multiply(difference, difference, out=difference)
+        squared_sum += difference
+        np.logical_and(none_shared, missing, out=none_shared)
+    distances = squared_sum if squared else np.sqrt(squared_sum)
+    distances[none_shared] = np.nan
     return distances
+
+
+def _standardised_stack(x, y):
+    stack = np.vstack([x, y])
+    return (stack - np.nanmean(stack, axis=0))/np.nanstd(stack, axis=0)
+
+
+def energy_statistic(x, y, method='log'):
+    """The statistic of estat, without its bootstrap (B91).
+
+    The objective discarded the one bootstrap draw it asked estat for, so it computed the
+    energy twice and drew from the global random state; this computes it once.
+    """
+    return energy(*np.split(_standardised_stack(x, y), [len(x)]), method)
 
 
 def estat(x, y, nboot=1000, replace=False, method='log', fitting=False):
@@ -186,8 +193,7 @@ def estat(x, y, nboot=1000, replace=False, method='log', fitting=False):
 
     '''
     n, N = len(x), len(x) + len(y)
-    stack = np.vstack([x, y])
-    stack = (stack - np.nanmean(stack, axis=0))/np.nanstd(stack, axis=0)
+    stack = _standardised_stack(x, y)
     if replace:
         def rand(x): return np.random.randint(x, size=x)
     else:
@@ -514,6 +520,17 @@ OUTCOME_TARGETS = {
     # dispersion and makes every layer attack rate impossible to measure from a few hundred
     # index cases, because the infections then cluster into a handful of them (E38).
     'offspring_k':            (0.20, 0.35, 1.0),
+    # B92 (2026-11-12, professor): B71's check, charged. Taiwan's largest tracing count (8 over
+    # 579 cases) must not fall in either 2.5% tail of the largest of 579 simulated index cases.
+    # Run 23 failed it on independent seeds (1.0%: 7 of 1000 index cases infected 9 or more),
+    # and the largest spreader was not in the objective, so re-optimising alone could not fix
+    # it. The miss is in units of the lower bound (OUTCOME_SCALE_BY_LOWER_BOUND): in units of
+    # the band's width, 95 points, falling from 2.5% to 0% would cost almost nothing.
+    # Only the lower tail is charged (user, 2026-11-12): 100% means no case reached 8, which
+    # with 300 cases per evaluation, fewer than Taiwan's 579, happens about 70% of the time
+    # even when the model matches Taiwan; charging it cost run 10 a flat 6.0. The checklist,
+    # on 1000 or more cases, still judges both tails.
+    'largest_spreader_percentile': (2.5, np.inf, 1.0),
     # B25: close contacts per day BEFORE symptom onset, from the 2020 national survey
     # (6.03 contacts/day) split by the setting composition of Fu 2012.
     # B61 (2026-10-15): checked against Fu 2010's national contact diaries (Zenodo
@@ -823,6 +840,7 @@ def measure_outcomes(index_cases):
     k = offspring_dispersion(offspring)
     if np.isfinite(k):
         measured['offspring_k'] = k
+    measured['largest_spreader_percentile'] = largest_spreader_percentile(offspring)  # B92
 
     for layer in layers:
         # B55: ordinary contacts only, see contact_measures.contacts_per_day_before_onset.
@@ -1001,7 +1019,9 @@ MAX_INTERVAL_WIDTH_OVER_CENTRE = 0.5
 # measured in units of the lower bound instead of B43's capped width, so the target still bites
 # near its lower end. Kept to the one target that needs it.
 # B76: a floor with no upper bound has no width either, so its miss is in units of the floor.
-OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio', 'health_care_contacts_per_index'}
+# B92: the largest-spreader percentile is a floor, 2.5 points above 0.
+OUTCOME_SCALE_BY_LOWER_BOUND = {'community_tail_ratio', 'health_care_contacts_per_index',
+                                'largest_spreader_percentile'}
 
 
 # B60: the intervals the objective charges, from target_margins.py; OUTCOME_TARGETS keeps the
@@ -1232,8 +1252,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
     synthetic_data_matrix = convert_synthetic_data_to_test_matrix(
         results, taiwan_data_matrix, source_case_number * repeat_number)
-    _, energy_cost, _ = estat(
-        taiwan_data_matrix, synthetic_data_matrix, nboot=1)
+    energy_cost = energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
     # energy_cost = max(energy_cost, 0)  # Prevent negative energy cost
     # Objective function
     # print('Energy cost: ', energy_cost)

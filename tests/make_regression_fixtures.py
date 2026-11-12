@@ -4,14 +4,16 @@
 
 Run from the repository root, on the compute server's pinned environment, whenever a decision
 intentionally changes simulated output; first at the commit that produced Phase D run 10, last
-for B75 (days off work):
+for B91-B93 (exact energy distances, the largest spreader, hospital transmission):
 
     uv run python tests/make_regression_fixtures.py
 
 It records, for the run 10 best parameter vector,
 (1) the total cost and every cost part of ``fast_cost.cost_function``, and
 (2) digests of ``run_covid`` output for fixed seeds in both simulation modes the pipeline uses.
-The regression tests then require every later commit to reproduce these exactly.
+The regression tests then require every later commit to reproduce the digests exactly and the
+cost to a relative 1e-6 (B91): since B91 another platform reproduces the cost to about 4e-9,
+so the server remains the reference only by convention.
 """
 
 from __future__ import annotations

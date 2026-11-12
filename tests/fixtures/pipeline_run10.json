@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "2b3b7451910a682e4491804dda9a679e23ed84a5",
+ "generated_at_commit": "81c93604b908eaedd05dd438e92612728864c074",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -543,10 +543,1691 @@
   "verify_phaseD": {
    "returncode": 0,
    "stdout_head": "<WORKDIR>/spread_Taiwan_weight: 40 simulations, 50 cases\n\n--- B29\n  ok~  household: other members per case                                      3.100    [2.6, 3]         [2.27, 3.75]         \n   ok  household: living alone                                               15.000%   [11, 16]         [5, 27.5]            \n--- B30\n  FAIL class size, elementary (7-12)                                      ",
-   "stdout_sha256": "ff46621453a8bd8165cf8ddbaf7ed3e2160a725a61807472ea7284a3395a8fe1"
+   "stdout_sha256": "fcea4f0e7245397b629f39226fe2428bae6afe53e85413848a38174090853d22"
   },
   "verify_phaseD_json": {
-   "sha256": "2c69883d639c8a5a0a797136edda004c261c766be9799e32b71c1b636cdd8796"
+   "content": {
+    "bootstrap_replicates": 200,
+    "cases": 50,
+    "checks": [
+     {
+      "ci": [
+       2.27375,
+       3.75125
+      ],
+      "decision": "B29",
+      "interval": true,
+      "name": "household: other members per case",
+      "note": "",
+      "ok": true,
+      "target": [
+       2.6,
+       3.0
+      ],
+      "unit": "",
+      "value": 3.1,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       5.0,
+       27.500000000000004
+      ],
+      "decision": "B29",
+      "interval": true,
+      "name": "household: living alone",
+      "note": "",
+      "ok": true,
+      "target": [
+       11.0,
+       16.0
+      ],
+      "unit": "%",
+      "value": 15.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       20.0,
+       20.0
+      ],
+      "decision": "B30",
+      "interval": true,
+      "name": "class size, elementary (7-12)",
+      "note": "n=1",
+      "ok": false,
+      "target": [
+       21,
+       27
+      ],
+      "unit": "",
+      "value": 20.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       26.0,
+       29.0
+      ],
+      "decision": "B30",
+      "interval": true,
+      "name": "class size, junior high (13-15)",
+      "note": "n=2",
+      "ok": true,
+      "target": [
+       24,
+       31
+      ],
+      "unit": "",
+      "value": 27.5,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       35.0,
+       35.0
+      ],
+      "decision": "B30",
+      "interval": true,
+      "name": "class size, senior high (16-18)",
+      "note": "n=1",
+      "ok": true,
+      "target": [
+       29,
+       36
+      ],
+      "unit": "",
+      "value": 35.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       68.0,
+       125.0
+      ],
+      "decision": "B30",
+      "interval": true,
+      "name": "class size, university (19-22)",
+      "note": "n=2",
+      "ok": true,
+      "target": [
+       75,
+       100
+      ],
+      "unit": "",
+      "value": 96.5,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       5.0,
+       10.0
+      ],
+      "decision": "B64",
+      "interval": true,
+      "name": "work group size, employed (median)",
+      "note": "n=19; (n - 1) a / (a + n - 1) around a company of n",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 6.0
+     },
+     {
+      "ci": [
+       1.724614615543187,
+       4.203546043138148
+      ],
+      "decision": "B64",
+      "interval": true,
+      "name": "coworker contacts per day before onset, employed",
+      "note": "B75: Fu 2010 employed on a day at work, >=15 min, met daily, weighted to the 2010 population: mean 4.96 (n=416); days before onset at work only, summarize_taiwan_contact_data.py at_work()",
+      "ok": false,
+      "target": [
+       4.34,
+       5.61
+      ],
+      "unit": "",
+      "value": 2.663736994000152,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       1.2652845435814186,
+       2.1602351294538793
+      ],
+      "decision": "B25",
+      "interval": true,
+      "name": "contacts per day before onset, household",
+      "note": "",
+      "ok": false,
+      "target": [
+       2.27,
+       3.28
+      ],
+      "unit": "",
+      "value": 1.7424496336996338,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.46371875000000023,
+       2.551945075757576
+      ],
+      "decision": "B25",
+      "interval": true,
+      "name": "contacts per day before onset, school",
+      "note": "",
+      "ok": true,
+      "target": [
+       1.15,
+       1.72
+      ],
+      "unit": "",
+      "value": 1.374128787878788,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.6825585542929294,
+       2.0466078192640698
+      ],
+      "decision": "B25",
+      "interval": true,
+      "name": "contacts per day before onset, workplace",
+      "note": "",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.2652750721500723
+     },
+     {
+      "ci": [
+       0.1791718028518959,
+       0.3629987655325268
+      ],
+      "decision": "B25",
+      "interval": true,
+      "name": "contacts per day before onset, health_care",
+      "note": "",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 0.26245300885253703
+     },
+     {
+      "ci": [
+       0.7184457365551117,
+       2.2110994214119217
+      ],
+      "decision": "B25",
+      "interval": true,
+      "name": "contacts per day before onset, municipality",
+      "note": "",
+      "ok": true,
+      "target": [
+       1.2,
+       7.12
+      ],
+      "unit": "",
+      "value": 1.3908673964923968,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       4.658154023834163,
+       7.447418161896055
+      ],
+      "decision": "B25",
+      "interval": true,
+      "name": "contacts per day, all layers",
+      "note": "2020 national survey 6.03; Fu 2010 diaries, >=15 min, 8.40",
+      "ok": true,
+      "target": [
+       6.03,
+       8.4
+      ],
+      "unit": "",
+      "value": 6.035173899073428,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       49.090768742132184,
+       54.81530882165241
+      ],
+      "decision": "B25",
+      "interval": true,
+      "name": "household: share of days each member is met",
+      "note": "was 27% before Phase D",
+      "ok": true,
+      "target": [
+       50.0,
+       100.0
+      ],
+      "unit": "%",
+      "value": 51.746364938827604,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.0,
+       0.0
+      ],
+      "decision": "B32",
+      "interval": true,
+      "name": "cases with candidate contacts but no effective-contact record",
+      "note": "was the E5 signature",
+      "ok": true,
+      "target": [
+       0,
+       0
+      ],
+      "unit": "",
+      "value": 0.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.0,
+       5.772058823529412
+      ],
+      "decision": "B32",
+      "interval": true,
+      "name": "cases with no contact in any layer",
+      "note": "was 6.4% before Phase D",
+      "ok": true,
+      "target": [
+       0.0,
+       4.0
+      ],
+      "unit": "%",
+      "value": 2.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.0,
+       5.267942583732059
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "cumulative SAR per contact, school",
+      "note": "calibration anchor 2.3%; n=75 candidate contacts",
+      "ok": true,
+      "target": [
+       1.0,
+       4.0
+      ],
+      "unit": "%",
+      "value": 1.3333333333333333,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.0,
+       5.3702731092437
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "cumulative SAR per contact, workplace",
+      "note": "calibration anchor 3.4000000000000004%; n=65 candidate contacts",
+      "ok": true,
+      "target": [
+       1.5,
+       5.0
+      ],
+      "unit": "%",
+      "value": 1.5384615384615385,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.916047136981968,
+       11.41545075560188
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "cumulative SAR per contact, household",
+      "note": "calibration anchor 10.88470916057123%; n=120 candidate contacts; informational since E56, accepted on the count",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 5.0
+     },
+     {
+      "ci": [
+       0.0,
+       2.1992481203007523
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "cumulative SAR per contact, health_care",
+      "note": "calibration anchor 2.915085187966312%; n=135 candidate contacts; informational since E56, accepted on the count",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 0.7407407407407407
+     },
+     {
+      "ci": [
+       0.0,
+       0.0
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "cumulative SAR per contact, municipality",
+      "note": "calibration anchor 0.15701895672417981%; n=246 candidate contacts; informational since E56, accepted on the count",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 0.0
+     },
+     {
+      "ci": [
+       0.0,
+       0.075
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "infections per index case, school",
+      "note": "CovSyn candidate contacts per index 1.875; Cheng has no category for this layer, reported only",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 0.025
+     },
+     {
+      "ci": [
+       0.0,
+       0.075
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "infections per index case, workplace",
+      "note": "CovSyn candidate contacts per index 1.625; Cheng has no category for this layer, reported only",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 0.025
+     },
+     {
+      "ci": [
+       0.025,
+       0.3
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "infections per index case, household",
+      "note": "CovSyn candidate contacts per index 3.000; Cheng 2020 0.10 per index case -> CovSyn is 1.50x",
+      "ok": true,
+      "target": [
+       0.13529309801000597,
+       0.5188501704644514
+      ],
+      "unit": "",
+      "value": 0.15,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.0,
+       0.075
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "infections per index case, health_care",
+      "note": "CovSyn candidate contacts per index 3.375; Cheng 2020 0.06 per index case -> CovSyn is 0.42x",
+      "ok": true,
+      "target": [
+       0.06212240840569798,
+       0.36844911035319167
+      ],
+      "unit": "",
+      "value": 0.025,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       0.0,
+       0.0
+      ],
+      "decision": "B9",
+      "interval": true,
+      "name": "infections per index case, municipality",
+      "note": "CovSyn candidate contacts per index 6.150; Cheng 2020 0.01 per index case -> CovSyn is 0.00x; upper capped at 3x the centre (E57), not the Poisson CI",
+      "ok": false,
+      "target": [
+       0.001,
+       0.08463949843260188
+      ],
+      "unit": "",
+      "value": 0.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.05569690258908996,
+       100.0
+      ],
+      "decision": "B17",
+      "interval": true,
+      "name": "offspring dispersion k",
+      "note": "Taiwan tracing NegBin MLE k = 0.286 (n = 579), recompute_taiwan_targets.py",
+      "ok": true,
+      "target": [
+       0.2,
+       0.35
+      ],
+      "unit": "",
+      "value": 0.24445814515766887,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.05,
+       0.425
+      ],
+      "decision": "B17",
+      "interval": true,
+      "name": "R (mean offspring of an index case)",
+      "note": "B67: Cheng 2020 local index cases 18 / 29 = 0.62; all cases between Taiwan links 0.047 and confirmed contacts 0.43 (E80)",
+      "ok": true,
+      "target": [
+       0.37,
+       0.98
+      ],
+      "unit": "",
+      "value": 0.225,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       0.0,
+       7.5
+      ],
+      "decision": "B17",
+      "interval": true,
+      "name": "cases infecting 3 or more",
+      "note": "B83: the 55 local cases, between recorded links (1 of 55) and confirmed contacts (7 of 55); the all-case band (0.2%, 4.3%) of B56 belonged to a population 84% imported and could not hold with B67's R",
+      "ok": true,
+      "target": [
+       1.8,
+       12.8
+      ],
+      "unit": "%",
+      "value": 2.5,
+      "within_noise": false
+     },
+     {
+      "ci": null,
+      "decision": "B17",
+      "interval": false,
+      "name": "samples of 579 cases, percentile of a largest of 8",
+      "note": "B71: Taiwan tracing largest 8 over 579 cases (confirmed contacts, an upper bound, E80); simulated index cases infecting more than 8: 0 of 40; exactly 8: 0; largest: 4",
+      "ok": false,
+      "target": [
+       2.5,
+       97.5
+      ],
+      "unit": "%",
+      "value": 100.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.0,
+       7.5
+      ],
+      "decision": "B23",
+      "interval": true,
+      "name": "index cases infecting 1 or more in health care",
+      "note": "B93: Taiwan first-wave local cases 5 of 55 = 9.1% (exact 95% 3.0-20.0), taiwan_tracing_contacts_per_case",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 2.5
+     },
+     {
+      "ci": [
+       0.0,
+       0.0
+      ],
+      "decision": "B23",
+      "interval": true,
+      "name": "index cases infecting 2 or more in health care",
+      "note": "B93: Taiwan first-wave local cases 1 of 55 = 1.8% (exact 95% 0.0-9.7), taiwan_tracing_contacts_per_case",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 0.0
+     },
+     {
+      "ci": [
+       2.0,
+       3.5
+      ],
+      "decision": "B27",
+      "interval": true,
+      "name": "community contacts per case, median",
+      "note": "Taiwan tracing friend+other median 7.5 (n=38, selected sample, E88); informational since B63",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 3.0
+     },
+     {
+      "ci": [
+       10.0,
+       32.60000000000001
+      ],
+      "decision": "B27",
+      "interval": true,
+      "name": "community contacts per case, p90",
+      "note": "Taiwan tracing 2020 first wave p90 = 195 (n=38); informational since B47",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 20.1
+     },
+     {
+      "ci": [
+       2.1,
+       9.870000000000003
+      ],
+      "decision": "B50",
+      "interval": true,
+      "name": "community contacts, p90 / median",
+      "note": "B56: limitation, selected sample (E88); Taiwan reported cases 26.0 (n=38), CI [5.5, 93.1]",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 5.742857142857143
+     },
+     {
+      "ci": [
+       20.0,
+       38.0
+      ],
+      "decision": "B27",
+      "interval": true,
+      "name": "community contacts per case, maximum",
+      "note": "Taiwan tracing maximum 850 (informational: one order statistic)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 38.0
+     },
+     {
+      "ci": null,
+      "decision": "B27",
+      "interval": true,
+      "name": "largest / smallest city mean community contacts",
+      "note": "informational since B56; was 12x, proportional to city population (E4)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": NaN
+     },
+     {
+      "ci": null,
+      "decision": "B27",
+      "interval": true,
+      "name": "city effect on community contacts, permutation p-value",
+      "note": "B56: passes when no city effect is detectable (p >= 0.05, 2000 label shuffles)",
+      "ok": null,
+      "target": [
+       0.05,
+       1.0
+      ],
+      "unit": "",
+      "value": NaN,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.8450188560653678,
+       2.9182272727272727
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "community contacts on one day, mean",
+      "note": "Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.7966666666666666
+     },
+     {
+      "ci": [
+       34.18172079983073,
+       60.57185216562533
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "community contacts on one day, zero share",
+      "note": "Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)",
+      "ok": true,
+      "target": [
+       59.8,
+       64.1
+      ],
+      "unit": "%",
+      "value": 48.0,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       0.0,
+       1.0
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "community contacts on one day, median",
+      "note": "Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.0
+     },
+     {
+      "ci": [
+       2.0,
+       11.025000000000006
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "community contacts on one day, p90",
+      "note": "Fu 2010, >=15 min, all days: mean 1.76, zero 62.0%, median 0, p90 6 (n=1,954)",
+      "ok": true,
+      "target": [
+       5.0,
+       8.0
+      ],
+      "unit": "",
+      "value": 6.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       1.74984375,
+       3.919181406828466
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "workplace, employed cases contacts on one day, mean",
+      "note": "B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 2.56390977443609
+     },
+     {
+      "ci": [
+       3.471623563218391,
+       13.2241946365323
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "workplace, employed cases contacts on one day, zero share",
+      "note": "B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only",
+      "ok": false,
+      "target": [
+       23.200000000000003,
+       31.8
+      ],
+      "unit": "%",
+      "value": 7.518796992481203,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       1.0,
+       3.0
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "workplace, employed cases contacts on one day, median",
+      "note": "B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 2.0
+     },
+     {
+      "ci": [
+       3.0,
+       13.0
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "workplace, employed cases contacts on one day, p90",
+      "note": "B75: Fu 2010, employed on a day at work, >=15 min, met daily, weighted: mean 4.96, zero 27.4%, p90 13 (n=416); days at work only",
+      "ok": true,
+      "target": [
+       10.0,
+       16.0
+      ],
+      "unit": "",
+      "value": 4.799999999999997,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       9.848125,
+       14.604375000000001
+      ],
+      "decision": "B56",
+      "interval": true,
+      "name": "contacts per case in Jian's tracing window",
+      "note": "information: index cases only; Jian et al. 2020 locally acquired cases 1,435 / 55 = 26.1; window onset - 2 d to isolation (E7, E89)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 12.35
+     },
+     {
+      "ci": [
+       12.348749999999999,
+       19.755000000000003
+      ],
+      "decision": "B56",
+      "interval": true,
+      "name": "contacts per case, all layers, from infection",
+      "note": "information: every candidate contact; CovSyn counts from infection, tracing does not",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 16.025
+     },
+     {
+      "ci": [
+       4.891629464285715,
+       7.000806451612903
+      ],
+      "decision": "B22",
+      "interval": true,
+      "name": "incubation period, mean",
+      "note": "literature reported-mean range, 15 studies (E45)",
+      "ok": true,
+      "target": [
+       3.9,
+       8.0
+      ],
+      "unit": "",
+      "value": 5.896551724137931,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       4.891629464285715,
+       7.000806451612903
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "incubation period, mean, Taiwan data",
+      "note": "Taiwan first wave: onset - earliest infection date, mean 6.2 d (n=28), bootstrap 95% of the mean; recompute_taiwan_targets.py",
+      "ok": true,
+      "target": [
+       4.96,
+       7.57
+      ],
+      "unit": "",
+      "value": 5.896551724137931,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.999107142857143,
+       1.967741935483871
+      ],
+      "decision": "B22",
+      "interval": true,
+      "name": "pre-onset infectious window, mean",
+      "note": "",
+      "ok": true,
+      "target": [
+       1.0,
+       3.0
+      ],
+      "unit": "",
+      "value": 1.4137931034482758,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       6.245265151515152,
+       32.14810924369748
+      ],
+      "decision": "B22",
+      "interval": true,
+      "name": "pre-onset window of zero days",
+      "note": "symptomatic cases (E96); was 20% before Phase D",
+      "ok": true,
+      "target": [
+       0.0,
+       12.0
+      ],
+      "unit": "%",
+      "value": 17.24137931034483,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       3.8737500000000002,
+       5.276250000000001
+      ],
+      "decision": "B22",
+      "interval": true,
+      "name": "latent period, mean",
+      "note": "B3: widened to the whole literature reported-mean range",
+      "ok": true,
+      "target": [
+       4.1,
+       5.5
+      ],
+      "unit": "",
+      "value": 4.55,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       5.0,
+       7.012500000000003
+      ],
+      "decision": "B2",
+      "interval": true,
+      "name": "onset to confirmation, median",
+      "note": "Taiwan tracing median 6 d (n=442); Ge 2021 onset to isolation 5 d; published CovSyn fits 8.17 d",
+      "ok": true,
+      "target": [
+       5.0,
+       7.0
+      ],
+      "unit": "",
+      "value": 6.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       10.924375000000001,
+       13.4525
+      ],
+      "decision": "B26",
+      "interval": true,
+      "name": "infection to isolation, mean",
+      "note": "derived: incubation (literature 3.9-8.0 d; Taiwan 6.2 d) plus Taiwan onset-to-confirmation median 5-7 d",
+      "ok": true,
+      "target": [
+       8.0,
+       14.0
+      ],
+      "unit": "",
+      "value": 12.275,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       10.973749999999999,
+       13.55
+      ],
+      "decision": "B61",
+      "interval": true,
+      "name": "infection to confirmation, mean, Taiwan data",
+      "note": "Taiwan first wave: confirmation - earliest infection date, mean 12.9 d (n=33), bootstrap 95% of the mean; recompute_taiwan_targets.py",
+      "ok": true,
+      "target": [
+       11.4,
+       14.6
+      ],
+      "unit": "",
+      "value": 12.3,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       49.15100154083205,
+       74.46912807676262
+      ],
+      "decision": "B26",
+      "interval": true,
+      "name": "isolation route: symptom",
+      "note": "",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 62.0
+     },
+     {
+      "ci": [
+       4.761904761904762,
+       24.17007597895968
+      ],
+      "decision": "B26",
+      "interval": true,
+      "name": "isolation route: traced",
+      "note": "",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 16.0
+     },
+     {
+      "ci": [
+       12.232893157262907,
+       35.55952380952381
+      ],
+      "decision": "B26",
+      "interval": true,
+      "name": "isolation route: untraced",
+      "note": "",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 22.0
+     },
+     {
+      "ci": [
+       0.0,
+       0.0
+      ],
+      "decision": "B26",
+      "interval": true,
+      "name": "isolation route: critical",
+      "note": "",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 0.0
+     },
+     {
+      "ci": [
+       55.021591970121385,
+       71.55190930787589
+      ],
+      "decision": "B26",
+      "interval": true,
+      "name": "contacts starting before symptom onset",
+      "note": "B56: informational, Cheng 2020 27.5% is a recording artefact (E84)",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 63.36405529953917
+     },
+     {
+      "ci": [
+       19.386932192231733,
+       35.714285714285715
+      ],
+      "decision": "B23",
+      "interval": true,
+      "name": "health care contacts starting 8+ days after onset",
+      "note": "Cheng 2020 medical: 256/697 = 36.7%; was ~1-3% before Phase D",
+      "ok": true,
+      "target": [
+       20.0,
+       50.0
+      ],
+      "unit": "%",
+      "value": 27.659574468085108,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       36.626912691269126,
+       57.898261278195484
+      ],
+      "decision": "B23",
+      "interval": true,
+      "name": "health care contacts starting before day 4",
+      "note": "Cheng 2020 medical: 33.9% before onset + 21.5% on days 0-3 = 55.4%",
+      "ok": true,
+      "target": [
+       40.0,
+       70.0
+      ],
+      "unit": "%",
+      "value": 47.87234042553192,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       2.425,
+       4.4275
+      ],
+      "decision": "B76",
+      "interval": true,
+      "name": "health care contacts per index case",
+      "note": "floor: Cheng 2020 medical infections lower bound / per-contact rate upper bound",
+      "ok": true,
+      "target": [
+       3.3352297478263013,
+       null
+      ],
+      "unit": "",
+      "value": 3.375,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.9743750000000001,
+       2.300625
+      ],
+      "decision": "B76",
+      "interval": true,
+      "name": "health care contacts per index case in Jian's tracing window",
+      "note": "information: Jian et al. 2020 local cases 9.89 hospital or clinic contacts",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.525
+     },
+     {
+      "ci": [
+       11.211514778325123,
+       15.584490740740742
+      ],
+      "decision": "B28",
+      "interval": true,
+      "name": "confirmation to case closure, symptomatic",
+      "note": "E91: Taiwan confirmed to release, mean 27.0 (n=56)",
+      "ok": false,
+      "target": [
+       22.0,
+       32.0
+      ],
+      "unit": "",
+      "value": 13.5,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       12.661111111111111,
+       26.465404040404042
+      ],
+      "decision": "B28",
+      "interval": true,
+      "name": "confirmation to case closure, asymptomatic",
+      "note": "E91: Taiwan mean 23.3 (n=23)",
+      "ok": true,
+      "target": [
+       17.0,
+       31.0
+      ],
+      "unit": "",
+      "value": 18.636363636363637,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       18.0,
+       20.0
+      ],
+      "decision": "B28",
+      "interval": true,
+      "name": "ICU to case closure",
+      "note": "E93: Taiwan mean 36.2 (n=28)",
+      "ok": false,
+      "target": [
+       29.0,
+       44.0
+      ],
+      "unit": "",
+      "value": 19.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       5.0,
+       16.0
+      ],
+      "decision": "B28",
+      "interval": true,
+      "name": "onset to ICU",
+      "note": "E92: Taiwan mean 7.2 (n=40), median 5.5",
+      "ok": true,
+      "target": [
+       5.4,
+       9.2
+      ],
+      "unit": "",
+      "value": 8.666666666666666,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       15.0,
+       40.062500000000014
+      ],
+      "decision": "B33",
+      "interval": true,
+      "name": "asymptomatic share",
+      "note": "B61: Taiwan 20.4% (no onset date and no ICU, 118/578); 23.5% if every case without an onset date counts (136/578)",
+      "ok": true,
+      "target": [
+       20.0,
+       28.0
+      ],
+      "unit": "%",
+      "value": 27.500000000000004,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       2.954545454545467,
+       21.23737373737374
+      ],
+      "decision": "B33",
+      "interval": true,
+      "name": "symptomatic to ICU",
+      "note": "B61: Taiwan 12.6% (58/460, an ICU case without an onset date counts as symptomatic); the cascade then reproduces the observed CFR exactly",
+      "ok": true,
+      "target": [
+       9.0,
+       17.0
+      ],
+      "unit": "%",
+      "value": 10.344827586206897,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.0,
+       100.0
+      ],
+      "decision": "B33",
+      "interval": true,
+      "name": "ICU to death",
+      "note": "Taiwan 12.1% (7/58)",
+      "ok": true,
+      "target": [
+       7.0,
+       19.0
+      ],
+      "unit": "%",
+      "value": 33.333333333333336,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       0.0,
+       7.5
+      ],
+      "decision": "B33",
+      "interval": true,
+      "name": "case fatality",
+      "note": "Taiwan 1.21% (7/578)",
+      "ok": true,
+      "target": [
+       0.7,
+       2.0
+      ],
+      "unit": "%",
+      "value": 2.5,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       0.0,
+       0.0
+      ],
+      "decision": "B20",
+      "interval": true,
+      "name": "symptomatic to ICU, 0-19",
+      "note": "n=6",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 0.0
+     },
+     {
+      "ci": [
+       0.0,
+       43.03571428571432
+      ],
+      "decision": "B20",
+      "interval": true,
+      "name": "symptomatic to ICU, 20-39",
+      "note": "n=10",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 12.5
+     },
+     {
+      "ci": [
+       0.0,
+       25.056818181818194
+      ],
+      "decision": "B20",
+      "interval": true,
+      "name": "symptomatic to ICU, 40-59",
+      "note": "n=17",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 8.333333333333334
+     },
+     {
+      "ci": [
+       0.0,
+       50.0
+      ],
+      "decision": "B20",
+      "interval": true,
+      "name": "symptomatic to ICU, 60+",
+      "note": "n=7",
+      "ok": null,
+      "target": null,
+      "unit": "%",
+      "value": 16.666666666666668
+     },
+     {
+      "ci": [
+       0.0,
+       4.142857142857142
+      ],
+      "decision": "B20",
+      "interval": true,
+      "name": "ICU rate 60+ / 20-39",
+      "note": "Verity 2020 gradient",
+      "ok": true,
+      "target": [
+       3.0,
+       12.0
+      ],
+      "unit": "",
+      "value": 1.3333333333333335,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       0.0,
+       2.717061661073827
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers, 0-19",
+      "note": "information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.0993377483443707
+     },
+     {
+      "ci": [
+       0.0,
+       1.0
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers, 20-39",
+      "note": "information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.0
+     },
+     {
+      "ci": [
+       0.0,
+       4.720158830080868
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers, 40-59",
+      "note": "information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 2.721311475409836
+     },
+     {
+      "ci": [
+       0.00631456423686891,
+       8.16611753480018
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers, 60+",
+      "note": "information: this run only, all layers pooled. Cheng has no school or workplace category, and CovSyn school carries a 2.3% attack rate concentrated in 0-19, so this pooling is not comparable to his (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 4.709219858156028
+     },
+     {
+      "ci": [
+       0.060473119989756435,
+       3.389099549961365
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "measured age risk ratio, 0-19",
+      "note": "400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [0.060, 3.389]; TOO NOISY; reference: Zhang 2020 0.34 / Viner 2021 0.56 / Uthman 2024 wild-type 0.58 / Madewell 2020 0.59; range [0.34, 0.77]. NOT Cheng 2020, whose 0-19 is 1 infection in 281 contacts and cannot validate this band (todolist 1.13, decision N5)",
+      "ok": true,
+      "target": [
+       0.34,
+       0.77
+      ],
+      "unit": "",
+      "value": 0.4531368102796674,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       0.23586774690936854,
+       4.239664019787525
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "measured age risk ratio, 20-39",
+      "note": "400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [0.236, 4.240]; resolvable; reference: reference band, fixed to 1 by construction",
+      "ok": true,
+      "target": [
+       1.0,
+       1.0
+      ],
+      "unit": "",
+      "value": 1.0,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       1.2157222604927849,
+       10.422008681217237
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "measured age risk ratio, 40-59",
+      "note": "400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [1.216, 10.422]; TOO NOISY; reference: Cheng 2020 all-infection 1.83 +/- 0.10",
+      "ok": true,
+      "target": [
+       1.63,
+       2.03
+      ],
+      "unit": "",
+      "value": 3.5585674713098534,
+      "within_noise": true
+     },
+     {
+      "ci": [
+       0.8543403488111682,
+       8.768861206623418
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "measured age risk ratio, 60+",
+      "note": "400 index cases, 58 infections over household, health_care, municipality (the settings Cheng traced); 95% CI [0.854, 8.769]; TOO NOISY; reference: Cheng 2020 all-infection 1.32 +/- 0.10",
+      "ok": true,
+      "target": [
+       1.12,
+       1.52
+      ],
+      "unit": "",
+      "value": 2.7371140213865197,
+      "within_noise": true
+     },
+     {
+      "ci": null,
+      "decision": "B14",
+      "interval": true,
+      "name": "locked age risk ratio input",
+      "note": "read from variable/course_parameters.npy; NOT a validation target -- the rows below check that the sampler reproduces it (input reproduction, N3)",
+      "ok": null,
+      "target": "[0.39, 1.00, 1.90, 1.44]",
+      "unit": "",
+      "value": null
+     },
+     {
+      "ci": [
+       5.901515151515152,
+       5.901515151515152
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "input reproduction, household",
+      "note": "largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 5.901515151515152
+     },
+     {
+      "ci": [
+       0.3023076923076923,
+       0.3023076923076923
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "input reproduction, school",
+      "note": "largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 0.3023076923076923
+     },
+     {
+      "ci": [
+       1.0482889733840304,
+       1.0482889733840304
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "input reproduction, workplace",
+      "note": "largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.0482889733840304
+     },
+     {
+      "ci": [
+       0.12072538860103643,
+       0.12072538860103643
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "input reproduction, health_care",
+      "note": "largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 0.12072538860103643
+     },
+     {
+      "ci": [
+       0.20769230769230762,
+       0.20769230769230762
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "input reproduction, municipality",
+      "note": "largest |measured RR - locked input| over the age bands this layer has; implementation check, not independent validation (N3)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 0.20769230769230762
+     },
+     {
+      "ci": [
+       0.7985092342021555,
+       0.7985092342021555
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers (high N), 0-19",
+      "note": "information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 0.7985092342021555
+     },
+     {
+      "ci": [
+       1.0,
+       1.0
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers (high N), 20-39",
+      "note": "information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.0
+     },
+     {
+      "ci": [
+       1.949515834453289,
+       1.949515834453289
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers (high N), 40-59",
+      "note": "information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.949515834453289
+     },
+     {
+      "ci": [
+       1.472032348127467,
+       1.472032348127467
+      ],
+      "decision": "B14",
+      "interval": true,
+      "name": "age risk ratio, all five layers (high N), 60+",
+      "note": "information: the same high-N measurement pooled over all five layers, for the size of the composition effect (E70)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 1.472032348127467
+     },
+     {
+      "ci": [
+       23.574375,
+       27.677500000000002
+      ],
+      "decision": "B66",
+      "interval": true,
+      "name": "first wave local cases per simulation",
+      "note": "observed 55 local cases (13 of unknown source); n=40",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 25.5
+     },
+     {
+      "ci": [
+       0.01964626099706745,
+       0.02705828445747801
+      ],
+      "decision": "B66",
+      "interval": true,
+      "name": "infections per imported seed",
+      "note": "Cheng 2020 imported index cases 4 / 71 = 0.056 (exact Poisson 95% 0.015-0.14); the case data give 17 local cases infected by imported cases",
+      "ok": true,
+      "target": [
+       0.015,
+       0.14
+      ],
+      "unit": "",
+      "value": 0.02309384164222874,
+      "within_noise": false
+     },
+     {
+      "ci": [
+       7.587695853269538,
+       7.865860636222953
+      ],
+      "decision": "B66",
+      "interval": true,
+      "name": "contacts per confirmed case in Jian's tracing window, all cases",
+      "note": "Jian et al. 2020: 16.5 per case over all 487 confirmed cases, 76% of them quarantined travellers or contacts; same mixture as this scenario (1.14)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 7.7315825375170535
+     },
+     {
+      "ci": [
+       7.585585384374179,
+       7.859467878923557
+      ],
+      "decision": "B72",
+      "interval": true,
+      "name": "Jian's contacts per case, all cases, per simulated first wave",
+      "note": "information: simulations 2.5-97.5% 6.9-8.4 (n=40); Jian et al. 2020 16.5 [13.9, 19.1]; without flight contacts 9.3",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 7.727419360651251
+     },
+     {
+      "ci": [
+       11.581546857626027,
+       12.950696968486271
+      ],
+      "decision": "B72",
+      "interval": true,
+      "name": "Jian's contacts per case, local cases, per simulated first wave",
+      "note": "information: simulations 2.5-97.5% 8.2-16.8 (n=40); Jian et al. 2020 locally acquired 1,435 / 55 = 26.1",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 12.23488217454772
+     },
+     {
+      "ci": [
+       7.275458211143695,
+       7.49819831378299
+      ],
+      "decision": "B72",
+      "interval": true,
+      "name": "Jian's contacts per case, imported cases, per simulated first wave",
+      "note": "information: simulations 2.5-97.5% 6.7-8.2 (n=40); Jian et al. 2020 imported 6,616 / 432 = 15.3; without flight contacts 7.2 (Navy cases included)",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 7.374120234604106
+     },
+     {
+      "ci": [
+       1.9,
+       2.9006250000000002
+      ],
+      "decision": "B36",
+      "interval": true,
+      "name": "first wave deaths per simulation",
+      "note": "observed 3 local deaths",
+      "ok": null,
+      "target": null,
+      "unit": "",
+      "value": 2.475
+     },
+     {
+      "ci": [
+       37.877266186355676,
+       38.03468887044963
+      ],
+      "decision": "B34",
+      "interval": true,
+      "name": "Taiwan scenario mean case age",
+      "note": "observed tracing mean 37.1",
+      "ok": true,
+      "target": [
+       33.0,
+       42.0
+      ],
+      "unit": "",
+      "value": 37.95613915416098,
+      "within_noise": false
+     }
+    ],
+    "simulations": 40,
+    "spread_dir": "<WORKDIR>/spread_Taiwan_weight"
+   }
   }
  }
 }

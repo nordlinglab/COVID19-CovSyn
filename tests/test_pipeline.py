@@ -5,9 +5,10 @@
 The fixture ``tests/fixtures/pipeline_run10.json`` was written by
 ``tests/make_pipeline_fixtures.py`` on the compute server, with the run 10 vector, at the commit
 recorded in its ``generated_at_commit`` (regenerated whenever a decision changes the output; last
-for B75).
-Data files and report output must match exactly; figure steps must succeed and write the same
-files (the images themselves are not compared).
+for B91-B93).
+Data files and report output must match exactly, except the checklist JSON, whose numbers
+match to a relative 1e-6 (B91: the platforms' dispersion fits differ at 1e-8); figure steps must
+succeed and write the same files (the images themselves are not compared).
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import json
 import re
 from pathlib import Path
 
+import pipeline_runner as pr
 import pytest
 from conftest import FIXTURES
 from make_pipeline_fixtures import collect
@@ -42,8 +44,24 @@ def test_report_step_output_is_unchanged(step: str, produced: dict[str, object])
     """Each report step exits the same way and prints the same normalised text."""
     got = produced["reports"][step]
     want = FIXTURE["reports"][step]
+    assert ("returncode" in want) == ("returncode" in got)
     assert got.get("returncode") == want.get("returncode")
-    assert got.get("stdout_sha256", got.get("sha256")) == want.get("stdout_sha256", want.get("sha256"))
+    # The fixture decides how a step is compared, and each step must be compared one way.
+    if "content" in want or "content" in got:
+        assert "content" in want and "content" in got, (
+            "the fixture and the pipeline disagree on how this step is recorded; "
+            "run make_pipeline_fixtures.py")
+        assert pr.json_mismatches(want["content"], got["content"]) == []
+    else:
+        expected = want.get("stdout_sha256", want.get("sha256"))
+        assert expected is not None, "the fixture records no output for this step"
+        assert got.get("stdout_sha256", got.get("sha256")) == expected
+
+
+def test_the_pipeline_has_the_recorded_steps(produced: dict[str, object]) -> None:
+    """A step the fixture does not know would otherwise go unchecked."""
+    assert sorted(produced["reports"]) == sorted(FIXTURE["reports"])
+    assert sorted(produced["figures"]) == sorted(FIXTURE["figures"])
 
 
 @pytest.mark.parametrize("step", sorted(FIXTURE["figures"]))
