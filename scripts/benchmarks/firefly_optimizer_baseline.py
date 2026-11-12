@@ -997,7 +997,7 @@ if __name__ == "__main__":
         print('mode error')
         sys.exit()
     # Task 3: every run directory comes from run_directory().
-    result_path = runs.run_directory(runs.make_run_id('baseline'))
+    result_path = runs.new_run_directory('baseline')
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma)

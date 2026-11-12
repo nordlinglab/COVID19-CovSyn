@@ -107,6 +107,8 @@ fi
 # holds a revalidated choice.
 if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
     say "re-scoring the candidates of $FIREFLY_RUN on unseen seeds (E87)"
+    # A chain run again on the same run directory starts its revalidation afresh.
+    rm -rf "$FIREFLY_RUN/revalidation"
     run covsyn.calibration.revalidation "$FIREFLY_RUN" "$FIREFLY_RUN/revalidation" \
         "${REVALIDATION_BLOCKS:-10}" >> "$LOG" 2>&1 \
         || { say 'ERROR: revalidation failed, stopping'; exit 1; }

@@ -5,7 +5,7 @@ k = P[198] cost +20 to +90 of outcome penalty. This prints every charged target 
 its band at three points around run 7's best vector, with its share of the outcome cost, so the
 price can be read as either structural or something the optimizer could re-balance.
 
-Usage: uv run python scripts/probes/probe_tail_price_detail.py
+Usage: uv run python scripts/probes/probe_tail_price_detail.py RUN_DIR
 """
 import sys
 import os

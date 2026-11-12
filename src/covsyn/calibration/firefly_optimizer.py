@@ -1393,8 +1393,10 @@ class Firefly:
         self.alpha = alpha
         self.betamin = betamin
         self.gamma = gamma
-        self.seed = seed
-        self.rng = default_rng(seed)
+        # Task 3: an unseeded run draws its seed here, so config.json can record it and the
+        # initial population can be drawn again from it.
+        self.seed = int(np.random.SeedSequence().entropy) if seed is None else seed
+        self.rng = default_rng(self.seed)
         # Task 3: recorded in config.json with the settings above; main() adds its own.
         self.run_settings = {}
 
@@ -1419,6 +1421,12 @@ class Firefly:
             normalized_fireflies[k] = np.clip((clip_warm_start(vector, lb, ub, f'firefly {k}') - lb) / span, 0, 1)
             fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
             print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
+        # Task 3: recorded before any evaluation, so a run that fails early still has it.
+        settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
+                    'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
+                    **self.run_settings}
+        runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
+                          initial_population=fireflies)
         # Create ONE persistent process pool reused for every evaluation in this run.
         # (Previously each evaluation created and tore down its own pool, re-spawning
         # 24 workers thousands of times.)
@@ -1455,11 +1463,6 @@ class Firefly:
         result = np.hstack((fireflies, np.matrix(intensities).T))
         np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
                    result, fmt='%.7f')
-        settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
-                    'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
-                    **self.run_settings}
-        runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
-                          initial_population=fireflies)
 
         evaluations = self.pop_size
         new_alpha = self.alpha
@@ -1609,10 +1612,9 @@ def main() -> None:
         print('mode error')
         sys.exit()
     if args.run_dir is not None:
-        result_path = args.run_dir
-        result_path.mkdir(parents=True, exist_ok=True)
+        result_path = runs.claim_run_directory(args.run_dir)  # refuses one holding a run
     else:
-        result_path = runs.run_directory(runs.make_run_id(args.config_name))
+        result_path = runs.new_run_directory(args.config_name)
     print(f'run directory: {result_path}')
 
     # Firefly

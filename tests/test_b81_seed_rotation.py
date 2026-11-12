@@ -181,3 +181,11 @@ def test_the_run_directory_holds_the_configuration(run):
     lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
     first = lb + again.rng.uniform(0, 1, (POP, DIM)) * (ub - lb)
     assert digest == hashlib.sha256(np.ascontiguousarray(first, dtype=float).tobytes()).hexdigest()
+
+
+def test_an_unseeded_run_records_a_seed_that_redraws_it():
+    """Task 3: without a seed the optimiser draws one, so config.json is never seed null."""
+    first = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03)
+    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=first.seed)
+    assert isinstance(first.seed, int)
+    assert np.array_equal(first.rng.uniform(size=5), again.rng.uniform(size=5))

@@ -8,7 +8,7 @@ put back to run 7's values -- and prints every cost part and measured value that
 
 The objective is deterministic on its fixed seeds (E30), so the difference is the attribution.
 
-Usage: uv run python scripts/probes/probe_recovery_tradeoff.py
+Usage: uv run python scripts/probes/probe_recovery_tradeoff.py RUN7_DIR RUN8_DIR
 """
 import sys
 import os

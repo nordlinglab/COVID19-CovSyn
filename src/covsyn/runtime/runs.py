@@ -5,11 +5,12 @@
 A run is named ``<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`` and writes under the
 parent repository's layout: ``results/models/<run-id>/`` (parameters, populations, logs and
 ``config.json``), ``results/tables/<run-id>/`` and ``results/figures/<run-id>/``.
-:func:`run_directory` is the only place these directories are created, so a fresh clone needs
-none of them in advance.
+:func:`run_directory` and :func:`claim_run_directory` are the only places these
+directories are created, so a fresh clone needs none of them in advance. ``results/`` is under
+the repository root wherever a command starts.
 
-Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` prints a new run id, which
-launch_phase_d.sh passes to the optimiser and the chain.
+Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` creates a new run directory and
+prints its path, which launch_phase_d.sh passes to the optimiser and the chain.
 """
 
 from __future__ import annotations
@@ -31,7 +32,9 @@ import numpy as np
 from covsyn.runtime import hardware
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RESULTS_ROOT = Path("results")
+RESULTS_ROOT = REPO_ROOT / "results"
+# What an optimiser run writes; a directory holding any of them already holds a run.
+RUN_OUTPUTS = ("config.json", "firefly_result.txt", "firefly_best.txt")
 KINDS = ("models", "tables", "figures")
 # Lowercase kebab-case: safe in any path, and free of the "_" that separates the id's fields.
 CONFIG_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -80,18 +83,53 @@ def make_run_id(
     return f"{when:%Y%m%d-%H%M%S}_{stamp}{'-dirty' if dirty else ''}_{config_name}"
 
 
-def run_directory(run_id: str, kind: str = "models", root: Path = RESULTS_ROOT) -> Path:
+def run_directory(
+    run_id: str, kind: str = "models", root: Path = RESULTS_ROOT, new: bool = False
+) -> Path:
     """Create, if needed, and return ``root/kind/run_id``.
+
+    Args:
+        run_id: One directory name.
+        kind: models, tables or figures.
+        root: The results directory.
+        new: Require that the directory does not exist yet, as for a fresh run: two runs
+            started in the same second with the same configuration get the same id.
 
     Raises:
         ValueError: ``kind`` is not one of models, tables and figures, or ``run_id`` is not a
             single directory name.
+        FileExistsError: ``new`` and the directory exists.
     """
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}, got {kind!r}")
     if not run_id or run_id in (".", "..") or Path(run_id).name != run_id or "\\" in run_id:
         raise ValueError(f"a run id is one directory name, got {run_id!r}")
     path = Path(root) / kind / run_id
+    path.mkdir(parents=True, exist_ok=not new)
+    return path
+
+
+def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: Any) -> Path:
+    """Create the models directory of a new run; ``id_fields`` go to :func:`make_run_id`."""
+    return run_directory(make_run_id(config_name, **id_fields), "models", root, new=True)
+
+
+def claim_run_directory(path: Path) -> Path:
+    """Create, if needed, a run directory given by path, refusing one that holds a run already.
+
+    The launcher's FIREFLY_RUN or the optimiser's --run-dir may name any directory, a committed
+    run such as results/models/phaseD_run10 included, which a new run must not overwrite.
+
+    Raises:
+        FileExistsError: The directory holds config.json, firefly_result.txt or
+            firefly_best.txt.
+    """
+    path = Path(path)
+    found = [name for name in RUN_OUTPUTS if (path / name).exists()]
+    if found:
+        raise FileExistsError(
+            f"{path} already holds a run ({', '.join(found)}); give a new directory"
+        )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -130,7 +168,11 @@ def _sha256(data: bytes) -> str:
 def _package_versions() -> dict[str, str]:
     """The installed version of numpy and of every package covsyn depends on."""
     names = {"numpy"}
-    for requirement in metadata.requires("covsyn") or []:
+    try:
+        requirements = metadata.requires("covsyn") or []
+    except metadata.PackageNotFoundError:  # run from a source tree that is not installed
+        requirements = []
+    for requirement in requirements:
         if "extra ==" not in requirement:
             names.add(re.split(r"[ <>=!~;\[]", requirement, maxsplit=1)[0])
     versions = {}
@@ -186,4 +228,8 @@ def write_config(
 
 
 if __name__ == "__main__":
-    print(make_run_id(sys.argv[1] if len(sys.argv) > 1 else "phase-d"))
+    created = new_run_directory(sys.argv[1] if len(sys.argv) > 1 else "phase-d")
+    try:
+        print(created.relative_to(Path.cwd()))
+    except ValueError:  # started outside the repository
+        print(created)

@@ -11,7 +11,7 @@ ratio, the all-case median, and the cost WITHOUT the tail term -- the difference
 unmodified vector is what the optimizer saves by not growing the tail. The same grid is the
 reachability gate (lesson 2) for the re-weighted target.
 
-Usage: uv run python scripts/probes/probe_tail_price.py
+Usage: uv run python scripts/probes/probe_tail_price.py RUN_DIR [RUN_DIR ...]
 """
 import sys
 import os
@@ -28,7 +28,8 @@ from covsyn.runtime import hardware
 from covsyn.runtime.runs import run_dir_argument
 
 # Task 3: the starting runs are given as run directories (originally run 7 and run 8).
-STARTS = {Path(d).name: f'{d}/firefly_best.txt' for d in sys.argv[1:]}
+# Keyed by the whole path: every run has a revalidation/ and a selected/ subdirectory.
+STARTS = {d: f'{d}/firefly_best.txt' for d in sys.argv[1:]}
 if not STARTS:
     run_dir_argument(sys.argv, 1, 'uv run python scripts/probes/probe_tail_price.py RUN_DIR [RUN_DIR ...]')
 K_VALUES = [None, 0.6, 0.45, 0.35, 0.25, 0.18, 0.12]

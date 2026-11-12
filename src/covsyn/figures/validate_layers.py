@@ -11,7 +11,8 @@ Definitions follow plot_diagnostics.py:
                          day between infection and monitored isolation
   (3) effective contacts entries of {layer}_effective_contacts equal to 1 (infections)
 
-Usage: uv run python -m covsyn.figures.validate_layers [spread_dir] [out_dir] [index_case_dir]
+Usage: uv run python -m covsyn.figures.validate_layers [spread_dir] [out_dir] run_dir [index_case_dir]
+(Task 3: run_dir, the optimiser's run directory, is required and comes before index_case_dir.)
 """
 import csv
 import glob

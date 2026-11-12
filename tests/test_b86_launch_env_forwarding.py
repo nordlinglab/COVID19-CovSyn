@@ -449,7 +449,9 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
         # Task 3: the launcher names the run with covsyn.runtime.runs.
-        'case "$*" in *covsyn.runtime.runs*) echo 20261113-090507_81c9360_phase-d; exit 0 ;; esac\n'
+        'case "$*" in *covsyn.runtime.runs*)\n'
+        '  echo results/models/20261113-090507_81c9360_phase-d; exit 0 ;;\n'
+        'esac\n'
         # One record per run: arguments ended by \x1f, the run by \x1e, so any argument,
         # newlines included, comes back as it was.
         f'printf "%s\\x1f" "$@" >> "{record}/runs"; printf "\\x1e" >> "{record}/runs"\n'

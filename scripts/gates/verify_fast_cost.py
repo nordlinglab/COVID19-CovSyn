@@ -26,22 +26,22 @@ from covsyn.runtime import hardware
 
 def load_vectors(count, directory):
     """Parameter vectors to test from a run: its best, its worst, and evenly spaced others."""
-    for best in [Path(directory) / 'firefly_best.txt']:
-        if best.exists():
-            res = np.loadtxt(best)
-            order = [int(np.argmin(res[:, -1])), int(np.argmax(res[:, -1]))]
-            step = max(len(res) // max(count - 2, 1), 1)
-            order += list(range(0, len(res), step))
-            seen, rows = set(), []
-            for i in order:
-                if i not in seen:
-                    seen.add(i)
-                    rows.append(i)
-                if len(rows) >= count:
-                    break
-            print(f'parameter vectors from {directory}')
-            return [(i, res[i, 1:-1]) for i in rows]
-    raise SystemExit(f'{directory}/firefly_best.txt not found')
+    best = Path(directory) / 'firefly_best.txt'
+    if not best.exists():
+        raise SystemExit(f'{best} not found')
+    res = np.loadtxt(best)
+    order = [int(np.argmin(res[:, -1])), int(np.argmax(res[:, -1]))]
+    step = max(len(res) // max(count - 2, 1), 1)
+    order += list(range(0, len(res), step))
+    seen, rows = set(), []
+    for i in order:
+        if i not in seen:
+            seen.add(i)
+            rows.append(i)
+        if len(rows) >= count:
+            break
+    print(f'parameter vectors from {directory}')
+    return [(i, res[i, 1:-1]) for i in rows]
 
 
 def main():

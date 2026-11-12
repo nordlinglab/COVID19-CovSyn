@@ -50,10 +50,10 @@ command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-.venv}"
 uv sync --locked --inexact
 # Task 3: the run is named once, here, so the optimiser and the chain use the same directory.
+# covsyn.runtime.runs creates the new directory and prints its path.
 if [ -z "${FIREFLY_RUN:-}" ]; then
-  run_id=$(uv run --no-sync python -m covsyn.runtime.runs phase-d) \
-    || { echo "ERROR: could not name the run"; exit 1; }
-  FIREFLY_RUN="results/models/$run_id"
+  FIREFLY_RUN=$(uv run --no-sync python -m covsyn.runtime.runs phase-d) \
+    || { echo "ERROR: could not create the run directory"; exit 1; }
 fi
 echo "run directory: $FIREFLY_RUN"
 # A tmux session gets the tmux server's environment, not this shell's, so every variable a

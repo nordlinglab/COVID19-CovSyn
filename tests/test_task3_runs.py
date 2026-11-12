@@ -169,3 +169,45 @@ def test_an_empty_run_directory_argument_is_missing():
     """The shell passes '' for an unset variable; that names no run."""
     with pytest.raises(SystemExit):
         runs.run_dir_argument(["x", ""], 1, "x RUN_DIR")
+
+
+def test_a_new_run_refuses_an_existing_directory(tmp_path):
+    """Two runs in the same second with one configuration must not share a directory."""
+    fields = {"when": WHEN, "commit": "81c9360", "dirty": False}
+    first = runs.new_run_directory("phase-d", root=tmp_path, **fields)
+    assert first == tmp_path / "models" / "20261113-090507_81c9360_phase-d" and first.is_dir()
+    with pytest.raises(FileExistsError):
+        runs.new_run_directory("phase-d", root=tmp_path, **fields)
+
+
+@pytest.mark.parametrize("output", ["config.json", "firefly_result.txt", "firefly_best.txt"])
+def test_a_given_directory_holding_a_run_is_refused(tmp_path, output):
+    """FIREFLY_RUN=results/models/phaseD_run10 must not overwrite the committed run 10."""
+    (tmp_path / output).write_text("1")
+    with pytest.raises(FileExistsError):
+        runs.claim_run_directory(tmp_path)
+
+
+def test_a_given_new_or_empty_directory_is_claimed(tmp_path):
+    """The launcher's fresh directory, or one the user names, is created and used."""
+    assert runs.claim_run_directory(tmp_path / "a" / "b").is_dir()
+    assert runs.claim_run_directory(tmp_path / "a" / "b") == tmp_path / "a" / "b"
+
+
+def test_results_live_under_the_repository_root():
+    """Wherever a command starts, runs land where .gitignore and the chain expect them."""
+    assert runs.RESULTS_ROOT == runs.REPO_ROOT / "results"
+    assert (runs.REPO_ROOT / "pyproject.toml").is_file()
+
+
+def test_versions_are_recorded_without_an_installed_covsyn(monkeypatch, tmp_path):
+    """Run from a source tree, covsyn's own metadata is missing; the config is still written."""
+
+    def missing(name):
+        raise runs.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(runs.metadata, "requires", missing)
+    path = runs.write_config(
+        tmp_path, {}, seed=1, workers=1, initial_population=None, lock=tmp_path / "uv.lock"
+    )
+    assert json.loads(path.read_text())["versions"]["packages"]["numpy"] == np.__version__
