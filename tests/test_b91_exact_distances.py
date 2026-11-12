@@ -103,3 +103,20 @@ def test_squared_in_the_inputs_precision_and_summed_in_float64(dtype):
     expected = np.sqrt(total)
     expected[~shared] = np.nan
     assert np.array_equal(fo.rw_nan_euclidean_distances(x, y), expected, equal_nan=True)
+
+
+def test_inputs_are_not_written():
+    """copy=False hands the caller's arrays to the loop, so it must only read them.
+
+    A read-only array makes any write raise. This guards against writing, not against a copy
+    returning, which would cost time but not change a result.
+    """
+    rng = np.random.default_rng(4)
+    x = rng.normal(size=(12, 3))
+    x[rng.random(x.shape) < 0.3] = np.nan
+    x.setflags(write=False)
+    fo.rw_nan_euclidean_distances(x)
+    fo.rw_nan_euclidean_distances(x, x)
+    coded = np.where(np.isnan(x), -1.0, x)
+    coded.setflags(write=False)
+    fo.rw_nan_euclidean_distances(coded, coded, missing_values=-1.0)

@@ -90,8 +90,9 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
         Representation of missing value.
 
     copy : bool, default=True
-        Passed to check_pairwise_arrays. Since B91 the inputs are never modified, so it no
-        longer changes the result; it is kept so existing calls stay valid.
+        Ignored since B91: the inputs are never written, so they need no protective copy
+        (check_pairwise_arrays may still convert them, e.g. lists or integers); the parameter
+        is kept so existing calls stay valid.
 
     Returns
     -------
@@ -132,7 +133,9 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
     # both, so the compute server kept working and hid it.
     ensure_all_finite = 'allow-nan' if is_scalar_nan(missing_values) else True
     X, Y = check_pairwise_arrays(X, Y, accept_sparse=False,
-                                 ensure_all_finite=ensure_all_finite, copy=copy)
+                                 ensure_all_finite=ensure_all_finite, copy=False)
+    # copy is ignored since B91: nothing below writes to X or Y, so copying them on each of
+    # energy()'s three calls only allocated (code review 2026-11-12).
     if not is_scalar_nan(missing_values):
         X = np.where(X == missing_values, np.nan, X)
         Y = np.where(Y == missing_values, np.nan, Y)
@@ -146,10 +149,9 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
     # float64, and a missing difference is set to 0 before squaring, which adds exactly what
     # np.where(present, d*d, 0) added: bit for bit the first B91 version, float32 or float64.
     shape = (X.shape[0], Y.shape[0])
-    dtype = np.result_type(X, Y)
     squared_sum = np.zeros(shape)
     none_shared = np.ones(shape, dtype=bool)
-    difference = np.empty(shape, dtype=dtype)
+    difference = np.empty(shape, dtype=X.dtype)  # check_pairwise_arrays gave X and Y one dtype
     missing = np.empty(shape, dtype=bool)
     for k in range(X.shape[1]):
         np.subtract(X[:, k, None], Y[None, :, k], out=difference)
