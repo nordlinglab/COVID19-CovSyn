@@ -132,8 +132,11 @@ def _replace_workdir(value: object, workdir: str) -> object:
     if isinstance(value, str):
         return value.replace(workdir, "<WORKDIR>")
     if isinstance(value, dict):
-        return {k.replace(workdir, "<WORKDIR>"): _replace_workdir(v, workdir)
-                for k, v in value.items()}
+        replaced = {k.replace(workdir, "<WORKDIR>"): _replace_workdir(v, workdir)
+                    for k, v in value.items()}
+        if len(replaced) != len(value):
+            raise ValueError("two keys differ only by the temporary directory")
+        return replaced
     if isinstance(value, list):
         return [_replace_workdir(v, workdir) for v in value]
     return value

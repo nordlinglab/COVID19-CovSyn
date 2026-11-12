@@ -44,6 +44,7 @@ def test_report_step_output_is_unchanged(step: str, produced: dict[str, object])
     """Each report step exits the same way and prints the same normalised text."""
     got = produced["reports"][step]
     want = FIXTURE["reports"][step]
+    assert ("returncode" in want) == ("returncode" in got)
     assert got.get("returncode") == want.get("returncode")
     # The fixture decides how a step is compared, and each step must be compared one way.
     if "content" in want or "content" in got:
@@ -55,6 +56,12 @@ def test_report_step_output_is_unchanged(step: str, produced: dict[str, object])
         expected = want.get("stdout_sha256", want.get("sha256"))
         assert expected is not None, "the fixture records no output for this step"
         assert got.get("stdout_sha256", got.get("sha256")) == expected
+
+
+def test_the_pipeline_has_the_recorded_steps(produced: dict[str, object]) -> None:
+    """A step the fixture does not know would otherwise go unchecked."""
+    assert sorted(produced["reports"]) == sorted(FIXTURE["reports"])
+    assert sorted(produced["figures"]) == sorted(FIXTURE["figures"])
 
 
 @pytest.mark.parametrize("step", sorted(FIXTURE["figures"]))

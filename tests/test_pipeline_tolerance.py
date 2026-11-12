@@ -12,6 +12,7 @@ booleans, keys and structure must still match exactly.
 
 from __future__ import annotations
 
+import json
 import math
 
 import pipeline_runner as pr
@@ -79,8 +80,16 @@ def test_workdir_is_replaced_in_keys_and_escaped_strings(tmp_path):
     """Replaced after parsing, so a path JSON escapes is found, in keys as well as values."""
     workdir = tmp_path / "rün"
     path = tmp_path / "checks.json"
-    import json
-
-    path.write_text(json.dumps({str(workdir / "a"): str(workdir / "b")}), encoding="utf-8")
+    a, b = str(workdir / "a"), str(workdir / "b")
+    path.write_text(json.dumps({a: b}), encoding="utf-8")
     assert "\\u" in path.read_text(encoding="utf-8")
-    assert pr.normalised_json(path, workdir) == {"<WORKDIR>/a": "<WORKDIR>/b"}
+    replace = str(workdir), "<WORKDIR>"
+    assert pr.normalised_json(path, workdir) == {a.replace(*replace): b.replace(*replace)}
+
+
+def test_keys_that_collide_after_replacement_are_an_error(tmp_path):
+    """Two keys that differ only by the workdir would otherwise lose one value silently."""
+    path = tmp_path / "checks.json"
+    path.write_text(json.dumps({str(tmp_path / "a"): 1, "<WORKDIR>/a": 2}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        pr.normalised_json(path, tmp_path)
