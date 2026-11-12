@@ -1706,6 +1706,7 @@ def main() -> None:
             fa.firefly(function=cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
                        demographic_parameters=demographic_parameters,
                        max_generations=max_generations, max_workers=max_workers,
+                       seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
                        Cheng_contact_array=Cheng_contact_array,
                        Cheng_attack_rate=Cheng_attack_rate,
                        norm_weights=norm_weights)
@@ -1713,6 +1714,7 @@ def main() -> None:
         stats = pstats.Stats(pr)
         stats.sort_stats(pstats.SortKey.TIME)
         # stats.print_stats()
+        Path('./profile_results').mkdir(exist_ok=True)  # Task 5 moves it into the run directory
         stats.dump_stats(filename='./profile_results/firefly_profiling.prof')
     else:
         np.savetxt(result_path/'bound.txt',

@@ -11,7 +11,8 @@ the repository root wherever a command starts.
 
 Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` prints the path of a new run
 directory, which launch_phase_d.sh passes to the optimiser (``--run-dir``), which claims it,
-and to the chain.
+and to the chain; ``uv run python -m covsyn.runtime.runs --check DIR`` exits 1 when DIR holds a
+run.
 """
 
 from __future__ import annotations
@@ -148,6 +149,8 @@ def check_unclaimed(path: Path) -> None:
         FileExistsError: The directory holds any of RUN_OUTPUTS, a dangling link included.
     """
     path = Path(path)
+    if path.is_symlink() and not path.exists() or path.exists() and not path.is_dir():
+        raise FileExistsError(f"{path} is not a directory; give a run directory")
     found = [n for n in RUN_OUTPUTS if (path / n).exists() or (path / n).is_symlink()]
     if found:
         raise FileExistsError(
@@ -288,6 +291,13 @@ def write_config(
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--check":
+        # The launcher checks a given FIREFLY_RUN before it starts anything.
+        try:
+            check_unclaimed(Path(sys.argv[2]))
+        except FileExistsError as error:
+            sys.exit(f"ERROR: {error}")
+        sys.exit(0)
     # An optional second argument replaces the results root, for testing.
     root = Path(sys.argv[2]) if len(sys.argv) > 2 else RESULTS_ROOT
     named = new_run_path(sys.argv[1] if len(sys.argv) > 1 else "phase-d", root)

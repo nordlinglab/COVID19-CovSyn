@@ -316,3 +316,29 @@ def test_checking_a_directory_creates_nothing(tmp_path):
     """The optimiser's startup check leaves no directory and no claim behind."""
     runs.check_unclaimed(tmp_path / "new")
     assert not (tmp_path / "new").exists()
+
+
+@pytest.mark.parametrize("kind", ["file", "dangling"])
+def test_a_run_dir_that_is_not_a_directory_fails_the_check(tmp_path, kind):
+    """A mistyped --run-dir naming a file fails at startup, not after the inputs load."""
+    path = tmp_path / "x"
+    if kind == "file":
+        path.write_text("1 2 3\n")
+    else:
+        path.symlink_to(tmp_path / "missing")
+    with pytest.raises(FileExistsError, match="not a directory"):
+        runs.check_unclaimed(path)
+
+
+def test_the_launchers_check_command_refuses_a_held_run(tmp_path):
+    """The check command exits 1 on a directory holding a run and 0 on a fresh one."""
+    import subprocess
+    import sys
+
+    (tmp_path / "held").mkdir()
+    (tmp_path / "held" / "firefly_best.txt").write_text("1\n")
+    check = [sys.executable, "-m", "covsyn.runtime.runs", "--check"]
+    held = subprocess.run([*check, str(tmp_path / "held")], capture_output=True, text=True)
+    fresh = subprocess.run([*check, str(tmp_path / "fresh")], capture_output=True, text=True)
+    assert held.returncode == 1 and "already holds a run" in held.stderr
+    assert fresh.returncode == 0 and not (tmp_path / "fresh").exists()

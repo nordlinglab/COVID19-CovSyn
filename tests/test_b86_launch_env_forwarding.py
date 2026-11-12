@@ -894,3 +894,16 @@ def test_the_chain_clears_an_earlier_revalidation_of_the_run(tmp_path):
     )
     assert status != 0 and "revalidation failed" in (root / "phaseD_chain.log").read_text()
     assert not (root / "run" / "revalidation" / "stale.txt").exists()
+
+
+def test_the_launcher_checks_a_given_run_directory_before_starting(tmp_path):
+    """A given FIREFLY_RUN is checked by covsyn.runtime.runs before any session starts."""
+    root, record, status, output = _run(
+        tmp_path,
+        SCRIPT,
+        {"FIREFLY_RUN": "results/models/mine", "_files": {"firefly_phaseD.exit": "0\n"}},
+    )
+    calls = (record / "calls").read_text().splitlines()
+    check = next(i for i, c in enumerate(calls) if "covsyn.runtime.runs --check" in c)
+    assert calls[check].endswith("results/models/mine")
+    assert not any("new-session" in c for c in calls[:check])

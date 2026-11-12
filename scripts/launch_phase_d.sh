@@ -51,8 +51,12 @@ command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-.venv}"
 uv sync --locked --inexact
 # Task 3: the run is named once, here, so the optimiser and the chain use the same directory.
-# covsyn.runtime.runs prints a new run path; the optimiser creates and claims it.
-if [ -z "${FIREFLY_RUN:-}" ]; then
+# covsyn.runtime.runs prints a new run path; the optimiser creates and claims it. A given
+# FIREFLY_RUN is checked here, before any session starts, as the optimiser may take longer
+# than the startup check below to reach its own check.
+if [ -n "${FIREFLY_RUN:-}" ]; then
+  uv run --no-sync python -m covsyn.runtime.runs --check "$FIREFLY_RUN" || exit 1
+else
   FIREFLY_RUN=$(uv run --no-sync python -m covsyn.runtime.runs phase-d) \
     || { echo "ERROR: could not name the run directory"; exit 1; }
 fi

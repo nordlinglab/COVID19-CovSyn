@@ -994,8 +994,7 @@ if __name__ == "__main__":
         gamma = 0.01
         max_generations = 3
     else:
-        print('mode error')
-        sys.exit()
+        sys.exit(f'mode error: unknown --mode {mode!r}')
     # Task 3: every run directory comes from run_directory().
     # The frozen baseline writes no config.json, so its directory is created, not claimed.
     result_path = runs.run_directory(runs.make_run_id('baseline'), new=True)
