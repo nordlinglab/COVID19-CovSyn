@@ -1,0 +1,149 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Task 3: name every run and create its directories in one place.
+
+The expected values are the rework plan's (doc/plan_Nordling2026_CovSynFireflyNordlingLab.md,
+Task 3): runs are named ``<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`` and live under
+``results/models/``, ``results/tables/`` and ``results/figures/``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime
+
+import numpy as np
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+from covsyn.runtime import runs
+
+WHEN = datetime(2026, 11, 13, 9, 5, 7)
+
+
+def test_a_run_is_named_by_time_commit_and_configuration():
+    """The plan's pattern, with the commit cut to seven characters."""
+    run_id = runs.make_run_id("phase-d", when=WHEN, commit="81c93604b908ea", dirty=False)
+    assert run_id == "20261113-090507_81c9360_phase-d"
+
+
+def test_uncommitted_changes_mark_the_run_dirty():
+    """A run from a modified checkout cannot be reproduced from its commit alone."""
+    run_id = runs.make_run_id("phase-d", when=WHEN, commit="81c9360", dirty=True)
+    assert run_id == "20261113-090507_81c9360-dirty_phase-d"
+
+
+def test_outside_a_git_checkout_the_commit_says_so():
+    """No commit to name is recorded as such, not as an empty field."""
+    assert runs.make_run_id("x", when=WHEN, commit="", dirty=False) == "20261113-090507_nocommit_x"
+
+
+def test_the_commit_and_dirty_flag_default_to_this_checkout():
+    """Without arguments the id names this repository's HEAD."""
+    run_id = runs.make_run_id("phase-d", when=WHEN)
+    commit = run_id.split("_")[1].removesuffix("-dirty")
+    assert len(commit) == 7 or commit == "nocommit"
+
+
+@pytest.mark.parametrize("name", ["", "a/b", "../x", "with space", "a_b", ".hidden", "x" * 65])
+def test_a_configuration_name_that_cannot_name_a_directory_is_rejected(name):
+    """Names go into paths and are split at '_', so only kebab-case words are allowed."""
+    with pytest.raises(ValueError):
+        runs.make_run_id(name, when=WHEN, commit="81c9360", dirty=False)
+
+
+@given(st.text(max_size=80))
+def test_any_accepted_name_is_safe_in_a_path(name):
+    """Whatever the input, an accepted name has no separator, '..', '_' or white space."""
+    try:
+        run_id = runs.make_run_id(name, when=WHEN, commit="81c9360", dirty=False)
+    except ValueError:
+        return
+    assert run_id.endswith("_" + name)
+    assert name and "/" not in name and "\\" not in name and ".." not in name
+    assert "_" not in name and not any(c.isspace() for c in name)
+
+
+@given(st.from_regex(r"[a-z0-9]+(-[a-z0-9]+)*", fullmatch=True).filter(lambda s: len(s) <= 64))
+def test_any_kebab_case_name_is_accepted(name):
+    """Every lowercase kebab-case name up to 64 characters is a valid configuration name."""
+    assert runs.make_run_id(name, when=WHEN, commit="81c9360", dirty=False).endswith(name)
+
+
+@pytest.mark.parametrize("kind", ["models", "tables", "figures"])
+def test_run_directory_creates_each_kind_under_results(tmp_path, kind):
+    """A fresh clone has no results/ yet; the function creates the whole path."""
+    path = runs.run_directory("20261113-090507_81c9360_phase-d", kind, root=tmp_path / "results")
+    assert path == tmp_path / "results" / kind / "20261113-090507_81c9360_phase-d"
+    assert path.is_dir()
+
+
+def test_run_directory_accepts_an_existing_directory(tmp_path):
+    """Creating it twice, as a resumed run does, is not an error."""
+    first = runs.run_directory("r", root=tmp_path)
+    (first / "kept.txt").write_text("1")
+    assert runs.run_directory("r", root=tmp_path) == first
+    assert (first / "kept.txt").read_text() == "1"
+
+
+@pytest.mark.parametrize("run_id", ["", "../escape", "a/b", "/abs"])
+def test_run_directory_refuses_a_path_as_run_id(tmp_path, run_id):
+    """A run id is one directory name; anything else could write outside results/."""
+    with pytest.raises(ValueError):
+        runs.run_directory(run_id, root=tmp_path)
+
+
+def test_run_directory_refuses_an_unknown_kind(tmp_path):
+    """Only the three directories of the layout exist."""
+    with pytest.raises(ValueError):
+        runs.run_directory("r", "logs", root=tmp_path)
+
+
+def test_config_records_what_reproduces_the_run(tmp_path):
+    """Settings, seed, workers, machine, versions and the two hashes the plan names."""
+    lock = tmp_path / "uv.lock"
+    lock.write_text("version = 1\n")
+    population = np.arange(6.0).reshape(2, 3)
+    path = runs.write_config(
+        tmp_path,
+        {"pop_size": 2, "gamma": 0.03},
+        seed=7,
+        workers=4,
+        initial_population=population,
+        lock=lock,
+    )
+    config = json.loads(path.read_text())
+    assert path == tmp_path / "config.json"
+    assert config["settings"] == {"pop_size": 2, "gamma": 0.03}
+    assert (config["seed"], config["workers"]) == (7, 4)
+    assert config["uv_lock_sha256"] == hashlib.sha256(b"version = 1\n").hexdigest()
+    expected = hashlib.sha256(np.ascontiguousarray(population, dtype=float).tobytes()).hexdigest()
+    assert config["initial_population_sha256"] == expected
+    assert config["machine"]["performance_cores"] >= 1 and config["machine"]["core_method"]
+    assert config["machine"]["cpu_model"]
+    assert config["versions"]["python"].count(".") == 2
+    assert config["versions"]["packages"]["numpy"] == np.__version__
+
+
+def test_config_without_a_lock_or_population_records_none(tmp_path):
+    """An installed copy without uv.lock, or a run that draws its population later."""
+    path = runs.write_config(
+        tmp_path, {}, seed=None, workers=1, initial_population=None, lock=tmp_path / "missing.lock"
+    )
+    config = json.loads(path.read_text())
+    assert config["uv_lock_sha256"] is None and config["initial_population_sha256"] is None
+
+
+def test_config_refuses_settings_json_cannot_hold(tmp_path):
+    """A setting that would be written as its repr could not be read back."""
+    with pytest.raises(TypeError):
+        runs.write_config(
+            tmp_path,
+            {"path": object()},
+            seed=0,
+            workers=1,
+            initial_population=None,
+            lock=tmp_path / "uv.lock",
+        )
