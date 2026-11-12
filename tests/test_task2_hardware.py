@@ -132,8 +132,17 @@ def test_linux_without_a_topology_falls_back(tmp_path, caplog):
 
 def test_refuses_when_one_worker_does_not_fit_in_memory():
     """The refusal says how much memory one worker needs."""
-    with pytest.raises(hw.InsufficientMemory, match=r"4\.9 GB"):
+    with pytest.raises(hw.InsufficientMemory, match=r"4\.9 GB") as refusal:
         hw.default_workers(4.9, cores=16, available_gb=5.0)
+    assert refusal.value.available_gb == 5.0
+
+
+def test_the_memory_error_survives_pickling():
+    """As it would when raised in a worker process."""
+    import pickle
+
+    error = pickle.loads(pickle.dumps(hw.InsufficientMemory("one worker needs 4.9 GB", 1.5)))
+    assert (str(error), error.available_gb) == ("one worker needs 4.9 GB", 1.5)
 
 
 # --- the rest of the specification ---------------------------------------------------------
@@ -353,7 +362,7 @@ def test_the_workers_option_rejects_non_positive_values_at_parsing(value):
         parser.parse_args(["--workers", value])
 
 
-def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory(monkeypatch):
+def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory(monkeypatch, capsys):
     """Short of memory, the checklist computes the intervals in its own process.
 
     The memory is faked, not the error, so the path from resolve_workers is the real one. The
@@ -365,8 +374,11 @@ def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory(monkeyp
     monkeypatch.setattr(sys, "argv", ["verify_phase_d"])
     monkeypatch.delenv("COVSYN_WORKERS", raising=False)
     verify = importlib.import_module("covsyn.validation.verify_phase_d")
-    monkeypatch.setattr(hw, "_available_gb", lambda: 1.0)
+    monkeypatch.setattr(hw, "_available_gb", lambda: 5.5)  # 4.9 fits, but not in 80% of it
     assert verify.bootstrap_workers() == 1
+    out = capsys.readouterr().out
+    assert "5.5 GB is available" in out and "20% free" in out
+    assert "COVSYN_WORKERS" not in out  # no override helps the checklist here
 
 
 def test_the_fallback_applies_the_cgroup_quota(tmp_path, caplog):
@@ -436,7 +448,10 @@ def test_a_cgroup_name_that_is_not_utf8_is_still_read(tmp_path):
     (tmp_path / "fs" / "cgroup").mkdir(parents=True)
     (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("200000 100000\n")
     nested = tmp_path / "fs" / "cgroup" / os.fsdecode(b"job\xff")
-    nested.mkdir()
+    try:
+        nested.mkdir()
+    except OSError:  # APFS and HFS+ accept only UTF-8 names; Linux file systems take bytes
+        pytest.skip("this file system refuses a name that is not UTF-8")
     (nested / "cpu.max").write_text("100000 100000\n")
     (tmp_path / "proc" / "self").mkdir(parents=True)
     (tmp_path / "proc" / "self" / "cgroup").write_bytes(b"0::/job\xff\n")

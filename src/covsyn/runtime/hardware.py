@@ -43,8 +43,13 @@ class InsufficientMemory(RuntimeError):
 
     def __init__(self, message: str, available_gb: float) -> None:
         """Keep the available memory, for a caller that reports it in its own words."""
-        super().__init__(message)
+        # Both in args, so the error survives pickling, as from a worker process.
+        super().__init__(message, available_gb)
         self.available_gb = available_gb
+
+    def __str__(self) -> str:
+        """The message alone, not the args tuple."""
+        return str(self.args[0])
 
 
 def _run_sysctl(key: str) -> str:

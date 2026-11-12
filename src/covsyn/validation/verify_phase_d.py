@@ -97,9 +97,10 @@ def bootstrap_workers() -> int:
         return hardware.resolve_workers(None, os.environ, hardware.CHECKLIST_GB_PER_WORKER)
     except hardware.InsufficientMemory as error:
         # No override helps here: the serial path is the only one that fits.
-        print(f'not even one {hardware.CHECKLIST_GB_PER_WORKER} GB bootstrap worker fits in '
-              f'the {error.available_gb:.1f} GB available; computing the bootstrap intervals '
-              'in this process instead')
+        print(f'{error.available_gb:.1f} GB is available, too little for one '
+              f'{hardware.CHECKLIST_GB_PER_WORKER} GB bootstrap worker while keeping '
+              f'{1 - hardware.MEMORY_SHARE:.0%} free; computing the bootstrap intervals in this '
+              'process instead')
         return 1
 
 
