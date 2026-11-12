@@ -79,3 +79,27 @@ def test_the_statistic_equals_estat_without_drawing_random_numbers():
     state = np.random.get_state()[1].copy()
     assert fo.energy_statistic(x, y) == expected
     assert np.array_equal(np.random.get_state()[1], state)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_squared_in_the_inputs_precision_and_summed_in_float64(dtype):
+    """Reusing work arrays keeps the first B91 arithmetic, for float32 input too.
+
+    The reference is that version's loop: d = x - y in the inputs' precision, np.where(present,
+    d * d, 0) added to a float64 sum (code review 2026-11-12, round 2).
+    """
+    rng = np.random.default_rng(9)
+    x = rng.normal(size=(40, 5)).astype(dtype)
+    y = rng.normal(size=(30, 5)).astype(dtype)
+    x[rng.random(x.shape) < 0.4] = np.nan
+    y[rng.random(y.shape) < 0.4] = np.nan
+    total = np.zeros((40, 30))
+    shared = np.zeros((40, 30), dtype=bool)
+    for k in range(5):
+        d = x[:, k, None] - y[None, :, k]
+        present = ~np.isnan(d)
+        total += np.where(present, d * d, 0.0)
+        shared |= present
+    expected = np.sqrt(total)
+    expected[~shared] = np.nan
+    assert np.array_equal(fo.rw_nan_euclidean_distances(x, y), expected, equal_nan=True)

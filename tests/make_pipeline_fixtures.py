@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Write the pipeline regression fixture for the Phase D run 10 vector.
 
-Run on the compute server whenever a decision changes the output (last for B75):
+Run on the compute server whenever a decision changes the output (last for B91-B93):
 
     uv run python tests/make_pipeline_fixtures.py
 

@@ -90,7 +90,8 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
         Representation of missing value.
 
     copy : bool, default=True
-        Make and use a deep copy of X and Y (if Y exists).
+        Passed to check_pairwise_arrays. Since B91 the inputs are never modified, so it no
+        longer changes the result; it is kept so existing calls stay valid.
 
     Returns
     -------
@@ -140,15 +141,25 @@ def rw_nan_euclidean_distances(X, Y=None, *, squared=False,
     # 3-8e-8 apart on OpenBLAS but 0 on Accelerate, and energy() takes log(d + 1e-16), so the
     # objective differed between Linux and macOS (E103). Exact differences make equal cases
     # exactly 0 on every platform.
-    squared_sum = np.zeros((X.shape[0], Y.shape[0]))
-    shared = np.zeros((X.shape[0], Y.shape[0]), dtype=bool)
+    # The work arrays are allocated once and reused across coordinates (code review
+    # 2026-11-12). Each difference is squared in the inputs' own precision and summed in
+    # float64, and a missing difference is set to 0 before squaring, which adds exactly what
+    # np.where(present, d*d, 0) added: bit for bit the first B91 version, float32 or float64.
+    shape = (X.shape[0], Y.shape[0])
+    dtype = np.result_type(X, Y)
+    squared_sum = np.zeros(shape)
+    none_shared = np.ones(shape, dtype=bool)
+    difference = np.empty(shape, dtype=dtype)
+    missing = np.empty(shape, dtype=bool)
     for k in range(X.shape[1]):
-        difference = X[:, k, None] - Y[None, :, k]
-        present = ~np.isnan(difference)
-        squared_sum += np.where(present, difference * difference, 0.0)
-        shared |= present
+        np.subtract(X[:, k, None], Y[None, :, k], out=difference)
+        np.isnan(difference, out=missing)
+        np.copyto(difference, 0.0, where=missing)
+        np.multiply(difference, difference, out=difference)
+        squared_sum += difference
+        np.logical_and(none_shared, missing, out=none_shared)
     distances = squared_sum if squared else np.sqrt(squared_sum)
-    distances[~shared] = np.nan
+    distances[none_shared] = np.nan
     return distances
 
 
