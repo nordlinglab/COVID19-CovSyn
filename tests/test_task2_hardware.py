@@ -413,9 +413,14 @@ def test_an_unreadable_cgroup_file_never_stops_the_detection(tmp_path, caplog):
 
 
 def test_cgroup_levels_without_a_quota_are_silent(tmp_path, caplog):
-    """Most levels of a cgroup path set no cpu.max; their absence is no warning."""
+    """Most levels of a cgroup path set no cpu.max; their absence is no warning.
+
+    user.slice is a file here, so its child raises NotADirectoryError, which Path.exists()
+    treated as absent too.
+    """
     write_topology(tmp_path, smt_topology(4))
     (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    (tmp_path / "fs" / "cgroup" / "user.slice").write_text("")
     (tmp_path / "proc" / "self").mkdir(parents=True)
     (tmp_path / "proc" / "self" / "cgroup").write_text("0::/user.slice/session-1.scope\n")
     with caplog.at_level(logging.WARNING, logger=hw.__name__):
@@ -423,14 +428,38 @@ def test_cgroup_levels_without_a_quota_are_silent(tmp_path, caplog):
     assert caplog.text == ""
 
 
-def test_a_proc_cgroup_that_is_not_text_reads_only_the_root(tmp_path):
-    """Non-UTF-8 bytes in /proc/self/cgroup must not stop the detection."""
+def test_a_cgroup_name_that_is_not_utf8_is_still_read(tmp_path):
+    """A cgroup name is bytes; its quota of 1 CPU binds below the root's 2."""
+    import os
+
     write_topology(tmp_path, smt_topology(4))
     (tmp_path / "fs" / "cgroup").mkdir(parents=True)
     (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("200000 100000\n")
+    nested = tmp_path / "fs" / "cgroup" / os.fsdecode(b"job\xff")
+    nested.mkdir()
+    (nested / "cpu.max").write_text("100000 100000\n")
     (tmp_path / "proc" / "self").mkdir(parents=True)
-    (tmp_path / "proc" / "self" / "cgroup").write_bytes(b"0::/\xff\xfe\n")
-    assert hw.performance_core_count(linux(tmp_path, 8)).count == 2
+    (tmp_path / "proc" / "self" / "cgroup").write_bytes(b"0::/job\xff\n")
+    assert hw.performance_core_count(linux(tmp_path, 8)).count == 1
+
+
+def test_an_unreadable_affinity_is_reported(tmp_path, caplog):
+    """Counting without the affinity is logged, not silent."""
+
+    def denied() -> set[int]:
+        raise PermissionError("sched_getaffinity denied")
+
+    write_topology(tmp_path, smt_topology(4))
+    machine = hw.Machine(
+        platform="linux",
+        sys_root=tmp_path,
+        proc_root=tmp_path / "proc",
+        cpu_count=lambda: 8,
+        affinity=denied,
+    )
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        assert hw.performance_core_count(machine).count == 4
+    assert "affinity" in caplog.text
 
 
 def test_the_method_names_the_quota_only_when_it_binds(tmp_path):

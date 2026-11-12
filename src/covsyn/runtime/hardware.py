@@ -41,6 +41,11 @@ CHECKLIST_GB_PER_WORKER = 4.9
 class InsufficientMemory(RuntimeError):
     """Not even one worker fits in the available memory."""
 
+    def __init__(self, message: str, available_gb: float) -> None:
+        """Keep the available memory, for a caller that reports it in its own words."""
+        super().__init__(message)
+        self.available_gb = available_gb
+
 
 def _run_sysctl(key: str) -> str:
     return subprocess.run(
@@ -158,7 +163,9 @@ def _cgroup_limit(machine: Machine) -> int | None:
     base = machine.sys_root / "fs" / "cgroup"
     levels = [base]
     try:
-        for line in (machine.proc_root / "self" / "cgroup").read_text().splitlines():
+        # Bytes, decoded as file names are: a cgroup name need not be valid UTF-8.
+        text = os.fsdecode((machine.proc_root / "self" / "cgroup").read_bytes())
+        for line in text.splitlines():
             if not line.startswith("0::"):
                 continue
             parts = Path(line[3:].strip()).parts[1:]  # without the leading "/"
@@ -166,8 +173,8 @@ def _cgroup_limit(machine: Machine) -> int | None:
             if ".." in parts:
                 break
             levels += [base.joinpath(*parts[: depth + 1]) for depth in range(len(parts))]
-    except (OSError, ValueError):
-        pass  # no readable /proc (or not text): only the root's quota applies
+    except OSError:
+        pass  # no readable /proc: only the root's quota applies
     quotas = [_quota(level / "cpu.max") for level in levels]
     return min((q for q in quotas if q is not None), default=None)
 
@@ -178,7 +185,8 @@ def _allowed_cpus(machine: Machine) -> set[int] | None:
         return None
     try:
         return set(machine.affinity())
-    except OSError:
+    except OSError as error:
+        log.warning("could not read the CPU affinity (%s); counting without it", error)
         return None
 
 
@@ -259,7 +267,8 @@ def default_workers(
         raise InsufficientMemory(
             f"one worker needs {memory_per_worker_gb} GB, but only {available_gb:.1f} GB is "
             f"available, of which CovSyn uses {MEMORY_SHARE:.0%}; free memory, or set "
-            f"{ENV_VARIABLE} (or --workers, where the command has it) to start anyway"
+            f"{ENV_VARIABLE} (or --workers, where the command has it) to start anyway",
+            available_gb,
         )
     return min(cores, fitting)
 
