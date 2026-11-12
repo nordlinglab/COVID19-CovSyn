@@ -138,6 +138,24 @@ def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: 
     return claim_run_directory(new_run_path(config_name, root, **id_fields))
 
 
+def check_unclaimed(path: Path) -> None:
+    """Refuse a directory that holds a run, without creating or claiming anything.
+
+    The optimiser calls it as it starts, so a FIREFLY_RUN holding a run fails within the
+    launcher's startup check, and claims the directory only once its inputs have loaded.
+
+    Raises:
+        FileExistsError: The directory holds any of RUN_OUTPUTS, a dangling link included.
+    """
+    path = Path(path)
+    found = [n for n in RUN_OUTPUTS if (path / n).exists() or (path / n).is_symlink()]
+    if found:
+        raise FileExistsError(
+            f"{path} already holds a run ({', '.join(found)}); give a new directory "
+            "(FIREFLY_RUN or --run-dir), or leave it out for a fresh one"
+        )
+
+
 def claim_run_directory(path: Path) -> Path:
     """Create, if needed, a run directory given by path, refusing one that holds a run already.
 
@@ -146,15 +164,10 @@ def claim_run_directory(path: Path) -> Path:
 
     Raises:
         FileExistsError: The directory holds any file an optimiser run writes (RUN_OUTPUTS), a
-            failed run's config.json included.
+            failed run's config.json included, or another run claimed it at the same time.
     """
     path = Path(path)
-    found = [name for name in RUN_OUTPUTS if (path / name).exists()]
-    if found:
-        raise FileExistsError(
-            f"{path} already holds a run ({', '.join(found)}); give a new directory "
-            "(FIREFLY_RUN or --run-dir), or leave it out for a fresh one"
-        )
+    check_unclaimed(path)
     path.mkdir(parents=True, exist_ok=True)
     # Claimed by creating config.json exclusively, which is atomic: of two runs started on one
     # directory at once, the second fails here. It holds valid JSON until write_config fills it.

@@ -1591,6 +1591,8 @@ def main() -> None:
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
     mode = args.mode
+    if args.run_dir is not None:
+        runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')
     # shift_percentage = args.shift_percentage
     if mode == 'train':
@@ -1619,8 +1621,8 @@ def main() -> None:
         gamma = 0.01
         max_generations = 3
     else:
-        print('mode error')
-        sys.exit()
+        # A non-zero status, so the launcher and the chain see the failure.
+        sys.exit(f'mode error: unknown --mode {mode!r}')
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
@@ -1703,7 +1705,7 @@ def main() -> None:
         with cProfile.Profile() as pr:
             fa.firefly(function=cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
                        demographic_parameters=demographic_parameters,
-                       max_generations=max_generations, 
+                       max_generations=max_generations, max_workers=max_workers,
                        Cheng_contact_array=Cheng_contact_array,
                        Cheng_attack_rate=Cheng_attack_rate,
                        norm_weights=norm_weights)

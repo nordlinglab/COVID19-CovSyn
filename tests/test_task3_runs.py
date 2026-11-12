@@ -298,6 +298,21 @@ def test_run_outputs_name_every_file_the_optimiser_writes():
     source = (Path(runs.__file__).parents[1] / "calibration" / "firefly_optimizer.py").read_text(
         encoding="utf-8"
     )
-    written = set(re.findall(r"result_path\s*/\s*'([^']+)'", source)) | {"config.json"}
+    # Single or double quotes, f-strings included: a name with {} then fails the comparison.
+    written = set(re.findall(r"result_path\s*/\s*f?['\"]([^'\"]+)['\"]", source))
+    written |= {"config.json"}
     files = {name for name in runs.RUN_OUTPUTS if "." in name}
     assert written == files, (written - files, files - written)
+
+
+def test_a_dangling_link_counts_as_a_run_output(tmp_path):
+    """A config.json link left from a copied run would otherwise be reported as a race."""
+    (tmp_path / "config.json").symlink_to(tmp_path / "missing.json")
+    with pytest.raises(FileExistsError, match="already holds a run"):
+        runs.claim_run_directory(tmp_path)
+
+
+def test_checking_a_directory_creates_nothing(tmp_path):
+    """The optimiser's startup check leaves no directory and no claim behind."""
+    runs.check_unclaimed(tmp_path / "new")
+    assert not (tmp_path / "new").exists()
