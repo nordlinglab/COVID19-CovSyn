@@ -16,7 +16,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.runtime import hardware
+from covsyn.runtime import hardware, runs
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
                                             health_care_contact_floor)
@@ -1393,7 +1393,10 @@ class Firefly:
         self.alpha = alpha
         self.betamin = betamin
         self.gamma = gamma
+        self.seed = seed
         self.rng = default_rng(seed)
+        # Task 3: recorded in config.json with the settings above; main() adds its own.
+        self.run_settings = {}
 
     def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None, warm_start_vectors=()):
         normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
@@ -1452,6 +1455,11 @@ class Firefly:
         result = np.hstack((fireflies, np.matrix(intensities).T))
         np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
                    result, fmt='%.7f')
+        settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
+                    'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
+                    **self.run_settings}
+        runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
+                          initial_population=fireflies)
 
         evaluations = self.pop_size
         new_alpha = self.alpha
@@ -1557,6 +1565,12 @@ def main() -> None:
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
     # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
     parser.add_argument('--warm_start', type=str, nargs='*', default=[])
+    # Task 3: the run writes into results/models/<run-id>/; launch_phase_d.sh names it with
+    # covsyn.runtime.runs and passes it here, so the chain knows where to read.
+    parser.add_argument('--run-dir', type=Path, default=None,
+                        help='run directory (default: results/models/<new run id>)')
+    parser.add_argument('--config-name', default='phase-d',
+                        help='configuration name in a new run id (lowercase kebab-case)')
     args = parser.parse_args()
 
     cores = hardware.performance_core_count()
@@ -1594,13 +1608,16 @@ def main() -> None:
     else:
         print('mode error')
         sys.exit()
-    result_path = Path(
-        f'./Firefly_result_pop_size_{pop_size}_alpha_{alpha}_betamin_{betamin}_gamma_{gamma}_max_generations_{max_generations}')
-    if not result_path.is_dir():
-        result_path.mkdir(parents=True)
+    if args.run_dir is not None:
+        result_path = args.run_dir
+        result_path.mkdir(parents=True, exist_ok=True)
+    else:
+        result_path = runs.run_directory(runs.make_run_id(args.config_name))
+    print(f'run directory: {result_path}')
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma)
+    fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start)}
 
     with open('./variable/contact_parameters.pkl', 'rb') as f:
         contact_parameters = pickle.load(f)

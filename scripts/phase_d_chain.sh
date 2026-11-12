@@ -33,7 +33,9 @@ LOG=phaseD_chain.log
 # The firefly names its output directory after its settings, while the report scripts read the
 # optimizer output from one fixed name. The run directory is copied onto that name below.
 FIREFLY=Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200
-FIREFLY_RUN="${FIREFLY_RUN:-Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.03_max_generations_120}"
+# Task 3: a run directory has a time-stamped name the chain cannot guess; the launcher sets it,
+# and the chain stops below, after its environment check, if it is missing.
+FIREFLY_RUN="${FIREFLY_RUN:-}"
 FIGS=validation_figures_phaseD
 SPREAD=synthetic_data_results_spread_Taiwan_weight
 FIRST=synthetic_data_results_taiwan_first_outbreak
@@ -80,6 +82,11 @@ if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
         if [ "$name" = UV_PROJECT_ENVIRONMENT ]; then value="${value:-.venv}"; fi
         say "  -e $(printf %q "$name=$value")"
     done
+    exit 1
+fi
+if [ -z "$FIREFLY_RUN" ]; then
+    say "ERROR: FIREFLY_RUN is not set; the launcher sets it to the optimiser's run directory," \
+        "results/models/<run-id>"
     exit 1
 fi
 

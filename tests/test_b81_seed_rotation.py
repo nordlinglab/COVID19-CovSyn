@@ -162,3 +162,22 @@ def test_candidates_work_without_an_archive(tmp_path):
     np.savetxt(tmp_path / "firefly_best.txt", bests)
     vectors, _ = load_candidates(tmp_path)
     assert len(vectors) == 2
+
+
+def test_the_run_directory_holds_the_configuration(run):
+    """Task 3: config.json records the seed, workers, settings and initial population."""
+    import hashlib
+    import json
+
+    _, _, path = run
+    config = json.loads((path / "config.json").read_text())
+    assert (config["seed"], config["workers"]) == (7, 2)
+    assert config["settings"]["pop_size"] == POP
+    assert config["settings"]["max_generations"] == GENERATIONS
+    digest = config["initial_population_sha256"]
+    assert len(digest) == 64 and int(digest, 16) >= 0
+    # The same seed draws the same initial population, so its hash repeats.
+    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
+    first = lb + again.rng.uniform(0, 1, (POP, DIM)) * (ub - lb)
+    assert digest == hashlib.sha256(np.ascontiguousarray(first, dtype=float).tobytes()).hexdigest()

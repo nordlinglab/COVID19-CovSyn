@@ -453,6 +453,8 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         f'echo "uv $*" >> "{record}/calls"\n'
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
+        # Task 3: the launcher names the run with covsyn.runtime.runs.
+        'case "$*" in *covsyn.runtime.runs*) echo 20261113-090507_81c9360_phase-d; exit 0 ;; esac\n'
         # One record per run: arguments ended by \x1f, the run by \x1e, so any argument,
         # newlines included, comes back as it was.
         f'printf "%s\\x1f" "$@" >> "{record}/runs"; printf "\\x1e" >> "{record}/runs"\n'
@@ -848,3 +850,35 @@ def test_a_removed_worker_variable_is_reported(script):
     assert check is not None, f"{script.name} no longer checks for the removed variables"
     assert "WARNING: VERIFY_WORKERS and CPU_CORES are no longer read" in code[check + 1]
     assert "COVSYN_WORKERS" in code[check + 1] and code[check + 2] == "fi"
+
+
+def test_the_optimiser_and_the_chain_get_the_same_new_run_directory(tmp_path):
+    """Task 3: the launcher names the run once and passes it to both sessions."""
+    root, record, status, output = _run(
+        tmp_path, SCRIPT, {"_files": {"firefly_phaseD.exit": "0\n"}}
+    )
+    assert status == 0, output
+    args = _uv_runs(record, output)[-1]
+    run_dir = args[args.index("--run-dir") + 1]
+    assert run_dir == "results/models/20261113-090507_81c9360_phase-d"
+    chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
+    assert chain["FIREFLY_RUN"] == run_dir
+
+
+def test_a_given_firefly_run_is_where_the_optimiser_writes(tmp_path):
+    """Set by the user, FIREFLY_RUN names the optimiser's directory as well as the chain's."""
+    root, record, status, output = _run(
+        tmp_path,
+        SCRIPT,
+        {"FIREFLY_RUN": "results/models/mine", "_files": {"firefly_phaseD.exit": "0\n"}},
+    )
+    assert status == 0, output
+    args = _uv_runs(record, output)[-1]
+    assert args[args.index("--run-dir") + 1] == "results/models/mine"
+
+
+def test_the_chain_stops_without_a_run_directory(tmp_path):
+    """No FIREFLY_RUN means no run to read; the chain says so in its log and stops."""
+    root, record, status, output = _run(tmp_path, CHAIN, {})
+    log = (root / "phaseD_chain.log").read_text()
+    assert status != 0 and "FIREFLY_RUN is not set" in log
