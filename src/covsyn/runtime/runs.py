@@ -34,7 +34,16 @@ from covsyn.runtime import hardware
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RESULTS_ROOT = REPO_ROOT / "results"
 # What an optimiser run writes; a directory holding any of them already holds a run.
-RUN_OUTPUTS = ("config.json", "firefly_result.txt", "firefly_best.txt")
+RUN_OUTPUTS = (
+    "config.json",
+    "bound.txt",
+    "firefly_result_first_initial_guess.txt",
+    "progress_metrics.csv",
+    "firefly_archive.txt",
+    "firefly_result.txt",
+    "firefly_best.txt",
+    "firefly_worst.txt",
+)
 KINDS = ("models", "tables", "figures")
 # Lowercase kebab-case: safe in any path, and free of the "_" that separates the id's fields.
 CONFIG_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -121,14 +130,15 @@ def claim_run_directory(path: Path) -> Path:
     run such as results/models/phaseD_run10 included, which a new run must not overwrite.
 
     Raises:
-        FileExistsError: The directory holds config.json, firefly_result.txt or
-            firefly_best.txt.
+        FileExistsError: The directory holds any file an optimiser run writes (RUN_OUTPUTS), a
+            failed run's config.json included.
     """
     path = Path(path)
     found = [name for name in RUN_OUTPUTS if (path / name).exists()]
     if found:
         raise FileExistsError(
-            f"{path} already holds a run ({', '.join(found)}); give a new directory"
+            f"{path} already holds a run ({', '.join(found)}); give a new directory, or "
+            "leave FIREFLY_RUN unset for a fresh one"
         )
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -228,7 +238,9 @@ def write_config(
 
 
 if __name__ == "__main__":
-    created = new_run_directory(sys.argv[1] if len(sys.argv) > 1 else "phase-d")
+    # An optional second argument replaces the results root, for testing.
+    root = Path(sys.argv[2]) if len(sys.argv) > 2 else RESULTS_ROOT
+    created = new_run_directory(sys.argv[1] if len(sys.argv) > 1 else "phase-d", root)
     try:
         print(created.relative_to(Path.cwd()))
     except ValueError:  # started outside the repository

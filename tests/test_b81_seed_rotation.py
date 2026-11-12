@@ -189,3 +189,19 @@ def test_an_unseeded_run_records_a_seed_that_redraws_it():
     again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=first.seed)
     assert isinstance(first.seed, int)
     assert np.array_equal(first.rng.uniform(size=5), again.rng.uniform(size=5))
+
+
+def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, tmp_path):
+    """Task 3: a run whose first evaluation fails still leaves its config.json."""
+    import json
+
+    def fails(*args, **kwargs):
+        raise RuntimeError("worker crashed")
+
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    with pytest.raises(RuntimeError):
+        engine.firefly(function=fails, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
+                       demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,
+                       Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)
+    assert json.loads((tmp_path / "config.json").read_text())["seed"] == 7

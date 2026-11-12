@@ -75,7 +75,7 @@ scripts/launch_phase_d.sh
 
 This starts the Firefly optimizer and then `scripts/phase_d_chain.sh` in two tmux sessions.
 The run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`, with `config.json` recording its settings, seed, workers, machine and versions;
-`FIREFLY_RUN` names another directory instead.
+`FIREFLY_RUN` names another directory instead, which must not hold a run already, a failed one included.
 `WARM_START` names the `firefly_best.txt` files that seed the initial population (default: run 10), and `PREVIOUS_CHECKS` the previous run's `phaseD_checks.json` for the comparison step.
 
 ### 4. Data synthesis

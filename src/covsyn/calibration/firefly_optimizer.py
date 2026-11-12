@@ -1554,6 +1554,13 @@ class Firefly:
                 fireflies, intensities)
 
 
+def run_directory_for(run_dir: Path | None, config_name: str) -> Path:
+    """The run's directory: ``run_dir`` if given and holding no run, else a new one (Task 3)."""
+    if run_dir is not None:
+        return runs.claim_run_directory(run_dir)
+    return runs.new_run_directory(config_name)
+
+
 def main() -> None:
     """Run the optimiser from the command line (``covsyn-optimise``)."""
     # Firefly.firefly writes its output to the module-level result_path, which test_b81
@@ -1574,6 +1581,9 @@ def main() -> None:
                         help='run directory (default: results/models/<new run id>)')
     parser.add_argument('--config-name', default='phase-d',
                         help='configuration name in a new run id (lowercase kebab-case)')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='seed of the initial population, as config.json records it '
+                             '(default: drawn and recorded)')
     args = parser.parse_args()
 
     cores = hardware.performance_core_count()
@@ -1611,14 +1621,11 @@ def main() -> None:
     else:
         print('mode error')
         sys.exit()
-    if args.run_dir is not None:
-        result_path = runs.claim_run_directory(args.run_dir)  # refuses one holding a run
-    else:
-        result_path = runs.new_run_directory(args.config_name)
+    result_path = run_directory_for(args.run_dir, args.config_name)
     print(f'run directory: {result_path}')
 
     # Firefly
-    fa = Firefly(pop_size, alpha, betamin, gamma)
+    fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
     fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start)}
 
     with open('./variable/contact_parameters.pkl', 'rb') as f:

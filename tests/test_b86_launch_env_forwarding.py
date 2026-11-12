@@ -879,3 +879,18 @@ def test_the_chain_stops_without_a_run_directory(tmp_path):
     root, record, status, output = _run(tmp_path, CHAIN, {})
     log = (root / "phaseD_chain.log").read_text()
     assert status != 0 and "FIREFLY_RUN is not set" in log
+
+
+def test_the_chain_clears_an_earlier_revalidation_of_the_run(tmp_path):
+    """Run again on one run directory, the chain does not mix in the old candidates."""
+    root, record, status, output = _run(
+        tmp_path,
+        CHAIN,
+        {
+            "FIREFLY_RUN": "run",
+            "UV_STATUS": "9",  # the revalidation fails, so the chain stops right after it
+            "_files": {"run/firefly_result.txt": "1 2 3\n", "run/revalidation/stale.txt": "old\n"},
+        },
+    )
+    assert status != 0 and "revalidation failed" in (root / "phaseD_chain.log").read_text()
+    assert not (root / "run" / "revalidation" / "stale.txt").exists()

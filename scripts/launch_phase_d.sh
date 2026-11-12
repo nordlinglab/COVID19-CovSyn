@@ -10,7 +10,8 @@
 #                    population (B49); default: the committed run 10 result
 #   PREVIOUS_CHECKS  phaseD_checks.json of the previous run, for the chain's comparison step
 #   FIREFLY_RUN      the run directory the optimiser writes and the chain reads; default: a new
-#                    results/models/<run-id> named by covsyn.runtime.runs (Task 3)
+#                    results/models/<run-id> named by covsyn.runtime.runs (Task 3). A given
+#                    directory must not hold a run already, a failed one included
 #   REVALIDATE       1 (default) re-scores the candidates on unseen seeds (B56); 0 skips it
 #   REVALIDATION_BLOCKS  unseen seed blocks for that re-scoring (default 10, E95)
 #   SELECT           1 (default) runs the checklist on the best revalidated candidates (B60)

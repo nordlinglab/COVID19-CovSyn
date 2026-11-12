@@ -211,3 +211,45 @@ def test_versions_are_recorded_without_an_installed_covsyn(monkeypatch, tmp_path
         tmp_path, {}, seed=1, workers=1, initial_population=None, lock=tmp_path / "uv.lock"
     )
     assert json.loads(path.read_text())["versions"]["packages"]["numpy"] == np.__version__
+
+
+@pytest.mark.parametrize("output", runs.RUN_OUTPUTS)
+def test_every_optimiser_output_marks_a_directory_as_holding_a_run(tmp_path, output):
+    """progress_metrics.csv of an earlier run would otherwise get a second run appended."""
+    (tmp_path / output).write_text("1")
+    with pytest.raises(FileExistsError, match="FIREFLY_RUN"):
+        runs.claim_run_directory(tmp_path)
+
+
+def test_the_command_creates_the_run_directory_and_prints_it(tmp_path):
+    """The launcher sets FIREFLY_RUN to what this prints, so it must be the created path."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    done = subprocess.run(
+        [sys.executable, "-m", "covsyn.runtime.runs", "phase-d", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=tmp_path,
+    )
+    printed = Path(done.stdout.strip())
+    assert printed.parts[0] == "models" and printed.name.endswith("_phase-d")
+    assert (tmp_path / printed).is_dir()
+
+
+def test_the_optimiser_claims_a_given_directory_and_names_a_new_one(tmp_path, monkeypatch):
+    """main() goes through runs: a committed run is refused, and no --run-dir is a new run."""
+    from covsyn.calibration import firefly_optimizer as fo
+
+    held = tmp_path / "phaseD_run10"
+    held.mkdir()
+    (held / "firefly_best.txt").write_text("1 2 3\n")
+    with pytest.raises(FileExistsError):
+        fo.run_directory_for(held, "phase-d")
+    assert fo.run_directory_for(tmp_path / "fresh", "phase-d") == tmp_path / "fresh"
+    monkeypatch.setattr(runs, "RESULTS_ROOT", tmp_path / "results")
+    monkeypatch.setattr(runs.new_run_directory, "__defaults__", (tmp_path / "results",))
+    created = fo.run_directory_for(None, "phase-d")
+    assert created.parent == tmp_path / "results" / "models" and created.is_dir()

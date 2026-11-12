@@ -29,7 +29,7 @@ def load_vectors(count, directory):
     best = Path(directory) / 'firefly_best.txt'
     if not best.exists():
         raise SystemExit(f'{best} not found')
-    res = np.loadtxt(best)
+    res = np.atleast_2d(np.loadtxt(best))  # one row would load as 1-D
     order = [int(np.argmin(res[:, -1])), int(np.argmax(res[:, -1]))]
     step = max(len(res) // max(count - 2, 1), 1)
     order += list(range(0, len(res), step))
