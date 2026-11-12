@@ -342,3 +342,24 @@ def test_the_launchers_check_command_refuses_a_held_run(tmp_path):
     fresh = subprocess.run([*check, str(tmp_path / "fresh")], capture_output=True, text=True)
     assert held.returncode == 1 and "already holds a run" in held.stderr
     assert fresh.returncode == 0 and not (tmp_path / "fresh").exists()
+
+
+def test_a_run_dir_under_a_file_fails_the_check(tmp_path):
+    """results/models/run10.txt/new, with run10.txt a file, cannot be created later either."""
+    (tmp_path / "run10.txt").write_text("1\n")
+    with pytest.raises(FileExistsError, match="run10.txt is not a directory"):
+        runs.check_unclaimed(tmp_path / "run10.txt" / "new")
+
+
+@pytest.mark.parametrize("extra", [[], ["a", "b"]])
+def test_the_check_command_needs_exactly_one_directory(extra):
+    """A wrong call gets the usage, not a traceback about the configuration name."""
+    import subprocess
+    import sys
+
+    done = subprocess.run(
+        [sys.executable, "-m", "covsyn.runtime.runs", "--check", *extra],
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 1 and "usage:" in done.stderr and "Traceback" not in done.stderr

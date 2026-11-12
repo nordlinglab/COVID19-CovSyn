@@ -149,8 +149,10 @@ def check_unclaimed(path: Path) -> None:
         FileExistsError: The directory holds any of RUN_OUTPUTS, a dangling link included.
     """
     path = Path(path)
-    if path.is_symlink() and not path.exists() or path.exists() and not path.is_dir():
-        raise FileExistsError(f"{path} is not a directory; give a run directory")
+    # The path and every existing parent must be directories, or mkdir fails late.
+    for level in (path, *path.parents):
+        if level.is_symlink() and not level.exists() or level.exists() and not level.is_dir():
+            raise FileExistsError(f"{level} is not a directory; give a run directory")
     found = [n for n in RUN_OUTPUTS if (path / n).exists() or (path / n).is_symlink()]
     if found:
         raise FileExistsError(
@@ -291,7 +293,9 @@ def write_config(
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--check":
+    if len(sys.argv) > 1 and sys.argv[1] == "--check":
+        if len(sys.argv) != 3:
+            sys.exit("usage: uv run python -m covsyn.runtime.runs --check DIR")
         # The launcher checks a given FIREFLY_RUN before it starts anything.
         try:
             check_unclaimed(Path(sys.argv[2]))
