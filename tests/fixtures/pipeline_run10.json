@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "4bd04baa3be806ddb1b5510564be93b1f7c1e8f2",
+ "generated_at_commit": "ce2e76a661cf57c9c40bbac4000e3745557d35f7",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -543,10 +543,10 @@
   "verify_phaseD": {
    "returncode": 0,
    "stdout_head": "<WORKDIR>/spread_Taiwan_weight: 40 simulations, 50 cases\n\n--- B29\n  ok~  household: other members per case                                      3.100    [2.6, 3]         [2.27, 3.75]         \n   ok  household: living alone                                               15.000%   [11, 16]         [5, 27.5]            \n--- B30\n  FAIL class size, elementary (7-12)                                      ",
-   "stdout_sha256": "73ecaf85b0fa0010be3ed40754c18d71717b3bb10f4e7b59a0d67f583641d7ba"
+   "stdout_sha256": "fcea4f0e7245397b629f39226fe2428bae6afe53e85413848a38174090853d22"
   },
   "verify_phaseD_json": {
-   "sha256": "08c3dfb78700bb16e2a511eb4b7cf9363d6d55df388e43455310f64bf1acef02"
+   "sha256": "f0ff5c75ede99216692d53473101bce31b278597b9a6a7c42da65814033fa68d"
   }
  }
 }
