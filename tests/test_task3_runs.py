@@ -222,8 +222,8 @@ def test_every_optimiser_output_marks_a_directory_as_holding_a_run(tmp_path, out
         runs.claim_run_directory(tmp_path)
 
 
-def test_the_command_creates_the_run_directory_and_prints_it(tmp_path):
-    """The launcher sets FIREFLY_RUN to what this prints, so it must be the created path."""
+def test_the_command_prints_a_new_run_path_without_creating_it(tmp_path):
+    """The launcher sets FIREFLY_RUN to what this prints; the optimiser claims it later."""
     import subprocess
     import sys
     from pathlib import Path
@@ -237,7 +237,7 @@ def test_the_command_creates_the_run_directory_and_prints_it(tmp_path):
     )
     printed = Path(done.stdout.strip())
     assert printed.parts[0] == "models" and printed.name.endswith("_phase-d")
-    assert (tmp_path / printed).is_dir()
+    assert not (tmp_path / printed).exists()
 
 
 def test_the_optimiser_claims_a_given_directory_and_names_a_new_one(tmp_path, monkeypatch):
@@ -256,11 +256,16 @@ def test_the_optimiser_claims_a_given_directory_and_names_a_new_one(tmp_path, mo
     assert created.parent == tmp_path / "results" / "models" and created.is_dir()
 
 
-def test_a_claim_is_atomic(tmp_path):
-    """The first claim creates config.json, so a second, concurrent one is refused."""
+def test_a_claim_is_atomic(tmp_path, monkeypatch):
+    """The first claim creates config.json (valid JSON); a concurrent second one is refused.
+
+    The race is forced by hiding config.json from the first check, as a second process that
+    checked before the first one wrote would see it.
+    """
     runs.claim_run_directory(tmp_path / "d")
-    assert (tmp_path / "d" / "config.json").exists()
-    with pytest.raises(FileExistsError):
+    assert json.loads((tmp_path / "d" / "config.json").read_text()) == {"claimed": True}
+    monkeypatch.setattr(runs, "RUN_OUTPUTS", ())
+    with pytest.raises(FileExistsError, match="--run-dir"):
         runs.claim_run_directory(tmp_path / "d")
 
 
@@ -272,7 +277,7 @@ def test_a_directory_with_chain_output_holds_a_run(tmp_path, chain_output):
         runs.claim_run_directory(tmp_path)
 
 
-@pytest.mark.parametrize("text", ["-1", "x", "1.5"])
+@pytest.mark.parametrize("text", ["-1", "x", "1.5", "+1", "1_0", " 1", "\u0663"])
 def test_a_bad_seed_is_refused_when_parsing(text):
     """Refused before the optimiser creates a run directory it would then leave empty."""
     import argparse
@@ -280,3 +285,19 @@ def test_a_bad_seed_is_refused_when_parsing(text):
     with pytest.raises(argparse.ArgumentTypeError):
         runs.non_negative_int(text)
     assert runs.non_negative_int("0") == 0
+
+
+def test_run_outputs_name_every_file_the_optimiser_writes():
+    """Every result_path/'name' in the optimiser is on the list, and every listed file is written.
+
+    The run fixture of test_b81 sees only Firefly.firefly's files; main() writes the others.
+    """
+    import re
+    from pathlib import Path
+
+    source = (Path(runs.__file__).parents[1] / "calibration" / "firefly_optimizer.py").read_text(
+        encoding="utf-8"
+    )
+    written = set(re.findall(r"result_path\s*/\s*'([^']+)'", source)) | {"config.json"}
+    files = {name for name in runs.RUN_OUTPUTS if "." in name}
+    assert written == files, (written - files, files - written)

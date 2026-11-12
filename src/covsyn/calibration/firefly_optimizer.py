@@ -1621,8 +1621,6 @@ def main() -> None:
     else:
         print('mode error')
         sys.exit()
-    result_path = run_directory_for(args.run_dir, args.config_name)
-    print(f'run directory: {result_path}')
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
@@ -1693,6 +1691,11 @@ def main() -> None:
     Cheng_contact_array = processed_contact_tracing_data['Cheng_contact_array']
     Cheng_attack_rate = processed_contact_tracing_data['Cheng_attack_rate']
     norm_weights = processed_contact_tracing_data['norm_weights']
+
+    # Task 3: claimed only now, after every input has loaded, so a mistyped warm start or a
+    # missing input file leaves no claimed directory behind.
+    result_path = run_directory_for(args.run_dir, args.config_name)
+    print(f'run directory: {result_path}')
 
     # Optimization
     if mode == 'profile':

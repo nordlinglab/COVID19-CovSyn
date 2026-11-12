@@ -9,8 +9,9 @@ parent repository's layout: ``results/models/<run-id>/`` (parameters, population
 directories are created, so a fresh clone needs none of them in advance. ``results/`` is under
 the repository root wherever a command starts.
 
-Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` creates a new run directory and
-prints its path, which launch_phase_d.sh passes to the optimiser and the chain.
+Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` prints the path of a new run
+directory, which launch_phase_d.sh passes to the optimiser (``--run-dir``), which claims it,
+and to the chain.
 """
 
 from __future__ import annotations
@@ -120,9 +121,21 @@ def run_directory(
     return path
 
 
+def new_run_path(config_name: str, root: Path = RESULTS_ROOT, **id_fields: Any) -> Path:
+    """The models directory a new run would claim; ``id_fields`` go to :func:`make_run_id`.
+
+    Nothing is created: :func:`claim_run_directory` creates and claims it in one step.
+    """
+    return Path(root) / "models" / make_run_id(config_name, **id_fields)
+
+
 def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: Any) -> Path:
-    """Create the models directory of a new run; ``id_fields`` go to :func:`make_run_id`."""
-    return run_directory(make_run_id(config_name, **id_fields), "models", root, new=True)
+    """Create and claim the models directory of a new run, as :func:`claim_run_directory` does.
+
+    Raises:
+        FileExistsError: Another run with the same id, started in the same second, claimed it.
+    """
+    return claim_run_directory(new_run_path(config_name, root, **id_fields))
 
 
 def claim_run_directory(path: Path) -> Path:
@@ -144,9 +157,15 @@ def claim_run_directory(path: Path) -> Path:
         )
     path.mkdir(parents=True, exist_ok=True)
     # Claimed by creating config.json exclusively, which is atomic: of two runs started on one
-    # directory at once, the second fails here. write_config later fills it in.
-    with open(path / "config.json", "x", encoding="utf-8"):
-        pass
+    # directory at once, the second fails here. It holds valid JSON until write_config fills it.
+    try:
+        with open(path / "config.json", "x", encoding="utf-8") as claim:
+            claim.write('{"claimed": true}\n')
+    except FileExistsError:
+        raise FileExistsError(
+            f"{path} was claimed by another run just now; give a new directory "
+            "(FIREFLY_RUN or --run-dir), or leave it out for a fresh one"
+        ) from None
     return path
 
 
@@ -154,10 +173,9 @@ def non_negative_int(text: str) -> int:
     """An argparse type for a seed, checked before any run directory is created."""
     import argparse
 
-    try:
-        value = int(text)
-    except ValueError:
-        value = -1
+    # Plain ASCII digits only: int() would also take '+1', '1_0' and other scripts' digits,
+    # which a seed copied from config.json never contains.
+    value = int(text) if re.fullmatch(r"[0-9]+", text) else -1
     if value < 0:
         raise argparse.ArgumentTypeError(f"must be a whole number of at least 0, got {text!r}")
     return value
@@ -259,8 +277,8 @@ def write_config(
 if __name__ == "__main__":
     # An optional second argument replaces the results root, for testing.
     root = Path(sys.argv[2]) if len(sys.argv) > 2 else RESULTS_ROOT
-    created = new_run_directory(sys.argv[1] if len(sys.argv) > 1 else "phase-d", root)
+    named = new_run_path(sys.argv[1] if len(sys.argv) > 1 else "phase-d", root)
     try:
-        print(created.relative_to(Path.cwd()))
+        print(named.relative_to(Path.cwd()))
     except ValueError:  # started outside the repository
-        print(created)
+        print(named)
