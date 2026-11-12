@@ -95,9 +95,8 @@ def bootstrap_workers() -> int:
     """
     try:
         return hardware.resolve_workers(None, os.environ, hardware.CHECKLIST_GB_PER_WORKER)
-    except hardware.InsufficientMemory:
-        print(f'not even one {hardware.CHECKLIST_GB_PER_WORKER} GB bootstrap worker fits in the '
-              'available memory; computing the bootstrap intervals in this process')
+    except hardware.InsufficientMemory as error:
+        print(f'{error}; meanwhile computing the bootstrap intervals in this process')
         return 1
 
 

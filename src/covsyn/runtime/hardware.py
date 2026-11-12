@@ -141,7 +141,7 @@ def _quota(path: Path) -> int | None:
             return None
         # A quota below one CPU still lets one worker run, slowly.
         return max(1, int(quota) // int(period))
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return None  # most levels of a cgroup path set no quota
     except (OSError, ValueError) as error:
         log.warning("ignoring the CPU quota in %s (%s)", path, error)
@@ -166,13 +166,23 @@ def _cgroup_limit(machine: Machine) -> int | None:
             if ".." in parts:
                 break
             levels += [base.joinpath(*parts[: depth + 1]) for depth in range(len(parts))]
-    except OSError:
-        pass  # no /proc: only the root's quota applies
+    except (OSError, ValueError):
+        pass  # no readable /proc (or not text): only the root's quota applies
     quotas = [_quota(level / "cpu.max") for level in levels]
     return min((q for q in quotas if q is not None), default=None)
 
 
-def _linux_cores(machine: Machine) -> CoreCount:
+def _allowed_cpus(machine: Machine) -> set[int] | None:
+    """The CPUs this process may run on; None where that is unknown or cannot be read."""
+    if machine.affinity is None:
+        return None
+    try:
+        return set(machine.affinity())
+    except OSError:
+        return None
+
+
+def _linux_cores(machine: Machine, allowed: set[int] | None) -> CoreCount:
     root = machine.sys_root
     p_cores = root / "devices" / "cpu_core" / "cpus"
     if p_cores.exists():
@@ -184,8 +194,7 @@ def _linux_cores(machine: Machine) -> CoreCount:
             if path.name[3:].isdigit()
         }
         method = "physical cores in /sys topology"
-    if machine.affinity is not None:
-        allowed = machine.affinity()
+    if allowed is not None:
         if p_cores.exists() and not cpus & allowed:
             # Pinned to E-cores only: those are the cores this process can use. Pinned to some
             # P-cores and some E-cores, only the P-cores count, as on an unpinned machine.
@@ -200,33 +209,30 @@ def performance_core_count(machine: Machine | None = None) -> CoreCount:
     machine = machine or Machine()
     cpus = machine.cpu_count() or 1
     # Read once and applied to the count found and to the fallback alike.
-    quota = _cgroup_limit(machine) if machine.platform.startswith("linux") else None
+    linux = machine.platform.startswith("linux")
+    quota = _cgroup_limit(machine) if linux else None
+    allowed = _allowed_cpus(machine)
     try:
         if machine.platform == "darwin":
             found = _mac_cores(machine)
-        elif machine.platform.startswith("linux"):
-            found = _linux_cores(machine)
+        elif linux:
+            found = _linux_cores(machine, allowed)
         else:
             raise OSError(f"no core detection for platform {machine.platform!r}")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         # The CPUs this process may use and the cgroup quota still bound the fallback.
-        allowed = cpus
-        if machine.affinity is not None:
-            try:
-                allowed = min(allowed, len(machine.affinity()))
-            except OSError:
-                pass
-        allowed = max(1, min(allowed, quota or allowed))
+        count = min(cpus, len(allowed) if allowed else cpus, quota or cpus)
         log.warning(
             "could not detect the performance cores (%s); falling back to os.cpu_count() = %d%s",
             error,
             cpus,
-            f", limited by the affinity or the cgroup quota to {allowed}" if allowed < cpus else "",
+            f", limited by the affinity or the cgroup quota to {count}" if count < cpus else "",
         )
-        return CoreCount(allowed, "os.cpu_count() fallback")
-    if quota is not None and quota < found.count:
-        found = CoreCount(quota, f"{found.method}, limited by the cgroup quota")
-    return CoreCount(max(1, min(found.count, cpus)), found.method)
+        return CoreCount(max(1, count), "os.cpu_count() fallback")
+    count = max(1, min(found.count, cpus))
+    if quota is not None and quota < count:
+        return CoreCount(quota, f"{found.method}, limited by the cgroup quota")
+    return CoreCount(count, found.method)
 
 
 def default_workers(
@@ -348,8 +354,9 @@ def resolve_workers(
 def positive_int(text: str) -> int:
     """An argparse type for a worker count, so a bad ``--workers`` fails at parsing."""
     try:
-        return _override(text, "the worker count")
+        return _override(text, "--workers")
     except ValueError:
+        # argparse names the option itself, so the message leaves it out.
         raise argparse.ArgumentTypeError(f"must be a positive whole number, got {text!r}") from None
 
 

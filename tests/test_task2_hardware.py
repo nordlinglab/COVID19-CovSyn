@@ -356,14 +356,13 @@ def test_the_workers_option_rejects_non_positive_values_at_parsing(value):
 def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory(monkeypatch):
     """Short of memory, the checklist computes the intervals in its own process.
 
-    The memory is faked, not the error, so the path from resolve_workers is the real one; the
-    module is imported afresh, as it reads sys.argv when imported.
+    The memory is faked, not the error, so the path from resolve_workers is the real one. The
+    module reads sys.argv when first imported, as in test_b92's fixture.
     """
     import importlib
     import sys
 
     monkeypatch.setattr(sys, "argv", ["verify_phase_d"])
-    monkeypatch.delitem(sys.modules, "covsyn.validation.verify_phase_d", raising=False)
     monkeypatch.delenv("COVSYN_WORKERS", raising=False)
     verify = importlib.import_module("covsyn.validation.verify_phase_d")
     monkeypatch.setattr(hw, "_available_gb", lambda: 1.0)
@@ -410,3 +409,34 @@ def test_an_unreadable_cgroup_file_never_stops_the_detection(tmp_path, caplog):
         assert hw.performance_core_count(linux(tmp_path, 6)).count == 6  # the fallback
         write_topology(tmp_path, smt_topology(4))
         assert hw.performance_core_count(linux(tmp_path, 8)).count == 4  # the topology
+    assert caplog.text.count("ignoring the CPU quota") == 2
+
+
+def test_cgroup_levels_without_a_quota_are_silent(tmp_path, caplog):
+    """Most levels of a cgroup path set no cpu.max; their absence is no warning."""
+    write_topology(tmp_path, smt_topology(4))
+    (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    (tmp_path / "proc" / "self").mkdir(parents=True)
+    (tmp_path / "proc" / "self" / "cgroup").write_text("0::/user.slice/session-1.scope\n")
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        assert hw.performance_core_count(linux(tmp_path, 8)).count == 4
+    assert caplog.text == ""
+
+
+def test_a_proc_cgroup_that_is_not_text_reads_only_the_root(tmp_path):
+    """Non-UTF-8 bytes in /proc/self/cgroup must not stop the detection."""
+    write_topology(tmp_path, smt_topology(4))
+    (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("200000 100000\n")
+    (tmp_path / "proc" / "self").mkdir(parents=True)
+    (tmp_path / "proc" / "self" / "cgroup").write_bytes(b"0::/\xff\xfe\n")
+    assert hw.performance_core_count(linux(tmp_path, 8)).count == 2
+
+
+def test_the_method_names_the_quota_only_when_it_binds(tmp_path):
+    """16 cores, a quota of 12 and 8 CPUs: 8, and the quota is not named as the limit."""
+    write_topology(tmp_path, smt_topology(16, threads=1))
+    (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("1200000 100000\n")
+    found = hw.performance_core_count(linux(tmp_path, 8))
+    assert found.count == 8 and "cgroup" not in found.method
