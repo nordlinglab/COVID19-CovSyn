@@ -10,6 +10,7 @@ The objective is deterministic on its fixed seeds (E30), so the difference is th
 
 Usage: uv run python scripts/probes/probe_recovery_tradeoff.py
 """
+import os
 import concurrent.futures
 import pickle
 
@@ -18,6 +19,7 @@ import numpy as np
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
+from covsyn.runtime import hardware
 
 RUN7 = 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_120_run7/firefly_best.txt'
 RUN8 = 'ARCHIVE_20260928_run_phaseD8/firefly_120/firefly_best.txt'
@@ -44,7 +46,7 @@ def main():
     columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
 
     pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns))
+        max_workers=hardware.resolve_workers(None, os.environ, None), initializer=fast_cost.init_worker, initargs=(demo, columns))
     results = {}
     for name, P in (('run8', p8), ('run8 + run7 recovery', swapped)):
         cost = fast_cost.cost_function(P, demo, pool, *cheng)

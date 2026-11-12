@@ -7,6 +7,7 @@ price can be read as either structural or something the optimizer could re-balan
 
 Usage: uv run python scripts/probes/probe_tail_price_detail.py
 """
+import os
 import concurrent.futures
 import pickle
 
@@ -15,6 +16,7 @@ import numpy as np
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
+from covsyn.runtime import hardware
 
 RUN7 = 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_120_run7/firefly_best.txt'
 # (label, k = P[198], factor on P[28], P[29]). P[29] is the probability of meeting yesterday's
@@ -36,7 +38,7 @@ def main():
     base = result[int(np.argmin(result[:, -1])), 1:-1]
 
     pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns))
+        max_workers=hardware.resolve_workers(None, os.environ, None), initializer=fast_cost.init_worker, initargs=(demo, columns))
     for label, k, factor, p29 in POINTS:
         P = base.copy()
         if k is not None:

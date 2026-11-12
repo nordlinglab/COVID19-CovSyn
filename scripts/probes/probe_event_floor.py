@@ -18,6 +18,7 @@ Usage (repository root, after uv sync):
     uv run python scripts/probes/probe_event_floor.py BEST_TXT OUT_CSV [BLOCKS] [--compensate]
 """
 
+import os
 import concurrent.futures
 import csv
 import pickle
@@ -29,6 +30,7 @@ import numpy as np
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
+from covsyn.runtime import hardware
 
 PROBABILITIES = [0.0, 0.0035, 0.01, 0.02, 0.03, 0.05, 0.075, 0.10, 0.15, 0.20]
 # Far from the objective's seeds 0..299, the chain's 0..999 and revalidation's 100000+.
@@ -95,7 +97,7 @@ def main():
         flush=True,
     )
     pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns)
+        max_workers=hardware.resolve_workers(None, os.environ, None), initializer=fast_cost.init_worker, initargs=(demo, columns)
     )
     key = "infections_per_index_municipality"
     target = evaluate(base, demo, pool, cheng, blocks)[key] if compensate else np.nan

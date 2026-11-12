@@ -12,7 +12,7 @@
 #   --environment-checked  the caller (phase_d_chain.sh) checked the environment against
 #                    uv.lock, so this script does not check it again
 # Environment:
-#   CPU_CORES       worker processes (default 24)
+#   COVSYN_WORKERS  worker processes (default: the performance cores, Task 2)
 #   PARAMETER_PATH  directory holding firefly_best.txt (default: the name phase_d_chain.sh copies
 #                   the run onto)
 #   UV_PROJECT_ENVIRONMENT  the environment the runs use (default .venv)
@@ -26,7 +26,6 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-cpu_cores="${CPU_CORES:-24}"
 modes=('spread_Taiwan_weight' 'taiwan_first_outbreak')
 parameter_path="${PARAMETER_PATH:-./Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200}"
 # A5: at least 1000 Monte Carlo runs; 100 was shown to be unreliable.
@@ -53,7 +52,6 @@ for mode in "${modes[@]}"; do
     uv run --no-sync python -m covsyn.model.data_synthesis_main --mode "$mode" \
         --monte_carlo_number "$monte_carlo_number" \
         --result_path "$result_path" \
-        --cpu_cores "$cpu_cores" \
         --parameter_path "$parameter_path"
     echo "Done! Results are saved in: $result_path"
 done

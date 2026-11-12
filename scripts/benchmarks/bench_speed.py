@@ -10,6 +10,7 @@ Measures, on the real parameter vector of run 5:
 Nothing is written; this only reads variable/ and the run 5 firefly result.
 """
 import cProfile
+import os
 import concurrent.futures
 import io
 import pickle
@@ -21,6 +22,7 @@ import numpy as np
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.runtime import hardware
 
 D = Path('Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
 
@@ -64,7 +66,7 @@ def main():
     print('   serial compute per evaluation: %.2f s' % (n * t_sim))
 
     # ---------------------------------------------------------------- 3. one evaluation
-    for workers in (32,):
+    for workers in (hardware.resolve_workers(None, os.environ, None),):
         ex = concurrent.futures.ProcessPoolExecutor(max_workers=workers)
         fo.cost_function(P, demo, ex, cheng_contact, cheng_ar, norm_w)     # warm the pool
         t0 = time.perf_counter()

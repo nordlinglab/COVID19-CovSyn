@@ -6,6 +6,7 @@ dispatch shows up as time inside future.result() while the aggregation shows up 
 generate_contact_result / np.append.
 """
 import cProfile
+import os
 import concurrent.futures
 import io
 import pickle
@@ -17,6 +18,7 @@ import numpy as np
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.runtime import hardware
 
 D = Path('Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
 
@@ -31,7 +33,7 @@ def main():
     args = (ct['Cheng_contact_array'], ct['Cheng_attack_rate'], ct['norm_weights'])
 
     n = fo.SIMULATIONS_PER_EVALUATION
-    ex = concurrent.futures.ProcessPoolExecutor(max_workers=32)
+    ex = concurrent.futures.ProcessPoolExecutor(max_workers=hardware.resolve_workers(None, os.environ, None))
     fo.cost_function(P, demo, ex, *args)
 
     # (a) pool round trip only: submit n tasks and collect them, nothing else

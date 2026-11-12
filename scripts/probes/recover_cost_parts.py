@@ -22,6 +22,7 @@ import numpy as np
 
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
+from covsyn.runtime import hardware
 
 
 def main():
@@ -41,7 +42,7 @@ def main():
     columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
 
     pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns))
+        max_workers=hardware.resolve_workers(None, os.environ, None), initializer=fast_cost.init_worker, initargs=(demo, columns))
     cost = fast_cost.cost_function(P, demo, pool, *cheng)
     pool.shutdown()
     parts = dict(fo.LAST_COST_PARTS)

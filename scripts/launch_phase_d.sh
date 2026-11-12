@@ -9,17 +9,15 @@
 #   WARM_START       space-separated firefly_best.txt files whose best vectors seed the initial
 #                    population (B49); default: the committed run 10 result
 #   PREVIOUS_CHECKS  phaseD_checks.json of the previous run, for the chain's comparison step
-#   VERIFY_WORKERS   bootstrap workers for the checklist (B86, E98); each holds about 4.9 GB,
-#                    so the default of min(cores, 32) needs about 157 GB and swaps when the
-#                    machine is shared. Unset means that default.
 #   FIREFLY_RUN      the optimizer output directory the chain reads; default: the directory the
 #                    optimizer's default settings name
 #   REVALIDATE       1 (default) re-scores the candidates on unseen seeds (B56); 0 skips it
 #   REVALIDATION_BLOCKS  unseen seed blocks for that re-scoring (default 10, E95)
 #   SELECT           1 (default) runs the checklist on the best revalidated candidates (B60)
 #   SELECT_TOP       how many candidates that selection checks (default 5)
-#   CPU_CORES        workers for the selection's and the data synthesis's simulations
-#                    (default 24)
+#   COVSYN_WORKERS   worker processes for every step, the optimiser included (Task 2); unset
+#                    means each step's default: the performance cores, and for the checklist
+#                    no more than fit in 80% of the available memory at 4.9 GB each (E98)
 #   FIREFLY_STATUS   the file where the firefly session leaves its exit status, which the
 #                    chain checks before it uses FIREFLY_RUN; default firefly_phaseD.exit,
 #                    relative to the repository root. The launcher fails if the firefly session
@@ -53,8 +51,8 @@ uv sync --locked --inexact
 # Each session command is given as separate arguments, which tmux runs directly rather than
 # through the user's default shell: bash then expands the variables, so WARM_START splits into
 # its files under any login shell, and a quote in a value cannot break the command line.
-CHAIN_ENV=(PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT
-           SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT)
+CHAIN_ENV=(PREVIOUS_CHECKS COVSYN_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT
+           SELECT_TOP FIREFLY_STATUS UV_PROJECT_ENVIRONMENT)
 # The firefly session replaces "running" with the optimiser's exit status, so a session that is
 # killed before the optimiser exits leaves "running", which stops the chain too.
 FIREFLY_STATUS="${FIREFLY_STATUS:-firefly_phaseD.exit}"
@@ -64,6 +62,7 @@ for name in "${CHAIN_ENV[@]}"; do chain_env_args+=(-e "$name=${!name:-}"); done
 # shellcheck disable=SC2016
 tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
   -e "UV_PROJECT_ENVIRONMENT=$UV_PROJECT_ENVIRONMENT" \
+  -e "COVSYN_WORKERS=${COVSYN_WORKERS:-}" \
   -e "FIREFLY_STATUS=$FIREFLY_STATUS" bash -c \
   'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
    --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1; \

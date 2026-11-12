@@ -21,7 +21,7 @@
 #
 # Usage: scripts/phase_d_chain.sh   (start it inside its own tmux session; see launch_phase_d.sh)
 # Environment: PREVIOUS_CHECKS, FIREFLY_RUN, REVALIDATE, REVALIDATION_BLOCKS, SELECT,
-#              SELECT_TOP, CPU_CORES, VERIFY_WORKERS, FIREFLY_STATUS, UV_PROJECT_ENVIRONMENT;
+#              SELECT_TOP, COVSYN_WORKERS, FIREFLY_STATUS, UV_PROJECT_ENVIRONMENT;
 #              launch_phase_d.sh documents and forwards each, and an empty value means the
 #              default, except that an empty FIREFLY_STATUS (a chain started by hand) skips the
 #              firefly status check.
@@ -70,8 +70,8 @@ if ! uv sync --locked --check --inexact >> "$LOG" 2>&1; then
     say "optimiser) in a tmux session, passing every setting it ran with, empty ones included,"
     say "as a tmux new-session option, as the launcher does: tmux gives a session its server's"
     say "environment, which would fill in a setting left out."
-    for name in PREVIOUS_CHECKS VERIFY_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
-            SELECT_TOP CPU_CORES FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
+    for name in PREVIOUS_CHECKS COVSYN_WORKERS FIREFLY_RUN REVALIDATE REVALIDATION_BLOCKS SELECT \
+            SELECT_TOP FIREFLY_STATUS UV_PROJECT_ENVIRONMENT; do
         value="${!name:-}"
         if [ "$name" = UV_PROJECT_ENVIRONMENT ]; then value="${value:-.venv}"; fi
         say "  -e $(printf %q "$name=$value")"
@@ -110,7 +110,7 @@ if [ "${REVALIDATE:-1}" = 1 ] && [ -f "$FIREFLY_RUN/firefly_result.txt" ]; then
     if [ "${SELECT:-1}" = 1 ]; then
         say "running the checklist on the best ${SELECT_TOP:-5} revalidated candidates (B60)"
         run covsyn.calibration.select_by_checklist revalidation selected "${SELECT_TOP:-5}" \
-            "${CPU_CORES:-24}" >> "$LOG" 2>&1 \
+            >> "$LOG" 2>&1 \
             || { say 'ERROR: checklist selection failed, stopping'; exit 1; }
         say "$(grep 'checklist choice' "$LOG" | tail -1)"
         FIREFLY_RUN=selected
@@ -171,7 +171,7 @@ for mode in spread_Taiwan_weight taiwan_first_outbreak; do
     rm -rf "independent_$mode"
     mkdir -p "independent_$mode"
     run covsyn.model.data_synthesis_main --mode "$mode" --monte_carlo_number 1000 \
-        --result_path "independent_$mode" --cpu_cores "${CPU_CORES:-24}" \
+        --result_path "independent_$mode" \
         --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
         || { say "ERROR: independent data synthesis failed for $mode, stopping"; exit 1; }
 done
@@ -278,7 +278,7 @@ run covsyn.figures.reproduce_wu2025 fig4 "${OPTIMIZER_RUN:-$FIREFLY_RUN}" wu2025
 rm -rf "$REPORT_CHENG"
 mkdir -p "$REPORT_CHENG"
 run covsyn.model.data_synthesis_main --mode cheng2020 --monte_carlo_number 1000 \
-    --result_path "$REPORT_CHENG" --cpu_cores "${CPU_CORES:-24}" \
+    --result_path "$REPORT_CHENG" \
     --parameter_path "$FIREFLY" --seed_start 500000 >> "$LOG" 2>&1 \
     || { say "ERROR: independent cheng2020 synthesis failed, so Fig 6 is missing;${FIGURES_FAILED:+ also failed:$FIGURES_FAILED;} stopping"
          exit 1; }

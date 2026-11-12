@@ -11,7 +11,7 @@ reported as 'within noise' rather than as a failure.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from typing import Any
 
 import numpy as np
@@ -29,39 +29,6 @@ import numpy as np
 # (B61): the local subset gives k = 5.69 by confirmed contacts, which would not constrain the
 # dispersion at all.
 OFFSPRING_SHARE_GE3 = (1.8, 12.8)
-
-
-def worker_count(env: Mapping[str, str], cpus: int | None = None, cap: int = 32) -> int:
-    """Number of bootstrap workers the checklist should use (B86, finding E98).
-
-    The checklist is bound by memory, not cores: each worker holds about 4.9 GB, so 32 of them
-    need about 157 GB. This machine is shared, and during run 21 another user held 294 GB of the
-    512, which sent the checklist into swap and took each candidate 19-28 minutes against the
-    4.3 measured in isolation. VERIFY_WORKERS therefore overrides the default.
-
-    launch_phase_d.sh forwards the variable into the chain's tmux session, which gives it as an
-    empty string when it is unset, so an unusable value falls back to the default rather than
-    raising or running on no workers.
-
-    Args:
-        env: The environment to read VERIFY_WORKERS from.
-        cpus: Core count the default is capped against; os.cpu_count() when None.
-        cap: Highest default, whatever the core count.
-
-    Returns:
-        The requested count when it is a positive whole number, else min(cpus, cap).
-    """
-    requested = (env.get('VERIFY_WORKERS') or '').strip()
-    try:
-        workers = int(requested)
-    except ValueError:
-        workers = 0
-    if workers > 0:
-        return workers
-    if cpus is None:
-        import os
-        cpus = os.cpu_count() or 1
-    return min(cpus, cap)
 
 
 def json_band(target: Any) -> Any:

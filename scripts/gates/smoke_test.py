@@ -10,6 +10,7 @@ on ONE evaluation of the seed vector:
   (d) the new run-6 targets are present, charged, and reachable from the seed
   (e) the cross-layer daily attack-rate ceiling holds
 """
+import os
 import concurrent.futures
 import pickle
 import time
@@ -18,6 +19,9 @@ import numpy as np
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration import sar_anchors
+from covsyn.runtime import hardware
+
+
 def main():
     print('=== (e) cross-layer ceiling (E61) ===')
     breaches = sar_anchors.cross_layer_ceiling_report()
@@ -63,7 +67,7 @@ def main():
     print('  OK: every seed value is inside its bounds\n')
 
     print('=== (a) one cost evaluation ===')
-    ex = concurrent.futures.ProcessPoolExecutor(max_workers=32)
+    ex = concurrent.futures.ProcessPoolExecutor(max_workers=hardware.resolve_workers(None, os.environ, None))
     t0 = time.perf_counter()
     cost = fo.cost_function(seed, demo, ex, *args)
     elapsed = time.perf_counter() - t0

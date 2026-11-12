@@ -21,6 +21,7 @@ import numpy as np
 
 sys.path.insert(0, "src")
 from covsyn.model.data_synthesis_main import run_covid  # noqa: E402
+from covsyn.runtime import hardware  # noqa: E402
 
 LAYERS = ("household", "school", "workplace", "health_care", "municipality")
 OBSERVED = {"confirmed": 3, "with_unclear": 5}
@@ -50,7 +51,8 @@ def main():
     rows = np.atleast_2d(np.loadtxt(sys.argv[1]))
     P = rows[np.argmin(rows[:, -1]), 1:-1]
     runs = int(sys.argv[2]) if len(sys.argv) > 2 else 400
-    workers = int(sys.argv[3]) if len(sys.argv) > 3 else os.cpu_count()
+    workers = hardware.resolve_workers(int(sys.argv[3]) if len(sys.argv) > 3 else None,
+                                       os.environ, None)
     with open("variable/demographic_parameters.pkl", "rb") as f:
         dp = pickle.load(f)
     m1, band, n = mean_offspring(P, dp, 1.0, runs, workers)

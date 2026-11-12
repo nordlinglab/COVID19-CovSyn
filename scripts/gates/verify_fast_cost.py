@@ -9,6 +9,7 @@ Timing is only meaningful on an idle machine, so it is reported but flagged.
 
 Usage: uv run python scripts/gates/verify_fast_cost.py [--workers N] [--vectors N]
 """
+import os
 import argparse
 import concurrent.futures
 import pickle
@@ -20,6 +21,7 @@ import numpy as np
 
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
+from covsyn.runtime import hardware
 
 
 def load_vectors(count):
@@ -45,9 +47,10 @@ def load_vectors(count):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--workers', type=int, default=4)
+    hardware.add_workers_argument(parser)  # Task 2 (D3)
     parser.add_argument('--vectors', type=int, default=4)
     args = parser.parse_args()
+    args.workers = hardware.resolve_workers(args.workers, os.environ, None)
 
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
         demo = pickle.load(f)

@@ -28,17 +28,16 @@ CHAIN = SCRIPT.parent / "phase_d_chain.sh"
 SYNTHESIS = SCRIPT.parent / "data_synthesis.sh"
 SOURCE = SCRIPT.parent.parent / "src" / "covsyn"
 # Every variable the chain, data_synthesis.sh or a module they run reads from the environment;
-# the launcher passes each into the chain session. VERIFY_WORKERS is read by the checklist
-# module (worker_count), the others by the two scripts.
+# the launcher passes each into the chain session. COVSYN_WORKERS is read by every module that
+# starts workers (runtime.hardware.resolve_workers, Task 2), the others by the two scripts.
 CHAIN_VARIABLES = (
     "PREVIOUS_CHECKS",
-    "VERIFY_WORKERS",
+    "COVSYN_WORKERS",
     "FIREFLY_RUN",
     "REVALIDATE",
     "REVALIDATION_BLOCKS",
     "SELECT",
     "SELECT_TOP",
-    "CPU_CORES",
     "FIREFLY_STATUS",
     "UV_PROJECT_ENVIRONMENT",
 )
@@ -270,7 +269,7 @@ CLEARED_BY_CHAIN = {"AGE_RR_FILE"}
 
 # The ways a module reads the environment in this code base: os.environ.get, os.getenv,
 # environ[...] under any module name (not an assignment, which sets it for a child) and a
-# mapping of it passed as env (worker_count). A del is left out by _environment_reads.
+# mapping of it passed as env (resolve_workers). A del is left out by _environment_reads.
 ENVIRONMENT_READ = re.compile(
     r"""\b(?:environ\.get|getenv|env\.get)\(\s*['"]([A-Z][A-Z0-9_]*)"""
     r"""|\benviron\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\](?!\s*=[^=])"""
@@ -335,7 +334,7 @@ def test_every_module_environment_read_is_forwarded_or_cleared():
     read = set()
     for path in SOURCE.rglob("*.py"):
         read |= _environment_reads(path.read_text(encoding="utf-8"))
-    assert "VERIFY_WORKERS" in read  # read through worker_count's env mapping
+    assert "COVSYN_WORKERS" in read  # read through resolve_workers' env mapping
     assert read <= set(CHAIN_VARIABLES) | CLEARED_BY_CHAIN
     code = _code(CHAIN)
     first_verify = next(i for i, line in enumerate(code) if "verify_phase_d" in line)
@@ -418,11 +417,19 @@ def test_the_chain_checks_before_it_waits_for_the_optimiser(tmp_path):
     assert status != 0 and "revalidation failed" in (root / "phaseD_chain.log").read_text()
 
 
-def test_the_firefly_modules_do_not_read_the_environment():
-    """The firefly session gets WARM_START alone, which the shell passes as an argument."""
+def test_the_firefly_modules_read_only_the_forwarded_worker_count():
+    """The firefly session reads COVSYN_WORKERS alone (Task 2), so the launcher forwards it.
+
+    WARM_START reaches the optimiser as an argument; the worker count is read by
+    runtime.hardware.resolve_workers from the os.environ mapping the optimiser passes it.
+    """
     for name in ("firefly_optimizer.py", "fast_cost.py"):
         text = (SOURCE / "calibration" / name).read_text(encoding="utf-8")
-        assert not re.search(r"\b(?:environ|getenv)\b", text), name
+        reads = [line.strip() for line in text.splitlines()
+                 if re.search(r"\b(?:environ|getenv)\b", line)]
+        assert all("hardware.resolve_workers(" in line for line in reads), (name, reads)
+    session = SCRIPT.read_text(encoding="utf-8").partition("tmux new-session -d -s firefly")[2]
+    assert '-e "COVSYN_WORKERS=${COVSYN_WORKERS:-}"' in session.partition("bash -c")[0]
 
 
 def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
@@ -543,7 +550,7 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
         {
             "WARM_START": "a/firefly_best.txt b/firefly_best.txt",
             "FIREFLY_RUN": "run's dir",
-            "CPU_CORES": "8",
+            "COVSYN_WORKERS": "8",
             "_files": {"firefly_phaseD.exit": "1\n"},
         },
     )
@@ -554,7 +561,7 @@ def test_launch_forwards_the_values_unchanged(tmp_path):
     chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
     assert (root / chain["FIREFLY_STATUS"]).read_text().strip() == "0"
     assert chain["FIREFLY_RUN"] == "run's dir"
-    assert chain["CPU_CORES"] == "8"
+    assert chain["COVSYN_WORKERS"] == "8"
     assert chain["SELECT_TOP"] == ""
     # uv sync in the launcher and uv run in both sessions use the same environment.
     assert chain["UV_PROJECT_ENVIRONMENT"] == ".venv"
@@ -786,11 +793,12 @@ def test_the_variable_is_documented_in_the_usage_header(variable):
 
 
 def test_the_checklist_uses_the_shared_helper_for_its_worker_count():
-    """Both the forwarding and the parsing have to agree on one definition."""
+    """Both the forwarding and the parsing have to agree on one definition (Task 2)."""
     checklist = (
         SCRIPT.parent.parent / "src" / "covsyn" / "validation" / "verify_phase_d.py"
     ).read_text(encoding="utf-8")
-    assert "worker_count(" in checklist
+    assert "hardware.resolve_workers(" in checklist
+    assert "CHECKLIST_GB_PER_WORKER" in checklist
 
 
 @pytest.mark.parametrize(
@@ -798,30 +806,32 @@ def test_the_checklist_uses_the_shared_helper_for_its_worker_count():
     [
         ("8", 8),  # E98's setting for this shared machine, about 39 GB
         ("1", 1),
-        ("64", 64),  # above the cap, because the cap is only a default
+        ("64", 64),  # above the cores and the memory, because both only set a default
         (" 8 ", 8),  # a forwarded value can carry whitespace
     ],
 )
 def test_an_explicit_worker_count_is_taken_as_given(value, expected):
-    """An explicit setting overrides the default, above the cap included."""
-    from covsyn.validation.acceptance import worker_count
+    """An explicit setting overrides the default, beyond the cores and the memory included."""
+    from covsyn.runtime.hardware import resolve_workers
 
-    assert worker_count({"VERIFY_WORKERS": value}, cpus=32) == expected
+    env = {"COVSYN_WORKERS": value}
+    assert resolve_workers(None, env, 4.9, cores=32, available_gb=50.0) == expected
 
 
 @pytest.mark.parametrize("value", ["", "   ", None])
 def test_an_unset_or_empty_value_falls_back_to_the_default(value):
     """The shell forwards '' when the variable is unset, which must not raise or mean zero."""
-    from covsyn.validation.acceptance import worker_count
+    from covsyn.runtime.hardware import resolve_workers
 
-    env = {} if value is None else {"VERIFY_WORKERS": value}
-    assert worker_count(env, cpus=48) == 32  # the cap
-    assert worker_count(env, cpus=4) == 4  # fewer cores than the cap
+    env = {} if value is None else {"COVSYN_WORKERS": value}
+    assert resolve_workers(None, env, 4.9, cores=48, available_gb=1000.0) == 48  # the cores
+    assert resolve_workers(None, env, 4.9, cores=48, available_gb=50.0) == 8  # the memory
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nonsense", "3.5"])
 def test_a_value_that_is_not_a_positive_count_falls_back(value):
     """A typo must not silently run the checklist on one worker or crash it."""
-    from covsyn.validation.acceptance import worker_count
+    from covsyn.runtime.hardware import resolve_workers
 
-    assert worker_count({"VERIFY_WORKERS": value}, cpus=32) == 32
+    env = {"COVSYN_WORKERS": value}
+    assert resolve_workers(None, env, 4.9, cores=32, available_gb=1000.0) == 32

@@ -53,7 +53,7 @@ def build_dataset(workdir: Path) -> dict[str, str]:
         out = workdir / mode
         out.mkdir(parents=True, exist_ok=True)
         done = _run(["-m", "covsyn.model.data_synthesis_main", "--mode", mode, "--monte_carlo_number",
-                     str(MONTE_CARLO), "--result_path", str(out), "--cpu_cores", "4",
+                     str(MONTE_CARLO), "--result_path", str(out), "--workers", "4",
                      "--parameter_path", RUN_DIR], workdir)
         if done.returncode:
             raise RuntimeError(f"data synthesis failed for {mode}:\n{done.stderr[-2000:]}")

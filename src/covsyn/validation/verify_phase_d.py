@@ -30,8 +30,8 @@ from covsyn.model.contact_measures import (TAIWAN_TRACING_CASES, TAIWAN_TRACING_
 from covsyn.calibration.sar_anchors import JIAN2020_LOCAL_HEALTH_CARE_PER_CASE
 from covsyn.validation.acceptance import (OFFSPRING_SHARE_GE3, band_text, bootstrap_index_sets,
                                           bootstrap_intervals, collect_replicates,
-                                          json_band, percentile_intervals, verdict,
-                                          worker_count)
+                                          json_band, percentile_intervals, verdict)
+from covsyn.runtime import hardware
 from covsyn.validation.city_effect import max_min_city_ratio, permutation_p_value
 from covsyn.validation.compare_first_wave import is_local_case
 
@@ -80,9 +80,8 @@ def check(decision, name, value, target, unit='', ok=None, note='', ci=None, int
 # resampling, and the permutation test's generator is not reached with permutations=False. Each
 # worker LOADS the simulations itself (15.8 s, measured) instead of receiving them: one process
 # holds 4.9 GB of them, so sending them to every worker would cost more than the replicates do.
-# Memory is the binding constraint, not cores: VERIFY_WORKERS workers hold
-# VERIFY_WORKERS * 4.9 GB.
-WORKER_COUNT = worker_count(os.environ)
+# Memory is the binding constraint, not cores: each worker holds 4.9 GB, so main() sizes the
+# pool by cores and available memory (Task 2), overridden by COVSYN_WORKERS.
 _WORKER_RUNS: list | None = None
 _WORKER_FIRST: list | None = None
 
@@ -745,9 +744,11 @@ def main():
 
         # The spread and first-outbreak runs are resampled independently: they are separate
         # scenarios and need not be equal in number.
-        if WORKER_COUNT > 1:
+        workers = hardware.resolve_workers(None, os.environ,
+                                           hardware.CHECKLIST_GB_PER_WORKER)
+        if workers > 1:
             intervals = bootstrap_in_parallel(SPREAD, FIRST, (len(runs), len(first_runs)),
-                                              BOOTSTRAP_REPLICATES, WORKER_COUNT)
+                                              BOOTSTRAP_REPLICATES, workers)
         else:
             intervals = bootstrap_intervals(replicate, runs, first_runs,
                                             replicates=BOOTSTRAP_REPLICATES)

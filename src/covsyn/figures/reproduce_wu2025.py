@@ -44,6 +44,7 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import os
 import re
 import sys
 from collections.abc import Iterator
@@ -388,7 +389,7 @@ COST_PARTS = [
 
 
 def evaluate_cost_parts(
-    vectors: dict[str, np.ndarray], table: Path, workers: int = 32
+    vectors: dict[str, np.ndarray], table: Path, workers: int | None = None
 ) -> list[dict]:
     """Objective and its parts for every firefly at every stage, written to a CSV table.
 
@@ -399,7 +400,8 @@ def evaluate_cost_parts(
     Args:
         vectors: The parameter vectors of each stage, one row per firefly.
         table: The CSV the rows are written to; an existing file is replaced.
-        workers: Processes evaluating the objective.
+        workers: Processes evaluating the objective; COVSYN_WORKERS or the detected default
+            when None (Task 2, was 32).
 
     Returns:
         One row per stage and firefly: stage, firefly, total, and each cost part.
@@ -409,7 +411,10 @@ def evaluate_cost_parts(
 
     from covsyn.calibration import fast_cost
     from covsyn.calibration.cost_parts import LAST
+    from covsyn.runtime import hardware
 
+    if workers is None:
+        workers = hardware.resolve_workers(None, os.environ, None)
     with open("./variable/demographic_parameters.pkl", "rb") as f:
         demo = pickle.load(f)
     with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:

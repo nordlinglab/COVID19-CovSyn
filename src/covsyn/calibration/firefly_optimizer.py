@@ -9,13 +9,14 @@ import pstats
 import sys
 import time
 import traceback
-import multiprocessing
+import os
 from pathlib import Path
 from numpy.random import default_rng
 from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.runtime import hardware
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
                                             health_care_contact_floor)
@@ -1553,15 +1554,13 @@ def main() -> None:
     # parser.add_argument('--result_path', type=str, default='./Firefly_result/')
     parser.add_argument('--mode', type=str, default='train')
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
-    parser.add_argument('--max_workers', type=int,
-                        default=multiprocessing.cpu_count())
+    hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
     # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
     parser.add_argument('--warm_start', type=str, nargs='*', default=[])
     args = parser.parse_args()
 
-    max_workers = args.max_workers
-    print('Available CPU cores (max_workers): ', multiprocessing.cpu_count())
-    print('set max_workers: ', max_workers)
+    max_workers = hardware.resolve_workers(args.workers, os.environ, None)
+    print(f'{hardware.performance_core_count()}; workers: {max_workers}')
     # result_path = Path(args.result_path)
     mode = args.mode
     print(f'mode: {mode}')

@@ -1,3 +1,4 @@
+import os
 import argparse
 import concurrent.futures
 import copy
@@ -20,6 +21,7 @@ from covsyn.calibration.sar_anchors import LAYER_CUMULATIVE_SAR
 from covsyn.model.data_synthesize import *
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
+from covsyn.runtime import hardware
 # from sklearn.metrics.pairwise import nan_euclidean_distances
 # Note: RW_nan_euclidean_distances is a copy code from sklearn but only comment out the weighting parts.
 # "distances /= present_count" and "distances *= X.shape[1]"
@@ -963,12 +965,10 @@ if __name__ == "__main__":
     # parser.add_argument('--result_path', type=str, default='./Firefly_result/')
     parser.add_argument('--mode', type=str, default='train')
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
-    parser.add_argument('--max_workers', type=int,
-                        default=multiprocessing.cpu_count())
+    parser.add_argument('--max_workers', type=int, default=None)  # Task 2 (D3)
     args = parser.parse_args()
 
-    max_workers = args.max_workers
-    print('Available CPU cores (max_workers): ', multiprocessing.cpu_count())
+    max_workers = hardware.resolve_workers(args.max_workers, os.environ, None)
     print('set max_workers: ', max_workers)
     # result_path = Path(args.result_path)
     mode = args.mode

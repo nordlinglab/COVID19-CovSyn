@@ -8,7 +8,7 @@ them and fell outside on 1,000 independent simulations. This scores the final po
 every firefly's personal best on fresh, disjoint seed blocks and picks the lowest mean.
 
 Usage (repository root, after uv sync):
-    uv run python -m covsyn.calibration.revalidation FIREFLY_DIR OUT_DIR [BLOCKS]
+    uv run python -m covsyn.calibration.revalidation FIREFLY_DIR OUT_DIR [BLOCKS] [--workers N]
 
 Writes OUT_DIR/revalidation.csv (every candidate) and OUT_DIR/firefly_best.txt (every candidate
 with its validation cost, so its minimum is the chosen vector), and copies the run's other files
@@ -17,15 +17,18 @@ with its validation cost, so its minimum is the chosen vector), and copies the r
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import csv
+import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from covsyn.runtime import hardware
 
 # Far above the objective's seeds 0..299 and the chain's Monte-Carlo seeds 0..999.
 VALIDATION_SEED_START = 100000
@@ -140,15 +143,21 @@ def score(
     return totals, {name: float(np.nanmean(v)) for name, v in outcomes.items()}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Re-score every candidate of FIREFLY_DIR and write OUT_DIR."""
     import pickle
 
     from covsyn.calibration import fast_cost
     from covsyn.calibration import firefly_optimizer as fo
 
-    firefly_dir, out_dir = Path(sys.argv[1]), Path(sys.argv[2])
-    blocks = int(sys.argv[3]) if len(sys.argv) > 3 else 10  # E95: 4 left the choice noisy
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("firefly_dir", type=Path)
+    parser.add_argument("out_dir", type=Path)
+    parser.add_argument("blocks", type=int, nargs="?", default=10)  # E95: 4 left it noisy
+    hardware.add_workers_argument(parser)  # Task 2: was 32 workers (D3)
+    args = parser.parse_args(argv)
+    firefly_dir, out_dir, blocks = args.firefly_dir, args.out_dir, args.blocks
+    workers = hardware.resolve_workers(args.workers, os.environ, None)
     out_dir.mkdir(parents=True, exist_ok=True)
     with open("./variable/demographic_parameters.pkl", "rb") as f:
         demo = pickle.load(f)
@@ -169,7 +178,7 @@ def main() -> None:
     )
 
     pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns)
+        max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns)
     )
     rows = []
     for index, (vector, training_cost) in enumerate(zip(vectors, train, strict=True)):

@@ -1,4 +1,5 @@
 import argparse
+import os
 import concurrent.futures
 import cProfile
 import numpy as np
@@ -11,6 +12,7 @@ from pathlib import Path
 from tqdm import tqdm
 from covsyn.model.data_synthesize import *
 from covsyn.model.school_calendar import SchoolCalendar
+from covsyn.runtime import hardware
 from covsyn.model.work_calendar import WorkCalendar, first_wave_day_zero, weekday_calendar
 from covsyn.model.data_synthesize import (community_event_parameters, community_power_law_exponent,
                                           tracing_delay_mean, work_group_parameters)
@@ -806,7 +808,7 @@ def main() -> None:
                         default='./Firefly_result/Firefly_result_pop_size_50_alpha_1_betamin_1_gamma_0.131_max_generations_200')
     parser.add_argument('--monte_carlo_number', type=int, default=100)
     parser.add_argument('--result_path', type=str, required=True)
-    parser.add_argument('--cpu_cores', type=int, default=1)
+    hardware.add_workers_argument(parser)  # Task 2: was --cpu_cores, default 1 (D3)
     parser.add_argument('--contact_weight', type=float, default=1.0,
                         help='contact multiplier of spread_Taiwan_weight (1 = calibrated Taiwan)')
     parser.add_argument('--quarantine_breach', type=str, default='with_unclear',
@@ -828,7 +830,7 @@ def main() -> None:
     mode = args.mode
     parameter_path = Path(args.parameter_path)
     mc_number = args.monte_carlo_number
-    cpu_cores = args.cpu_cores
+    cpu_cores = hardware.resolve_workers(args.workers, os.environ, None)
     seed_start = args.seed_start
     contact_weight = args.contact_weight
     quarantine_breach = args.quarantine_breach
@@ -892,7 +894,7 @@ def main() -> None:
         print(f'Full batches: {full_batches}, Remainder: {remainder}')
         for i in tqdm(range(full_batches)):
             seeds = range(seed_start + i*cpu_cores, seed_start + (i+1)*cpu_cores)
-            with concurrent.futures.ProcessPoolExecutor() as executor:  # Multiprocessing
+            with concurrent.futures.ProcessPoolExecutor(max_workers=cpu_cores) as executor:
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight,
@@ -907,7 +909,7 @@ def main() -> None:
         print('Processing the remainder')
         if remainder > 0:
             seeds = range(seed_start + full_batches*cpu_cores, seed_start + mc_number)
-            with concurrent.futures.ProcessPoolExecutor() as executor:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=cpu_cores) as executor:
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight,
