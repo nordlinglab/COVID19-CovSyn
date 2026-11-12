@@ -270,7 +270,7 @@ def default_workers(
     fitting, available_gb = _fitting(memory_per_worker_gb, available_gb)
     if fitting < 1:
         raise InsufficientMemory(
-            f"one worker needs {memory_per_worker_gb} GB, but only {available_gb:.1f} GB is "
+            f"one worker needs {memory_per_worker_gb} GB, but only {available_gb:.2f} GB is "
             f"available, of which CovSyn uses {MEMORY_SHARE:.0%}; free memory, or set "
             f"{ENV_VARIABLE} (or --workers, where the command has it) to start anyway",
             available_gb,
@@ -308,7 +308,7 @@ def _capped(
     capped = max(1, fitting)
     if workers > capped:
         log.warning(
-            "%s asks for %d workers of %s GB, but the available %.1f GB holds %d; starting %d",
+            "%s asks for %d workers of %s GB, but the available %.2f GB holds %d; starting %d",
             source,
             workers,
             memory_per_worker_gb,
@@ -402,7 +402,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"method:            {found.method}")
     print(f"os.cpu_count():    {os.cpu_count()}")
     available = _available_gb()
-    print(f"available memory:  {available:.1f} GB")
+    print(f"available memory:  {available:.2f} GB")
     try:
         workers = default_workers(args.memory_per_worker_gb, found.count, available)
         print(f"default workers:   {workers} (at {args.memory_per_worker_gb} GB per worker)")

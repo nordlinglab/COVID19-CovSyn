@@ -138,14 +138,14 @@ def test_refuses_when_one_worker_does_not_fit_in_memory():
 
 
 def test_the_memory_error_survives_pickling():
-    """As it would when raised in a worker process."""
+    """The error default_workers raises survives pickling, as from a worker process."""
     import pickle
 
-    error = pickle.loads(pickle.dumps(hw.InsufficientMemory("one worker needs 4.9 GB", 1.5)))
-    assert (str(error), error.available_gb) == ("one worker needs 4.9 GB", 1.5)
-
-
-# --- the rest of the specification ---------------------------------------------------------
+    with pytest.raises(hw.InsufficientMemory) as refusal:
+        hw.default_workers(4.9, cores=4, available_gb=4.93)
+    error = pickle.loads(pickle.dumps(refusal.value))
+    assert (str(error), error.available_gb) == (str(refusal.value), 4.93)
+    assert "4.93 GB" in str(error)  # two decimals: never '4.9 available, needs 4.9'
 
 
 def test_affinity_limits_the_cores(tmp_path):
@@ -332,7 +332,7 @@ def test_an_override_above_the_memory_is_capped_with_a_warning(caplog):
             == 10  # floor(50 / 4.9): all of the available memory, not 80%
         )
         assert hw.resolve_workers(64, {}, 4.9, cores=64, available_gb=50.0) == 10
-    assert "available 50.0 GB holds 10" in caplog.text
+    assert "available 50.00 GB holds 10" in caplog.text
 
 
 def test_e98s_setting_fits_where_the_default_would_be_lower():
@@ -377,7 +377,7 @@ def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory(monkeyp
     monkeypatch.setattr(hw, "_available_gb", lambda: 5.5)  # 4.9 fits, but not in 80% of it
     assert verify.bootstrap_workers() == 1
     out = capsys.readouterr().out
-    assert "5.5 GB is available" in out and "20% free" in out
+    assert "5.50 GB is available" in out and "20% free" in out
     assert "COVSYN_WORKERS" not in out  # no override helps the checklist here
 
 
