@@ -134,13 +134,15 @@ def _physical_cores(root: Path, cpus: set[int]) -> int:
 
 
 def _quota(path: Path) -> int | None:
-    """CPUs a cgroup v2 cpu.max allows; None for no limit or a file it cannot read."""
+    """CPUs a cgroup v2 cpu.max allows; None for no file, no limit or a file it cannot read."""
     try:
         quota, period = path.read_text().split()
         if quota == "max":
             return None
         # A quota below one CPU still lets one worker run, slowly.
         return max(1, int(quota) // int(period))
+    except FileNotFoundError:
+        return None  # most levels of a cgroup path set no quota
     except (OSError, ValueError) as error:
         log.warning("ignoring the CPU quota in %s (%s)", path, error)
         return None
@@ -150,7 +152,8 @@ def _cgroup_limit(machine: Machine) -> int | None:
     """The tightest cgroup v2 CPU quota from the process's own cgroup up to the root.
 
     A systemd slice or a container sets cpu.max in the process's cgroup, not the root's, so
-    every level of the path /proc/self/cgroup names is read. cgroup v1 is not read.
+    every level of the path /proc/self/cgroup names is read. cgroup v1 is not read. It never
+    raises: a level it cannot read sets no limit.
     """
     base = machine.sys_root / "fs" / "cgroup"
     levels = [base]
@@ -165,7 +168,7 @@ def _cgroup_limit(machine: Machine) -> int | None:
             levels += [base.joinpath(*parts[: depth + 1]) for depth in range(len(parts))]
     except OSError:
         pass  # no /proc: only the root's quota applies
-    quotas = [_quota(level / "cpu.max") for level in levels if (level / "cpu.max").exists()]
+    quotas = [_quota(level / "cpu.max") for level in levels]
     return min((q for q in quotas if q is not None), default=None)
 
 
@@ -189,17 +192,15 @@ def _linux_cores(machine: Machine) -> CoreCount:
             cpus, method = set(allowed), "allowed cores in /sys topology (no P-core allowed)"
         else:
             cpus &= allowed
-    count = _physical_cores(root, cpus)
-    limit = _cgroup_limit(machine)
-    if limit is not None and limit < count:
-        return CoreCount(limit, f"{method}, limited by the cgroup quota")
-    return CoreCount(count, method)
+    return CoreCount(_physical_cores(root, cpus), method)
 
 
 def performance_core_count(machine: Machine | None = None) -> CoreCount:
     """The number of cores worth a worker on ``machine`` (this one by default)."""
     machine = machine or Machine()
     cpus = machine.cpu_count() or 1
+    # Read once and applied to the count found and to the fallback alike.
+    quota = _cgroup_limit(machine) if machine.platform.startswith("linux") else None
     try:
         if machine.platform == "darwin":
             found = _mac_cores(machine)
@@ -215,9 +216,7 @@ def performance_core_count(machine: Machine | None = None) -> CoreCount:
                 allowed = min(allowed, len(machine.affinity()))
             except OSError:
                 pass
-        if machine.platform.startswith("linux"):
-            allowed = min(allowed, _cgroup_limit(machine) or allowed)
-        allowed = max(1, allowed)
+        allowed = max(1, min(allowed, quota or allowed))
         log.warning(
             "could not detect the performance cores (%s); falling back to os.cpu_count() = %d%s",
             error,
@@ -225,6 +224,8 @@ def performance_core_count(machine: Machine | None = None) -> CoreCount:
             f", limited by the affinity or the cgroup quota to {allowed}" if allowed < cpus else "",
         )
         return CoreCount(allowed, "os.cpu_count() fallback")
+    if quota is not None and quota < found.count:
+        found = CoreCount(quota, f"{found.method}, limited by the cgroup quota")
     return CoreCount(max(1, min(found.count, cpus)), found.method)
 
 
@@ -252,7 +253,7 @@ def default_workers(
         raise InsufficientMemory(
             f"one worker needs {memory_per_worker_gb} GB, but only {available_gb:.1f} GB is "
             f"available, of which CovSyn uses {MEMORY_SHARE:.0%}; free memory, or set "
-            f"--workers or {ENV_VARIABLE} to start anyway"
+            f"{ENV_VARIABLE} (or --workers, where the command has it) to start anyway"
         )
     return min(cores, fitting)
 
@@ -347,9 +348,9 @@ def resolve_workers(
 def positive_int(text: str) -> int:
     """An argparse type for a worker count, so a bad ``--workers`` fails at parsing."""
     try:
-        return _override(text, "--workers")
-    except ValueError as error:
-        raise argparse.ArgumentTypeError(str(error)) from None
+        return _override(text, "the worker count")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"must be a positive whole number, got {text!r}") from None
 
 
 def add_workers_argument(parser: argparse.ArgumentParser) -> None:

@@ -80,9 +80,10 @@ def check(decision, name, value, target, unit='', ok=None, note='', ci=None, int
 # resampling, and the permutation test's generator is not reached with permutations=False. Each
 # worker LOADS the simulations itself (15.8 s, measured) instead of receiving them: one process
 # holds 4.9 GB of them, so sending them to every worker would cost more than the replicates do.
-# Memory is the binding constraint, not cores: each worker holds 4.9 GB, so main() sizes the
-# pool by cores and available memory (Task 2), overridden by COVSYN_WORKERS.
+# Memory is the binding constraint, not cores: each worker holds 4.9 GB, so bootstrap_workers()
+# sizes the pool by cores and available memory (Task 2), overridden by COVSYN_WORKERS.
 _WORKER_RUNS: list | None = None
+_WORKER_FIRST: list | None = None
 
 
 def bootstrap_workers() -> int:
@@ -94,10 +95,10 @@ def bootstrap_workers() -> int:
     """
     try:
         return hardware.resolve_workers(None, os.environ, hardware.CHECKLIST_GB_PER_WORKER)
-    except hardware.InsufficientMemory as error:
-        print(f'{error}; computing the bootstrap intervals in this process')
+    except hardware.InsufficientMemory:
+        print(f'not even one {hardware.CHECKLIST_GB_PER_WORKER} GB bootstrap worker fits in the '
+              'available memory; computing the bootstrap intervals in this process')
         return 1
-_WORKER_FIRST: list | None = None
 
 
 def init_replicate_worker(spread_dir, first_dir):

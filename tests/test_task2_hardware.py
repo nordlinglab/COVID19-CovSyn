@@ -354,17 +354,19 @@ def test_the_workers_option_rejects_non_positive_values_at_parsing(value):
 
 
 def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory(monkeypatch):
-    """Short of memory, the checklist computes the intervals in its own process."""
+    """Short of memory, the checklist computes the intervals in its own process.
+
+    The memory is faked, not the error, so the path from resolve_workers is the real one; the
+    module is imported afresh, as it reads sys.argv when imported.
+    """
     import importlib
     import sys
 
     monkeypatch.setattr(sys, "argv", ["verify_phase_d"])
+    monkeypatch.delitem(sys.modules, "covsyn.validation.verify_phase_d", raising=False)
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
     verify = importlib.import_module("covsyn.validation.verify_phase_d")
-
-    def no_memory(*args, **kwargs):
-        raise hw.InsufficientMemory("one worker needs 4.9 GB")
-
-    monkeypatch.setattr(verify.hardware, "resolve_workers", no_memory)
+    monkeypatch.setattr(hw, "_available_gb", lambda: 1.0)
     assert verify.bootstrap_workers() == 1
 
 
@@ -399,3 +401,12 @@ def test_a_cgroup_outside_the_namespace_is_not_followed(tmp_path):
     (tmp_path / "proc" / "self").mkdir(parents=True)
     (tmp_path / "proc" / "self" / "cgroup").write_text("0::/../x\n")
     assert hw.performance_core_count(linux(tmp_path, 16)).count == 8
+
+
+def test_an_unreadable_cgroup_file_never_stops_the_detection(tmp_path, caplog):
+    """A cpu.max the process cannot read (here a directory) sets no limit, on either path."""
+    (tmp_path / "fs" / "cgroup" / "cpu.max").mkdir(parents=True)
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        assert hw.performance_core_count(linux(tmp_path, 6)).count == 6  # the fallback
+        write_topology(tmp_path, smt_topology(4))
+        assert hw.performance_core_count(linux(tmp_path, 8)).count == 4  # the topology
