@@ -27,7 +27,6 @@ import numpy as np
 import pytest
 import regression_digest as rd
 from conftest import FIXTURES
-from pipeline_runner import PLATFORM_REL_TOL
 
 FIXTURE = json.loads((FIXTURES / "regression_run10.json").read_text(encoding="utf-8"))
 
@@ -40,7 +39,7 @@ def _same(a: float, b: float) -> bool:
 
 def _close(a: float, b: float) -> bool:
     """Equal to normal precision across platforms (B91); NaN only matches NaN."""
-    return _same(a, b) or math.isclose(a, b, rel_tol=PLATFORM_REL_TOL)
+    return _same(a, b) or math.isclose(a, b, rel_tol=rd.PLATFORM_REL_TOL)
 
 
 def test_cost_function_reproduces_run10(

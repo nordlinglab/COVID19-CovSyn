@@ -45,12 +45,16 @@ def test_report_step_output_is_unchanged(step: str, produced: dict[str, object])
     got = produced["reports"][step]
     want = FIXTURE["reports"][step]
     assert got.get("returncode") == want.get("returncode")
-    if "content" in got:
-        assert "content" in want, "fixture predates B91's JSON comparison; run make_pipeline_fixtures.py"
+    # The fixture decides how a step is compared, and each step must be compared one way.
+    if "content" in want or "content" in got:
+        assert "content" in want and "content" in got, (
+            "the fixture and the pipeline disagree on how this step is recorded; "
+            "run make_pipeline_fixtures.py")
         assert pr.json_mismatches(want["content"], got["content"]) == []
     else:
-        digest = got.get("stdout_sha256", got.get("sha256"))
-        assert digest == want.get("stdout_sha256", want.get("sha256"))
+        expected = want.get("stdout_sha256", want.get("sha256"))
+        assert expected is not None, "the fixture records no output for this step"
+        assert got.get("stdout_sha256", got.get("sha256")) == expected
 
 
 @pytest.mark.parametrize("step", sorted(FIXTURE["figures"]))

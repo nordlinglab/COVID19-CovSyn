@@ -17,6 +17,11 @@ from typing import Any
 
 import numpy as np
 
+# B91: the professor accepted reproduction "to within normal precision differences between the
+# packages". One relative tolerance, used for the regression test's cost and for the checklist
+# JSON of the pipeline test, with no absolute floor in either.
+PLATFORM_REL_TOL = 1e-6
+
 
 def _encode(obj: Any, out: hashlib._Hash) -> None:
     """Feed a canonical encoding of ``obj`` into the hash ``out``."""

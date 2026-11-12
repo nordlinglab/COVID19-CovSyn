@@ -7,7 +7,8 @@ Run on the compute server whenever a decision changes the output (last for B91-B
     uv run python tests/make_pipeline_fixtures.py
 
 Runs every step of ``pipeline_runner`` on the small fixed dataset and records, per step, the exit
-code and a digest of its normalised output; figure steps also record which files they wrote.
+code and a digest of its normalised output, except the checklist JSON, which is kept whole and
+compared to normal precision (B91); figure steps also record which files they wrote.
 """
 
 from __future__ import annotations

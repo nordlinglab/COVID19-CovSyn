@@ -64,3 +64,23 @@ def test_large_input():
     b = {"checks": [{"value": float(i)} for i in range(5000)]}
     b["checks"][4321]["value"] += 1.0
     assert pr.json_mismatches(a, b) == ["checks[4321].value: want 4321.0, got 4322.0"]
+
+
+def test_shared_keys_are_compared_when_other_keys_differ():
+    """One slow pipeline run reports a new key and a moved value together."""
+    a = {"checks": {"k": 0.2444}, "old": 1}
+    b = {"checks": {"k": 0.3}, "new": 1}
+    found = pr.json_mismatches(a, b)
+    assert found[0].startswith("<root>: keys differ")
+    assert any(m.startswith("checks.k: ") for m in found)
+
+
+def test_workdir_is_replaced_in_keys_and_escaped_strings(tmp_path):
+    """Replaced after parsing, so a path JSON escapes is found, in keys as well as values."""
+    workdir = tmp_path / "rün"
+    path = tmp_path / "checks.json"
+    import json
+
+    path.write_text(json.dumps({str(workdir / "a"): str(workdir / "b")}), encoding="utf-8")
+    assert "\\u" in path.read_text(encoding="utf-8")
+    assert pr.normalised_json(path, workdir) == {"<WORKDIR>/a": "<WORKDIR>/b"}

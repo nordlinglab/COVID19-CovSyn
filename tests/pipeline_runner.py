@@ -6,8 +6,8 @@
 the run report, the constraint table and the validation figures.
 Moving those scripts can break them silently (finding E71), so this runs every step on a small
 dataset built from the run 10 best vector with fixed seeds, and records what each step produced:
-a digest of every data file, the text each report script prints, and the figures each plot
-script writes.
+a digest of every data file, the text each report script prints, the checklist JSON itself
+(compared to a relative PLATFORM_REL_TOL, B91), and the figures each plot script writes.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import regression_digest as rd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUN_DIR = "firefly_result/phaseD_run10"
@@ -126,24 +128,19 @@ def normalised_file_digest(path: Path, workdir: Path) -> str:
                           .encode()).hexdigest()
 
 
-# B91: the professor accepted reproduction "to within normal precision differences between the
-# packages". One relative tolerance, used by the regression test's cost and by the checklist
-# JSON here, with no absolute floor in either.
-PLATFORM_REL_TOL = 1e-6
-
-
 def _replace_workdir(value: object, workdir: str) -> object:
     if isinstance(value, str):
         return value.replace(workdir, "<WORKDIR>")
     if isinstance(value, dict):
-        return {k: _replace_workdir(v, workdir) for k, v in value.items()}
+        return {k.replace(workdir, "<WORKDIR>"): _replace_workdir(v, workdir)
+                for k, v in value.items()}
     if isinstance(value, list):
         return [_replace_workdir(v, workdir) for v in value]
     return value
 
 
 def normalised_json(path: Path, workdir: Path) -> object:
-    """A JSON file's content with the temporary directory replaced in its strings.
+    """A JSON file's content with the temporary directory replaced in its keys and strings.
 
     Replaced after parsing, so a path that JSON escapes (non-ASCII, backslashes) is still found.
     """
@@ -153,10 +150,10 @@ def normalised_json(path: Path, workdir: Path) -> object:
 def json_mismatches(want: object, got: object, where: str = "") -> list[str]:
     """Where two JSON values differ beyond normal precision (B91), with both values.
 
-    Floats match to a relative PLATFORM_REL_TOL, with no absolute floor so tiny probabilities are
-    still compared relatively, and NaN matches NaN. Everything else must be equal and of the
-    same type: integers (counts carry no platform rounding), booleans, text, None, keys and
-    lengths, since a verdict or a note that changes is a real change.
+    Floats match to a relative regression_digest.PLATFORM_REL_TOL, with no absolute floor so
+    tiny probabilities are still compared relatively, and NaN matches NaN. Everything else must
+    be equal and of the same type: integers (counts carry no platform rounding), booleans, text,
+    None, keys and lengths, since a verdict or a note that changes is a real change.
 
     Returns:
         One 'path: want ..., got ...' line per difference.
@@ -164,13 +161,15 @@ def json_mismatches(want: object, got: object, where: str = "") -> list[str]:
     path = where or "<root>"
     if isinstance(want, float) and isinstance(got, float):
         same = (math.isnan(want) and math.isnan(got)) or math.isclose(want, got,
-                                                                      rel_tol=PLATFORM_REL_TOL)
+                                                                      rel_tol=rd.PLATFORM_REL_TOL)
         return [] if same else [f"{path}: want {want!r}, got {got!r}"]
     if isinstance(want, dict) and isinstance(got, dict):
-        if set(want) != set(got):
-            return [f"{path}: keys differ, {sorted(set(want) ^ set(got))}"]
-        return [m for k in sorted(want)
-                for m in json_mismatches(want[k], got[k], f"{where}.{k}" if where else k)]
+        # Keys that differ are reported, and the shared keys are still compared, so one slow
+        # pipeline run shows every difference.
+        differ = sorted(set(want) ^ set(got))
+        found = [f"{path}: keys differ, {differ}"] if differ else []
+        return found + [m for k in sorted(set(want) & set(got))
+                        for m in json_mismatches(want[k], got[k], f"{where}.{k}" if where else k)]
     if isinstance(want, list) and isinstance(got, list):
         if len(want) != len(got):
             return [f"{path}: length {len(want)}, got {len(got)}"]
