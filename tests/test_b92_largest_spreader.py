@@ -12,6 +12,8 @@ the same number without resampling noise.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -118,10 +120,13 @@ def test_charged_below_the_band_in_units_of_its_lower_bound():
 
 
 def test_no_large_spreader_in_one_evaluation_costs_nothing():
-    """100% means no simulated case reached 8. With 300 cases per evaluation, fewer than
-    Taiwan's 579, that happens about 70% of the time even when the model matches Taiwan, so
-    charging the upper tail charged noise: run 10 paid 6.0 for it. Only the lower tail is
-    charged; the checklist, on 1000 or more cases, still judges both."""
+    """100%, no simulated case reaching 8, costs nothing.
+
+    With 300 cases per evaluation, fewer than Taiwan's 579, that happens about 70% of the time
+    even when the model matches Taiwan, so charging the upper tail charged noise: run 10 paid
+    6.0 for it. Only the lower tail is charged; the checklist, on 1000 or more cases, still
+    judges both.
+    """
     alone = {name: np.nan for name in fo.OUTCOME_TARGETS}
     alone["largest_spreader_percentile"] = 100.0
     assert fo.outcome_penalty(alone) == 0.0
@@ -136,3 +141,16 @@ def test_checklist_uses_the_same_statistic(monkeypatch):
     v = importlib.import_module("covsyn.validation.verify_phase_d")
     assert v.largest_spreader_percentile is largest_spreader_percentile
     assert v.TAIWAN_TRACING_LARGEST is TAIWAN_TRACING_LARGEST
+
+
+def test_checklist_note_lists_the_verdicts_inputs():
+    """The note gives the counts the exact verdict is computed from, not a range of the largest.
+
+    A range of quantiles cannot share the verdict's mid-rank tie rule, so it could print
+    '95% 8-9' beside a failing 1.5% (code review 2026-11-12, round 2).
+    """
+    source = Path(__file__).resolve().parents[1] / "src/covsyn/validation/verify_phase_d.py"
+    text = source.read_text(encoding="utf-8")
+    block = text[text.index("percentile of a largest of") : text.index("# B93 (2026-11-12)")]
+    assert "infecting 9 or more" in block and "exactly 8" in block
+    assert "95%" not in block and "rng" not in block
