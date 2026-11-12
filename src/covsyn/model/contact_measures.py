@@ -335,11 +335,12 @@ def layer_offspring(contacts: Iterable[Mapping[str, Any]], layer: str) -> np.nda
         layer: Layer name, as in '<layer>_effective_contacts'.
 
     Returns:
-        One count per case; NaN entries and a list that is None count as no infection.
+        One count per case; NaN entries and a list that is None count as no infection
+        (np.asarray(None, dtype=float) is NaN, which np.nansum adds as 0).
 
     Raises:
         KeyError: When a case has no such layer, so a misspelt layer does not read as zero.
     """
     key = f"{layer}_effective_contacts"
-    return np.array([float(np.nansum(np.asarray([] if c[key] is None else c[key], dtype=float)))
-                     for c in contacts], dtype=float)
+    return np.array([float(np.nansum(np.asarray(c[key], dtype=float))) for c in contacts],
+                    dtype=float)

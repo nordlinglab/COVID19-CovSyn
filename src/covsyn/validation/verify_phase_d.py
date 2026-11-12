@@ -151,6 +151,26 @@ def offspring_counts(contacts):
                      for c in contacts], dtype=float)
 
 
+def largest_spreader_note(counts: np.ndarray) -> str:
+    """The B71 note: the counts the exact verdict is computed from (B92).
+
+    No range of quantiles shares the verdict's mid-rank tie rule, so a range could contradict
+    it; the counts above and at Taiwan's largest cannot (code review 2026-11-12).
+
+    Args:
+        counts: Offspring count of every simulated index case.
+
+    Returns:
+        The note text; the largest is 'none' when there are no counts.
+    """
+    reference = TAIWAN_TRACING_LARGEST
+    largest = f'{counts.max():.0f}' if len(counts) else 'none'
+    return (f'B71: Taiwan tracing largest {reference} over {TAIWAN_TRACING_CASES} cases '
+            f'(confirmed contacts, an upper bound, E80); simulated index cases infecting more '
+            f'than {reference}: {int(np.sum(counts > reference))} of {len(counts)}; exactly '
+            f'{reference}: {int(np.sum(counts == reference))}; largest: {largest}')
+
+
 def negative_binomial_k(counts):
     """B61: the objective's maximum-likelihood k (was the method of moments)."""
     return offspring_dispersion(counts)
@@ -337,17 +357,11 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
     # discrete and ties at 8 often, so a tie counts as half a sample, as in B85's
     # reference_percentile; counting every tie as below failed an 8 that sat in neither tail
     # (code review 2026-11-09, F4). B92: the percentile is computed exactly, by the function the
-    # objective charges. The note lists the counts it is computed from instead of a range of
-    # the largest: resampled maxima were redrawn in every bootstrap replicate, and no range of
-    # quantiles shares the verdict's mid-rank tie rule, so either could contradict the verdict.
-    at_least_9, exactly_8 = int(np.sum(counts >= 9)), int(np.sum(counts == 8))
+    # objective charges; largest_spreader_note says why the note lists counts, not a range.
     check('B17', f'samples of {TAIWAN_TRACING_CASES} cases, percentile of a largest of '
           f'{TAIWAN_TRACING_LARGEST}', largest_spreader_percentile(counts), (2.5, 97.5),
           '%', interval=False,
-          note=f'B71: Taiwan tracing largest {TAIWAN_TRACING_LARGEST} over {TAIWAN_TRACING_CASES} '
-               f'cases (confirmed contacts, an upper bound, E80); simulated index cases '
-               f'infecting 9 or more {at_least_9} of {len(counts)}, exactly 8 {exactly_8}, '
-               f'largest {counts.max():.0f}')
+          note=largest_spreader_note(counts))
     # B93 (2026-11-12): the professor asked for a hospital-cluster mechanism only if the data has
     # one. It does (links 34 -> 42, 34 -> 45, 27 -> 32, all "the same hospital"), but run 23
     # already produced it at Taiwan's rate (8.2% and 1.8% against 9.1% and 1.8%), so it is
