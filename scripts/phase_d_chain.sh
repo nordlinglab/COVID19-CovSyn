@@ -52,6 +52,10 @@ say() { echo "[chain $(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 # uv run takes the interpreter and covsyn from the environment uv sync built; --no-sync keeps
 # it from reinstalling packages under the optimiser, which may still be running.
 run() { uv run --no-sync python -m "$@"; }
+# Task 2 replaced both with COVSYN_WORKERS; a chain started with them by hand is told so.
+if [ -n "${VERIFY_WORKERS:-}${CPU_CORES:-}" ]; then
+    say 'WARNING: VERIFY_WORKERS and CPU_CORES are no longer read; set COVSYN_WORKERS instead'
+fi
 
 # Every step runs uv run --no-sync, so the environment is checked against uv.lock once, here,
 # before the chain waits: the check changes nothing, so it is safe while the optimiser runs, it

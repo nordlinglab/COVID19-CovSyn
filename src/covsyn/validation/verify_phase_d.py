@@ -744,8 +744,13 @@ def main():
 
         # The spread and first-outbreak runs are resampled independently: they are separate
         # scenarios and need not be equal in number.
-        workers = hardware.resolve_workers(None, os.environ,
-                                           hardware.CHECKLIST_GB_PER_WORKER)
+        try:
+            workers = hardware.resolve_workers(None, os.environ,
+                                               hardware.CHECKLIST_GB_PER_WORKER)
+        except hardware.InsufficientMemory as error:
+            # The serial path needs no worker memory: this process already holds the runs.
+            print(f'{error}; computing the bootstrap intervals in this process')
+            workers = 1
         if workers > 1:
             intervals = bootstrap_in_parallel(SPREAD, FIRST, (len(runs), len(first_runs)),
                                               BOOTSTRAP_REPLICATES, workers)

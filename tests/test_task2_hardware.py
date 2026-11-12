@@ -53,14 +53,17 @@ def smt_topology(physical: int, threads: int = 2) -> dict[int, tuple[int, int]]:
 
 def mac(answers: dict[str, str], cpus: int) -> hw.Machine:
     """A Mac answering ``answers`` with ``cpus`` logical CPUs."""
-    return hw.Machine(platform="darwin", sysctl=sysctl_answers(answers), cpu_count=lambda: cpus)
+    return hw.Machine(
+        platform="darwin", sysctl=sysctl_answers(answers), cpu_count=lambda: cpus, affinity=None
+    )
 
 
 def linux(root: Path, cpus: int, affinity: set[int] | None = None) -> hw.Machine:
-    """A Linux machine reading ``root`` as /sys, with ``cpus`` logical CPUs."""
+    """A Linux machine reading ``root`` as /sys and ``root/proc`` as /proc, with ``cpus`` CPUs."""
     return hw.Machine(
         platform="linux",
         sys_root=root,
+        proc_root=root / "proc",
         cpu_count=lambda: cpus,
         affinity=(lambda: affinity) if affinity is not None else None,
     )
@@ -111,7 +114,9 @@ def test_a_cgroup_quota_of_four_cpus_limits_to_four(tmp_path):
 
 def test_every_read_failing_falls_back_to_os_cpu_count(caplog):
     """A denied sysctl falls back to os.cpu_count() with a warning."""
-    machine = hw.Machine(platform="darwin", sysctl=denied_sysctl, cpu_count=lambda: 10)
+    machine = hw.Machine(
+        platform="darwin", sysctl=denied_sysctl, cpu_count=lambda: 10, affinity=None
+    )
     with caplog.at_level(logging.WARNING, logger=hw.__name__):
         found = hw.performance_core_count(machine)
     assert (found.count, found.method) == (10, "os.cpu_count() fallback")
@@ -256,3 +261,95 @@ def test_any_sys_tree_gives_between_one_and_cpu_count(
     (root / "fs" / "cgroup").mkdir(parents=True)
     (root / "fs" / "cgroup" / "cpu.max").write_text(quota)
     assert 1 <= hw.performance_core_count(linux(root, cpus)).count <= cpus
+
+
+# --- code review 2026-11-13 -------------------------------------------------------------------
+
+
+def test_p_cores_outside_the_affinity_count_the_allowed_cores(tmp_path):
+    """Pinned to the E-cores of a hybrid Intel, the allowed physical cores are counted."""
+    cores = smt_topology(8) | {16 + e: (0, 8 + e) for e in range(8)}
+    write_topology(tmp_path, cores)
+    (tmp_path / "devices" / "cpu_core").mkdir(parents=True)
+    (tmp_path / "devices" / "cpu_core" / "cpus").write_text("0-15\n")
+    assert hw.performance_core_count(linux(tmp_path, 24, affinity={16, 17, 18})).count == 3
+
+
+def test_the_fallback_respects_the_affinity(caplog):
+    """A failed read falls back to the CPUs this process may use, not every CPU."""
+    machine = hw.Machine(
+        platform="darwin", sysctl=denied_sysctl, cpu_count=lambda: 32, affinity=lambda: {0, 1, 2, 3}
+    )
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        assert hw.performance_core_count(machine).count == 4
+
+
+def test_a_malformed_cgroup_file_keeps_the_core_count(tmp_path, caplog):
+    """An unreadable quota is no reason to throw away the cores already counted."""
+    write_topology(tmp_path, smt_topology(8))
+    (tmp_path / "fs" / "cgroup").mkdir(parents=True)
+    (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("garbage\n")
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        assert hw.performance_core_count(linux(tmp_path, 16)).count == 8
+    assert "cpu.max" in caplog.text
+
+
+def test_the_quota_of_the_process_own_cgroup_is_found(tmp_path):
+    """A systemd slice with CPUQuota=400% sets cpu.max in the process's cgroup, not the root."""
+    write_topology(tmp_path, smt_topology(16))
+    nested = tmp_path / "fs" / "cgroup" / "system.slice" / "covsyn.service"
+    nested.mkdir(parents=True)
+    (tmp_path / "fs" / "cgroup" / "cpu.max").write_text("max 100000\n")
+    (tmp_path / "fs" / "cgroup" / "system.slice" / "cpu.max").write_text("800000 100000\n")
+    (nested / "cpu.max").write_text("400000 100000\n")
+    proc = tmp_path / "proc" / "self"
+    proc.mkdir(parents=True)
+    (proc / "cgroup").write_text("0::/system.slice/covsyn.service\n")
+    machine = hw.Machine(
+        platform="linux",
+        sys_root=tmp_path,
+        proc_root=tmp_path / "proc",
+        cpu_count=lambda: 32,
+        affinity=None,
+    )
+    assert hw.performance_core_count(machine).count == 4
+
+
+def test_an_override_above_the_memory_is_capped_with_a_warning(caplog):
+    """E98: COVSYN_WORKERS=64 for the optimiser must not start 64 checklist workers."""
+    with caplog.at_level(logging.WARNING, logger=hw.__name__):
+        assert (
+            hw.resolve_workers(None, {"COVSYN_WORKERS": "64"}, 4.9, cores=64, available_gb=50.0)
+            == 8
+        )
+        assert hw.resolve_workers(64, {}, 4.9, cores=64, available_gb=50.0) == 8
+    assert "memory" in caplog.text
+
+
+def test_an_override_below_the_memory_is_taken_as_given():
+    """Lowering the count, E98's use, is never capped."""
+    assert hw.resolve_workers(None, {"COVSYN_WORKERS": "3"}, 4.9, cores=64, available_gb=500.0) == 3
+
+
+def test_an_override_starts_one_worker_even_without_the_memory():
+    """The refusal tells the user to override; the override then runs one worker."""
+    assert hw.resolve_workers(4, {}, 4.9, cores=8, available_gb=1.0) == 1
+
+
+@pytest.mark.parametrize("value", ["0", "-3", "x"])
+def test_the_workers_option_rejects_non_positive_values_at_parsing(value):
+    """The parser reports the error, with no traceback after the command started."""
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    hw.add_workers_argument(parser)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--workers", value])
+
+
+def test_the_checklist_falls_back_to_the_serial_bootstrap_without_memory():
+    """Short of memory, the checklist computes the intervals in its own process."""
+    text = (Path(hw.__file__).parents[1] / "validation" / "verify_phase_d.py").read_text(
+        encoding="utf-8"
+    )
+    assert "except hardware.InsufficientMemory" in text

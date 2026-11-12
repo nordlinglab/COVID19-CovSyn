@@ -44,6 +44,8 @@ CHAIN_VARIABLES = (
 # Set by the chain itself: OPTIMIZER_RUN after revalidation, PARAMETER_PATH on its call of
 # data_synthesis.sh, so a value left in the tmux server's environment cannot reach either.
 SET_BY_CHAIN = {"OPTIMIZER_RUN", "PARAMETER_PATH"}
+# Removed by Task 2 and read only to warn a run that still sets them; never forwarded.
+REMOVED_VARIABLES = {"VERIFY_WORKERS", "CPU_CORES"}
 
 
 def _code(path: Path) -> list[str]:
@@ -81,7 +83,7 @@ def test_the_list_holds_every_default_the_scripts_read():
     The scripts read the environment only this way; a variable read otherwise is not caught
     here, a limit accepted for scripts that Task 4 of the rework plan replaces.
     """
-    read = (_defaults(CHAIN) | _defaults(SYNTHESIS)) - SET_BY_CHAIN
+    read = (_defaults(CHAIN) | _defaults(SYNTHESIS)) - SET_BY_CHAIN - REMOVED_VARIABLES
     assert read <= set(CHAIN_VARIABLES)
 
 
@@ -806,16 +808,16 @@ def test_the_checklist_uses_the_shared_helper_for_its_worker_count():
     [
         ("8", 8),  # E98's setting for this shared machine, about 39 GB
         ("1", 1),
-        ("64", 64),  # above the cores and the memory, because both only set a default
+        ("12", 12),  # above the cores, which only set a default
         (" 8 ", 8),  # a forwarded value can carry whitespace
     ],
 )
 def test_an_explicit_worker_count_is_taken_as_given(value, expected):
-    """An explicit setting overrides the default, beyond the cores and the memory included."""
+    """An explicit setting overrides the default, beyond the cores included."""
     from covsyn.runtime.hardware import resolve_workers
 
     env = {"COVSYN_WORKERS": value}
-    assert resolve_workers(None, env, 4.9, cores=32, available_gb=50.0) == expected
+    assert resolve_workers(None, env, 4.9, cores=4, available_gb=100.0) == expected
 
 
 @pytest.mark.parametrize("value", ["", "   ", None])
@@ -835,3 +837,11 @@ def test_a_value_that_is_not_a_positive_count_falls_back(value):
 
     env = {"COVSYN_WORKERS": value}
     assert resolve_workers(None, env, 4.9, cores=32, available_gb=1000.0) == 32
+
+
+@pytest.mark.parametrize("script", [SCRIPT, CHAIN])
+def test_a_removed_worker_variable_is_reported(tmp_path, script):
+    """VERIFY_WORKERS and CPU_CORES are gone (Task 2); a run still setting them is told so."""
+    text = script.read_text(encoding="utf-8")
+    for name in ("VERIFY_WORKERS", "CPU_CORES"):
+        assert re.search(rf'\$\{{{name}:-\}}.*COVSYN_WORKERS', text, re.DOTALL), name

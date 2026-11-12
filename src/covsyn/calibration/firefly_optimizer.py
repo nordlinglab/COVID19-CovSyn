@@ -1559,8 +1559,9 @@ def main() -> None:
     parser.add_argument('--warm_start', type=str, nargs='*', default=[])
     args = parser.parse_args()
 
-    max_workers = hardware.resolve_workers(args.workers, os.environ, None)
-    print(f'{hardware.performance_core_count()}; workers: {max_workers}')
+    cores = hardware.performance_core_count()
+    max_workers = hardware.resolve_workers(args.workers, os.environ, None, cores=cores.count)
+    print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
     mode = args.mode
     print(f'mode: {mode}')

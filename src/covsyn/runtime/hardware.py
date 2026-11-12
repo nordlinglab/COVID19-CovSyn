@@ -66,6 +66,7 @@ class Machine:
     platform: str = sys.platform
     sysctl: Callable[[str], str] = _run_sysctl
     sys_root: Path = Path("/sys")
+    proc_root: Path = Path("/proc")
     cpu_count: Callable[[], int | None] = os.cpu_count
     affinity: Callable[[], set[int]] | None = field(default_factory=_affinity)
 
@@ -132,15 +133,43 @@ def _physical_cores(root: Path, cpus: set[int]) -> int:
     return len(pairs)
 
 
-def _cgroup_limit(root: Path) -> int | None:
-    path = root / "fs" / "cgroup" / "cpu.max"
-    if not path.exists():
+def _quota(path: Path) -> int | None:
+    """CPUs a cgroup v2 cpu.max allows; None for no limit or a file it cannot read."""
+    try:
+        quota, period = path.read_text().split()
+        if quota == "max":
+            return None
+        # A quota below one CPU still lets one worker run, slowly.
+        return max(1, int(quota) // int(period))
+    except (OSError, ValueError) as error:
+        log.warning("ignoring the CPU quota in %s (%s)", path, error)
         return None
-    quota, period = path.read_text().split()
-    if quota == "max":
-        return None
-    # A quota below one CPU still lets one worker run, slowly.
-    return max(1, int(quota) // int(period))
+
+
+def _cgroup_limit(machine: Machine) -> int | None:
+    """The tightest cgroup v2 CPU quota from the process's own cgroup up to the root.
+
+    A systemd slice or a container sets cpu.max in the process's cgroup, not the root's, so
+    every level of the path /proc/self/cgroup names is read. cgroup v1 is not read.
+    """
+    base = machine.sys_root / "fs" / "cgroup"
+    levels = [base]
+    try:
+        for line in (machine.proc_root / "self" / "cgroup").read_text().splitlines():
+            if line.startswith("0::"):
+                relative = Path(line[3:].strip().lstrip("/"))
+                levels += [base / relative.parents[i] for i in range(len(relative.parts) - 1)]
+                levels.append(base / relative)
+    except OSError:
+        pass  # no /proc: only the root's quota applies
+    quotas = [
+        q
+        for level in levels
+        if (level / "cpu.max").exists()
+        for q in [_quota(level / "cpu.max")]
+        if q is not None
+    ]
+    return min(quotas, default=None)
 
 
 def _linux_cores(machine: Machine) -> CoreCount:
@@ -156,9 +185,13 @@ def _linux_cores(machine: Machine) -> CoreCount:
         }
         method = "physical cores in /sys topology"
     if machine.affinity is not None:
-        cpus &= machine.affinity()
+        allowed = machine.affinity()
+        if p_cores.exists() and not cpus & allowed:
+            # Pinned to E-cores only: those are the cores this process can use.
+            cpus, method = set(allowed), "allowed cores in /sys topology (no P-core allowed)"
+        cpus &= allowed
     count = _physical_cores(root, cpus)
-    limit = _cgroup_limit(root)
+    limit = _cgroup_limit(machine)
     if limit is not None and limit < count:
         return CoreCount(limit, f"{method}, limited by the cgroup quota")
     return CoreCount(count, method)
@@ -176,12 +209,19 @@ def performance_core_count(machine: Machine | None = None) -> CoreCount:
         else:
             raise OSError(f"no core detection for platform {machine.platform!r}")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
+        allowed = cpus
+        if machine.affinity is not None:
+            try:
+                allowed = max(1, min(cpus, len(machine.affinity())))
+            except OSError:
+                pass
         log.warning(
-            "could not detect the performance cores (%s); falling back to os.cpu_count() = %d",
+            "could not detect the performance cores (%s); falling back to os.cpu_count() = %d%s",
             error,
             cpus,
+            f", limited to the {allowed} CPUs this process may use" if allowed < cpus else "",
         )
-        return CoreCount(cpus, "os.cpu_count() fallback")
+        return CoreCount(allowed, "os.cpu_count() fallback")
     return CoreCount(max(1, min(found.count, cpus)), found.method)
 
 
@@ -204,13 +244,7 @@ def default_workers(
         cores = performance_core_count().count
     if memory_per_worker_gb is None:
         return cores
-    if not memory_per_worker_gb > 0 or not math.isfinite(memory_per_worker_gb):
-        raise ValueError(
-            f"memory per worker must be a positive number of GB, got {memory_per_worker_gb}"
-        )
-    if available_gb is None:
-        available_gb = _available_gb()
-    fitting = math.floor(MEMORY_SHARE * available_gb / memory_per_worker_gb)
+    fitting, available_gb = _fitting(memory_per_worker_gb, available_gb)
     if fitting < 1:
         raise InsufficientMemory(
             f"one worker needs {memory_per_worker_gb} GB, but only {available_gb:.1f} GB is "
@@ -218,6 +252,43 @@ def default_workers(
             f"--workers or {ENV_VARIABLE} to start anyway"
         )
     return min(cores, fitting)
+
+
+def _fitting(memory_per_worker_gb: float, available_gb: float | None) -> tuple[int, float]:
+    """Workers that fit in 80% of the available memory, and the available memory read."""
+    if not memory_per_worker_gb > 0 or not math.isfinite(memory_per_worker_gb):
+        raise ValueError(
+            f"memory per worker must be a positive number of GB, got {memory_per_worker_gb}"
+        )
+    if available_gb is None:
+        available_gb = _available_gb()
+    return math.floor(MEMORY_SHARE * available_gb / memory_per_worker_gb), available_gb
+
+
+def _capped(
+    workers: int, source: str, memory_per_worker_gb: float | None, available_gb: float | None
+) -> int:
+    """An override, capped at what fits in memory for a memory-bound stage (E98).
+
+    One COVSYN_WORKERS sets every step of the chain, so a count meant for the optimiser's cores
+    must not start that many 4.9 GB checklist workers. At least one worker starts, since the
+    refusal of default_workers tells the user to override in order to start anyway.
+    """
+    if memory_per_worker_gb is None:
+        return workers
+    fitting, available_gb = _fitting(memory_per_worker_gb, available_gb)
+    if workers > max(1, fitting):
+        log.warning(
+            "%s asks for %d workers, but %.1f GB of memory holds %d at %s GB each; starting %d",
+            source,
+            workers,
+            available_gb,
+            fitting,
+            memory_per_worker_gb,
+            max(1, fitting),
+        )
+        return max(1, fitting)
+    return workers
 
 
 def _override(value: str | int, source: str) -> int:
@@ -245,26 +316,42 @@ def resolve_workers(
     into a run, where a typo must neither stop the run nor mean zero workers. ``--workers`` is
     read when the command starts, so an unusable one stops it at once.
 
+    For a memory-bound stage (``memory_per_worker_gb`` given) an override above what fits in
+    memory is capped there, with a warning; an override below it is taken as given.
+
     Raises:
         ValueError: ``--workers`` is not a positive whole number.
     """
     if cli is not None:
-        return _override(cli, "--workers")
+        return _capped(_override(cli, "--workers"), "--workers", memory_per_worker_gb, available_gb)
     # Spelled out, not ENV_VARIABLE, so test_b86's scan of environment reads finds it.
     requested = env.get("COVSYN_WORKERS", "")
     if requested.strip():
         try:
-            return _override(requested, ENV_VARIABLE)
+            workers = _override(requested, ENV_VARIABLE)
         except ValueError as error:
             log.warning("%s; using the default instead", error)
+        else:
+            return _capped(workers, ENV_VARIABLE, memory_per_worker_gb, available_gb)
     return default_workers(memory_per_worker_gb, cores, available_gb)
+
+
+def positive_int(text: str) -> int:
+    """An argparse type for a positive whole number, so a bad value fails at parsing."""
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive whole number, got {text!r}")
+    return value
 
 
 def add_workers_argument(parser: argparse.ArgumentParser) -> None:
     """Add the ``--workers`` override every entry point shares."""
     parser.add_argument(
         "--workers",
-        type=int,
+        type=positive_int,
         default=None,
         help=f"worker processes; overrides {ENV_VARIABLE} and the default, "
         "which is the performance cores limited by memory",

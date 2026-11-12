@@ -133,7 +133,8 @@ def main(argv: list[str] | None = None) -> None:
     source, out_dir, top = args.source, args.out_dir, args.top
     env = dict(os.environ)
     if args.workers is not None:
-        env[hardware.ENV_VARIABLE] = str(hardware.resolve_workers(args.workers, env, None))
+        # Every step reads it; the checklist still caps it by memory (resolve_workers).
+        env[hardware.ENV_VARIABLE] = str(args.workers)
     with open(source / "revalidation.csv") as f:
         table = list(csv.DictReader(f))
     best = np.atleast_2d(np.loadtxt(source / "firefly_best.txt"))

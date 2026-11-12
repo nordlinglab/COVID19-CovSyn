@@ -32,6 +32,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 WARM_START="${WARM_START:-firefly_result/phaseD_run10/firefly_best.txt}"
+# Task 2 replaced both with COVSYN_WORKERS; a run still setting them is told, not ignored.
+if [ -n "${VERIFY_WORKERS:-}${CPU_CORES:-}" ]; then
+  echo "WARNING: VERIFY_WORKERS and CPU_CORES are no longer read; set COVSYN_WORKERS instead"
+fi
 
 if tmux has-session -t =firefly 2>/dev/null || tmux has-session -t =chain 2>/dev/null; then
   echo "ERROR: a firefly or chain session is already running, refusing to start"

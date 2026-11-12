@@ -10,7 +10,6 @@ import pstats
 import sys
 import time
 import traceback
-import multiprocessing
 from pathlib import Path
 from numpy.random import default_rng
 from scipy.stats import genextreme
