@@ -306,7 +306,11 @@ def test_launch_checks_uv_and_the_environment_before_the_sessions():
 
 
 def test_readme_explains_the_slow_tests_on_linux():
-    """The README warns that the slow regression tests reproduce macOS fixtures (E103)."""
+    """The README says how the slow tests treat another platform.
+
+    Until B91 it warned that they failed on Linux (E103); since B91 they pass there, with the
+    objective and the checklist JSON compared to a relative 1e-6.
+    """
     readme = (REPO_ROOT / "README.md").read_text()
-    assert "E103" in readme
+    assert "B91" in readme and "1e-6" in readme and "Linux" in readme
     assert "[Tests](#tests)" in readme

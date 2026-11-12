@@ -35,8 +35,10 @@ def collect(workdir: Path) -> dict[str, object]:
         reports[name] = {"returncode": done.returncode,
                          "stdout_sha256": hashlib.sha256(text.encode()).hexdigest(),
                          "stdout_head": text[:400]}
+    # B91: the checklist JSON is kept whole and compared to normal precision, because the
+    # platforms' dispersion fits differ at 1e-8; a digest required bit-identical numbers.
     reports["verify_phaseD_json"] = {
-        "sha256": pr.normalised_file_digest(workdir / "phaseD_checks.json", workdir)}
+        "content": pr.normalised_json(workdir / "phaseD_checks.json", workdir)}
     reports["constraint_summary"] = {
         "sha256": pr.normalised_file_digest(workdir / "constraint_check" / "constraint_summary.csv",
                                             workdir)}

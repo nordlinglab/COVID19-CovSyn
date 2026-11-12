@@ -13,6 +13,8 @@ script writes.
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import os
 import re
 import shutil
@@ -122,3 +124,58 @@ def normalised_file_digest(path: Path, workdir: Path) -> str:
     """SHA-256 of a text file after replacing the temporary directory, which it may record."""
     return hashlib.sha256(path.read_text(encoding="utf-8").replace(str(workdir), "<WORKDIR>")
                           .encode()).hexdigest()
+
+
+# B91: the professor accepted reproduction "to within normal precision differences between the
+# packages". One relative tolerance, used by the regression test's cost and by the checklist
+# JSON here, with no absolute floor in either.
+PLATFORM_REL_TOL = 1e-6
+
+
+def _replace_workdir(value: object, workdir: str) -> object:
+    if isinstance(value, str):
+        return value.replace(workdir, "<WORKDIR>")
+    if isinstance(value, dict):
+        return {k: _replace_workdir(v, workdir) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_replace_workdir(v, workdir) for v in value]
+    return value
+
+
+def normalised_json(path: Path, workdir: Path) -> object:
+    """A JSON file's content with the temporary directory replaced in its strings.
+
+    Replaced after parsing, so a path that JSON escapes (non-ASCII, backslashes) is still found.
+    """
+    return _replace_workdir(json.loads(path.read_text(encoding="utf-8")), str(workdir))
+
+
+def json_mismatches(want: object, got: object, where: str = "") -> list[str]:
+    """Where two JSON values differ beyond normal precision (B91), with both values.
+
+    Floats match to a relative PLATFORM_REL_TOL, with no absolute floor so tiny probabilities are
+    still compared relatively, and NaN matches NaN. Everything else must be equal and of the
+    same type: integers (counts carry no platform rounding), booleans, text, None, keys and
+    lengths, since a verdict or a note that changes is a real change.
+
+    Returns:
+        One 'path: want ..., got ...' line per difference.
+    """
+    path = where or "<root>"
+    if isinstance(want, float) and isinstance(got, float):
+        same = (math.isnan(want) and math.isnan(got)) or math.isclose(want, got,
+                                                                      rel_tol=PLATFORM_REL_TOL)
+        return [] if same else [f"{path}: want {want!r}, got {got!r}"]
+    if isinstance(want, dict) and isinstance(got, dict):
+        if set(want) != set(got):
+            return [f"{path}: keys differ, {sorted(set(want) ^ set(got))}"]
+        return [m for k in sorted(want)
+                for m in json_mismatches(want[k], got[k], f"{where}.{k}" if where else k)]
+    if isinstance(want, list) and isinstance(got, list):
+        if len(want) != len(got):
+            return [f"{path}: length {len(want)}, got {len(got)}"]
+        return [m for i, (a, b) in enumerate(zip(want, got, strict=True))
+                for m in json_mismatches(a, b, f"{where}[{i}]")]
+    if type(want) is type(got) and want == got:
+        return []
+    return [f"{path}: want {want!r}, got {got!r}"]
