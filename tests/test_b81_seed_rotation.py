@@ -205,3 +205,12 @@ def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, t
                        demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,
                        Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)
     assert json.loads((tmp_path / "config.json").read_text())["seed"] == 7
+
+
+def test_every_file_the_optimiser_writes_marks_its_directory(run):
+    """claim_run_directory's list must cover what a run leaves in its directory."""
+    from covsyn.runtime import runs
+
+    _, _, path = run
+    written = {p.name for p in path.iterdir()}
+    assert written and written <= set(runs.RUN_OUTPUTS), written - set(runs.RUN_OUTPUTS)

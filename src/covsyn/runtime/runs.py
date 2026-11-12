@@ -43,6 +43,8 @@ RUN_OUTPUTS = (
     "firefly_result.txt",
     "firefly_best.txt",
     "firefly_worst.txt",
+    "revalidation",  # written into the run directory by the chain
+    "selected",
 )
 KINDS = ("models", "tables", "figures")
 # Lowercase kebab-case: safe in any path, and free of the "_" that separates the id's fields.
@@ -137,11 +139,28 @@ def claim_run_directory(path: Path) -> Path:
     found = [name for name in RUN_OUTPUTS if (path / name).exists()]
     if found:
         raise FileExistsError(
-            f"{path} already holds a run ({', '.join(found)}); give a new directory, or "
-            "leave FIREFLY_RUN unset for a fresh one"
+            f"{path} already holds a run ({', '.join(found)}); give a new directory "
+            "(FIREFLY_RUN or --run-dir), or leave it out for a fresh one"
         )
     path.mkdir(parents=True, exist_ok=True)
+    # Claimed by creating config.json exclusively, which is atomic: of two runs started on one
+    # directory at once, the second fails here. write_config later fills it in.
+    with open(path / "config.json", "x", encoding="utf-8"):
+        pass
     return path
+
+
+def non_negative_int(text: str) -> int:
+    """An argparse type for a seed, checked before any run directory is created."""
+    import argparse
+
+    try:
+        value = int(text)
+    except ValueError:
+        value = -1
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be a whole number of at least 0, got {text!r}")
+    return value
 
 
 def run_dir_argument(argv: list[str], position: int, usage: str) -> Path:

@@ -1581,7 +1581,7 @@ def main() -> None:
                         help='run directory (default: results/models/<new run id>)')
     parser.add_argument('--config-name', default='phase-d',
                         help='configuration name in a new run id (lowercase kebab-case)')
-    parser.add_argument('--seed', type=int, default=None,
+    parser.add_argument('--seed', type=runs.non_negative_int, default=None,
                         help='seed of the initial population, as config.json records it '
                              '(default: drawn and recorded)')
     args = parser.parse_args()

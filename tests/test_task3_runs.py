@@ -190,8 +190,9 @@ def test_a_given_directory_holding_a_run_is_refused(tmp_path, output):
 
 def test_a_given_new_or_empty_directory_is_claimed(tmp_path):
     """The launcher's fresh directory, or one the user names, is created and used."""
-    assert runs.claim_run_directory(tmp_path / "a" / "b").is_dir()
     assert runs.claim_run_directory(tmp_path / "a" / "b") == tmp_path / "a" / "b"
+    (tmp_path / "empty").mkdir()
+    assert runs.claim_run_directory(tmp_path / "empty").is_dir()
 
 
 def test_results_live_under_the_repository_root():
@@ -253,3 +254,29 @@ def test_the_optimiser_claims_a_given_directory_and_names_a_new_one(tmp_path, mo
     monkeypatch.setattr(runs.new_run_directory, "__defaults__", (tmp_path / "results",))
     created = fo.run_directory_for(None, "phase-d")
     assert created.parent == tmp_path / "results" / "models" and created.is_dir()
+
+
+def test_a_claim_is_atomic(tmp_path):
+    """The first claim creates config.json, so a second, concurrent one is refused."""
+    runs.claim_run_directory(tmp_path / "d")
+    assert (tmp_path / "d" / "config.json").exists()
+    with pytest.raises(FileExistsError):
+        runs.claim_run_directory(tmp_path / "d")
+
+
+@pytest.mark.parametrize("chain_output", ["revalidation", "selected"])
+def test_a_directory_with_chain_output_holds_a_run(tmp_path, chain_output):
+    """A run whose optimiser files are gone still has its chain's revalidation or selection."""
+    (tmp_path / chain_output).mkdir()
+    with pytest.raises(FileExistsError, match="--run-dir"):
+        runs.claim_run_directory(tmp_path)
+
+
+@pytest.mark.parametrize("text", ["-1", "x", "1.5"])
+def test_a_bad_seed_is_refused_when_parsing(text):
+    """Refused before the optimiser creates a run directory it would then leave empty."""
+    import argparse
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        runs.non_negative_int(text)
+    assert runs.non_negative_int("0") == 0
