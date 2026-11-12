@@ -13,6 +13,7 @@ reachability gate (lesson 2) for the re-weighted target.
 
 Usage: uv run python scripts/probes/probe_tail_price.py
 """
+import os
 import concurrent.futures
 import pickle
 
@@ -21,6 +22,7 @@ import numpy as np
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
+from covsyn.runtime import hardware
 
 STARTS = {
     'run7': 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_120_run7/firefly_best.txt',
@@ -56,7 +58,7 @@ def main():
                                               fo.OUTCOME_TARGETS['community_median'][:2]))
 
     pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns))
+        max_workers=hardware.resolve_workers(None, os.environ, None), initializer=fast_cost.init_worker, initargs=(demo, columns))
     header = '%-5s %6s %6s | %6s %6s %6s %5s | %8s %8s %8s %8s %9s' % (
         'start', 'k', 'lam', 'ratio', 'med', 'p90', 'zero', 'total', 'no_tail', 'contact',
         'outcome', 'd_no_tail')

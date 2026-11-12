@@ -8,6 +8,7 @@ Samples the health care contact block P[21:28] uniformly inside its bounds, leav
 parameter at the seed, and reports the range of medical_early_share and medical_late_share that
 the bounds can actually produce. Also reports whether both targets can be met at once.
 """
+import os
 import concurrent.futures
 import pickle
 
@@ -15,6 +16,7 @@ import numpy as np
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.runtime import hardware
 
 N_DRAWS = 120
 N_SIMS = 120
@@ -70,7 +72,7 @@ def main():
           % (EARLY_TARGET[0], EARLY_TARGET[1], LATE_TARGET[0], LATE_TARGET[1]))
     print('Cheng 2020: early 0.554, late 0.367\n')
 
-    ex = concurrent.futures.ProcessPoolExecutor(max_workers=32)
+    ex = concurrent.futures.ProcessPoolExecutor(max_workers=hardware.resolve_workers(None, os.environ, None))
     rows = []
     for draw in range(N_DRAWS):
         P = seed.copy()

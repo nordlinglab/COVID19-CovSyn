@@ -4,6 +4,7 @@ Imports the pre-refactor optimizer as firefly_optimizer_baseline and the refacto
 firefly_optimizer, evaluates the same parameter vector through both, and compares the total
 cost and every entry of LAST_COST_PARTS exactly. Also times both.
 """
+import os
 import concurrent.futures
 import pickle
 import time
@@ -12,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from covsyn.calibration import firefly_optimizer as new
+from covsyn.runtime import hardware
 import firefly_optimizer_baseline as old
 
 D = Path('Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
@@ -28,7 +30,7 @@ def main():
     # Three different parameter vectors, not just the best one, so the comparison also
     # covers vectors the optimizer would have rejected.
     rows = [int(np.argmin(res[:, -1])), 0, len(res) // 2]
-    ex = concurrent.futures.ProcessPoolExecutor(max_workers=32)
+    ex = concurrent.futures.ProcessPoolExecutor(max_workers=hardware.resolve_workers(None, os.environ, None))
     old.cost_function(res[rows[0], 1:-1], demo, ex, *args)          # warm the pool
     all_ok = True
     for row in rows:

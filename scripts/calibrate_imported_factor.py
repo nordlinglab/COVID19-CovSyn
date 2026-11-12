@@ -34,6 +34,7 @@ import pandas as pd
 
 sys.path.insert(0, "src")
 from covsyn.model.data_synthesis_main import IMPORTED_FACTOR, run_covid  # noqa: E402
+from covsyn.runtime import hardware  # noqa: E402
 
 LAYERS = ("household", "school", "workplace", "health_care", "municipality")
 SEED_START = 710000
@@ -157,7 +158,8 @@ def main():
     rows = np.atleast_2d(np.loadtxt(sys.argv[1]))
     P = rows[np.argmin(rows[:, -1]), 1:-1]
     runs = int(sys.argv[2]) if len(sys.argv) > 2 else 400
-    workers = int(sys.argv[3]) if len(sys.argv) > 3 else os.cpu_count()
+    workers = hardware.resolve_workers(int(sys.argv[3]) if len(sys.argv) > 3 else None,
+                                       os.environ, None)
     isolation = sys.argv[4] if len(sys.argv) > 4 else "imported_delay"
     q0 = float(sys.argv[5]) if len(sys.argv) > 5 else IMPORTED_FACTOR
     with open("variable/demographic_parameters.pkl", "rb") as f:

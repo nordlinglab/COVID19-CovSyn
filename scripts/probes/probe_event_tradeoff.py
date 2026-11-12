@@ -21,6 +21,7 @@ Usage (repository root, after uv sync):
     uv run python scripts/probes/probe_event_tradeoff.py BEST_TXT OUT_CSV [N_INDEX_CASES]
 """
 
+import os
 import concurrent.futures
 import copy
 import csv
@@ -35,6 +36,7 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
 from covsyn.figures.plot_results import create_array_cheng2020_fig2
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.runtime import hardware
 
 PROBABILITIES = [0.0, 0.012, 0.025, 0.05, 0.075, 0.10, 0.15, 0.20]
 OTHERS = [i for i, (name, _) in enumerate(fast_cost.CHENG_GROUPS) if name == "Cheng others"][0]
@@ -118,7 +120,7 @@ def main():
     )
 
     pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns)
+        max_workers=hardware.resolve_workers(None, os.environ, None), initializer=fast_cost.init_worker, initargs=(demo, columns)
     )
     rows_out = []
     for p in PROBABILITIES:

@@ -54,6 +54,7 @@ ENTRY_POINTS = {
     "covsyn-plot-todolist923": "covsyn.figures.plot_todolist923:main",
     "covsyn-check-constraints": "covsyn.validation.check_constraints:main",
     "covsyn-reproduce-wu2025": "covsyn.figures.reproduce_wu2025:main",
+    "covsyn-cores": "covsyn.runtime.hardware:main",
 }
 
 INSTALL_COMMANDS = (

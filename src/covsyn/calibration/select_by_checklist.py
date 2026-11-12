@@ -14,7 +14,10 @@ the chain reports the chosen candidate's checklist again on an independent seed 
 
 Usage (repository root, after uv sync):
     uv run python -m covsyn.calibration.select_by_checklist REVALIDATION_DIR OUT_DIR \\
-        [TOP] [CPU_CORES]
+        [TOP] [--workers N]
+
+Each step chooses its own worker count (Task 2): the data synthesis by cores, the checklist by
+cores and memory. ``--workers`` sets COVSYN_WORKERS for every step.
 
 Writes OUT_DIR (a copy of REVALIDATION_DIR whose firefly_best.txt holds only the chosen vector),
 OUT_DIR/selection.csv and the candidates' checklists under OUT_DIR/candidates/.
@@ -22,6 +25,7 @@ OUT_DIR/selection.csv and the candidates' checklists under OUT_DIR/candidates/.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import os
@@ -33,6 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from covsyn.calibration.revalidation import write_best_file
+from covsyn.runtime import hardware
 
 MONTE_CARLO = 1000
 AGE_RR_CASES = 20000
@@ -58,7 +63,7 @@ def _run(args: list[str], log, env: dict | None = None) -> None:
     )
 
 
-def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, cpu_cores: int) -> dict:
+def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, env: dict) -> dict:
     """Generate the candidate's data, measure its age risk ratio and run the checklist."""
     workdir.mkdir(parents=True, exist_ok=True)
     write_best_file(workdir / "firefly_best.txt", vector[None, :], np.array([cost]))
@@ -77,12 +82,11 @@ def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, cpu_cores
                     str(MONTE_CARLO),
                     "--result_path",
                     str(workdir / name),
-                    "--cpu_cores",
-                    str(cpu_cores),
                     "--parameter_path",
                     str(workdir),
                 ],
                 log,
+                env=env,
             )
         age_rr = workdir / "age_rr.json"
         _run(
@@ -95,8 +99,9 @@ def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, cpu_cores
                 str(age_rr),
             ],
             log,
+            env=env,
         )
-        env = {**os.environ, "AGE_RR_FILE": str(age_rr)}
+        env = {**env, "AGE_RR_FILE": str(age_rr)}
         _run(
             [
                 "-m",
@@ -117,11 +122,19 @@ def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, cpu_cores
     return {"failed": failed, "within_noise": within_noise}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Evaluate the TOP revalidated candidates and write the chosen one to OUT_DIR."""
-    source, out_dir = Path(sys.argv[1]), Path(sys.argv[2])
-    top = int(sys.argv[3]) if len(sys.argv) > 3 else 5
-    cpu_cores = int(sys.argv[4]) if len(sys.argv) > 4 else 24
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("source", type=Path)
+    parser.add_argument("out_dir", type=Path)
+    parser.add_argument("top", type=int, nargs="?", default=5)
+    hardware.add_workers_argument(parser)  # Task 2: was CPU_CORES, default 24 (D3)
+    args = parser.parse_args(argv)
+    source, out_dir, top = args.source, args.out_dir, args.top
+    env = dict(os.environ)
+    if args.workers is not None:
+        # Every step reads it; the checklist still caps it by memory (resolve_workers).
+        env[hardware.ENV_VARIABLE] = str(args.workers)
     with open(source / "revalidation.csv") as f:
         table = list(csv.DictReader(f))
     best = np.atleast_2d(np.loadtxt(source / "firefly_best.txt"))
@@ -142,7 +155,7 @@ def main() -> None:
         index = int(r["candidate"])
         cost = float(r["validation_mean"])
         counts = evaluate_candidate(
-            vectors[index], cost, out_dir / "candidates" / f"candidate_{index}", cpu_cores
+            vectors[index], cost, out_dir / "candidates" / f"candidate_{index}", env
         )
         rows.append({"candidate": index, "validation_mean": cost, **counts})
         print(

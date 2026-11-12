@@ -47,6 +47,10 @@ Modules run as `uv run python -m covsyn.<package>.<module>`, and the optimiser a
 `pyproject.toml` lists them under `[project.scripts]`.
 The shell scripts run every module through `uv run`.
 
+Every module that starts worker processes uses the performance cores, which `uv run covsyn-cores` prints with how it found them;
+the checklist also starts no more workers than fit in 80% of the available memory.
+`--workers N` or the environment variable `COVSYN_WORKERS` overrides that count, in that order.
+
 ### 1. Search bounds and seed vector
 
 ```bash

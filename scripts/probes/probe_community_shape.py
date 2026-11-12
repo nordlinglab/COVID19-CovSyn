@@ -22,6 +22,7 @@ import numpy as np
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.runtime import hardware
 
 N_DRAWS = 100
 N_SIMS = 400
@@ -59,7 +60,7 @@ def main():
 
     rng = np.random.default_rng(1)
     executor = concurrent.futures.ProcessPoolExecutor(
-        max_workers=32, initializer=fast_cost.init_worker, initargs=(demo, columns))
+        max_workers=hardware.resolve_workers(None, os.environ, None), initializer=fast_cost.init_worker, initargs=(demo, columns))
     rows = []
     for _ in range(N_DRAWS):
         P = base.copy()

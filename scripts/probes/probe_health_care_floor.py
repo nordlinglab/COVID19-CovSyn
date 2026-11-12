@@ -21,6 +21,7 @@ The shape mode raises P[21] to 2-4 times the base and draws P[24] between the ba
 ceiling and the timing parameters P[25:28] inside their bounds, to see whether moving contacts
 after onset meets the floor without the pre-onset daily rate passing its ceiling of 0.30.
 """
+import os
 import concurrent.futures
 import pickle
 import sys
@@ -30,6 +31,7 @@ import numpy as np
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.runtime import hardware
 
 BLOCK = slice(21, 28)
 NAMES = ['contact_p', 'contact_previous_day_p', 'healthy_p', 'symptom_p',
@@ -83,7 +85,7 @@ def grid(base, lb, ub, demo, simulations, second=23):
     """P[21] and P[second] scaled, clipped to their bounds; the rest at the base."""
     print('\n%7s %7s  ' % ('x P21', 'P%d' % second) + '  '.join('%10s' % k[:10] for k in KEYS)
           + '  charged')
-    with concurrent.futures.ProcessPoolExecutor(max_workers=24) as ex:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=hardware.resolve_workers(None, os.environ, None)) as ex:
         for a in GRID_FACTORS:
             for b in SECOND_FACTORS[second]:
                 P = base.copy()
@@ -101,7 +103,7 @@ def shape_search(base, lb, ub, demo, draws, simulations):
     hits = 0
     print('\n%8s %6s %6s %6s %6s  ' % ('P21', 'P24', 'P25', 'P26', 'P27')
           + '  '.join('%10s' % k[:10] for k in KEYS) + '  charged')
-    with concurrent.futures.ProcessPoolExecutor(max_workers=24) as ex:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=hardware.resolve_workers(None, os.environ, None)) as ex:
         for _ in range(draws):
             P = base.copy()
             P[21] = min(base[21] * rng.uniform(2.0, 4.0), ub[0])
@@ -147,7 +149,7 @@ def main():
 
     rng = np.random.default_rng(0)
     rows = []
-    with concurrent.futures.ProcessPoolExecutor(max_workers=24) as ex:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=hardware.resolve_workers(None, os.environ, None)) as ex:
         measured = outcomes(ex, base, demo, simulations)
         print('\nbase vector: ' + '  '.join('%s %.3f' % (k, measured[k]) for k in KEYS))
         for _ in range(draws):

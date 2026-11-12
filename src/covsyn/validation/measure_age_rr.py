@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from covsyn.calibration import fast_cost
+from covsyn.runtime import hardware
 from covsyn.model.data_synthesis_main import run_covid
 
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
@@ -126,9 +127,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('directory', nargs='?', default=None)
     parser.add_argument('n', nargs='?', type=int, default=20000)
-    parser.add_argument('--workers', type=int, default=32)
+    hardware.add_workers_argument(parser)  # Task 2: was 32 workers (D3)
     parser.add_argument('--out', default='validation_reference/age_rr.json')
     args = parser.parse_args()
+    workers = hardware.resolve_workers(args.workers, os.environ, None)
 
     directory = args.directory
     if directory is None:
@@ -144,8 +146,8 @@ def main():
     print('age risk ratio on %d index cases, parameters from %s' % (args.n, directory))
     start = time.perf_counter()
     executor = concurrent.futures.ProcessPoolExecutor(
-        max_workers=args.workers, initializer=fast_cost.init_worker, initargs=(demo, columns))
-    per_task = max(args.n // (args.workers * 4), 1)
+        max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns))
+    per_task = max(args.n // (workers * 4), 1)
     batches = [list(range(i, min(i + per_task, args.n))) for i in range(0, args.n, per_task)]
     contacts = np.zeros((5, 4))
     infections = np.zeros((5, 4))
