@@ -50,3 +50,12 @@ def test_unknown_layer_is_an_error():
     """A misspelt layer must not read as zero infections."""
     with pytest.raises(KeyError):
         layer_offspring([{"health_care_effective_contacts": [1]}], "hospital")
+
+
+def test_arrays_as_saved_contact_data_holds_them():
+    """Contact data loaded from .npy may hold arrays, whose truth value is ambiguous."""
+    contacts = [
+        {"health_care_effective_contacts": np.array([1.0, 0.0, 1.0])},
+        {"health_care_effective_contacts": np.array([])},
+    ]
+    assert layer_offspring(contacts, "health_care").tolist() == [2.0, 0.0]
