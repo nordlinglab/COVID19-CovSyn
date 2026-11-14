@@ -217,3 +217,27 @@ def test_an_empty_mode_is_refused_by_the_optimiser(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", ""])
     with pytest.raises(SystemExit, match="mode error"):
         fo.main()
+
+
+def test_a_missing_progress_table_stops_a_resume(tmp_path, uninterrupted):
+    """Generations are done but their table is gone: stop and say where it should be."""
+    path = tmp_path / "lost"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(3 * POP + 5))
+    runs.progress_path(path).unlink()
+    with pytest.raises(FileNotFoundError, match="no progress table"):
+        optimise(path, objective, resume=True)
+    assert not runs.progress_path(path).exists()  # not rebuilt
+
+
+def test_a_run_killed_before_any_generation_resumes_without_a_table(tmp_path, uninterrupted):
+    """Only the initial population was scored, so no progress row exists yet: that is fine."""
+    whole, whole_path = uninterrupted
+    path = tmp_path / "early"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(POP + 3))  # killed in generation 0
+    assert not runs.progress_path(path).exists()
+    optimise(path, objective, resume=True)
+    assert progress(path) == progress(whole_path)

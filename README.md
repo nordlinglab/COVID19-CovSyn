@@ -89,6 +89,9 @@ nohup uv run covsyn-pipeline --resume <run-id> > pipeline.out 2>&1 &
 ```
 
 continues an interrupted run where it stopped.
+`--resume` takes the run id, or `results/models/<run-id>` written out as a whole path;
+anything else, such as `.`, a subdirectory of the run or the place the run is stored, is refused before anything is written, because its tables and figures could then go elsewhere.
+A run directory that is a link to other storage is not supported.
 `src/covsyn/pipeline/default.toml` holds the settings, such as the warm start (default: run 10) and the previous run's `checks.json` to compare with;
 `--config` also takes another TOML file.
 

@@ -69,11 +69,19 @@ def config():
     return pc.load("default")
 
 
+def prun(config, run_dir, execute=None, resume=False):
+    """pr.run with the scratch results root the run directory is in (results/models/<id>)."""
+    import os
+
+    root = Path(os.path.abspath(run_dir)).parent.parent
+    return pr.run(config, run_dir, execute=execute, resume=resume, results_root=root)
+
+
 def run_pipeline(tmp_path, config, recorder, resume=False):
     """Run the pipeline into a fresh results tree under tmp_path."""
     root = tmp_path / "results"
     run_dir = root / "models" / "20261115-090000_b30c141_phase-d"
-    status = pr.run(config, run_dir, execute=recorder, resume=resume)
+    status = prun(config, run_dir, execute=recorder, resume=resume)
     return status, run_dir
 
 
@@ -395,7 +403,7 @@ def test_resume_skips_the_finished_stages(tmp_path, config):
     status, run_dir = run_pipeline(tmp_path, config, recorder)
     assert status != 0
     recorder = Recorder()
-    status = pr.run(None, run_dir, execute=recorder, resume=True)
+    status = prun(None, run_dir, execute=recorder, resume=True)
     assert status == 0
     assert modules(recorder)[0] == "covsyn.model.data_synthesis_main"
     assert [
@@ -410,7 +418,7 @@ def test_resume_continues_the_optimiser_from_its_checkpoint(tmp_path, config):
     (run_dir / "checkpoints").mkdir()
     (run_dir / "checkpoints" / "generation_0003.npz").write_text("x")
     recorder = Recorder()
-    pr.run(None, run_dir, execute=recorder, resume=True)
+    prun(None, run_dir, execute=recorder, resume=True)
     assert recorder.calls[0][2:] == ["--resume", str(run_dir)]
 
 
@@ -419,7 +427,7 @@ def test_resume_uses_the_runs_own_configuration(tmp_path, config):
     recorder = Recorder(fail={"covsyn.model.data_synthesis_main"})
     _, run_dir = run_pipeline(tmp_path, pc.replace(config, monte_carlo=40), recorder)
     recorder = Recorder()
-    pr.run(None, run_dir, execute=recorder, resume=True)
+    prun(None, run_dir, execute=recorder, resume=True)
     synthesis = recorder.calls[0]
     assert synthesis[synthesis.index("--monte_carlo_number") + 1] == "40"
 
@@ -428,15 +436,15 @@ def test_resuming_a_finished_run_runs_nothing(tmp_path, config):
     """Every stage is in run.log."""
     _, run_dir = run_pipeline(tmp_path, config, Recorder())
     recorder = Recorder()
-    assert pr.run(None, run_dir, execute=recorder, resume=True) == 0
+    assert prun(None, run_dir, execute=recorder, resume=True) == 0
     assert recorder.calls == []
 
 
 def test_resuming_a_directory_that_is_no_pipeline_run_is_an_error(tmp_path):
     """Without the saved configuration there is nothing to resume."""
-    (tmp_path / "x").mkdir()
+    (tmp_path / "results" / "models" / "x").mkdir(parents=True)
     with pytest.raises(FileNotFoundError, match="pipeline"):
-        pr.run(None, tmp_path / "x", execute=Recorder(), resume=True)
+        prun(None, tmp_path / "results" / "models" / "x", execute=Recorder(), resume=True)
 
 
 def test_a_new_run_refuses_a_directory_holding_a_run(tmp_path, config):
@@ -445,7 +453,7 @@ def test_a_new_run_refuses_a_directory_holding_a_run(tmp_path, config):
     run_dir.mkdir(parents=True)
     (run_dir / "firefly_best.txt").write_text("1\n")
     with pytest.raises(FileExistsError):
-        pr.run(config, run_dir, execute=Recorder())
+        prun(config, run_dir, execute=Recorder())
 
 
 # --- the command line -------------------------------------------------------------------------
@@ -455,7 +463,7 @@ def test_the_command_resumes_a_run_by_id(tmp_path, monkeypatch):
     """--resume <run-id> names results/models/<run-id>."""
     seen = {}
 
-    def fake_run(config, run_dir, execute=None, resume=False):
+    def fake_run(config, run_dir, execute=None, resume=False, results_root=None):
         seen.update(config=config, run_dir=run_dir, resume=resume)
         return 0
 
@@ -498,7 +506,7 @@ def test_an_earlier_wu_figure_is_removed_before_drawing(tmp_path, config):
     stale = root / "figures" / "r" / "wu2025" / "fig3.png"
     stale.parent.mkdir(parents=True)
     stale.write_text("old")
-    pr.run(config, run_dir, execute=Recorder())
+    prun(config, run_dir, execute=Recorder())
     assert not stale.exists()
 
 
@@ -507,7 +515,7 @@ def test_a_resumed_revalidation_starts_afresh(tmp_path, config):
     recorder = Recorder(fail={"covsyn.calibration.revalidation"})
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     (run_dir / "revalidation" / "stale.txt").write_text("old")
-    pr.run(None, run_dir, execute=Recorder(), resume=True)
+    prun(None, run_dir, execute=Recorder(), resume=True)
     assert not (run_dir / "revalidation" / "stale.txt").exists()
 
 
@@ -522,7 +530,7 @@ def test_an_optimiser_killed_before_its_first_checkpoint_starts_again(tmp_path, 
     (run_dir / "checkpoints").mkdir()
     (run_dir / "checkpoints" / "initial.tmp.npz").write_text("cut off")
     recorder = Recorder()
-    pr.run(None, run_dir, execute=recorder, resume=True)
+    prun(None, run_dir, execute=recorder, resume=True)
     first = recorder.calls[0]
     assert "--run-dir" in first and "--resume" not in first
     assert not (run_dir / "checkpoints").exists() or not list((run_dir / "checkpoints").iterdir())
@@ -561,10 +569,10 @@ def test_a_run_in_use_cannot_be_resumed(tmp_path, config):
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # as the orphaned optimiser would hold it
     try:
         with pytest.raises(RuntimeError, match="in use"):
-            pr.run(None, run_dir, execute=Recorder(), resume=True)
+            prun(None, run_dir, execute=Recorder(), resume=True)
     finally:
         os.close(fd)
-    assert pr.run(None, run_dir, execute=Recorder(), resume=True) == 0
+    assert prun(None, run_dir, execute=Recorder(), resume=True) == 0
 
 
 def test_a_step_inherits_the_runs_lock(tmp_path):
@@ -589,11 +597,11 @@ def test_a_cut_off_run_log_line_does_not_stop_a_resume(tmp_path, config):
     with open(run_dir / "run.log", "a") as f:
         f.write('{"stage": "synth')
     recorder = Recorder()
-    assert pr.run(None, run_dir, execute=recorder, resume=True) == 0
+    assert prun(None, run_dir, execute=recorder, resume=True) == 0
     assert modules(recorder)[0] == "covsyn.model.data_synthesis_main"
     # The stage after the cut-off line is recorded on its own line, so it is not run again.
     assert "synthesise" in pr.finished_stages(run_dir)
-    assert pr.run(None, run_dir, execute=(again := Recorder()), resume=True) == 0
+    assert prun(None, run_dir, execute=(again := Recorder()), resume=True) == 0
     assert again.calls == []
 
 
@@ -628,36 +636,12 @@ def test_run_hands_its_lock_to_the_real_steps_and_releases_it(tmp_path, config, 
 
     monkeypatch.setattr(pr, "run_module", fake)
     run_dir = tmp_path / "results" / "models" / "r"
-    assert pr.run(config, run_dir) == 0
+    assert prun(config, run_dir) == 0
     assert seen and all(len(fds) == 1 for fds in seen)
     import os
 
     os.close(pr.acquire_lock(run_dir))  # free: the run released it
 
-
-def test_a_linked_run_keeps_its_layout_however_it_is_named(tmp_path, config, monkeypatch):
-    """A linked run's tables and progress table stay in results/tables/r, however it is named.
-
-    results/models/r links to other storage; it is resumed by the storage path and as ".".
-    """
-    from covsyn.runtime import runs
-
-    monkeypatch.setattr(runs, "RESULTS_ROOT", tmp_path / "results")
-    storage = tmp_path / "storage" / "r"
-    storage.mkdir(parents=True)
-    models = tmp_path / "results" / "models"
-    models.mkdir(parents=True)
-    (models / "r").symlink_to(storage)
-    pr.run(config, models / "r", execute=Recorder(fail={"covsyn.model.data_synthesis_main"}))
-    resumed = Recorder(fail={"covsyn.validation.verify_phase_d"})
-    pr.run(None, storage, execute=resumed, resume=True)
-    synthesis = next(a for a in resumed.calls if a[1] == "covsyn.model.data_synthesis_main")
-    assert synthesis[synthesis.index("--parameter_path") + 1] == str(models / "r" / "selected")
-    monkeypatch.chdir(storage)  # the working directory inside a link is the physical one
-    pr.run(None, Path("."), execute=Recorder(), resume=True)
-    assert (tmp_path / "results" / "tables" / "r" / "report.txt").exists()
-    assert not (storage / "tables").exists() and not (storage / "figures").exists()
-    assert runs.progress_path(storage / "selected") == tmp_path / "results/tables/r/progress.csv"
 
 def test_check_gap_reads_this_runs_spread_simulations(tmp_path, config):
     """It read a fixed synthetic_data_results_spread_Taiwan_weight in the working directory."""
@@ -672,7 +656,7 @@ def test_a_relative_run_directory_is_made_absolute(tmp_path, config, monkeypatch
     """Steps run from the repository root, so a path relative to elsewhere must not reach them."""
     monkeypatch.chdir(tmp_path)
     recorder = Recorder()
-    pr.run(config, Path("results/models/rel"), execute=recorder)
+    prun(config, Path("results/models/rel"), execute=recorder)
     optimiser = recorder.calls[0]
     assert optimiser[optimiser.index("--run-dir") + 1] == str(tmp_path / "results/models/rel")
 

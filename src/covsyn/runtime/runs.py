@@ -159,35 +159,6 @@ def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: 
     return claim_run_directory(new_run_path(config_name, root, **id_fields))
 
 
-def canonical_run_dir(path: Path | str) -> Path:
-    """A run directory as results/models/<id> when that is the same directory, else absolute.
-
-    A run may live on other storage behind a link in results/models, under any name. Named by
-    its storage path, or as "." from inside it (the working directory is the physical one), it
-    would lose its results/tables and results/figures siblings; named this way it keeps them.
-    The path itself or one of its parents (as for run/selected) is matched, by file identity
-    and not by name, against each entry of results/models. Where results/models has no entry
-    for the run, the path stands, so a link added or removed during a run moves its tables.
-    """
-    path = Path(os.path.abspath(path))
-    models = RESULTS_ROOT / "models"
-    entries = []
-    try:
-        entries = [entry for entry in models.iterdir() if entry.is_dir()]
-    except OSError:
-        return path
-    for level in (path, *path.parents):
-        if level.parent == models:
-            return path  # already named through results/models
-        for entry in entries:
-            try:
-                if os.path.samefile(entry, level):
-                    return entry / path.relative_to(level)
-            except OSError:
-                continue
-    return path
-
-
 def run_root(path: Path) -> Path:
     """The run directory a path belongs to: the ancestor directly under a ``models`` directory.
 
@@ -207,7 +178,7 @@ def progress_path(run_dir: Path) -> Path:
     ``results/tables/<run-id>/progress.csv`` for a run under ``results/models/<run-id>``, else
     ``progress.csv`` in the run directory itself.
     """
-    root = run_root(canonical_run_dir(run_dir))
+    root = run_root(Path(os.path.abspath(run_dir)))
     if root.parent.name == "models":
         return root.parent.parent / "tables" / root.name / "progress.csv"
     return root / "progress.csv"
@@ -228,9 +199,9 @@ def check_unclaimed(path: Path) -> None:
         if level.is_symlink() and not level.exists() or level.exists() and not level.is_dir():
             raise FileExistsError(f"{level} is not a directory; give a run directory")
     found = [n for n in RUN_OUTPUTS if (path / n).exists() or (path / n).is_symlink()]
-    table = progress_path(path)  # through results/models, however the path is named
-    if table.parent.parent.name == "tables" and table.exists():
-        found.append(str(table))
+    table = progress_path(path)
+    if table != Path(os.path.abspath(path)) / "progress.csv" and table.exists():
+        found.append(str(table))  # in results/tables/<run-id>, not counted by RUN_OUTPUTS
     if found:
         raise FileExistsError(
             f"{path} already holds a run ({', '.join(found)}); give a new directory "

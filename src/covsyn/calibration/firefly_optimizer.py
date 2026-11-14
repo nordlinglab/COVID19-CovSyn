@@ -1557,7 +1557,14 @@ class Firefly:
             evaluations = int(checkpoint['evaluations'])
             new_alpha = float(checkpoint['alpha'])
             start = int(checkpoint['generation']) + 1
-            drop_progress_after(runs.progress_path(result_path), start - 1)
+            table = runs.progress_path(result_path)
+            # A finished generation wrote its progress row before its checkpoint, so a missing
+            # table means it is elsewhere or lost: stop, rather than start a new one.
+            if start > 0 and not table.exists():
+                raise FileNotFoundError(
+                    f'{result_path} has generations up to {start - 1} but no progress table '
+                    f'at {table}; nothing is rebuilt or looked for elsewhere')
+            drop_progress_after(table, start - 1)
         # search_range = ub - lb
 
         for generation in tqdm(range(start, max_generations)):

@@ -132,11 +132,54 @@ def record_stage(
         f.write(("\n" if cut_off else "") + json.dumps(line) + "\n")
 
 
+def standard_run_dir(run_dir: Path | str, results_root: Path) -> Path:
+    """The run directory, if it is results_root/models/<run-id> written out; else refused.
+
+    The plan names runs results/models/<run-id> and resumes them by run id (Tasks 3 and 4).
+    A run named otherwise, or a link there to other storage, could put its tables and figures
+    in another place, so nothing but this one name is accepted, and no other run is looked at.
+
+    Raises:
+        ValueError: Not results_root/models/<run-id>, a step through "." or "..", or a link.
+    """
+    text = str(run_dir)
+    if any(part in (".", "..") for part in text.replace("\\", "/").split("/")):
+        raise ValueError(f"{text!r} names no run: give its run id, or results/models/<run id>")
+    path = Path(os.path.abspath(text))
+    models = Path(os.path.abspath(results_root)) / "models"
+    if path.parent != models:
+        raise ValueError(f"{text} is not results/models/<run id> ({models}); give the run id")
+    if path.is_symlink():
+        raise ValueError(
+            f"{path} is a link; a run behind a link is not supported, as its "
+            "tables and figures could go elsewhere"
+        )
+    return path
+
+
+def resolve_resume(given: str, results_root: Path) -> Path:
+    """The run --resume names: a run id, or results/models/<run-id> written out.
+
+    Raises:
+        ValueError: Anything else, ".", a storage path or a subdirectory included.
+    """
+    if not given or given in (".", ".."):
+        raise ValueError(f"{given!r} names no run: give its run id")
+    if "/" not in given and "\\" not in given:
+        return standard_run_dir(Path(results_root) / "models" / given, results_root)
+    if not os.path.isabs(given):
+        raise ValueError(
+            f"{given!r} names no run: give its run id, or results/models/<run id> as a whole path"
+        )
+    return standard_run_dir(given, results_root)
+
+
 def run(
     config: pc.PipelineConfig | None,
     run_dir: Path,
     execute: Execute | None = None,
     resume: bool = False,
+    results_root: Path | None = None,
 ) -> int:
     """Run the stages not yet finished; 0 when all finished, 1 when a stage stopped the run.
 
@@ -145,15 +188,18 @@ def run(
         run_dir: The run's models directory.
         execute: Runs one step; :func:`run_module` by default, a recorder in tests.
         resume: Continue the run in ``run_dir`` instead of starting one there.
+        results_root: The results directory ``run_dir`` must be in; RESULTS_ROOT by default,
+            a scratch one in tests.
 
     Raises:
         FileNotFoundError: Resuming a directory that holds no pipeline run.
         FileExistsError: Starting a run in a directory that holds one.
         RuntimeError: Another pipeline, or a step one left running, holds the run.
+        ValueError: ``run_dir`` is not results_root/models/<run-id> (see standard_run_dir).
     """
     # Absolute, as steps run from the repository root; not resolved, so a symlinked models
     # directory keeps its results/ siblings.
-    run_dir = runs.canonical_run_dir(run_dir)  # absolute, and through results/models if linked
+    run_dir = standard_run_dir(run_dir, runs.RESULTS_ROOT if results_root is None else results_root)
     if resume:
         saved = run_dir / SAVED_CONFIG
         if not saved.is_file():
@@ -263,12 +309,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.resume:
-        given = Path(args.resume)
-        run_dir = (
-            runs.canonical_run_dir(given)
-            if given.is_dir()
-            else runs.RESULTS_ROOT / "models" / args.resume
-        )
+        try:
+            run_dir = resolve_resume(args.resume, runs.RESULTS_ROOT)
+        except ValueError as error:
+            parser.error(str(error))
         return run(None, run_dir, resume=True)
     config = pc.load(args.config)
     return run(config, runs.new_run_path(config.config_name, runs.RESULTS_ROOT))
