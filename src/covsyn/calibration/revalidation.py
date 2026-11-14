@@ -113,7 +113,7 @@ def write_best_file(path: Path, vectors: np.ndarray, costs: np.ndarray) -> None:
 
 # Written here, or the pipeline's records of the whole run rather than of the optimiser.
 NOT_COPIED = ("firefly_best.txt", "revalidation.csv", "optimiser.log", "run.log",
-              "pipeline.toml", "pipeline.log", "pipeline.lock", "layout.json")
+              "pipeline.toml", "pipeline.log", "pipeline.lock")
 
 
 def copy_run_files(firefly_dir: Path, out_dir: Path) -> None:

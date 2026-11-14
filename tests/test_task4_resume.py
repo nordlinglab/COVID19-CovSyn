@@ -208,3 +208,12 @@ def test_one_rule_finds_the_last_checkpoint(tmp_path):
     assert runs.last_checkpoint(tmp_path) == folder / "initial.npz"
     (folder / "generation_0001.npz").write_text("x")
     assert runs.last_checkpoint(tmp_path) == folder / "generation_0001.npz"
+
+
+def test_an_empty_mode_is_refused_by_the_optimiser(monkeypatch):
+    """'' is not a mode: the optimiser stops before it loads anything or claims a directory."""
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", ""])
+    with pytest.raises(SystemExit, match="mode error"):
+        fo.main()

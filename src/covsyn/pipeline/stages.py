@@ -18,8 +18,6 @@ synthesis, and a missing reported figure. The other steps only warned there, and
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -36,26 +34,15 @@ class StageFailed(RuntimeError):
     """A step the chain stopped on failed, so the run stops after this stage."""
 
 
-LAYOUT_FILE = "layout.json"
-
-
 class Layout:
-    """Where a run's files go: its models directory and the tables and figures beside it.
-
-    A run records where its tables and figures go when it starts (layout.json), and every later
-    look at it reads that back, so how its directory is spelled later, through a link or not,
-    cannot move them.
-    """
+    """Where a run's files go: its models directory and the tables and figures beside it."""
 
     def __init__(self, run_dir: Path) -> None:
         """Lay out the run in ``run_dir``; outside results/models the run holds all three."""
-        # Absolute, as every step runs from the repository root.
-        self.run = Path(os.path.abspath(run_dir))
-        saved = self.run / LAYOUT_FILE
-        if saved.is_file():
-            recorded = json.loads(saved.read_text(encoding="utf-8"))
-            self.tables, self.figures = Path(recorded["tables"]), Path(recorded["figures"])
-        elif self.run.parent.name == "models":
+        # Absolute, as every step runs from the repository root, and named through
+        # results/models when it is linked there, so its siblings do not depend on the name.
+        self.run = runs.canonical_run_dir(run_dir)
+        if self.run.parent.name == "models":
             results = self.run.parent.parent
             self.tables = results / "tables" / self.run.name
             self.figures = results / "figures" / self.run.name
@@ -63,13 +50,6 @@ class Layout:
             self.tables = self.run / "tables"
             self.figures = self.run / "figures"
         self.logs = self.run / "logs"
-
-    def save(self) -> None:
-        """Record where this run's tables and figures go, once, when the run starts."""
-        (self.run / LAYOUT_FILE).write_text(
-            json.dumps({"tables": str(self.tables), "figures": str(self.figures)}, indent=1) + "\n",
-            encoding="utf-8",
-        )
 
     def synthetic(self, mode: str) -> Path:
         """The simulations of seeds 0..999, on which the candidate is chosen."""

@@ -396,3 +396,17 @@ def test_run_10s_progress_table_is_where_progress_path_says():
     assert runs.progress_path(run10).is_file()
     assert not (run10 / "progress_metrics.csv").exists()
 
+
+
+def test_a_linked_run_is_named_through_results_models(tmp_path, monkeypatch):
+    """Its storage path, or any directory in it, is named as results/models/<id>/..."""
+    monkeypatch.setattr(runs, "RESULTS_ROOT", tmp_path / "results")
+    storage = tmp_path / "storage" / "r"
+    (storage / "selected").mkdir(parents=True)
+    (tmp_path / "results" / "models").mkdir(parents=True)
+    (tmp_path / "results" / "models" / "r").symlink_to(storage)
+    linked = tmp_path / "results" / "models" / "r"
+    assert runs.canonical_run_dir(storage) == linked
+    assert runs.canonical_run_dir(storage / "selected") == linked / "selected"
+    assert runs.canonical_run_dir(linked / "selected") == linked / "selected"
+    assert runs.canonical_run_dir(tmp_path / "other") == tmp_path / "other"  # no alias

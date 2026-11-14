@@ -635,24 +635,29 @@ def test_run_hands_its_lock_to_the_real_steps_and_releases_it(tmp_path, config, 
     os.close(pr.acquire_lock(run_dir))  # free: the run released it
 
 
-def test_a_run_keeps_its_layout_however_it_is_named_later(tmp_path, config, monkeypatch):
-    """A run's tables stay where layout.json says, whatever path resumes it.
+def test_a_linked_run_keeps_its_layout_however_it_is_named(tmp_path, config, monkeypatch):
+    """A linked run's tables and progress table stay in results/tables/r, however it is named.
 
-    Started as results/models/r, a link to other storage, then resumed by its real path and
-    from inside it.
+    results/models/r links to other storage; it is resumed by the storage path and as ".".
     """
+    from covsyn.runtime import runs
+
+    monkeypatch.setattr(runs, "RESULTS_ROOT", tmp_path / "results")
     storage = tmp_path / "storage" / "r"
     storage.mkdir(parents=True)
     models = tmp_path / "results" / "models"
     models.mkdir(parents=True)
     (models / "r").symlink_to(storage)
     pr.run(config, models / "r", execute=Recorder(fail={"covsyn.model.data_synthesis_main"}))
-    pr.run(None, storage, execute=Recorder(fail={"covsyn.validation.verify_phase_d"}),
-           resume=True)
-    monkeypatch.chdir(models / "r")  # the working directory is then the physical one
+    resumed = Recorder(fail={"covsyn.validation.verify_phase_d"})
+    pr.run(None, storage, execute=resumed, resume=True)
+    synthesis = next(a for a in resumed.calls if a[1] == "covsyn.model.data_synthesis_main")
+    assert synthesis[synthesis.index("--parameter_path") + 1] == str(models / "r" / "selected")
+    monkeypatch.chdir(storage)  # the working directory inside a link is the physical one
     pr.run(None, Path("."), execute=Recorder(), resume=True)
     assert (tmp_path / "results" / "tables" / "r" / "report.txt").exists()
     assert not (storage / "tables").exists() and not (storage / "figures").exists()
+    assert runs.progress_path(storage / "selected") == tmp_path / "results/tables/r/progress.csv"
 
 def test_check_gap_reads_this_runs_spread_simulations(tmp_path, config):
     """It read a fixed synthetic_data_results_spread_Taiwan_weight in the working directory."""
@@ -693,14 +698,17 @@ def test_tw_check_lists_earlier_runs_only_when_given_no_run(tmp_path):
     assert "previous:" not in given.stdout, given.stdout + given.stderr
 
 
-@pytest.mark.parametrize("inside", [True, False])
-def test_the_resume_hint_names_the_run_as_main_finds_it(tmp_path, monkeypatch, inside):
-    """The id under results/models, else the whole path, which --resume also takes."""
+@pytest.mark.parametrize("spelling", ["inside", "elsewhere", "linked"])
+def test_the_resume_hint_names_the_run_as_main_finds_it(tmp_path, monkeypatch, spelling):
+    """The id when the run is in results/models, however its parent is spelled; else the path."""
     monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
-    run_dir = (tmp_path / "results" / "models" / "r") if inside else (tmp_path / "elsewhere" / "r")
-    run_dir.parent.mkdir(parents=True)
-    assert pr.resume_name(run_dir) == ("r" if inside else str(run_dir))
-
+    models = tmp_path / "results" / "models"
+    models.mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(models)  # results/models named another way
+    run_dir = {"inside": models / "r", "elsewhere": tmp_path / "elsewhere" / "r",
+               "linked": tmp_path / "alias" / "r"}[spelling]
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    assert pr.resume_name(run_dir) == ("r" if spelling != "elsewhere" else str(run_dir))
 
 def test_a_symlinked_models_directory_keeps_its_results_siblings(tmp_path):
     """Absolute, not resolved: a linked results/models/<id> still lays out under results/."""

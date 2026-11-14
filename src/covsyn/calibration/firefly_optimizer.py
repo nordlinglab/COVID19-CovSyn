@@ -1839,7 +1839,7 @@ def main() -> None:
 
     # Task 3: claimed only now, after every input has loaded, so a mistyped warm start or a
     # missing input file leaves no claimed directory behind.
-    result_path = (args.resume if args.resume is not None
+    result_path = (runs.canonical_run_dir(args.resume) if args.resume is not None
                    else run_directory_for(args.run_dir, args.config_name))
     print(f'run directory: {result_path}')
 

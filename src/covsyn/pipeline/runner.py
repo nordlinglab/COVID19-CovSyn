@@ -153,7 +153,7 @@ def run(
     """
     # Absolute, as steps run from the repository root; not resolved, so a symlinked models
     # directory keeps its results/ siblings.
-    run_dir = Path(os.path.abspath(run_dir))
+    run_dir = runs.canonical_run_dir(run_dir)  # absolute, and through results/models if linked
     if resume:
         saved = run_dir / SAVED_CONFIG
         if not saved.is_file():
@@ -163,7 +163,6 @@ def run(
         runs.check_unclaimed(run_dir)  # the optimiser claims it; this fails before anything runs
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / SAVED_CONFIG).write_text(pc.to_toml(config), encoding="utf-8")
-        ps.Layout(run_dir).save()  # from now on the run's tables and figures stay put
     lock = acquire_lock(run_dir)
     try:
         if execute is None:
@@ -266,7 +265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.resume:
         given = Path(args.resume)
         run_dir = (
-            Path(os.path.abspath(given))
+            runs.canonical_run_dir(given)
             if given.is_dir()
             else runs.RESULTS_ROOT / "models" / args.resume
         )

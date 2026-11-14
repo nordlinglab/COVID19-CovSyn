@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import re
 import subprocess
@@ -158,6 +159,29 @@ def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: 
     return claim_run_directory(new_run_path(config_name, root, **id_fields))
 
 
+def canonical_run_dir(path: Path | str) -> Path:
+    """A run directory as results/models/<id> when that is the same directory, else absolute.
+
+    A run may live on other storage behind a link at results/models/<id>. Named by its storage
+    path, or as "." from inside it (the working directory is the physical one), it would lose
+    its results/tables and results/figures siblings; named this way it keeps them, however it
+    was named. Every caller that lays out a run goes through here.
+    """
+    path = Path(os.path.abspath(path))
+    models = RESULTS_ROOT / "models"
+    # The run may be the path itself or one of its parents, as for run/selected.
+    for level in (path, *path.parents):
+        alias = models / level.name
+        if level == alias or level.parent == models:
+            return path  # already named through results/models
+        try:
+            if level.name and alias.exists() and os.path.samefile(alias, level):
+                return alias / path.relative_to(level)
+        except OSError:
+            continue
+    return path
+
+
 def run_root(path: Path) -> Path:
     """The run directory a path belongs to: the ancestor directly under a ``models`` directory.
 
@@ -177,7 +201,7 @@ def progress_path(run_dir: Path) -> Path:
     ``results/tables/<run-id>/progress.csv`` for a run under ``results/models/<run-id>``, else
     ``progress.csv`` in the run directory itself.
     """
-    root = run_root(run_dir)
+    root = run_root(canonical_run_dir(run_dir))
     if root.parent.name == "models":
         return root.parent.parent / "tables" / root.name / "progress.csv"
     return root / "progress.csv"
