@@ -164,3 +164,45 @@ def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
         (tmp_path / "config.json").write_text(config)
     with pytest.raises(SystemExit, match="cannot be resumed"):
         fo.resumed_settings(tmp_path)
+
+
+def _args(**given):
+    import argparse
+
+    values = {"resume": None, "run_dir": None, "seed": None, "mode": None, "warm_start": []}
+    return argparse.Namespace(**{**values, **given})
+
+
+def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
+    """main() runs the mode config.json recorded: it sets the population the checkpoint holds."""
+    import json
+
+    (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": {"mode": "test"}}))
+    args = _args(resume=tmp_path)
+    assert fo.resume_arguments(args) == "test" and args.seed == 5
+    assert fo.resume_arguments(_args()) == "train"
+    assert fo.resume_arguments(_args(mode="profile")) == "profile"
+
+
+@pytest.mark.parametrize("given", [{"mode": "train"}, {"warm_start": ["a.txt"]}, {"seed": 3},
+                                   {"run_dir": "x"}])
+def test_an_option_that_would_change_a_resumed_run_is_refused(tmp_path, given):
+    """Refused, not silently ignored."""
+    with pytest.raises(SystemExit, match="--resume takes"):
+        fo.resume_arguments(_args(resume=tmp_path, **given))
+
+
+def test_one_rule_finds_the_last_checkpoint(tmp_path):
+    """The pipeline and the optimiser agree: four digits, no .tmp, else initial.npz."""
+    from covsyn.pipeline import stages
+    from covsyn.runtime import runs
+
+    folder = tmp_path / "checkpoints"
+    folder.mkdir()
+    (folder / "generation_12345.npz").write_text("x")
+    (folder / "generation_0002.tmp.npz").write_text("x")
+    assert runs.last_checkpoint(tmp_path) is None and not stages.has_checkpoint(tmp_path)
+    (folder / "initial.npz").write_text("x")
+    assert runs.last_checkpoint(tmp_path) == folder / "initial.npz"
+    (folder / "generation_0001.npz").write_text("x")
+    assert runs.last_checkpoint(tmp_path) == folder / "generation_0001.npz"

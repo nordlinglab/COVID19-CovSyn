@@ -1151,13 +1151,10 @@ def load_last_checkpoint(directory: Path) -> dict:
     Raises:
         FileNotFoundError: The directory holds no checkpoint to resume from.
     """
-    folder = Path(directory) / CHECKPOINTS
-    found = sorted(folder.glob('generation_[0-9][0-9][0-9][0-9].npz'))
-    if not found and (folder / 'initial.npz').exists():
-        found = [folder / 'initial.npz']
-    if not found:
+    last = runs.last_checkpoint(directory)
+    if last is None:
         raise FileNotFoundError(f'{directory} holds no checkpoint to resume from')
-    with np.load(found[-1]) as saved:
+    with np.load(last) as saved:
         return {name: saved[name] for name in saved.files}
 
 
@@ -1676,6 +1673,27 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
     return seed, mode
 
 
+def resume_arguments(args: argparse.Namespace) -> str:
+    """The mode to run in; with --resume, the run's recorded seed and mode (Task 4).
+
+    A resumed run continues as it started, so an option that would change it is refused rather
+    than ignored.
+
+    Raises:
+        SystemExit: --resume with --run-dir, --seed, --mode or --warm_start.
+    """
+    if args.resume is None:
+        return args.mode or 'train'
+    given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
+                                      ('--mode', args.mode), ('--warm_start', args.warm_start))
+             if value]
+    if given:
+        sys.exit(f'--resume takes the directory, seed, mode and warm start from the run; '
+                 f'remove {", ".join(given)}')
+    args.seed, mode = resumed_settings(args.resume)
+    return mode
+
+
 def run_directory_for(run_dir: Path | None, config_name: str) -> Path:
     """The run's directory: ``run_dir`` if given and holding no run, else a new one (Task 3)."""
     if run_dir is not None:
@@ -1692,7 +1710,8 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description='Firefly optimization')
     # parser.add_argument('--result_path', type=str, default='./Firefly_result/')
-    parser.add_argument('--mode', type=str, default='train')
+    parser.add_argument('--mode', type=str, default=None,
+                        help='train (default), test or profile; a resumed run keeps its own')
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
     # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
@@ -1714,14 +1733,8 @@ def main() -> None:
     max_workers = hardware.resolve_workers(args.workers, os.environ, None, cores=cores.count)
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
-    mode = args.mode
-    if args.resume is not None:
-        # Task 4: the run's own seed, so the resumed generations make the same moves.
-        if args.run_dir is not None or args.seed is not None:
-            sys.exit('--resume takes the run directory and seed from the run; '
-                     'give neither --run-dir nor --seed')
-        args.seed, mode = resumed_settings(args.resume)
-    elif args.run_dir is not None:
+    mode = resume_arguments(args)
+    if args.resume is None and args.run_dir is not None:
         runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')
     # shift_percentage = args.shift_percentage
@@ -1840,7 +1853,7 @@ def main() -> None:
                        seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
                        Cheng_contact_array=Cheng_contact_array,
                        Cheng_attack_rate=Cheng_attack_rate,
-                       norm_weights=norm_weights)
+                       norm_weights=norm_weights, resume=args.resume is not None)
         print("--- Done %s seconds ---" % (time.time() - start_time))
         stats = pstats.Stats(pr)
         stats.sort_stats(pstats.SortKey.TIME)

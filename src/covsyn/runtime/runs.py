@@ -37,6 +37,22 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 RESULTS_ROOT = REPO_ROOT / "results"
 # The optimiser's checkpoint directory (Task 4), here so a caller need not import the optimiser.
 CHECKPOINTS = "checkpoints"
+
+
+def last_checkpoint(run_dir: Path) -> Path | None:
+    """The optimiser's last finished checkpoint in a run, or None (Task 4).
+
+    A generation's checkpoint is generation_<4 digits>.npz; before any, initial.npz holds the
+    scored initial population. A .tmp file is one a kill cut short, and never counts.
+    """
+    folder = Path(run_dir) / CHECKPOINTS
+    found = sorted(folder.glob("generation_[0-9][0-9][0-9][0-9].npz"))
+    if found:
+        return found[-1]
+    initial = folder / "initial.npz"
+    return initial if initial.is_file() else None
+
+
 # What an optimiser run writes; a directory holding any of them already holds a run.
 RUN_OUTPUTS = (
     "config.json",

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import functools
 import json
 import os
 import resource
@@ -40,19 +41,34 @@ SAVED_CONFIG = "pipeline.toml"
 RUN_LOG = "run.log"
 PIPELINE_LOG = "pipeline.log"  # every progress line, warning and error, kept with the run
 LOCK = "pipeline.lock"
-# The lock's descriptor while a run holds it; every step inherits it (see run_module).
-_lock_fds: tuple[int, ...] = ()
-_log_path: Path | None = None
+# Stages whose checklist caps its workers by memory, at 4.9 GB each (Task 2).
+MEMORY_BOUND = {
+    "select": hardware.CHECKLIST_GB_PER_WORKER,
+    "check": hardware.CHECKLIST_GB_PER_WORKER,
+}
 Execute = Callable[[Sequence, Path | None, bool, Mapping[str, str]], int]
 
 
-def run_module(args: Sequence, output: Path | None, append: bool, env: Mapping[str, str]) -> int:
-    """Run ``python args`` from the repository root, its output into ``output``; its status."""
+def run_module(
+    args: Sequence,
+    output: Path | None,
+    append: bool,
+    env: Mapping[str, str],
+    keep_fds: Sequence[int] = (),
+) -> int:
+    """Run ``python args`` from the repository root, its output into ``output``; its status.
+
+    ``keep_fds`` stay open in the step: the run's lock, so a step left running when the
+    pipeline was killed still holds it and a resume cannot start a second one on the run.
+    """
     environment = {**os.environ, **env}
     command = [sys.executable, *map(str, args)]
-    # The step inherits the run's lock, so an optimiser left running when the pipeline was
-    # killed still holds it and a resume cannot start a second one on the same run.
-    options = {"cwd": runs.REPO_ROOT, "env": environment, "check": False, "pass_fds": _lock_fds}
+    options = {
+        "cwd": runs.REPO_ROOT,
+        "env": environment,
+        "check": False,
+        "pass_fds": tuple(keep_fds),
+    }
     if output is None:
         return subprocess.run(command, **options).returncode
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -60,12 +76,12 @@ def run_module(args: Sequence, output: Path | None, append: bool, env: Mapping[s
         return subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, **options).returncode
 
 
-def say(message: str) -> None:
-    """A timestamped progress line, printed and kept in the run's pipeline.log."""
+def say(message: str, log: Path | None = None) -> None:
+    """A timestamped progress line, printed and, given a run's pipeline.log, kept there."""
     line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}"
     print(line, flush=True)
-    if _log_path is not None:
-        with open(_log_path, "a", encoding="utf-8") as f:
+    if log is not None:
+        with open(log, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
 
@@ -106,8 +122,11 @@ def record_stage(
         "worker_peak_mb": round(_peak_mb(resource.RUSAGE_CHILDREN), 1),
         "warnings": list(warnings),
     }
-    with open(Path(run_dir) / RUN_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(line) + "\n")
+    path = Path(run_dir) / RUN_LOG
+    # A kill while writing leaves a line without its newline; start after it, not on it.
+    cut_off = path.exists() and path.stat().st_size > 0 and not path.read_bytes().endswith(b"\n")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(("\n" if cut_off else "") + json.dumps(line) + "\n")
 
 
 def run(
@@ -127,9 +146,11 @@ def run(
     Raises:
         FileNotFoundError: Resuming a directory that holds no pipeline run.
         FileExistsError: Starting a run in a directory that holds one.
+        RuntimeError: Another pipeline, or a step one left running, holds the run.
     """
-    run_dir = Path(run_dir).resolve()  # steps run from the repository root
-    execute = execute or run_module
+    # Absolute, as steps run from the repository root; not resolved, so a symlinked models
+    # directory keeps its results/ siblings.
+    run_dir = Path(os.path.abspath(run_dir))
     if resume:
         saved = run_dir / SAVED_CONFIG
         if not saved.is_file():
@@ -139,20 +160,23 @@ def run(
         runs.check_unclaimed(run_dir)  # the optimiser claims it; this fails before anything runs
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / SAVED_CONFIG).write_text(pc.to_toml(config), encoding="utf-8")
-    global _log_path
-    lock = _acquire_lock(run_dir)
-    _log_path = run_dir / PIPELINE_LOG
+    lock = acquire_lock(run_dir)
     try:
-        return _run_stages(config, run_dir, execute, resume)
+        if execute is None:
+            execute = functools.partial(run_module, keep_fds=(lock,))
+        report = functools.partial(say, log=run_dir / PIPELINE_LOG)
+        return _run_stages(config, run_dir, execute, resume, report)
     finally:
-        _log_path = None
-        _release_lock(lock)
+        os.close(lock)  # the lock goes with the last descriptor, a step's included
 
 
-def _acquire_lock(run_dir: Path) -> int:
-    """Lock the run, or refuse: another pipeline, or a step it left running, holds it."""
-    global _lock_fds
-    fd = os.open(run_dir / LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+def acquire_lock(run_dir: Path) -> int:
+    """Lock the run and return the lock's descriptor, or refuse.
+
+    Raises:
+        RuntimeError: Another pipeline, or a step one left running, holds the lock.
+    """
+    fd = os.open(Path(run_dir) / LOCK, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -161,21 +185,18 @@ def _acquire_lock(run_dir: Path) -> int:
             f"{run_dir} is in use by another pipeline, or by a step one left "
             "running; wait for it, or stop it, before resuming"
         ) from None
-    os.set_inheritable(fd, True)
-    _lock_fds = (fd,)
     return fd
 
 
-def _release_lock(fd: int) -> None:
-    global _lock_fds
-    _lock_fds = ()
-    os.close(fd)  # the lock goes with the last descriptor
-
-
-def _run_stages(config: pc.PipelineConfig, run_dir: Path, execute: Execute, resume: bool) -> int:
+def _run_stages(
+    config: pc.PipelineConfig,
+    run_dir: Path,
+    execute: Execute,
+    resume: bool,
+    report: Callable[[str], None],
+) -> int:
     env = {} if config.workers is None else {hardware.ENV_VARIABLE: str(config.workers)}
-    # What a step uses by default: the setting, else COVSYN_WORKERS, else the cores (Task 2).
-    workers = hardware.resolve_workers(None, {**os.environ, **env}, None)
+    steps_env = {**os.environ, **env}
 
     def step(args, output=None, append=False, env=None):
         return execute(args, output, append, {**environment, **(env or {})})
@@ -185,29 +206,41 @@ def _run_stages(config: pc.PipelineConfig, run_dir: Path, execute: Execute, resu
     for directory in (layout.tables, layout.figures, layout.logs):
         directory.mkdir(parents=True, exist_ok=True)
     if os.environ.get("VERIFY_WORKERS") or os.environ.get("CPU_CORES"):
-        say(
+        report(
             "WARNING: VERIFY_WORKERS and CPU_CORES are no longer read; set workers in the "
             "configuration or COVSYN_WORKERS"
         )
     done = set(finished_stages(run_dir))
-    say(f"run directory {run_dir}" + (f"; finished: {', '.join(sorted(done))}" if done else ""))
+    report(f"run directory {run_dir}" + (f"; finished: {', '.join(sorted(done))}" if done else ""))
     for name, function in ps.STAGES:
         if name in done:
             continue
         ctx = ps.Context(config, layout, step)
-        say(f"stage {name}")
+        report(f"stage {name}")
         start = time.monotonic()
         try:
             function(ctx, resume) if name == "optimise" else function(ctx)
         except ps.StageFailed as error:
-            say(f"ERROR: {error}; stopping. Resume with: covsyn-pipeline --resume {run_dir.name}")
+            report(
+                f"ERROR: {error}; stopping. Resume with: covsyn-pipeline --resume "
+                f"{resume_name(run_dir)}"
+            )
             return 1
         finally:
             for warning in ctx.warnings:
-                say(f"WARNING: {warning}")
+                report(f"WARNING: {warning}")
+        # What the stage's steps use by default: the setting, else COVSYN_WORKERS, else the
+        # cores, and for a checklist stage no more than fit in memory (Task 2).
+        workers = hardware.resolve_workers(None, steps_env, MEMORY_BOUND.get(name))
         record_stage(run_dir, name, time.monotonic() - start, workers, ctx.warnings)
-    say("ALL DONE")
+    report("ALL DONE")
     return 0
+
+
+def resume_name(run_dir: Path) -> str:
+    """What to give --resume: the run id under results/models, else the whole path."""
+    models = Path(os.path.abspath(runs.RESULTS_ROOT / "models"))
+    return run_dir.name if run_dir.parent == models else str(run_dir)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -225,7 +258,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.resume:
         given = Path(args.resume)
-        run_dir = given.resolve() if given.is_dir() else runs.RESULTS_ROOT / "models" / args.resume
+        run_dir = (
+            Path(os.path.abspath(given))
+            if given.is_dir()
+            else runs.RESULTS_ROOT / "models" / args.resume
+        )
         return run(None, run_dir, resume=True)
     config = pc.load(args.config)
     return run(config, runs.new_run_path(config.config_name, runs.RESULTS_ROOT))

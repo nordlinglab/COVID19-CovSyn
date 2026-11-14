@@ -567,17 +567,19 @@ def test_a_run_in_use_cannot_be_resumed(tmp_path, config):
     assert pr.run(None, run_dir, execute=Recorder(), resume=True) == 0
 
 
-def test_every_step_inherits_the_runs_lock(tmp_path, config):
-    """A real step holds the lock too, so it outlives a killed pipeline."""
-    seen = []
+def test_a_step_inherits_the_runs_lock(tmp_path):
+    """A real child process holds the lock's descriptor, so it outlives a killed pipeline."""
+    lock = pr.acquire_lock(tmp_path)
+    try:
+        out = tmp_path / "out.txt"
+        code = (f"import os; print(os.fstat({lock}).st_ino == "
+                f"os.stat({str(tmp_path / pr.LOCK)!r}).st_ino)")
+        assert pr.run_module(["-c", code], out, False, {}, keep_fds=(lock,)) == 0
+        assert out.read_text().strip() == "True"
+    finally:
+        import os
 
-    def step(args, output, append, env):
-        seen.append(pr._lock_fds)
-        return Recorder()(args, output, append, env)
-
-    run_pipeline(tmp_path, config, step)
-    assert seen and all(len(fds) == 1 for fds in seen)
-    assert pr._lock_fds == ()  # released when the run ends
+        os.close(lock)
 
 
 def test_a_cut_off_run_log_line_does_not_stop_a_resume(tmp_path, config):
@@ -589,14 +591,23 @@ def test_a_cut_off_run_log_line_does_not_stop_a_resume(tmp_path, config):
     recorder = Recorder()
     assert pr.run(None, run_dir, execute=recorder, resume=True) == 0
     assert modules(recorder)[0] == "covsyn.model.data_synthesis_main"
+    # The stage after the cut-off line is recorded on its own line, so it is not run again.
+    assert "synthesise" in pr.finished_stages(run_dir)
+    assert pr.run(None, run_dir, execute=(again := Recorder()), resume=True) == 0
+    assert again.calls == []
 
 
 def test_run_log_records_the_workers_the_steps_use(tmp_path, config, monkeypatch):
-    """COVSYN_WORKERS from the shell, when the configuration sets none."""
+    """COVSYN_WORKERS from the shell, capped by memory for the checklist stages."""
+    from covsyn.runtime import hardware
+
     monkeypatch.setenv("COVSYN_WORKERS", "7")
+    monkeypatch.setattr(hardware, "_available_gb", lambda: 10.0)  # 2 checklist workers fit
     _, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert {json.loads(x)["workers"] for x in (run_dir / "run.log").read_text().splitlines()} \
-        == {7}
+    lines = {json.loads(x)["stage"]: json.loads(x)["workers"]
+             for x in (run_dir / "run.log").read_text().splitlines()}
+    assert lines["check"] == lines["select"] == 2
+    assert {lines[s] for s in STAGES if s not in ("check", "select")} == {7}
 
 
 def test_check_gap_reads_this_runs_spread_simulations(tmp_path, config):
@@ -636,3 +647,21 @@ def test_tw_check_lists_earlier_runs_only_when_given_no_run(tmp_path):
     finally:
         old.rmdir()
     assert "previous:" not in given.stdout, given.stdout + given.stderr
+
+
+@pytest.mark.parametrize("inside", [True, False])
+def test_the_resume_hint_names_the_run_as_main_finds_it(tmp_path, monkeypatch, inside):
+    """The id under results/models, else the whole path, which --resume also takes."""
+    monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
+    run_dir = (tmp_path / "results" / "models" / "r") if inside else (tmp_path / "elsewhere" / "r")
+    assert pr.resume_name(run_dir) == ("r" if inside else str(run_dir))
+
+
+def test_a_symlinked_models_directory_keeps_its_results_siblings(tmp_path):
+    """Absolute, not resolved: a linked results/models/<id> still lays out under results/."""
+    storage = tmp_path / "storage" / "r"
+    storage.mkdir(parents=True)
+    (tmp_path / "results" / "models").mkdir(parents=True)
+    (tmp_path / "results" / "models" / "r").symlink_to(storage)
+    layout = ps.Layout(tmp_path / "results" / "models" / "r")
+    assert layout.tables == tmp_path / "results" / "tables" / "r"

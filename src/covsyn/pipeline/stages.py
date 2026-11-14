@@ -18,6 +18,7 @@ synthesis, and a missing reported figure. The other steps only warned there, and
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -39,8 +40,9 @@ class Layout:
 
     def __init__(self, run_dir: Path) -> None:
         """Lay out the run in ``run_dir``; outside results/models the run holds all three."""
-        # Absolute: every step runs from the repository root, wherever the pipeline started.
-        self.run = Path(run_dir).resolve()
+        # Absolute, as every step runs from the repository root; not resolved, so a symlinked
+        # models directory keeps its results/ siblings.
+        self.run = Path(os.path.abspath(run_dir))
         if self.run.parent.name == "models":
             results = self.run.parent.parent
             self.tables = results / "tables" / self.run.name
@@ -117,8 +119,7 @@ def optimise(ctx: Context, resume: bool) -> None:
 
 def has_checkpoint(run: Path) -> bool:
     """Whether the optimiser left a finished checkpoint to resume from (not a .tmp one)."""
-    folder = Path(run) / runs.CHECKPOINTS
-    return (folder / "initial.npz").is_file() or any(folder.glob("generation_[0-9]*[0-9].npz"))
+    return runs.last_checkpoint(run) is not None
 
 
 # The optimiser's own files, from runs.RUN_OUTPUTS: not the chain's directories after it.

@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 from pathlib import Path
 
@@ -144,7 +145,9 @@ def main() -> None:
     parser.add_argument("run", nargs="?", default=".", type=Path)
     parser.add_argument("--watch", action="append", default=[])
     args = parser.parse_args()
-    run = args.run.resolve()  # from inside a run directory, "." must still find its tables
+    # From inside a run directory, "." must still find its tables; absolute, not resolved,
+    # so a symlinked run keeps its results/ siblings.
+    run = Path(os.path.abspath(args.run))
     watch = DEFAULT_WATCH + tuple(args.watch)
 
     stages = stage_timings(run)
