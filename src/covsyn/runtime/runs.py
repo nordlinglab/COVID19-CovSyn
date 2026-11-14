@@ -294,8 +294,10 @@ def write_config(
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--check":
-        if len(sys.argv) != 3:
-            sys.exit("usage: uv run python -m covsyn.runtime.runs --check DIR")
+        if len(sys.argv) != 3 or not sys.argv[2]:
+            # Status 2, as for any usage error here; 1 means DIR holds a run.
+            print("usage: uv run python -m covsyn.runtime.runs --check DIR", file=sys.stderr)
+            sys.exit(2)
         # The launcher checks a given FIREFLY_RUN before it starts anything.
         try:
             check_unclaimed(Path(sys.argv[2]))
