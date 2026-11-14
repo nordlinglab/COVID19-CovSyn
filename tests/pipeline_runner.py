@@ -77,11 +77,20 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
 
 
 def figure_steps(workdir: Path) -> dict[str, list[str]]:
-    """Command line of every figure step of phaseD_chain.sh, writing into ``workdir/figures``."""
+    """Command line of every figure step of the pipeline, writing into ``workdir/figures``.
+
+    The figures and their arguments come from covsyn.pipeline.stages, so this checks the
+    pipeline's own definitions (Task 4); the dictionary below is the same list written out.
+    """
+    from covsyn.pipeline import stages
+
     spread, first = str(workdir / MODES[0]), str(workdir / MODES[1])
     figs = str(workdir / "figures")
     checks = str(workdir / "phaseD_checks.json")
-    return {
+    shared = {name: ["-m", f"covsyn.figures.{name}",
+                     *map(str, stages.validation_figure_args(name, spread, first, figs, RUN_DIR))]
+              for name in stages.VALIDATION_FIGURES}
+    written_out = {
         "validate_layers": ["-m", "covsyn.figures.validate_layers", spread, figs, RUN_DIR],
         "validate_infection": ["-m", "covsyn.figures.validate_infection", spread, figs],
         "plot_diagnostics": ["-m", "covsyn.figures.plot_diagnostics", spread, figs],
@@ -96,6 +105,8 @@ def figure_steps(workdir: Path) -> dict[str, list[str]]:
         "compare_healthcare_municipality": ["-m", "covsyn.figures.compare_healthcare_municipality", spread, figs],
         "plot_todolist923": ["-m", "covsyn.figures.plot_todolist923", spread, RUN_DIR, checks, figs + "/todolist923"],
     }
+    assert {k: v for k, v in written_out.items() if k in shared} == shared, "the pipeline's figures changed"
+    return {**shared, "plot_todolist923": written_out["plot_todolist923"]}
 
 
 def run_step(args: list[str], workdir: Path) -> subprocess.CompletedProcess[str]:
