@@ -410,3 +410,40 @@ def test_a_linked_run_is_named_through_results_models(tmp_path, monkeypatch):
     assert runs.canonical_run_dir(storage / "selected") == linked / "selected"
     assert runs.canonical_run_dir(linked / "selected") == linked / "selected"
     assert runs.canonical_run_dir(tmp_path / "other") == tmp_path / "other"  # no alias
+
+
+def test_a_link_named_unlike_its_storage_is_found(tmp_path, monkeypatch):
+    """results/models/phaseD_run10 -> storage/run10: matched by identity, not by name."""
+    monkeypatch.setattr(runs, "RESULTS_ROOT", tmp_path / "results")
+    storage = tmp_path / "storage" / "run10"
+    (storage / "selected").mkdir(parents=True)
+    (tmp_path / "results" / "models").mkdir(parents=True)
+    linked = tmp_path / "results" / "models" / "phaseD_run10"
+    linked.symlink_to(storage)
+    assert runs.canonical_run_dir(storage / "selected") == linked / "selected"
+    assert runs.progress_path(storage) == tmp_path / "results/tables/phaseD_run10/progress.csv"
+
+
+def test_a_linked_models_directory_is_named_through_results(tmp_path, monkeypatch):
+    """results/models itself links to a bigger disk; a run named on that disk keeps results/."""
+    monkeypatch.setattr(runs, "RESULTS_ROOT", tmp_path / "results")
+    disk = tmp_path / "bigdisk" / "models"
+    (disk / "r").mkdir(parents=True)
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results" / "models").symlink_to(disk)
+    assert runs.canonical_run_dir(disk / "r") == tmp_path / "results" / "models" / "r"
+    assert runs.progress_path(disk / "r") == tmp_path / "results/tables/r/progress.csv"
+
+
+def test_a_run_named_by_its_storage_path_sees_its_old_progress_table(tmp_path, monkeypatch):
+    """The claim check follows the name through results/models, so it is not overwritten."""
+    monkeypatch.setattr(runs, "RESULTS_ROOT", tmp_path / "results")
+    storage = tmp_path / "storage" / "r"
+    storage.mkdir(parents=True)
+    (tmp_path / "results" / "models").mkdir(parents=True)
+    (tmp_path / "results" / "models" / "r").symlink_to(storage)
+    table = tmp_path / "results" / "tables" / "r" / "progress.csv"
+    table.parent.mkdir(parents=True)
+    table.write_text("generation\n0\n")
+    with pytest.raises(FileExistsError, match="progress.csv"):
+        runs.check_unclaimed(storage)

@@ -30,7 +30,6 @@ import re
 from pathlib import Path
 
 from covsyn.pipeline.stages import Layout
-from covsyn.runtime.runs import canonical_run_dir
 
 # The checks a review keeps coming back to; --watch adds more.
 DEFAULT_WATCH = (
@@ -147,7 +146,7 @@ def main() -> None:
     args = parser.parse_args()
     # From inside a run directory, "." must still find its tables; absolute, not resolved,
     # so a symlinked run keeps its results/ siblings.
-    run = canonical_run_dir(args.run)  # named through results/models when linked there
+    run = args.run  # Layout names it through results/models when it is linked there
     watch = DEFAULT_WATCH + tuple(args.watch)
 
     stages = stage_timings(run)

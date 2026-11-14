@@ -162,23 +162,29 @@ def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: 
 def canonical_run_dir(path: Path | str) -> Path:
     """A run directory as results/models/<id> when that is the same directory, else absolute.
 
-    A run may live on other storage behind a link at results/models/<id>. Named by its storage
-    path, or as "." from inside it (the working directory is the physical one), it would lose
-    its results/tables and results/figures siblings; named this way it keeps them, however it
-    was named. Every caller that lays out a run goes through here.
+    A run may live on other storage behind a link in results/models, under any name. Named by
+    its storage path, or as "." from inside it (the working directory is the physical one), it
+    would lose its results/tables and results/figures siblings; named this way it keeps them.
+    The path itself or one of its parents (as for run/selected) is matched, by file identity
+    and not by name, against each entry of results/models. Where results/models has no entry
+    for the run, the path stands, so a link added or removed during a run moves its tables.
     """
     path = Path(os.path.abspath(path))
     models = RESULTS_ROOT / "models"
-    # The run may be the path itself or one of its parents, as for run/selected.
+    entries = []
+    try:
+        entries = [entry for entry in models.iterdir() if entry.is_dir()]
+    except OSError:
+        return path
     for level in (path, *path.parents):
-        alias = models / level.name
-        if level == alias or level.parent == models:
+        if level.parent == models:
             return path  # already named through results/models
-        try:
-            if level.name and alias.exists() and os.path.samefile(alias, level):
-                return alias / path.relative_to(level)
-        except OSError:
-            continue
+        for entry in entries:
+            try:
+                if os.path.samefile(entry, level):
+                    return entry / path.relative_to(level)
+            except OSError:
+                continue
     return path
 
 
@@ -222,8 +228,9 @@ def check_unclaimed(path: Path) -> None:
         if level.is_symlink() and not level.exists() or level.exists() and not level.is_dir():
             raise FileExistsError(f"{level} is not a directory; give a run directory")
     found = [n for n in RUN_OUTPUTS if (path / n).exists() or (path / n).is_symlink()]
-    if path.parent.name == "models" and progress_path(path).exists():
-        found.append(str(progress_path(path)))
+    table = progress_path(path)  # through results/models, however the path is named
+    if table.parent.parent.name == "tables" and table.exists():
+        found.append(str(table))
     if found:
         raise FileExistsError(
             f"{path} already holds a run ({', '.join(found)}); give a new directory "
