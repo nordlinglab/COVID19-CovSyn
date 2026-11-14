@@ -34,10 +34,11 @@ Every command below runs from the repository root, because the modules read thei
 | `src/covsyn/validation/` | Acceptance checklist and run reports: `verify_phase_d.py`, `check_constraints.py` (per-case constraint table), `measure_age_rr.py`, `measure_days.py`, `rr_exact.py`, `tw_check.py`, `show_final.py`, `show_bounds.py`, `check_gap.py`, `compare_phase_d_runs.py` |
 | `src/covsyn/figures/` | Validation figures, including `plot_todolist923.py` |
 | `src/covsyn/upstream/` | Upstream code the preprint describes, not used by the Phase D pipeline |
-| `scripts/` | `launch_phase_d.sh`, `phase_d_chain.sh`, `data_synthesis.sh`; `gates/` (checks before a run), `probes/` and `benchmarks/` (the tools behind findings in the decision register) |
+| `src/covsyn/pipeline/` | `covsyn-pipeline`: the Phase D stages in order, with resume, and `default.toml` |
+| `scripts/` | `data_synthesis.sh`; `gates/` (checks before a run), `probes/` and `benchmarks/` (the tools behind findings in the decision register) |
 | `tests/` | Regression, pipeline and unit tests; fixtures in `tests/fixtures/` |
 | `variable/`, `data/`, `validation_reference/` | Fitted parameters, raw inputs, and reference distributions |
-| `results/models/phaseD_run10/` | Best vector, bounds and progress of Phase D run 10 |
+| `results/models/phaseD_run10/`, `results/tables/phaseD_run10/` | Best vector and bounds, and the progress table, of Phase D run 10 |
 | `docs/` | `covsyn_decisions.md` (every modelling decision and finding) and Phase D notes |
 | `notebooks/` | Analysis notebooks |
 
@@ -70,13 +71,26 @@ The first reproduces Phase D run 10 exactly; the second checks that the fast obj
 ### 3. Parameter optimisation
 
 ```bash
-scripts/launch_phase_d.sh
+nohup uv run covsyn-pipeline --config default \
+    > pipeline.out 2>&1 &
 ```
 
-This starts the Firefly optimizer and then `scripts/phase_d_chain.sh` in two tmux sessions.
-The run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`, with `config.json` recording its settings, seed, workers, machine and versions;
-`FIREFLY_RUN` names another directory instead, which must not hold a run already, a failed one included.
-`WARM_START` names the `firefly_best.txt` files that seed the initial population (default: run 10), and `PREVIOUS_CHECKS` the previous run's `phaseD_checks.json` for the comparison step.
+On macOS, prefix the command with `caffeinate -is` so the machine does not sleep.
+`nohup` keeps the run going after the terminal or SSH session closes;
+`tmux` and `screen` remain optional.
+
+The pipeline runs the stages in order: optimise, revalidate, select, synthesise, check, report, figures.
+A run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`, with `config.json` recording the optimiser's settings, seed, workers, machine and versions, and `pipeline.toml` the pipeline's;
+its tables go into `results/tables/<run-id>/` and its figures into `results/figures/<run-id>/`.
+Each finished stage adds a line to `run.log`, and the optimiser saves a checkpoint after every generation, so
+
+```bash
+nohup uv run covsyn-pipeline --resume <run-id> > pipeline.out 2>&1 &
+```
+
+continues an interrupted run where it stopped.
+`src/covsyn/pipeline/default.toml` holds the settings, such as the warm start (default: run 10) and the previous run's `checks.json` to compare with;
+`--config` also takes another TOML file.
 
 ### 4. Data synthesis
 

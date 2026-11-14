@@ -10,7 +10,7 @@ directories are created, so a fresh clone needs none of them in advance. ``resul
 the repository root wherever a command starts.
 
 Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` prints the path of a new run
-directory, which launch_phase_d.sh passes to the optimiser (``--run-dir``), which claims it,
+directory, which a caller passes to the optimiser (``--run-dir``), which claims it,
 and to the chain; ``uv run python -m covsyn.runtime.runs --check DIR`` exits 1 when DIR holds a
 run.
 """

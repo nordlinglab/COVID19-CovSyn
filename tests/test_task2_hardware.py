@@ -212,7 +212,7 @@ def test_cli_beats_environment_beats_detection():
 
 
 def test_an_empty_environment_variable_counts_as_unset():
-    """launch_phase_d.sh forwards unset variables into tmux as empty strings (B86)."""
+    """A shell forwards an unset variable as an empty string (B86)."""
     assert hw.resolve_workers(None, {"COVSYN_WORKERS": " "}, None, cores=5) == 5
 
 

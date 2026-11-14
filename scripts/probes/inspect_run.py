@@ -8,14 +8,14 @@ the name of each candidate's failing check were recomputed with 5,000 simulation
 checklist, about 35 minutes, when selected/candidates/*/checks.json held both and reads in 1 ms.
 This probe exists so that does not happen again.
 
-What the chain keeps, and what this reads:
-  phaseD_chain.log                       stage timings and the selection line
-  results/tables/<run-id>/progress.csv  every measured_* quantity, per generation
-  selected/revalidation.csv              per candidate: training cost, validation mean and sd
-  selected/candidates/*/checks.json      per candidate: the FULL checklist, not just the counts
-  validation_reference/phaseD_checks.json            the selected vector's checklist
-  validation_reference/phaseD_checks_independent.json  the same on independent seeds
-  phaseD_report.txt                      the standard report
+What covsyn-pipeline keeps (Task 4), and what this reads, for results/models/<run-id>:
+  run.log                                 one line per finished stage, with its duration
+  results/tables/<run-id>/progress.csv   every measured_* quantity, per generation
+  selected/revalidation.csv               per candidate: training cost, validation mean and sd
+  selected/candidates/*/checks.json       per candidate: the FULL checklist, not just the counts
+  results/tables/<run-id>/checks.json     the selected vector's checklist
+  results/tables/<run-id>/checks_independent.json  the same on independent seeds
+  results/tables/<run-id>/report.txt      the standard report
 
 Usage (from a run directory, or with one as the argument):
     uv run python scripts/probes/inspect_run.py [RUN_DIR] [--watch "check name" ...]
@@ -28,6 +28,8 @@ import csv
 import json
 import re
 from pathlib import Path
+
+from covsyn.pipeline.stages import Layout
 
 # The checks a review keeps coming back to; --watch adds more.
 DEFAULT_WATCH = (
@@ -65,15 +67,20 @@ def watched_value(checks: list[dict], name: str) -> tuple[float | None, str]:
 
 
 def stage_timings(run: Path) -> list[tuple[str, str]]:
-    """The chain's own [chain MM-DD HH:MM:SS] lines, as (timestamp, text)."""
-    log = run / "phaseD_chain.log"
+    """The pipeline's finished stages from run.log, as (end time, "stage, duration").
+
+    A line that is not one of the pipeline's JSON records is skipped.
+    """
+    log = run / "run.log"
     if not log.exists():
         return []
     out = []
     for line in log.read_text(errors="replace").splitlines():
-        m = re.match(r"\[chain (\d\d-\d\d \d\d:\d\d:\d\d)\] (.*)", line)
-        if m:
-            out.append((m.group(1), m.group(2)))
+        try:
+            record = json.loads(line)
+            out.append((record["finished"], f'{record["stage"]}, {record["seconds"]:.0f} s'))
+        except (ValueError, KeyError, TypeError):
+            continue
     return out
 
 
@@ -160,10 +167,10 @@ def main() -> None:
             notes = sorted({r["notes"][name] for r in rows if r["notes"].get(name)})
             print(f"    {name[:46]:<46} {line}" + (f'  ({"; ".join(notes)})' if notes else ""))
     else:
-        print("\n(no selected/candidates/*/checks.json: an older run, or the chain is unfinished)")
+        print("\n(no selected/candidates/*/checks.json: an older run, or the run is unfinished)")
 
     for tag, label in (("", "selected, training seeds"), ("_independent", "independent seeds")):
-        checks = read_checks(run / "validation_reference" / f"phaseD_checks{tag}.json")
+        checks = read_checks(Layout(run).tables / f"checks{tag}.json")
         if checks is None:
             continue
         print(f"\n=== checklist: {label} ===")

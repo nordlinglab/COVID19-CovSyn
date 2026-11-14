@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Run the post-optimisation pipeline on a small fixed dataset, for the pipeline regression tests.
 
-``phaseD_chain.sh`` turns a finished firefly run into synthetic data, the acceptance checklist,
+``covsyn-pipeline`` turns a finished firefly run into synthetic data, the acceptance checklist,
 the run report, the constraint table and the validation figures.
 Moving those scripts can break them silently (finding E71), so this runs every step on a small
 dataset built from the run 10 best vector with fixed seeds, and records what each step produced:
@@ -60,7 +60,7 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
     """Command line of every text-producing step, keyed by a stable name."""
     spread, first = str(workdir / MODES[0]), str(workdir / MODES[1])
     checks = str(workdir / "phaseD_checks.json")
-    # Order matters and follows phaseD_chain.sh: measure_age_rr.py writes
+    # Order matters and follows the pipeline: measure_age_rr.py writes
     # validation_reference/age_rr.json, which verify_phaseD.py reads.
     return {
         "measure_age_rr": ["-m", "covsyn.validation.measure_age_rr", RUN_DIR, "400"],

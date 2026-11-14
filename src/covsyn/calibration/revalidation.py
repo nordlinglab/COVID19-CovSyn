@@ -114,7 +114,7 @@ def write_best_file(path: Path, vectors: np.ndarray, costs: np.ndarray) -> None:
 def copy_run_files(firefly_dir: Path, out_dir: Path) -> None:
     """Copy every file of the optimizer run except the two this module writes itself.
 
-    phase_d_chain.sh replaces the run directory with OUT_DIR before the run report, and
+    The pipeline reads the run from OUT_DIR after this step, and
     The steps after it read the run from OUT_DIR, so OUT_DIR must hold the whole run.
     """
     for source in Path(firefly_dir).iterdir():

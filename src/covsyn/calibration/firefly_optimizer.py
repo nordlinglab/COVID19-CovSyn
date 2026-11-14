@@ -1691,7 +1691,7 @@ def main() -> None:
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
     # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
     parser.add_argument('--warm_start', type=str, nargs='*', default=[])
-    # Task 3: the run writes into results/models/<run-id>/; launch_phase_d.sh names it with
+    # Task 3: the run writes into results/models/<run-id>/; covsyn-pipeline names it with
     # covsyn.runtime.runs and passes it here, so the chain knows where to read.
     parser.add_argument('--run-dir', type=Path, default=None,
                         help='run directory (default: results/models/<new run id>)')

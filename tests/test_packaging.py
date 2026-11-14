@@ -283,28 +283,13 @@ def test_chain_scripts_do_not_resync_the_environment():
     The optimiser runs for days in the same ``.venv``; a sync in the middle of a run would
     reinstall packages under it and could change the lock file.
     """
-    for name in ("phase_d_chain.sh", "data_synthesis.sh", "launch_phase_d.sh"):
+    for name in ("data_synthesis.sh",):  # the chain scripts were replaced by covsyn-pipeline
         text = (REPO_ROOT / "scripts" / name).read_text()
         code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
         commands = [c for line in code for c in re.findall(UV_RUN, line)]
         assert commands, name
         for command in commands:
             assert "--no-sync" in command, (name, command)
-
-
-def test_launch_checks_uv_and_the_environment_before_the_sessions():
-    """The launcher checks uv and the environment once, before the sessions start.
-
-    It stops with a message when uv is missing, and checks the environment against uv.lock,
-    as the sessions run with --no-sync.
-
-    tmux gives a new session the PATH of the shell that runs new-session, so the uv found
-    here is the uv both sessions find.
-    """
-    text = (REPO_ROOT / "scripts" / "launch_phase_d.sh").read_text()
-    first_session = text.index("tmux new-session")
-    assert "command -v uv >/dev/null || {" in text[:first_session]
-    assert "uv sync --locked" in text[:first_session]
 
 
 def test_readme_explains_the_slow_tests_on_linux():

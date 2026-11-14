@@ -9,7 +9,7 @@
 # spread data that every validation figure uses.
 #
 # Usage: scripts/data_synthesis.sh [--environment-checked]
-#   --environment-checked  the caller (phase_d_chain.sh) checked the environment against
+#   --environment-checked  the caller already checked the environment against
 #                    uv.lock, so this script does not check it again
 # Environment:
 #   COVSYN_WORKERS  worker processes (default: the performance cores, Task 2)

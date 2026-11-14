@@ -489,3 +489,23 @@ def test_the_real_step_runner_runs_a_module_from_the_repository_root(tmp_path):
     assert status == 0 and Path(out.read_text().strip()) == pr.runs.REPO_ROOT
     assert pr.run_module(["-c", "import sys; sys.exit(3)"], None, False, {}) == 3
     assert sys.executable  # the interpreter the runner uses
+
+
+def test_an_earlier_wu_figure_is_removed_before_drawing(tmp_path, config):
+    """A figure that fails is missing, not stale (code review 2026-11-09), as in the chain."""
+    root = tmp_path / "results"
+    run_dir = root / "models" / "r"
+    stale = root / "figures" / "r" / "wu2025" / "fig3.png"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old")
+    pr.run(config, run_dir, execute=Recorder())
+    assert not stale.exists()
+
+
+def test_a_resumed_revalidation_starts_afresh(tmp_path, config):
+    """Old candidates in run/revalidation must not mix with the new ones."""
+    recorder = Recorder(fail={"covsyn.calibration.revalidation"})
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    (run_dir / "revalidation" / "stale.txt").write_text("old")
+    pr.run(None, run_dir, execute=Recorder(), resume=True)
+    assert not (run_dir / "revalidation" / "stale.txt").exists()
