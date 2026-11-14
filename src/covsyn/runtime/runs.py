@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import re
 import subprocess
@@ -156,6 +157,26 @@ def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: 
         FileExistsError: Another run with the same id, started in the same second, claimed it.
     """
     return claim_run_directory(new_run_path(config_name, root, **id_fields))
+
+
+def logical_abspath(path: Path | str) -> Path:
+    """The absolute path, with links kept: as the shell names the working directory.
+
+    os.getcwd() names the physical directory, so inside a linked results/models/<id> the path
+    "." would lose its results/ siblings; $PWD, when it names the same directory, keeps them.
+    """
+    path = Path(path)
+    if path.is_absolute():
+        return Path(os.path.normpath(path))
+    base = os.getcwd()
+    shell = os.environ.get("PWD")
+    if shell and os.path.isabs(shell):
+        try:
+            if os.path.samefile(shell, base):
+                base = shell
+        except OSError:
+            pass
+    return Path(os.path.normpath(os.path.join(base, path)))
 
 
 def run_root(path: Path) -> Path:

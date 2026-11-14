@@ -1686,7 +1686,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
         return args.mode or 'train'
     given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
                                       ('--mode', args.mode), ('--warm_start', args.warm_start))
-             if value]
+             if value is not None]  # --seed 0 and a bare --warm_start are given too
     if given:
         sys.exit(f'--resume takes the directory, seed, mode and warm start from the run; '
                  f'remove {", ".join(given)}')
@@ -1715,7 +1715,7 @@ def main() -> None:
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
     # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
-    parser.add_argument('--warm_start', type=str, nargs='*', default=[])
+    parser.add_argument('--warm_start', type=str, nargs='*', default=None)
     # Task 3: the run writes into results/models/<run-id>/; covsyn-pipeline names it with
     # covsyn.runtime.runs and passes it here, so the chain knows where to read.
     parser.add_argument('--run-dir', type=Path, default=None,
@@ -1769,7 +1769,7 @@ def main() -> None:
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
-    fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start)}
+    fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start or [])}
 
     with open('./variable/contact_parameters.pkl', 'rb') as f:
         contact_parameters = pickle.load(f)
@@ -1814,7 +1814,7 @@ def main() -> None:
     seed_vector = np.hstack(((lower_bound[:37] + upper_bound[:37]) / 2, course_parameters))
 
     warm_start_vectors = []
-    for path in args.warm_start:
+    for path in args.warm_start or []:
         earlier = np.atleast_2d(np.loadtxt(path))
         vector = earlier[int(np.argmin(earlier[:, -1])), 1:-1]
         padded = pad_pre_b54_vector(vector, seed_vector)

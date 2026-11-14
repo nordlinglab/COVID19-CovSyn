@@ -18,7 +18,6 @@ synthesis, and a missing reported figure. The other steps only warned there, and
 
 from __future__ import annotations
 
-import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -42,7 +41,7 @@ class Layout:
         """Lay out the run in ``run_dir``; outside results/models the run holds all three."""
         # Absolute, as every step runs from the repository root; not resolved, so a symlinked
         # models directory keeps its results/ siblings.
-        self.run = Path(os.path.abspath(run_dir))
+        self.run = runs.logical_abspath(run_dir)
         if self.run.parent.name == "models":
             results = self.run.parent.parent
             self.tables = results / "tables" / self.run.name

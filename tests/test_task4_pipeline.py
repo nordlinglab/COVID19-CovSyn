@@ -598,16 +598,64 @@ def test_a_cut_off_run_log_line_does_not_stop_a_resume(tmp_path, config):
 
 
 def test_run_log_records_the_workers_the_steps_use(tmp_path, config, monkeypatch):
-    """COVSYN_WORKERS from the shell, capped by memory for the checklist stages."""
+    """The default every step gets, and for the checklist stages their cap by memory."""
     from covsyn.runtime import hardware
 
     monkeypatch.setenv("COVSYN_WORKERS", "7")
     monkeypatch.setattr(hardware, "_available_gb", lambda: 10.0)  # 2 checklist workers fit
     _, run_dir = run_pipeline(tmp_path, config, Recorder())
-    lines = {json.loads(x)["stage"]: json.loads(x)["workers"]
-             for x in (run_dir / "run.log").read_text().splitlines()}
-    assert lines["check"] == lines["select"] == 2
-    assert {lines[s] for s in STAGES if s not in ("check", "select")} == {7}
+    lines = {json.loads(x)["stage"]: json.loads(x) for x in (run_dir / "run.log").read_text()
+             .splitlines()}
+    assert {lines[s]["workers"] for s in STAGES} == {7}
+    assert lines["check"]["checklist_workers"] == lines["select"]["checklist_workers"] == 2
+    assert "checklist_workers" not in lines["synthesise"]
+
+
+def test_short_of_memory_a_finished_checklist_stage_is_still_recorded(tmp_path, config,
+                                                                      monkeypatch):
+    """Not even one 4.9 GB worker fits: the checklist ran serially, and the stage is logged."""
+    from covsyn.runtime import hardware
+
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    monkeypatch.setattr(hardware, "_available_gb", lambda: 1.0)
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+    lines = {json.loads(x)["stage"]: json.loads(x) for x in (run_dir / "run.log").read_text()
+             .splitlines()}
+    assert lines["check"]["checklist_workers"] == 1
+
+
+def test_run_hands_its_lock_to_the_real_steps_and_releases_it(tmp_path, config, monkeypatch):
+    """Without a test runner, every step gets the lock; once the run ends it is free again."""
+    seen = []
+
+    def fake(args, output, append, env, keep_fds=()):
+        seen.append(tuple(keep_fds))
+        return Recorder()(args, output, append, env)
+
+    monkeypatch.setattr(pr, "run_module", fake)
+    run_dir = tmp_path / "results" / "models" / "r"
+    assert pr.run(config, run_dir) == 0
+    assert seen and all(len(fds) == 1 for fds in seen)
+    import os
+
+    os.close(pr.acquire_lock(run_dir))  # free: the run released it
+
+
+def test_a_symlinked_run_passed_to_run_lays_out_under_results(tmp_path, config, monkeypatch):
+    """run() and a resume from inside the linked directory keep results/tables/<id>."""
+    storage = tmp_path / "storage" / "r"
+    storage.mkdir(parents=True)
+    models = tmp_path / "results" / "models"
+    models.mkdir(parents=True)
+    (models / "r").symlink_to(storage)
+    recorder = Recorder(fail={"covsyn.model.data_synthesis_main"})
+    pr.run(config, models / "r", execute=recorder)
+    monkeypatch.chdir(models / "r")
+    monkeypatch.setenv("PWD", str(models / "r"))
+    pr.run(None, Path("."), execute=Recorder(), resume=True)
+    assert (tmp_path / "results" / "tables" / "r" / "report.txt").exists()
+    assert not (storage / "tables").exists()
 
 
 def test_check_gap_reads_this_runs_spread_simulations(tmp_path, config):

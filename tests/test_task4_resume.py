@@ -169,7 +169,7 @@ def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
 def _args(**given):
     import argparse
 
-    values = {"resume": None, "run_dir": None, "seed": None, "mode": None, "warm_start": []}
+    values = {"resume": None, "run_dir": None, "seed": None, "mode": None, "warm_start": None}
     return argparse.Namespace(**{**values, **given})
 
 
@@ -185,7 +185,8 @@ def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
 
 
 @pytest.mark.parametrize("given", [{"mode": "train"}, {"warm_start": ["a.txt"]}, {"seed": 3},
-                                   {"run_dir": "x"}])
+                                   {"run_dir": "x"}, {"seed": 0}, {"warm_start": []},
+                                   {"mode": ""}])
 def test_an_option_that_would_change_a_resumed_run_is_refused(tmp_path, given):
     """Refused, not silently ignored."""
     with pytest.raises(SystemExit, match="--resume takes"):
