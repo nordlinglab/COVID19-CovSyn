@@ -153,3 +153,9 @@ def test_an_older_run_is_read_under_the_current_name_and_marked():
     assert ir.watched_value(old, name) == (98.0, "older run: P(largest <= 8)")
     assert ir.watched_value(new, name) == (94.0, "")
     assert "samples of 579 cases whose largest is at most 8" not in ir.DEFAULT_WATCH
+
+
+def test_from_inside_a_run_directory_the_checklists_are_found(run, monkeypatch):
+    """The usage runs it from the run directory, where "." has no models parent until resolved."""
+    monkeypatch.chdir(run)
+    assert ir.Layout(Path(".").resolve()).tables == checks_path(run).parent

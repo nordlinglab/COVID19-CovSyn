@@ -71,7 +71,7 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
         "tw_check": ["-m", "covsyn.validation.tw_check", first],
         "measure_days": ["-m", "covsyn.validation.measure_days", spread],
         "show_final": ["-m", "covsyn.validation.show_final", RUN_DIR],
-        "check_gap": ["-m", "covsyn.validation.check_gap", RUN_DIR],
+        "check_gap": ["-m", "covsyn.validation.check_gap", RUN_DIR, spread],
         "show_bounds": ["-m", "covsyn.validation.show_bounds"],
     }
 

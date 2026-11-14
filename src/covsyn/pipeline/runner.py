@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import resource
@@ -37,6 +38,11 @@ from covsyn.runtime import hardware, runs
 
 SAVED_CONFIG = "pipeline.toml"
 RUN_LOG = "run.log"
+PIPELINE_LOG = "pipeline.log"  # every progress line, warning and error, kept with the run
+LOCK = "pipeline.lock"
+# The lock's descriptor while a run holds it; every step inherits it (see run_module).
+_lock_fds: tuple[int, ...] = ()
+_log_path: Path | None = None
 Execute = Callable[[Sequence, Path | None, bool, Mapping[str, str]], int]
 
 
@@ -44,23 +50,23 @@ def run_module(args: Sequence, output: Path | None, append: bool, env: Mapping[s
     """Run ``python args`` from the repository root, its output into ``output``; its status."""
     environment = {**os.environ, **env}
     command = [sys.executable, *map(str, args)]
+    # The step inherits the run's lock, so an optimiser left running when the pipeline was
+    # killed still holds it and a resume cannot start a second one on the same run.
+    options = {"cwd": runs.REPO_ROOT, "env": environment, "check": False, "pass_fds": _lock_fds}
     if output is None:
-        return subprocess.run(command, cwd=runs.REPO_ROOT, env=environment, check=False).returncode
+        return subprocess.run(command, **options).returncode
     output.parent.mkdir(parents=True, exist_ok=True)
     with open(output, "a" if append else "w", encoding="utf-8") as f:
-        return subprocess.run(
-            command,
-            cwd=runs.REPO_ROOT,
-            env=environment,
-            stdout=f,
-            stderr=subprocess.STDOUT,
-            check=False,
-        ).returncode
+        return subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, **options).returncode
 
 
 def say(message: str) -> None:
-    """A timestamped progress line, as the chain's log had."""
-    print(f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}", flush=True)
+    """A timestamped progress line, printed and kept in the run's pipeline.log."""
+    line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}"
+    print(line, flush=True)
+    if _log_path is not None:
+        with open(_log_path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
 
 def _peak_mb(who: int) -> float:
@@ -70,14 +76,22 @@ def _peak_mb(who: int) -> float:
 
 
 def finished_stages(run_dir: Path) -> list[str]:
-    """The stages run.log records as finished."""
+    """The stages run.log records as finished; a line cut off by a kill is not one."""
     path = Path(run_dir) / RUN_LOG
     if not path.exists():
         return []
-    return [json.loads(line)["stage"] for line in path.read_text().splitlines() if line.strip()]
+    stages = []
+    for line in path.read_text(errors="replace").splitlines():
+        try:
+            stages.append(json.loads(line)["stage"])
+        except (ValueError, KeyError, TypeError):
+            continue
+    return stages
 
 
-def record_stage(run_dir: Path, stage: str, seconds: float, workers: int) -> None:
+def record_stage(
+    run_dir: Path, stage: str, seconds: float, workers: int, warnings: Sequence[str] = ()
+) -> None:
     """Append one line to run.log for a finished stage.
 
     The worker peak is the largest of every step run so far (RUSAGE_CHILDREN cannot be reset);
@@ -90,6 +104,7 @@ def record_stage(run_dir: Path, stage: str, seconds: float, workers: int) -> Non
         "workers": workers,
         "parent_peak_mb": round(_peak_mb(resource.RUSAGE_SELF), 1),
         "worker_peak_mb": round(_peak_mb(resource.RUSAGE_CHILDREN), 1),
+        "warnings": list(warnings),
     }
     with open(Path(run_dir) / RUN_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(line) + "\n")
@@ -113,7 +128,7 @@ def run(
         FileNotFoundError: Resuming a directory that holds no pipeline run.
         FileExistsError: Starting a run in a directory that holds one.
     """
-    run_dir = Path(run_dir)
+    run_dir = Path(run_dir).resolve()  # steps run from the repository root
     execute = execute or run_module
     if resume:
         saved = run_dir / SAVED_CONFIG
@@ -124,8 +139,43 @@ def run(
         runs.check_unclaimed(run_dir)  # the optimiser claims it; this fails before anything runs
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / SAVED_CONFIG).write_text(pc.to_toml(config), encoding="utf-8")
+    global _log_path
+    lock = _acquire_lock(run_dir)
+    _log_path = run_dir / PIPELINE_LOG
+    try:
+        return _run_stages(config, run_dir, execute, resume)
+    finally:
+        _log_path = None
+        _release_lock(lock)
+
+
+def _acquire_lock(run_dir: Path) -> int:
+    """Lock the run, or refuse: another pipeline, or a step it left running, holds it."""
+    global _lock_fds
+    fd = os.open(run_dir / LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise RuntimeError(
+            f"{run_dir} is in use by another pipeline, or by a step one left "
+            "running; wait for it, or stop it, before resuming"
+        ) from None
+    os.set_inheritable(fd, True)
+    _lock_fds = (fd,)
+    return fd
+
+
+def _release_lock(fd: int) -> None:
+    global _lock_fds
+    _lock_fds = ()
+    os.close(fd)  # the lock goes with the last descriptor
+
+
+def _run_stages(config: pc.PipelineConfig, run_dir: Path, execute: Execute, resume: bool) -> int:
     env = {} if config.workers is None else {hardware.ENV_VARIABLE: str(config.workers)}
-    workers = config.workers or hardware.performance_core_count().count
+    # What a step uses by default: the setting, else COVSYN_WORKERS, else the cores (Task 2).
+    workers = hardware.resolve_workers(None, {**os.environ, **env}, None)
 
     def step(args, output=None, append=False, env=None):
         return execute(args, output, append, {**environment, **(env or {})})
@@ -134,6 +184,11 @@ def run(
     layout = ps.Layout(run_dir)
     for directory in (layout.tables, layout.figures, layout.logs):
         directory.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("VERIFY_WORKERS") or os.environ.get("CPU_CORES"):
+        say(
+            "WARNING: VERIFY_WORKERS and CPU_CORES are no longer read; set workers in the "
+            "configuration or COVSYN_WORKERS"
+        )
     done = set(finished_stages(run_dir))
     say(f"run directory {run_dir}" + (f"; finished: {', '.join(sorted(done))}" if done else ""))
     for name, function in ps.STAGES:
@@ -150,7 +205,7 @@ def run(
         finally:
             for warning in ctx.warnings:
                 say(f"WARNING: {warning}")
-        record_stage(run_dir, name, time.monotonic() - start, workers)
+        record_stage(run_dir, name, time.monotonic() - start, workers, ctx.warnings)
     say("ALL DONE")
     return 0
 
@@ -170,7 +225,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.resume:
         given = Path(args.resume)
-        run_dir = given if given.is_dir() else runs.RESULTS_ROOT / "models" / args.resume
+        run_dir = given.resolve() if given.is_dir() else runs.RESULTS_ROOT / "models" / args.resume
         return run(None, run_dir, resume=True)
     config = pc.load(args.config)
     return run(config, runs.new_run_path(config.config_name, runs.RESULTS_ROOT))

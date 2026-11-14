@@ -1117,7 +1117,7 @@ SIMULATIONS_PER_EVALUATION = 300
 ARCHIVE_EVERY = 5
 
 
-def generation_rng(seed, generation):
+def generation_rng(seed: int, generation: int) -> np.random.Generator:
     """The move generator of a generation, from SeedSequence([seed, generation]) (Task 4).
 
     Each generation draws its moves from its own generator, so a resumed run needs no saved
@@ -1126,10 +1126,10 @@ def generation_rng(seed, generation):
     return default_rng(np.random.SeedSequence([seed, generation]))
 
 
-CHECKPOINTS = 'checkpoints'
+CHECKPOINTS = runs.CHECKPOINTS
 
 
-def save_checkpoint(directory, generation, state):
+def save_checkpoint(directory: Path, generation: int, state: dict) -> None:
     """Write generation's state to directory/checkpoints/generation_<g>.npz, all or nothing.
 
     It is written under a temporary name and renamed, so a run killed while writing leaves the
@@ -1145,7 +1145,7 @@ def save_checkpoint(directory, generation, state):
     os.replace(temporary, final)
 
 
-def load_last_checkpoint(directory):
+def load_last_checkpoint(directory: Path) -> dict:
     """The state of the last finished generation in directory/checkpoints, as a dict.
 
     Raises:
@@ -1161,7 +1161,7 @@ def load_last_checkpoint(directory):
         return {name: saved[name] for name in saved.files}
 
 
-def drop_progress_after(path, generation):
+def drop_progress_after(path: Path, generation: int) -> None:
     """Keep the progress rows up to generation; later ones were written after its checkpoint."""
     if not path.exists():
         return
@@ -1655,19 +1655,25 @@ class Firefly:
                 fireflies, intensities)
 
 
-def resumed_seed(run_dir: Path) -> int:
-    """The seed a run recorded in its config.json, to resume it with (Task 4).
+def resumed_settings(run_dir: Path) -> tuple[int, str]:
+    """The seed and mode a run recorded in its config.json, to resume it with (Task 4).
+
+    The mode sets the population size and the generations, which must match the checkpoint.
 
     Raises:
-        SystemExit: The directory holds no config.json with a seed, so it cannot be resumed.
+        SystemExit: The directory holds no config.json with both, so it cannot be resumed.
     """
     try:
-        seed = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))['seed']
-    except (OSError, ValueError, KeyError) as error:
-        raise SystemExit(f'{run_dir} cannot be resumed: no seed in its config.json ({error})')
-    if not isinstance(seed, int):
+        config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
+        seed, mode = config['seed'], config['settings']['mode']
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise SystemExit(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
+                         f'({error!r})')
+    if not isinstance(seed, int) or isinstance(seed, bool):
         raise SystemExit(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
-    return seed
+    if not isinstance(mode, str):
+        raise SystemExit(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
+    return seed, mode
 
 
 def run_directory_for(run_dir: Path | None, config_name: str) -> Path:
@@ -1714,7 +1720,7 @@ def main() -> None:
         if args.run_dir is not None or args.seed is not None:
             sys.exit('--resume takes the run directory and seed from the run; '
                      'give neither --run-dir nor --seed')
-        args.seed = resumed_seed(args.resume)
+        args.seed, mode = resumed_settings(args.resume)
     elif args.run_dir is not None:
         runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')

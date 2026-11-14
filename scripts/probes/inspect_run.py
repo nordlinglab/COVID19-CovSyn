@@ -144,7 +144,7 @@ def main() -> None:
     parser.add_argument("run", nargs="?", default=".", type=Path)
     parser.add_argument("--watch", action="append", default=[])
     args = parser.parse_args()
-    run = args.run
+    run = args.run.resolve()  # from inside a run directory, "." must still find its tables
     watch = DEFAULT_WATCH + tuple(args.watch)
 
     stages = stage_timings(run)

@@ -22,6 +22,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from covsyn.pipeline.config import PipelineConfig
 from covsyn.runtime import runs
 
 SPREAD_MODE = "spread_Taiwan_weight"
@@ -38,7 +39,8 @@ class Layout:
 
     def __init__(self, run_dir: Path) -> None:
         """Lay out the run in ``run_dir``; outside results/models the run holds all three."""
-        self.run = Path(run_dir)
+        # Absolute: every step runs from the repository root, wherever the pipeline started.
+        self.run = Path(run_dir).resolve()
         if self.run.parent.name == "models":
             results = self.run.parent.parent
             self.tables = results / "tables" / self.run.name
@@ -60,7 +62,7 @@ class Layout:
 class Context:
     """What a stage needs: the configuration, the layout, and a way to run a step."""
 
-    def __init__(self, config, layout: Layout, step: Callable[..., int]) -> None:
+    def __init__(self, config: PipelineConfig, layout: Layout, step: Callable[..., int]) -> None:
         """Hold ``config`` and ``layout``; ``step`` runs one module and returns its status."""
         self.config = config
         self.layout = layout
@@ -91,10 +93,15 @@ def optimise(ctx: Context, resume: bool) -> None:
     """The optimiser, into the run directory; continued from its checkpoint when resuming."""
     run = ctx.layout.run
     log = run / "optimiser.log"
-    if resume and (run / runs_checkpoints()).is_dir():
+    if resume and has_checkpoint(run):
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
         ctx.must(args, "the optimiser", output=log, append=True)
         return
+    if resume:
+        # Killed before its first checkpoint (while scoring the initial population): nothing
+        # to continue, and the claim it left would refuse a fresh start, so the optimiser's
+        # partial output goes and the optimiser starts again.
+        discard_optimiser_output(run)
     args = [
         "-m",
         "covsyn.calibration.firefly_optimizer",
@@ -108,11 +115,29 @@ def optimise(ctx: Context, resume: bool) -> None:
     ctx.must(args, "the optimiser", output=log)
 
 
-def runs_checkpoints() -> str:
-    """The optimiser's checkpoint directory name."""
-    from covsyn.calibration.firefly_optimizer import CHECKPOINTS
+def has_checkpoint(run: Path) -> bool:
+    """Whether the optimiser left a finished checkpoint to resume from (not a .tmp one)."""
+    folder = Path(run) / runs.CHECKPOINTS
+    return (folder / "initial.npz").is_file() or any(folder.glob("generation_[0-9]*[0-9].npz"))
 
-    return CHECKPOINTS
+
+# The optimiser's own files, from runs.RUN_OUTPUTS: not the chain's directories after it.
+OPTIMISER_OUTPUTS = tuple(
+    name for name in runs.RUN_OUTPUTS if name not in ("revalidation", "selected")
+)
+
+
+def discard_optimiser_output(run: Path) -> None:
+    """Remove what an optimiser that never reached a checkpoint left in the run directory."""
+    for name in OPTIMISER_OUTPUTS:
+        path = Path(run) / name
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        elif path.exists() or path.is_symlink():
+            path.unlink()
+    table = runs.progress_path(run)
+    if table.exists():
+        table.unlink()
 
 
 def revalidate(ctx: Context) -> None:
@@ -189,6 +214,14 @@ def synthesise(ctx: Context) -> None:
             raise StageFailed(f"{ctx.layout.independent(mode)} holds no simulation")
 
 
+def repository_path(setting: str) -> Path | None:
+    """A path setting, relative to the repository root as every step runs there; None if empty."""
+    if not setting:
+        return None
+    path = Path(setting)
+    return path if path.is_absolute() else runs.REPO_ROOT / path
+
+
 def check(ctx: Context) -> None:
     """The age risk ratio, then the checklist on both seed sets, and the previous run's."""
     tables = ctx.layout.tables
@@ -231,8 +264,8 @@ def check(ctx: Context) -> None:
         output=tables / "checks_independent.txt",
         env=env,
     )
-    previous = ctx.config.previous_checks
-    if previous and Path(previous).is_file():
+    previous = repository_path(ctx.config.previous_checks)
+    if previous is not None and previous.is_file():
         ctx.may(
             ["-m", "covsyn.validation.compare_phase_d_runs", previous, tables / "checks.json"],
             "the run comparison",
@@ -249,7 +282,7 @@ def report(ctx: Context) -> None:
     out = tables / "report.txt"
     arguments = {
         "show_final": [candidate],
-        "check_gap": [candidate],
+        "check_gap": [candidate, ctx.layout.synthetic(SPREAD_MODE)],
         "rr_exact": [ctx.layout.synthetic(SPREAD_MODE)],
         "tw_check": [ctx.layout.synthetic(FIRST_MODE)],
         "show_bounds": [],

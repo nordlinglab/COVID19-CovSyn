@@ -147,14 +147,20 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
     """The optimiser's --resume reads the seed config.json recorded, not a fresh one."""
     import json
 
-    (tmp_path / "config.json").write_text(json.dumps({"seed": 123}))
-    assert fo.resumed_seed(tmp_path) == 123
+    (tmp_path / "config.json").write_text(json.dumps({"seed": 123,
+                                                      "settings": {"mode": "test"}}))
+    assert fo.resumed_settings(tmp_path) == (123, "test")
 
 
-@pytest.mark.parametrize("config", [None, '{"claimed": true}', '{"seed": null}', "not json"])
+@pytest.mark.parametrize("config", [None, '{"claimed": true}', '{"seed": null}', "not json",
+                                    '{"seed": 1}', '{"seed": 1, "settings": {}}',
+                                    '{"seed": true, "settings": {"mode": "train"}}'])
 def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
-    """A claim marker, a missing file or a null seed would resume with the wrong moves."""
+    """A claim marker, a missing file, or no seed or mode would resume the wrong run.
+
+    The mode sets the population size, which must match the checkpoint's.
+    """
     if config is not None:
         (tmp_path / "config.json").write_text(config)
     with pytest.raises(SystemExit, match="cannot be resumed"):
-        fo.resumed_seed(tmp_path)
+        fo.resumed_settings(tmp_path)

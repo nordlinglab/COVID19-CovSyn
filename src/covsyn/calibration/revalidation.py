@@ -111,14 +111,19 @@ def write_best_file(path: Path, vectors: np.ndarray, costs: np.ndarray) -> None:
     np.savetxt(path, rows, fmt="%.7f")
 
 
+# Written here, or the pipeline's records of the whole run rather than of the optimiser.
+NOT_COPIED = ("firefly_best.txt", "revalidation.csv", "optimiser.log", "run.log",
+              "pipeline.toml", "pipeline.log", "pipeline.lock")
+
+
 def copy_run_files(firefly_dir: Path, out_dir: Path) -> None:
     """Copy every file of the optimizer run except the two this module writes itself.
 
-    The pipeline reads the run from OUT_DIR after this step, and
-    The steps after it read the run from OUT_DIR, so OUT_DIR must hold the whole run.
+    The steps after it read the run from OUT_DIR, so OUT_DIR must hold the whole run; the
+    pipeline's own records of the run (Task 4) stay with the run itself.
     """
     for source in Path(firefly_dir).iterdir():
-        if source.is_file() and source.name not in ("firefly_best.txt", "revalidation.csv"):
+        if source.is_file() and source.name not in NOT_COPIED:
             shutil.copy(source, Path(out_dir) / source.name)
 
 

@@ -509,3 +509,130 @@ def test_a_resumed_revalidation_starts_afresh(tmp_path, config):
     (run_dir / "revalidation" / "stale.txt").write_text("old")
     pr.run(None, run_dir, execute=Recorder(), resume=True)
     assert not (run_dir / "revalidation" / "stale.txt").exists()
+
+
+# --- code review 2026-11-15 (high) ---------------------------------------------------------
+
+
+def test_an_optimiser_killed_before_its_first_checkpoint_starts_again(tmp_path, config):
+    """Killed while scoring the initial population: its claim is cleared and it runs anew."""
+    recorder = Recorder(fail={"covsyn.calibration.firefly_optimizer"})
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    (run_dir / "config.json").write_text('{"claimed": true}\n')  # what the claim left
+    (run_dir / "checkpoints").mkdir()
+    (run_dir / "checkpoints" / "initial.tmp.npz").write_text("cut off")
+    recorder = Recorder()
+    pr.run(None, run_dir, execute=recorder, resume=True)
+    first = recorder.calls[0]
+    assert "--run-dir" in first and "--resume" not in first
+    assert not (run_dir / "checkpoints").exists() or not list((run_dir / "checkpoints").iterdir())
+
+
+def test_a_relative_previous_checks_is_read_from_the_repository_root(tmp_path, config):
+    """Every step runs from the repository root, so a setting's path is read from there."""
+    recorder = Recorder()
+    name = "results/tables/phaseD_run10/progress.csv"  # a committed file, as a stand-in
+    _, run_dir = run_pipeline(tmp_path, pc.replace(config, previous_checks=name), recorder)
+    compare = next(a for a in recorder.calls if a[1] == "covsyn.validation.compare_phase_d_runs")
+    assert compare[2] == str(pr.runs.REPO_ROOT / name)
+
+
+def test_warnings_are_kept_with_the_run(tmp_path, config):
+    """In pipeline.log and the stage's run.log line, not only in pipeline.out.
+
+    The next resume overwrites pipeline.out.
+    """
+    _, run_dir = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.validation.show_final"}))
+    assert "WARNING: the report's show_final failed" in (run_dir / "pipeline.log").read_text()
+    lines = {json.loads(x)["stage"]: json.loads(x) for x in (run_dir / "run.log").read_text()
+             .splitlines()}
+    assert lines["report"]["warnings"] == ["the report's show_final failed"]
+    assert lines["check"]["warnings"] == []
+
+
+def test_a_run_in_use_cannot_be_resumed(tmp_path, config):
+    """A second pipeline, or a step one left running, holds the lock; a resume is refused."""
+    import fcntl
+    import os
+
+    recorder = Recorder(fail={"covsyn.model.data_synthesis_main"})
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    fd = os.open(run_dir / "pipeline.lock", os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # as the orphaned optimiser would hold it
+    try:
+        with pytest.raises(RuntimeError, match="in use"):
+            pr.run(None, run_dir, execute=Recorder(), resume=True)
+    finally:
+        os.close(fd)
+    assert pr.run(None, run_dir, execute=Recorder(), resume=True) == 0
+
+
+def test_every_step_inherits_the_runs_lock(tmp_path, config):
+    """A real step holds the lock too, so it outlives a killed pipeline."""
+    seen = []
+
+    def step(args, output, append, env):
+        seen.append(pr._lock_fds)
+        return Recorder()(args, output, append, env)
+
+    run_pipeline(tmp_path, config, step)
+    assert seen and all(len(fds) == 1 for fds in seen)
+    assert pr._lock_fds == ()  # released when the run ends
+
+
+def test_a_cut_off_run_log_line_does_not_stop_a_resume(tmp_path, config):
+    """A kill while writing run.log leaves half a line; it is not a finished stage."""
+    recorder = Recorder(fail={"covsyn.model.data_synthesis_main"})
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    with open(run_dir / "run.log", "a") as f:
+        f.write('{"stage": "synth')
+    recorder = Recorder()
+    assert pr.run(None, run_dir, execute=recorder, resume=True) == 0
+    assert modules(recorder)[0] == "covsyn.model.data_synthesis_main"
+
+
+def test_run_log_records_the_workers_the_steps_use(tmp_path, config, monkeypatch):
+    """COVSYN_WORKERS from the shell, when the configuration sets none."""
+    monkeypatch.setenv("COVSYN_WORKERS", "7")
+    _, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert {json.loads(x)["workers"] for x in (run_dir / "run.log").read_text().splitlines()} \
+        == {7}
+
+
+def test_check_gap_reads_this_runs_spread_simulations(tmp_path, config):
+    """It read a fixed synthetic_data_results_spread_Taiwan_weight in the working directory."""
+    recorder = Recorder()
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    gap = next(a for a in recorder.calls if a[1] == "covsyn.validation.check_gap")
+    assert gap[2:] == [str(run_dir / "selected"),
+                       str(run_dir / "synthetic" / "spread_Taiwan_weight")]
+
+
+def test_a_relative_run_directory_is_made_absolute(tmp_path, config, monkeypatch):
+    """Steps run from the repository root, so a path relative to elsewhere must not reach them."""
+    monkeypatch.chdir(tmp_path)
+    recorder = Recorder()
+    pr.run(config, Path("results/models/rel"), execute=recorder)
+    optimiser = recorder.calls[0]
+    assert optimiser[optimiser.index("--run-dir") + 1] == str(tmp_path / "results/models/rel")
+
+
+def test_the_old_worker_variables_are_reported(tmp_path, config, monkeypatch, capsys):
+    """The chain warned about VERIFY_WORKERS and CPU_CORES; so does the pipeline."""
+    monkeypatch.setenv("VERIFY_WORKERS", "8")
+    run_pipeline(tmp_path, config, Recorder())
+    assert "VERIFY_WORKERS and CPU_CORES are no longer read" in capsys.readouterr().out
+
+
+def test_tw_check_lists_earlier_runs_only_when_given_no_run(tmp_path):
+    """Given this run, as the pipeline gives it, the report is about this run alone."""
+    import subprocess
+
+    old = pr.runs.REPO_ROOT / "synthetic_data_results_taiwan_first_outbreak_zz_test_only"
+    old.mkdir()
+    try:
+        given = subprocess.run([sys.executable, "-m", "covsyn.validation.tw_check", str(tmp_path)],
+                               cwd=pr.runs.REPO_ROOT, capture_output=True, text=True)
+    finally:
+        old.rmdir()
+    assert "previous:" not in given.stdout, given.stdout + given.stderr

@@ -109,3 +109,15 @@ def test_default_seed_offset_is_the_objective_and_others_differ(
     )
     assert default == zero
     assert moved != default
+
+
+def test_the_pipelines_records_are_not_copied(tmp_path) -> None:
+    """run.log, pipeline.toml and the rest describe the whole run, not the revalidated copy."""
+    run, out = tmp_path / "run", tmp_path / "out"
+    run.mkdir()
+    out.mkdir()
+    for name in ("bound.txt", "optimiser.log", "run.log", "pipeline.toml", "pipeline.log",
+                 "pipeline.lock"):
+        (run / name).write_text(name)
+    rv.copy_run_files(run, out)
+    assert {p.name for p in out.iterdir()} == {"bound.txt"}

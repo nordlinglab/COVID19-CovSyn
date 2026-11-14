@@ -35,6 +35,8 @@ from covsyn.runtime import hardware
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RESULTS_ROOT = REPO_ROOT / "results"
+# The optimiser's checkpoint directory (Task 4), here so a caller need not import the optimiser.
+CHECKPOINTS = "checkpoints"
 # What an optimiser run writes; a directory holding any of them already holds a run.
 RUN_OUTPUTS = (
     "config.json",

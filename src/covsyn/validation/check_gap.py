@@ -7,8 +7,10 @@ from pathlib import Path
 from covsyn.model.data_synthesize import Draw_course_of_disease_data
 from covsyn.runtime.runs import run_dir_argument
 
-PARAM = run_dir_argument(sys.argv, 1, 'uv run python -m covsyn.validation.check_gap RUN_DIR')
-SYN = 'synthetic_data_results_spread_Taiwan_weight'
+_USAGE = 'uv run python -m covsyn.validation.check_gap RUN_DIR SPREAD_DIR'
+PARAM = run_dir_argument(sys.argv, 1, _USAGE)
+# Task 4: the run's own spread simulations; a fixed name read whatever an earlier run left.
+SYN = str(run_dir_argument(sys.argv, 2, _USAGE))
 N = 20000
 
 # ---------- literature reported-mean ranges ----------
