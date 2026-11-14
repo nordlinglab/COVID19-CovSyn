@@ -45,6 +45,7 @@ RUN_OUTPUTS = (
     "firefly_result.txt",
     "firefly_best.txt",
     "firefly_worst.txt",
+    "checkpoints",  # one per generation (Task 4)
     "revalidation",  # written into the run directory by the chain
     "selected",
 )

@@ -3,6 +3,7 @@ import concurrent.futures
 import copy
 import cProfile
 import csv
+import json
 import numpy as np
 import pickle
 import pstats
@@ -1116,6 +1117,63 @@ SIMULATIONS_PER_EVALUATION = 300
 ARCHIVE_EVERY = 5
 
 
+def generation_rng(seed, generation):
+    """The move generator of a generation, from SeedSequence([seed, generation]) (Task 4).
+
+    Each generation draws its moves from its own generator, so a resumed run needs no saved
+    generator state to make the same moves as an uninterrupted one.
+    """
+    return default_rng(np.random.SeedSequence([seed, generation]))
+
+
+CHECKPOINTS = 'checkpoints'
+
+
+def save_checkpoint(directory, generation, state):
+    """Write generation's state to directory/checkpoints/generation_<g>.npz, all or nothing.
+
+    It is written under a temporary name and renamed, so a run killed while writing leaves the
+    previous checkpoint as the last one.
+    """
+    folder = Path(directory) / CHECKPOINTS
+    folder.mkdir(exist_ok=True)
+    # Generation -1 is the evaluated initial population, so a run killed in generation 0 resumes.
+    name = 'initial' if generation < 0 else f'generation_{generation:04d}'
+    final = folder / f'{name}.npz'
+    temporary = folder / f'{name}.tmp.npz'
+    np.savez(temporary, generation=generation, **state)
+    os.replace(temporary, final)
+
+
+def load_last_checkpoint(directory):
+    """The state of the last finished generation in directory/checkpoints, as a dict.
+
+    Raises:
+        FileNotFoundError: The directory holds no checkpoint to resume from.
+    """
+    folder = Path(directory) / CHECKPOINTS
+    found = sorted(folder.glob('generation_[0-9][0-9][0-9][0-9].npz'))
+    if not found and (folder / 'initial.npz').exists():
+        found = [folder / 'initial.npz']
+    if not found:
+        raise FileNotFoundError(f'{directory} holds no checkpoint to resume from')
+    with np.load(found[-1]) as saved:
+        return {name: saved[name] for name in saved.files}
+
+
+def drop_progress_after(path, generation):
+    """Keep the progress rows up to generation; later ones were written after its checkpoint."""
+    if not path.exists():
+        return
+    with open(path, newline='') as f:
+        rows = list(csv.DictReader(f))
+    with open(path, 'w', newline='') as f:
+        if rows:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(r for r in rows if int(r['generation']) <= generation)
+
+
 def generation_seed_offset(generation):
     """First simulation seed of a generation's own block (B81); generation 0 shares block 0
     with the initial population, whose scores it starts from (F7)."""
@@ -1400,7 +1458,21 @@ class Firefly:
         # Task 3: recorded in config.json with the settings above; main() adds its own.
         self.run_settings = {}
 
-    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None, warm_start_vectors=()):
+    @staticmethod
+    def _state(normalized, fireflies, intensities, cost_parts, archive, worst_fireflies,
+               worst_intensities, worst_iteration, evaluations, alpha, dim):
+        """What a checkpoint holds: everything the next generation reads (Task 4)."""
+        return {'normalized': np.asarray(normalized, dtype=float),
+                'fireflies': np.asarray(fireflies, dtype=float),
+                'intensities': np.asarray(intensities, dtype=float),
+                'cost_parts': np.array(json.dumps(cost_parts)),
+                'archive': np.asarray(archive, dtype=float).reshape(len(archive), dim + 2),
+                'worst_fireflies': np.asarray(worst_fireflies, dtype=float),
+                'worst_intensities': np.asarray(worst_intensities, dtype=float),
+                'worst_iteration': np.asarray(worst_iteration, dtype=float),
+                'evaluations': evaluations, 'alpha': alpha}
+
+    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None, warm_start_vectors=(), resume=False):
         normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
         # fireflies = self.rng.uniform(lb, ub, (self.pop_size, dim))
         # inverse of min-max normalization
@@ -1421,12 +1493,15 @@ class Firefly:
             normalized_fireflies[k] = np.clip((clip_warm_start(vector, lb, ub, f'firefly {k}') - lb) / span, 0, 1)
             fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
             print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
+        # Task 4: a resumed run continues from its last checkpoint; its config.json stands.
+        checkpoint = load_last_checkpoint(result_path) if resume else None
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
                     **self.run_settings}
-        runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
-                          initial_population=fireflies)
+        if checkpoint is None:
+            runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
+                              initial_population=fireflies)
         # Create ONE persistent process pool reused for every evaluation in this run.
         # (Previously each evaluation created and tore down its own pool, re-spawning
         # 24 workers thousands of times.)
@@ -1439,11 +1514,14 @@ class Firefly:
         executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=max_workers, initializer=_init_reduction_worker,
             initargs=(demographic_parameters, _columns))
-        print(f'evaluating initial population: {self.pop_size} fireflies '
-              f'({SIMULATIONS_PER_EVALUATION} simulations each)...', flush=True)
         intensities = np.empty(self.pop_size)
         cost_parts = [{} for _ in range(self.pop_size)]
-        for k in range(self.pop_size):
+        if checkpoint is not None:
+            print(f'resuming after generation {int(checkpoint["generation"])}', flush=True)
+        else:
+            print(f'evaluating initial population: {self.pop_size} fireflies '
+                  f'({SIMULATIONS_PER_EVALUATION} simulations each)...', flush=True)
+        for k in range(self.pop_size if checkpoint is None else 0):
             intensities[k] = function(
                 fireflies[k], demographic_parameters, executor, Cheng_contact_array,
                 Cheng_attack_rate, norm_weights, seed_offset=0)
@@ -1459,16 +1537,33 @@ class Firefly:
         worst_fireflies = np.zeros(np.shape(fireflies))
         worst_intensities = np.zeros(np.shape(intensities))
         worst_iteration = np.zeros(np.shape(intensities))
-        # Save the first random guess
-        result = np.hstack((fireflies, np.matrix(intensities).T))
-        np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
-                   result, fmt='%.7f')
-
         evaluations = self.pop_size
         new_alpha = self.alpha
+        start = 0
+        if checkpoint is None:
+            # Save the first random guess
+            result = np.hstack((fireflies, np.matrix(intensities).T))
+            np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
+                       result, fmt='%.7f')
+            save_checkpoint(result_path, -1, self._state(
+                normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
+        else:
+            normalized_fireflies = checkpoint['normalized'].copy()
+            fireflies = checkpoint['fireflies'].copy()
+            intensities = checkpoint['intensities'].copy()
+            cost_parts = json.loads(str(checkpoint['cost_parts']))
+            archive = [row for row in checkpoint['archive']]
+            worst_fireflies = checkpoint['worst_fireflies'].copy()
+            worst_intensities = checkpoint['worst_intensities'].copy()
+            worst_iteration = checkpoint['worst_iteration'].copy()
+            evaluations = int(checkpoint['evaluations'])
+            new_alpha = float(checkpoint['alpha'])
+            start = int(checkpoint['generation']) + 1
+            drop_progress_after(result_path / 'progress_metrics.csv', start - 1)
         # search_range = ub - lb
 
-        for generation in tqdm(range(max_generations)):
+        for generation in tqdm(range(start, max_generations)):
             # B81: this generation's block, and every firefly re-scored on it -- the brightest
             # included, since its score came from another block and cannot be compared here.
             offset = generation_seed_offset(generation)
@@ -1480,6 +1575,7 @@ class Firefly:
                     cost_parts[k] = dict(LAST_COST_PARTS)
                     evaluations += 1
             new_alpha *= 0.97
+            moves = generation_rng(self.seed, generation)  # Task 4
             for i in range(self.pop_size):
                 if i % 10 == 0:
                     print(f'  gen {generation} | firefly {i}/{self.pop_size} | '
@@ -1499,7 +1595,7 @@ class Firefly:
                         beta = self.betamin * np.exp(-self.gamma * r)
                         # steps = new_alpha * \
                         #     (self.rng.random(dim) - 0.5) * search_range
-                        steps = new_alpha*(self.rng.random(dim) - 0.5)
+                        steps = new_alpha*(moves.random(dim) - 0.5)
                         normalized_fireflies[i] += beta * \
                             (normalized_fireflies[j] -
                              normalized_fireflies[i]) + steps
@@ -1540,6 +1636,10 @@ class Firefly:
                 if generation == 0:
                     writer.writeheader()
                 writer.writerow(row)
+            # Task 4: after the progress row, so a resumed run drops a row written past it.
+            save_checkpoint(result_path, generation, self._state(
+                normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
 
         executor.shutdown()
         # B81: firefly_best.txt keeps one row per firefly -- reproduce_wu2025 and
@@ -1552,6 +1652,21 @@ class Firefly:
         return (np.array(fireflies, dtype=float), np.array(intensities, dtype=float),
                 best_iteration, worst_fireflies, worst_intensities, worst_iteration,
                 fireflies, intensities)
+
+
+def resumed_seed(run_dir: Path) -> int:
+    """The seed a run recorded in its config.json, to resume it with (Task 4).
+
+    Raises:
+        SystemExit: The directory holds no config.json with a seed, so it cannot be resumed.
+    """
+    try:
+        seed = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))['seed']
+    except (OSError, ValueError, KeyError) as error:
+        raise SystemExit(f'{run_dir} cannot be resumed: no seed in its config.json ({error})')
+    if not isinstance(seed, int):
+        raise SystemExit(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
+    return seed
 
 
 def run_directory_for(run_dir: Path | None, config_name: str) -> Path:
@@ -1581,6 +1696,8 @@ def main() -> None:
                         help='run directory (default: results/models/<new run id>)')
     parser.add_argument('--config-name', default='phase-d',
                         help='configuration name in a new run id (lowercase kebab-case)')
+    parser.add_argument('--resume', type=Path, default=None,
+                        help='run directory to continue from its last checkpoint (Task 4)')
     parser.add_argument('--seed', type=runs.non_negative_int, default=None,
                         help='seed of the initial population, as config.json records it '
                              '(default: drawn and recorded)')
@@ -1591,7 +1708,13 @@ def main() -> None:
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
     mode = args.mode
-    if args.run_dir is not None:
+    if args.resume is not None:
+        # Task 4: the run's own seed, so the resumed generations make the same moves.
+        if args.run_dir is not None or args.seed is not None:
+            sys.exit('--resume takes the run directory and seed from the run; '
+                     'give neither --run-dir nor --seed')
+        args.seed = resumed_seed(args.resume)
+    elif args.run_dir is not None:
         runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')
     # shift_percentage = args.shift_percentage
@@ -1696,7 +1819,8 @@ def main() -> None:
 
     # Task 3: claimed only now, after every input has loaded, so a mistyped warm start or a
     # missing input file leaves no claimed directory behind.
-    result_path = run_directory_for(args.run_dir, args.config_name)
+    result_path = (args.resume if args.resume is not None
+                   else run_directory_for(args.run_dir, args.config_name))
     print(f'run directory: {result_path}')
 
     # Optimization
@@ -1731,7 +1855,8 @@ def main() -> None:
                 function=reducing_cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
                 demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=max_workers, Cheng_contact_array=Cheng_contact_array,
                 Cheng_attack_rate=Cheng_attack_rate, norm_weights=norm_weights,
-                seed_vector=seed_vector, warm_start_vectors=warm_start_vectors)
+                seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
+                resume=args.resume is not None)
         fireflies_result = np.hstack((fireflies, np.matrix(intensities).T))
         best_result = np.hstack(
             (np.matrix(best_iteration).T, best_fireflies, np.matrix(best_intensities).T))
