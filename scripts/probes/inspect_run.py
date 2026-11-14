@@ -10,7 +10,7 @@ This probe exists so that does not happen again.
 
 What the chain keeps, and what this reads:
   phaseD_chain.log                       stage timings and the selection line
-  Firefly_result_*/progress_metrics.csv  every measured_* quantity, per generation
+  results/tables/<run-id>/progress.csv  every measured_* quantity, per generation
   selected/revalidation.csv              per candidate: training cost, validation mean and sd
   selected/candidates/*/checks.json      per candidate: the FULL checklist, not just the counts
   validation_reference/phaseD_checks.json            the selected vector's checklist

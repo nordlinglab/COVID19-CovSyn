@@ -40,7 +40,7 @@ RUN_OUTPUTS = (
     "config.json",
     "bound.txt",
     "firefly_result_first_initial_guess.txt",
-    "progress_metrics.csv",
+    "progress.csv",  # here only for a run directory outside results/models, see progress_path
     "firefly_archive.txt",
     "firefly_result.txt",
     "firefly_best.txt",
@@ -140,6 +140,31 @@ def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: 
     return claim_run_directory(new_run_path(config_name, root, **id_fields))
 
 
+def run_root(path: Path) -> Path:
+    """The run directory a path belongs to: the ancestor directly under a ``models`` directory.
+
+    The chain hands steps a run's revalidation/ or selected/ subdirectory; they belong to the
+    run above. A path with no ``models`` ancestor, as in a test, is its own run.
+    """
+    path = Path(path)
+    for level in (path, *path.parents):
+        if level.parent.name == "models":
+            return level
+    return path
+
+
+def progress_path(run_dir: Path) -> Path:
+    """Where a run's per-generation progress table lives (Task 3, Task 4).
+
+    ``results/tables/<run-id>/progress.csv`` for a run under ``results/models/<run-id>``, else
+    ``progress.csv`` in the run directory itself.
+    """
+    root = run_root(run_dir)
+    if root.parent.name == "models":
+        return root.parent.parent / "tables" / root.name / "progress.csv"
+    return root / "progress.csv"
+
+
 def check_unclaimed(path: Path) -> None:
     """Refuse a directory that holds a run, without creating or claiming anything.
 
@@ -155,6 +180,8 @@ def check_unclaimed(path: Path) -> None:
         if level.is_symlink() and not level.exists() or level.exists() and not level.is_dir():
             raise FileExistsError(f"{level} is not a directory; give a run directory")
     found = [n for n in RUN_OUTPUTS if (path / n).exists() or (path / n).is_symlink()]
+    if path.parent.name == "models" and progress_path(path).exists():
+        found.append(str(progress_path(path)))
     if found:
         raise FileExistsError(
             f"{path} already holds a run ({', '.join(found)}); give a new directory "

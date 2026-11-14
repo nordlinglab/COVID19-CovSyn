@@ -216,7 +216,7 @@ def test_versions_are_recorded_without_an_installed_covsyn(monkeypatch, tmp_path
 
 @pytest.mark.parametrize("output", runs.RUN_OUTPUTS)
 def test_every_optimiser_output_marks_a_directory_as_holding_a_run(tmp_path, output):
-    """progress_metrics.csv of an earlier run would otherwise get a second run appended."""
+    """progress.csv of an earlier run would otherwise get a second run appended."""
     (tmp_path / output).write_text("1")
     with pytest.raises(FileExistsError, match="FIREFLY_RUN"):
         runs.claim_run_directory(tmp_path)
@@ -300,7 +300,7 @@ def test_run_outputs_name_every_file_the_optimiser_writes():
     )
     # Single or double quotes, f-strings included: a name with {} then fails the comparison.
     written = set(re.findall(r"result_path\s*/\s*f?['\"]([^'\"]+)['\"]", source))
-    written |= {"config.json"}
+    written |= {"config.json", "progress.csv"}  # written by name, not as result_path / '...'
     files = {name for name in runs.RUN_OUTPUTS if "." in name}
     assert written == files, (written - files, files - written)
 
@@ -364,3 +364,34 @@ def test_the_check_command_needs_exactly_one_directory(extra):
     )
     # 2, not the 1 that means the directory holds a run; "" would mean the current directory.
     assert done.returncode == 2 and "usage:" in done.stderr and "Traceback" not in done.stderr
+
+
+@pytest.mark.parametrize("sub", ["", "revalidation", "selected", "selected/candidates/c1"])
+def test_the_progress_table_of_a_run_is_found_from_any_of_its_directories(tmp_path, sub):
+    """The chain hands a step the run's revalidation/ or selected/; the table is the run's."""
+    run = tmp_path / "results" / "models" / "20261113-090507_81c9360_phase-d"
+    assert runs.run_root(run / sub if sub else run) == run
+    expected = tmp_path / "results" / "tables" / run.name / "progress.csv"
+    assert runs.progress_path(run / sub if sub else run) == expected
+
+
+def test_a_directory_outside_results_keeps_its_progress_table(tmp_path):
+    """A test or scratch directory is its own run, with progress.csv inside it."""
+    assert runs.progress_path(tmp_path / "x") == tmp_path / "x" / "progress.csv"
+
+
+def test_a_run_whose_progress_table_exists_is_held(tmp_path):
+    """The table lives under tables/, so the claim check looks there for a models directory."""
+    run = tmp_path / "results" / "models" / "r"
+    table = runs.progress_path(run)
+    table.parent.mkdir(parents=True)
+    table.write_text("generation\n0\n")
+    with pytest.raises(FileExistsError, match="progress.csv"):
+        runs.check_unclaimed(run)
+
+
+def test_run_10s_progress_table_is_where_progress_path_says():
+    """The committed run 10 moved with the layout (Task 4)."""
+    run10 = runs.REPO_ROOT / "results" / "models" / "phaseD_run10"
+    assert runs.progress_path(run10).is_file()
+    assert not (run10 / "progress_metrics.csv").exists()

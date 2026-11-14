@@ -15,7 +15,7 @@ import sys
 import numpy as np
 
 from covsyn.calibration import firefly_optimizer as fo
-from covsyn.runtime.runs import run_dir_argument
+from covsyn.runtime.runs import progress_path, run_dir_argument
 
 COST_CONTACT_RUN6 = 1.6956
 COST_ATTACK_RUN6 = 0.3092
@@ -39,7 +39,7 @@ def shaped(miss):
 
 def main():
     directory = str(run_dir_argument(sys.argv, 1, 'uv run python scripts/probes/calibrate_outcome_weight.py RUN_DIR'))
-    rows = list(csv.DictReader(open(directory + '/progress_metrics.csv')))
+    rows = list(csv.DictReader(open(progress_path(directory))))
     last = rows[-1]
     print('measured values from %s, generation %s\n' % (directory, last['generation']))
 

@@ -66,20 +66,20 @@ def test_best_file_with_a_single_candidate_is_still_two_dimensional(tmp_path) ->
 def test_output_directory_holds_the_whole_run_for_the_report(tmp_path) -> None:
     """OUT_DIR holds the whole run, with only firefly_best.txt replaced.
 
-    phase_d_chain.sh copies OUT_DIR over the run directory, and show_final reads
-    progress_metrics.csv from it.
+    The steps after revalidation read the run from OUT_DIR. The progress table is not among the
+    files: it lives in results/tables/<run-id>/, which runs.progress_path finds from OUT_DIR.
     """
     run, out = tmp_path / "run", tmp_path / "out"
     run.mkdir()
     out.mkdir()
-    for name in ("bound.txt", "progress_metrics.csv", "firefly_result.txt"):
+    for name in ("bound.txt", "config.json", "firefly_result.txt"):
         (run / name).write_text(name)
     (run / "firefly_best.txt").write_text("training")
     (out / "firefly_best.txt").write_text("validation")
     rv.copy_run_files(run, out)
     assert {p.name for p in out.iterdir()} == {
         "bound.txt",
-        "progress_metrics.csv",
+        "config.json",
         "firefly_result.txt",
         "firefly_best.txt",
     }

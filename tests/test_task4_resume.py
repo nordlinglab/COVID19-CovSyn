@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from covsyn.calibration import firefly_optimizer as fo
+from covsyn.runtime import runs
 
 DIM = 208
 POP = 4
@@ -58,7 +59,7 @@ def optimise(path, function, resume=False):
 
 def progress(path):
     """The progress table's rows."""
-    with open(path / "progress_metrics.csv", newline="") as f:
+    with open(runs.progress_path(path), newline="") as f:
         return list(csv.DictReader(f))
 
 
@@ -118,7 +119,7 @@ def test_progress_rows_after_the_checkpoint_are_dropped(tmp_path, uninterrupted)
         optimise(path, killed_after(3 * POP + 5))
     rows = progress(path)
     last = max(int(p.stem.split("_")[1]) for p in (path / "checkpoints").glob("generation_*"))
-    with open(path / "progress_metrics.csv", "a", newline="") as f:  # a row past the checkpoint
+    with open(runs.progress_path(path), "a", newline="") as f:  # a row past the checkpoint
         csv.DictWriter(f, fieldnames=list(rows[0])).writerow({**rows[-1], "generation": last + 1})
     optimise(path, objective, resume=True)
     assert progress(path) == progress(whole_path)

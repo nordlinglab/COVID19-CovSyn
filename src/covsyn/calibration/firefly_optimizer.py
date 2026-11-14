@@ -417,7 +417,7 @@ PHYSIOLOGY_PENALTY_WEIGHT = 2.0
 ATTACK_RATE_WEIGHT = 10.0
 
 # Filled in by cost_function() on every evaluation so the firefly loop can log which part
-# of the objective is driving the fit (see progress_metrics.csv).
+# of the objective is driving the fit (see progress.csv).
 #
 # E71: this dict lives in its own module, not here. This file is run as a script, so while it
 # executes it is `__main__`; when fast_cost imports `firefly_optimizer` Python loads a SECOND
@@ -511,7 +511,7 @@ OUTCOME_PENALTY_WEIGHT = 6.0
 # intervals are widened to about two standard errors of ONE evaluation (100 index cases),
 # because a target narrower than the sampling noise would charge the optimizer for
 # randomness: with 100 cases the asymptomatic share alone has a standard error of 4 points.
-# Weight 0 means the quantity is measured and written to progress_metrics.csv but not
+# Weight 0 means the quantity is measured and written to progress.csv but not
 # charged -- used where 100 cases cannot say anything (about 10 ICU cases and 1 death per
 # evaluation), in which case the calibration is carried by the parameter itself.
 OUTCOME_TARGETS = {
@@ -1560,7 +1560,7 @@ class Firefly:
             evaluations = int(checkpoint['evaluations'])
             new_alpha = float(checkpoint['alpha'])
             start = int(checkpoint['generation']) + 1
-            drop_progress_after(result_path / 'progress_metrics.csv', start - 1)
+            drop_progress_after(runs.progress_path(result_path), start - 1)
         # search_range = ub - lb
 
         for generation in tqdm(range(start, max_generations)):
@@ -1630,7 +1630,8 @@ class Firefly:
                    'best_cost': float(np.min(intensities))}
             row.update(cost_parts[best_idx])
             row.update(decode_metrics(fireflies[best_idx]))
-            csv_path = result_path / 'progress_metrics.csv'
+            csv_path = runs.progress_path(result_path)  # Task 4: results/tables/<run-id>/
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
             with open(csv_path, 'w' if generation == 0 else 'a', newline='') as cf:
                 writer = csv.DictWriter(cf, fieldnames=list(row.keys()))
                 if generation == 0:

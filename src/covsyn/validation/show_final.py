@@ -4,10 +4,10 @@ import csv
 import numpy as np
 from pathlib import Path
 from covsyn.calibration.firefly_optimizer import PHYSIOLOGY_PENALTY_WEIGHT
-from covsyn.runtime.runs import run_dir_argument
+from covsyn.runtime.runs import progress_path, run_dir_argument
 
 D = run_dir_argument(sys.argv, 1, 'uv run python -m covsyn.validation.show_final RUN_DIR')
-rows = list(csv.DictReader(open(D / 'progress_metrics.csv')))
+rows = list(csv.DictReader(open(progress_path(D))))  # results/tables/<run-id>/progress.csv
 last = rows[-1]
 print('=== final generation (%s of %d) ===' % (last['generation'], len(rows)))
 for k, v in last.items():
