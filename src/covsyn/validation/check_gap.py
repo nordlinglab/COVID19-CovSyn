@@ -1,11 +1,13 @@
 """Compare the latest firefly run's synthetic data against the literature reported-mean
 ranges taken from plot_result/plot_synthetic_data.ipynb."""
+import sys
 import glob, json, random
 import numpy as np
 from pathlib import Path
 from covsyn.model.data_synthesize import Draw_course_of_disease_data
+from covsyn.runtime.runs import run_dir_argument
 
-PARAM = 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200'
+PARAM = run_dir_argument(sys.argv, 1, 'uv run python -m covsyn.validation.check_gap RUN_DIR')
 SYN = 'synthetic_data_results_spread_Taiwan_weight'
 N = 20000
 

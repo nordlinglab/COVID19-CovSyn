@@ -11,9 +11,9 @@ Varies P[28] (mean community contacts per case), P[30] (municipality healthy-day
 P[31]-P[34] (symptomatic probability and the logistic shape) and P[198] (the contact-COUNT
 dispersion), leaving every other parameter at the run 7 best fit.
 """
+import sys
 import concurrent.futures
 import copy
-import glob
 import os
 import pickle
 
@@ -23,6 +23,7 @@ from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.runtime import hardware
+from covsyn.runtime.runs import run_dir_argument
 
 N_DRAWS = 100
 N_SIMS = 400
@@ -46,8 +47,7 @@ def main():
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
         demo = pickle.load(f)
     columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
-    d = [x for x in sorted(glob.glob('Firefly_result_pop_size_100_*'))
-         if os.path.exists(x + '/firefly_best.txt')][0]
+    d = str(run_dir_argument(sys.argv, 1, 'uv run python scripts/probes/probe_community_shape.py RUN_DIR'))
     res = np.loadtxt(d + '/firefly_best.txt')
     base = res[int(np.argmin(res[:, -1])), 1:-1]
 

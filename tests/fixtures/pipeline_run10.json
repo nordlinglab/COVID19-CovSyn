@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "81c93604b908eaedd05dd438e92612728864c074",
+ "generated_at_commit": "f1cb71cb48721defbd24db881a00d57cc314ba0b",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -512,8 +512,8 @@
   },
   "measure_age_rr": {
    "returncode": 0,
-   "stdout_head": "age risk ratio on 400 index cases, parameters from Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200\n\nlocked age risk ratio input: [0.39, 1.0, 1.9, 1.44]  (read from variable/course_parameters.npy)\n\nlayer          contacts by band             infections by band         RR                         max |RR - input|\n----------------------------------------------------------",
-   "stdout_sha256": "68b6fe3b6288a77a2d5f5910d2be4232f9879e41306414a09a2839dd2d61b8e5"
+   "stdout_head": "age risk ratio on 400 index cases, parameters from results/models/phaseD_run10\n\nlocked age risk ratio input: [0.39, 1.0, 1.9, 1.44]  (read from variable/course_parameters.npy)\n\nlayer          contacts by band             infections by band         RR                         max |RR - input|\n------------------------------------------------------------------------------------------------------------",
+   "stdout_sha256": "7afc5720eca5162691077ec2ce3960d56493c45d1faa252fcf63130bb30386b9"
   },
   "measure_days": {
    "returncode": 0,

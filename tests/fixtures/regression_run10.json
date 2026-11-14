@@ -54,7 +54,7 @@
  },
  "cost_total": 72.88033811325143,
  "generated_at_commit": "4bd04baa3be806ddb1b5510564be93b1f7c1e8f2",
- "parameter_vector": "firefly_result/phaseD_run10/firefly_best.txt (lowest-cost row)",
+ "parameter_vector": "results/models/phaseD_run10/firefly_best.txt (lowest-cost row)",
  "synthesis_digests": {
   "result/0": "901b44421b1a5106b1739e751c75f86b9b5246d1ea4e5bcd0604e6133585e1f1",
   "result/1": "6908b01088a4e055919399fcd3b7bfaf083486a062a4528c81d4360bf05f7e5e",

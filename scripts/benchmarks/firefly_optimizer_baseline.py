@@ -20,7 +20,7 @@ from covsyn.calibration.sar_anchors import LAYER_CUMULATIVE_SAR
 from covsyn.model.data_synthesize import *
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
-from covsyn.runtime import hardware
+from covsyn.runtime import hardware, runs
 # from sklearn.metrics.pairwise import nan_euclidean_distances
 # Note: RW_nan_euclidean_distances is a copy code from sklearn but only comment out the weighting parts.
 # "distances /= present_count" and "distances *= X.shape[1]"
@@ -994,12 +994,10 @@ if __name__ == "__main__":
         gamma = 0.01
         max_generations = 3
     else:
-        print('mode error')
-        sys.exit()
-    result_path = Path(
-        f'./Firefly_result_pop_size_{pop_size}_alpha_{alpha}_betamin_{betamin}_gamma_{gamma}_max_generations_{max_generations}')
-    if not result_path.is_dir():
-        result_path.mkdir(parents=True)
+        sys.exit(f'mode error: unknown --mode {mode!r}')
+    # Task 3: every run directory comes from run_directory().
+    # The frozen baseline writes no config.json, so its directory is created, not claimed.
+    result_path = runs.run_directory(runs.make_run_id('baseline'), new=True)
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma)

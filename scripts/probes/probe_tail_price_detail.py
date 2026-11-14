@@ -5,8 +5,9 @@ k = P[198] cost +20 to +90 of outcome penalty. This prints every charged target 
 its band at three points around run 7's best vector, with its share of the outcome cost, so the
 price can be read as either structural or something the optimizer could re-balance.
 
-Usage: uv run python scripts/probes/probe_tail_price_detail.py
+Usage: uv run python scripts/probes/probe_tail_price_detail.py RUN_DIR
 """
+import sys
 import os
 import concurrent.futures
 import pickle
@@ -17,8 +18,10 @@ from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
 from covsyn.runtime import hardware
+from covsyn.runtime.runs import run_dir_argument
 
-RUN7 = 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_120_run7/firefly_best.txt'
+# Task 3: the run is given as a directory (originally run 7).
+RUN7 = run_dir_argument(sys.argv, 1, 'uv run python scripts/probes/probe_tail_price_detail.py RUN_DIR') / 'firefly_best.txt'
 # (label, k = P[198], factor on P[28], P[29]). P[29] is the probability of meeting yesterday's
 # contact again: lowering it spreads the same daily contact count over MORE distinct people,
 # which is the only lever that raises the distinct count without raising daily_municipality.

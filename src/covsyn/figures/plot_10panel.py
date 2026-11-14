@@ -4,6 +4,7 @@ serial interval, R0) using the optimized parameters + the notebook's report_* li
 Style matches plot_synthetic_data.ipynb: blue=Simulation, dashed=Sim mean,
 orange=Reported mean range, green=Reported 95% CI range."""
 import json, glob, sys, numpy as np
+from covsyn.runtime.runs import run_dir_argument
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from pathlib import Path
 from covsyn.model.data_synthesize import Draw_course_of_disease_data
@@ -13,7 +14,7 @@ from covsyn.model.r0_network import R0_average_effective_contact
 NB = 'plot_result/plot_synthetic_data.ipynb'
 SYN = sys.argv[1] if len(sys.argv) > 1 else 'synthetic_data_results_spread_Taiwan_weight'
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('.')
-PARAM = sys.argv[3] if len(sys.argv) > 3 else 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200'
+PARAM = run_dir_argument(sys.argv, 3, 'uv run python -m covsyn.figures.plot_10panel SYN OUT RUN_DIR')
 OUT.mkdir(parents=True, exist_ok=True)
 N = 20000
 

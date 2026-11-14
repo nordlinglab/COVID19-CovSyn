@@ -804,8 +804,8 @@ def main() -> None:
                                  'taiwan_first_outbreak_feb7', 'taiwan_first_outbreak_feb29',
                                  'taiwan_first_outbreak_mar18', 'taiwan_first_outbreak_mar18_local'],
                         help='Mode options include: spread, spread_demo, profile, ICIDMID, result, cheng2020, test, ge2021, Boonpatcharanon2022')
-    parser.add_argument('--parameter_path', type=str,
-                        default='./Firefly_result/Firefly_result_pop_size_50_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+    parser.add_argument('--parameter_path', type=str, required=True,
+                        help='run directory holding firefly_best.txt (Task 3)')
     parser.add_argument('--monte_carlo_number', type=int, default=100)
     parser.add_argument('--result_path', type=str, required=True)
     hardware.add_workers_argument(parser)  # Task 2: was --cpu_cores, default 1 (D3)

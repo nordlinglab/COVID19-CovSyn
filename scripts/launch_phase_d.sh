@@ -9,8 +9,9 @@
 #   WARM_START       space-separated firefly_best.txt files whose best vectors seed the initial
 #                    population (B49); default: the committed run 10 result
 #   PREVIOUS_CHECKS  phaseD_checks.json of the previous run, for the chain's comparison step
-#   FIREFLY_RUN      the optimizer output directory the chain reads; default: the directory the
-#                    optimizer's default settings name
+#   FIREFLY_RUN      the run directory the optimiser writes and the chain reads; default: a new
+#                    results/models/<run-id> named by covsyn.runtime.runs (Task 3). A given
+#                    directory must not hold a run already, a failed one included
 #   REVALIDATE       1 (default) re-scores the candidates on unseen seeds (B56); 0 skips it
 #   REVALIDATION_BLOCKS  unseen seed blocks for that re-scoring (default 10, E95)
 #   SELECT           1 (default) runs the checklist on the best revalidated candidates (B60)
@@ -31,7 +32,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-WARM_START="${WARM_START:-firefly_result/phaseD_run10/firefly_best.txt}"
+WARM_START="${WARM_START:-results/models/phaseD_run10/firefly_best.txt}"
 # Task 2 replaced both with COVSYN_WORKERS; a run still setting them is told, not ignored.
 if [ -n "${VERIFY_WORKERS:-}${CPU_CORES:-}" ]; then
   echo "WARNING: VERIFY_WORKERS and CPU_CORES are no longer read; set COVSYN_WORKERS instead"
@@ -49,6 +50,17 @@ command -v uv >/dev/null || { echo "ERROR: uv not found on PATH; see the README"
 # them, lest they run in another one.
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-.venv}"
 uv sync --locked --inexact
+# Task 3: the run is named once, here, so the optimiser and the chain use the same directory.
+# covsyn.runtime.runs prints a new run path; the optimiser creates and claims it. A given
+# FIREFLY_RUN is checked here, before any session starts, as the optimiser may take longer
+# than the startup check below to reach its own check.
+if [ -n "${FIREFLY_RUN:-}" ]; then
+  uv run --no-sync python -m covsyn.runtime.runs --check "$FIREFLY_RUN" || exit 1
+else
+  FIREFLY_RUN=$(uv run --no-sync python -m covsyn.runtime.runs phase-d) \
+    || { echo "ERROR: could not name the run directory"; exit 1; }
+fi
+echo "run directory: $FIREFLY_RUN"
 # A tmux session gets the tmux server's environment, not this shell's, so every variable a
 # session reads is passed with -e. PATH is the exception: tmux gives a new session the PATH of
 # the shell that runs new-session (tested on tmux 3.6), so the uv found above is found there.
@@ -67,9 +79,9 @@ for name in "${CHAIN_ENV[@]}"; do chain_env_args+=(-e "$name=${!name:-}"); done
 tmux new-session -d -s firefly -c "$ROOT" -e "WARM_START=$WARM_START" \
   -e "UV_PROJECT_ENVIRONMENT=$UV_PROJECT_ENVIRONMENT" \
   -e "COVSYN_WORKERS=${COVSYN_WORKERS:-}" \
-  -e "FIREFLY_STATUS=$FIREFLY_STATUS" bash -c \
+  -e "FIREFLY_STATUS=$FIREFLY_STATUS" -e "FIREFLY_RUN=$FIREFLY_RUN" bash -c \
   'uv run --no-sync python -m covsyn.calibration.firefly_optimizer \
-   --mode train --warm_start $WARM_START > firefly_phaseD.log 2>&1; \
+   --mode train --run-dir "$FIREFLY_RUN" --warm_start $WARM_START > firefly_phaseD.log 2>&1; \
    echo $? > "$FIREFLY_STATUS.tmp" && mv "$FIREFLY_STATUS.tmp" "$FIREFLY_STATUS"'
 sleep 2
 # The status is renamed into place, so it is never read half-written. "running" with no

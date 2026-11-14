@@ -16,7 +16,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.runtime import hardware
+from covsyn.runtime import hardware, runs
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
                                             health_care_contact_floor)
@@ -1393,7 +1393,12 @@ class Firefly:
         self.alpha = alpha
         self.betamin = betamin
         self.gamma = gamma
-        self.rng = default_rng(seed)
+        # Task 3: an unseeded run draws its seed here, so config.json can record it and the
+        # initial population can be drawn again from it.
+        self.seed = int(np.random.SeedSequence().entropy) if seed is None else seed
+        self.rng = default_rng(self.seed)
+        # Task 3: recorded in config.json with the settings above; main() adds its own.
+        self.run_settings = {}
 
     def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None, warm_start_vectors=()):
         normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
@@ -1416,6 +1421,12 @@ class Firefly:
             normalized_fireflies[k] = np.clip((clip_warm_start(vector, lb, ub, f'firefly {k}') - lb) / span, 0, 1)
             fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
             print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
+        # Task 3: recorded before any evaluation, so a run that fails early still has it.
+        settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
+                    'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
+                    **self.run_settings}
+        runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
+                          initial_population=fireflies)
         # Create ONE persistent process pool reused for every evaluation in this run.
         # (Previously each evaluation created and tore down its own pool, re-spawning
         # 24 workers thousands of times.)
@@ -1543,6 +1554,13 @@ class Firefly:
                 fireflies, intensities)
 
 
+def run_directory_for(run_dir: Path | None, config_name: str) -> Path:
+    """The run's directory: ``run_dir`` if given and holding no run, else a new one (Task 3)."""
+    if run_dir is not None:
+        return runs.claim_run_directory(run_dir)
+    return runs.new_run_directory(config_name)
+
+
 def main() -> None:
     """Run the optimiser from the command line (``covsyn-optimise``)."""
     # Firefly.firefly writes its output to the module-level result_path, which test_b81
@@ -1557,6 +1575,15 @@ def main() -> None:
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
     # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
     parser.add_argument('--warm_start', type=str, nargs='*', default=[])
+    # Task 3: the run writes into results/models/<run-id>/; launch_phase_d.sh names it with
+    # covsyn.runtime.runs and passes it here, so the chain knows where to read.
+    parser.add_argument('--run-dir', type=Path, default=None,
+                        help='run directory (default: results/models/<new run id>)')
+    parser.add_argument('--config-name', default='phase-d',
+                        help='configuration name in a new run id (lowercase kebab-case)')
+    parser.add_argument('--seed', type=runs.non_negative_int, default=None,
+                        help='seed of the initial population, as config.json records it '
+                             '(default: drawn and recorded)')
     args = parser.parse_args()
 
     cores = hardware.performance_core_count()
@@ -1564,6 +1591,8 @@ def main() -> None:
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
     mode = args.mode
+    if args.run_dir is not None:
+        runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')
     # shift_percentage = args.shift_percentage
     if mode == 'train':
@@ -1592,15 +1621,12 @@ def main() -> None:
         gamma = 0.01
         max_generations = 3
     else:
-        print('mode error')
-        sys.exit()
-    result_path = Path(
-        f'./Firefly_result_pop_size_{pop_size}_alpha_{alpha}_betamin_{betamin}_gamma_{gamma}_max_generations_{max_generations}')
-    if not result_path.is_dir():
-        result_path.mkdir(parents=True)
+        # A non-zero status, so the launcher and the chain see the failure.
+        sys.exit(f'mode error: unknown --mode {mode!r}')
 
     # Firefly
-    fa = Firefly(pop_size, alpha, betamin, gamma)
+    fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
+    fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start)}
 
     with open('./variable/contact_parameters.pkl', 'rb') as f:
         contact_parameters = pickle.load(f)
@@ -1668,13 +1694,19 @@ def main() -> None:
     Cheng_attack_rate = processed_contact_tracing_data['Cheng_attack_rate']
     norm_weights = processed_contact_tracing_data['norm_weights']
 
+    # Task 3: claimed only now, after every input has loaded, so a mistyped warm start or a
+    # missing input file leaves no claimed directory behind.
+    result_path = run_directory_for(args.run_dir, args.config_name)
+    print(f'run directory: {result_path}')
+
     # Optimization
     if mode == 'profile':
         # Cprofile
         with cProfile.Profile() as pr:
             fa.firefly(function=cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
                        demographic_parameters=demographic_parameters,
-                       max_generations=max_generations, 
+                       max_generations=max_generations, max_workers=max_workers,
+                       seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
                        Cheng_contact_array=Cheng_contact_array,
                        Cheng_attack_rate=Cheng_attack_rate,
                        norm_weights=norm_weights)
@@ -1682,6 +1714,7 @@ def main() -> None:
         stats = pstats.Stats(pr)
         stats.sort_stats(pstats.SortKey.TIME)
         # stats.print_stats()
+        Path('./profile_results').mkdir(exist_ok=True)  # Task 5 moves it into the run directory
         stats.dump_stats(filename='./profile_results/firefly_profiling.prof')
     else:
         np.savetxt(result_path/'bound.txt',

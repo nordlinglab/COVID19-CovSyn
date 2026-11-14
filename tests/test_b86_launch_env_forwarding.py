@@ -93,7 +93,7 @@ def test_the_list_holds_every_default_the_scripts_read():
 SCRIPT_LINES = [
     '    say "then start scripts/phase_d_chain.sh itself '
     '(not launch_phase_d.sh, which starts a new"',
-    'PARAMETER_PATH="./$FIREFLY" bash scripts/data_synthesis.sh --environment-checked '
+    'PARAMETER_PATH="$FIREFLY_RUN" bash scripts/data_synthesis.sh --environment-checked '
     '>> "$LOG" 2>&1 \\',
 ]
 
@@ -150,17 +150,14 @@ def _synthesis_runs(record: Path, context: str = "") -> list[tuple[str, str]]:
 MODES = list(pipeline_runner.MODES)
 
 
-def test_the_synthesis_alone_reads_the_run_the_chain_copies_onto(tmp_path, chain_at_step_2):
-    """Run on its own without PARAMETER_PATH, data_synthesis.sh reads the chain's copy.
+def test_the_synthesis_alone_needs_the_run_directory(tmp_path):
+    """Task 3: run on its own without PARAMETER_PATH, data_synthesis.sh stops and says why.
 
-    The directory comes from a chain run, so no directory name is written in the test.
+    There is no legacy copy to fall back on, and a time-stamped run name cannot be guessed.
     """
-    directory = chain_at_step_2.directory
-    root, record, status, output = _run(
-        tmp_path / "alone", SYNTHESIS, {"_files": {f"{directory}/firefly_best.txt": "1 2 3\n"}}
-    )
-    assert status == 0, output
-    assert _synthesis_runs(record, output) == [(mode, f"./{directory}") for mode in MODES], output
+    root, record, status, output = _run(tmp_path, SYNTHESIS, dict(SYNTHESIS_FILES))
+    assert status != 0 and "PARAMETER_PATH is not set" in output, output
+    assert not (record / "runs").exists(), output  # nothing ran
 
 
 def test_the_synthesis_uses_the_parameter_path_it_is_given(tmp_path):
@@ -195,7 +192,7 @@ class ChainRun(NamedTuple):
     status: int
     context: str  # output and log, for assertion messages
     log: str  # phaseD_chain.log, which the user reads
-    directory: str  # what the synthesis was told to read: PARAMETER_PATH without ./
+    directory: str  # what the synthesis was told to read: PARAMETER_PATH
 
 
 def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
@@ -223,9 +220,7 @@ def _chain_to_step_2(tmp_path: Path, synthesis_status: str) -> ChainRun:
     context = output + log
     syntheses = [call for call in _records(record / "runs", context) if call[:1] == ["SYNTHESIS"]]
     assert len(syntheses) == 1 and syntheses[0][2:] == ["--environment-checked"], context
-    path = syntheses[0][1]
-    assert path.startswith("./"), context
-    return ChainRun(root, record, status, context, log, path[2:])
+    return ChainRun(root, record, status, context, log, syntheses[0][1])
 
 
 @pytest.fixture
@@ -237,15 +232,15 @@ def chain_at_step_2(tmp_path) -> ChainRun:
     return _chain_to_step_2(tmp_path / "chain", "0")
 
 
-def test_the_chain_runs_the_synthesis_at_step_2_on_the_runs_copy(chain_at_step_2):
-    """Run to step 2 with REVALIDATE=0: the synthesis runs once, on the run's copy.
+def test_the_chain_runs_the_synthesis_at_step_2_on_the_run_directory(chain_at_step_2):
+    """Run to step 2 with REVALIDATE=0: the synthesis runs once, on FIREFLY_RUN itself.
 
-    That copy is the directory the regression harness checks, and the log reports success.
-    Only this path is run; other settings reach the same call by reading of the script.
+    Task 3 removed the copy onto a legacy name, and the log reports success. Only this path is
+    run; other settings reach the same call by reading of the script.
     """
     run = chain_at_step_2
-    assert (run.root / run.directory / "firefly_best.txt").exists(), run.context
-    assert run.directory == pipeline_runner.COMPAT_DIR, run.context
+    assert run.directory == "run", run.context
+    assert [p.name for p in run.root.iterdir() if p.name.startswith("Firefly_result")] == []
     assert "synthetic data done" in run.log, run.context
     # The steps after it run uv: recorded after the synthesis, in order.
     calls = _records(run.record / "runs", run.context)
@@ -453,6 +448,10 @@ def _stand_ins(tmp_path: Path) -> tuple[Path, Path]:
         f'echo "uv $*" >> "{record}/calls"\n'
         '[ "$1" = sync ] && exit "${UV_SYNC_STATUS:-0}"\n'
         '[ "$1" = run ] || exit 0\n'
+        # Task 3: the launcher names the run with covsyn.runtime.runs.
+        'case "$*" in *covsyn.runtime.runs*)\n'
+        '  echo results/models/20261113-090507_81c9360_phase-d; exit 0 ;;\n'
+        'esac\n'
         # One record per run: arguments ended by \x1f, the run by \x1e, so any argument,
         # newlines included, comes back as it was.
         f'printf "%s\\x1f" "$@" >> "{record}/runs"; printf "\\x1e" >> "{record}/runs"\n'
@@ -848,3 +847,63 @@ def test_a_removed_worker_variable_is_reported(script):
     assert check is not None, f"{script.name} no longer checks for the removed variables"
     assert "WARNING: VERIFY_WORKERS and CPU_CORES are no longer read" in code[check + 1]
     assert "COVSYN_WORKERS" in code[check + 1] and code[check + 2] == "fi"
+
+
+def test_the_optimiser_and_the_chain_get_the_same_new_run_directory(tmp_path):
+    """Task 3: the launcher names the run once and passes it to both sessions."""
+    root, record, status, output = _run(
+        tmp_path, SCRIPT, {"_files": {"firefly_phaseD.exit": "0\n"}}
+    )
+    assert status == 0, output
+    args = _uv_runs(record, output)[-1]
+    run_dir = args[args.index("--run-dir") + 1]
+    assert run_dir == "results/models/20261113-090507_81c9360_phase-d"
+    chain = dict(line.split("=", 1) for line in (record / "chain_env").read_text().splitlines())
+    assert chain["FIREFLY_RUN"] == run_dir
+
+
+def test_a_given_firefly_run_is_where_the_optimiser_writes(tmp_path):
+    """Set by the user, FIREFLY_RUN names the optimiser's directory as well as the chain's."""
+    root, record, status, output = _run(
+        tmp_path,
+        SCRIPT,
+        {"FIREFLY_RUN": "results/models/mine", "_files": {"firefly_phaseD.exit": "0\n"}},
+    )
+    assert status == 0, output
+    args = _uv_runs(record, output)[-1]
+    assert args[args.index("--run-dir") + 1] == "results/models/mine"
+
+
+def test_the_chain_stops_without_a_run_directory(tmp_path):
+    """No FIREFLY_RUN means no run to read; the chain says so in its log and stops."""
+    root, record, status, output = _run(tmp_path, CHAIN, {})
+    log = (root / "phaseD_chain.log").read_text()
+    assert status != 0 and "FIREFLY_RUN is not set" in log
+
+
+def test_the_chain_clears_an_earlier_revalidation_of_the_run(tmp_path):
+    """Run again on one run directory, the chain does not mix in the old candidates."""
+    root, record, status, output = _run(
+        tmp_path,
+        CHAIN,
+        {
+            "FIREFLY_RUN": "run",
+            "UV_STATUS": "9",  # the revalidation fails, so the chain stops right after it
+            "_files": {"run/firefly_result.txt": "1 2 3\n", "run/revalidation/stale.txt": "old\n"},
+        },
+    )
+    assert status != 0 and "revalidation failed" in (root / "phaseD_chain.log").read_text()
+    assert not (root / "run" / "revalidation" / "stale.txt").exists()
+
+
+def test_the_launcher_checks_a_given_run_directory_before_starting(tmp_path):
+    """A given FIREFLY_RUN is checked by covsyn.runtime.runs before any session starts."""
+    root, record, status, output = _run(
+        tmp_path,
+        SCRIPT,
+        {"FIREFLY_RUN": "results/models/mine", "_files": {"firefly_phaseD.exit": "0\n"}},
+    )
+    calls = (record / "calls").read_text().splitlines()
+    check = next(i for i, c in enumerate(calls) if "covsyn.runtime.runs --check" in c)
+    assert calls[check].endswith("results/models/mine")
+    assert not any("new-session" in c for c in calls[:check])

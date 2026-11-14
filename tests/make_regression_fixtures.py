@@ -76,7 +76,7 @@ def main() -> None:
                             cwd=REPO_ROOT, check=False).stdout.strip()
     fixture = {
         "generated_at_commit": commit,
-        "parameter_vector": "firefly_result/phaseD_run10/firefly_best.txt (lowest-cost row)",
+        "parameter_vector": "results/models/phaseD_run10/firefly_best.txt (lowest-cost row)",
         "cost_total": rd.encode_float(float(total)),
         "cost_parts": parts,
         "synthesis_digests": synthesis,

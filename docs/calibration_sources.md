@@ -219,11 +219,11 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 | 第一波種子 | 354 例 | figshare 個案資料＋本土感染源分類，見 B66 |
 | 境外移入種子傳染數 | [0.015, 0.14] | Cheng 2020 境外移入 4 / 71 |
 | `MEAN_CONTACT_DAYS` | {10.27, 6.61, 8.87, 2.70, 1.21} | run 17 `phaseD_report.txt` measure_days |
-| `MEAN_CONTACT_DAYS`（B75，2026-11-01） | {9.68, 7.41, 3.15, 2.26, 1.59} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 400 次，measure_days（`firefly_result/phaseD_run18/`）；攻擊率界限已重建（`variable/course_parameters*.npy` 索引 33–157） |
-| `MEAN_CONTACT_DAYS`（B77，2026-11-02） | {9.27, 5.30, 3.48, 2.94, 1.77} | run 19 候選 60 在 B77 程式下 `spread_Taiwan_weight` 400 次，measure_days（`firefly_result/phaseD_run19/`）；學校 7.41 → 5.30（0.72 倍，週末關閉 5/7）；攻擊率界限已重建（`variable/course_parameters*.npy` 索引 33–157） |
+| `MEAN_CONTACT_DAYS`（B75，2026-11-01） | {9.68, 7.41, 3.15, 2.26, 1.59} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 400 次，measure_days（`results/models/phaseD_run18/`）；攻擊率界限已重建（`variable/course_parameters*.npy` 索引 33–157） |
+| `MEAN_CONTACT_DAYS`（B77，2026-11-02） | {9.27, 5.30, 3.48, 2.94, 1.77} | run 19 候選 60 在 B77 程式下 `spread_Taiwan_weight` 400 次，measure_days（`results/models/phaseD_run19/`）；學校 7.41 → 5.30（0.72 倍，週末關閉 5/7）；攻擊率界限已重建（`variable/course_parameters*.npy` 索引 33–157） |
 | `COVSYN_CANDIDATE_CONTACTS` | {2.605, 3.657, 2.144, 4.759, 23.874} | run 17 `phaseD_checks.txt` |
-| `COVSYN_CANDIDATE_CONTACTS`（B75，2026-11-01） | {2.595, 2.305, 3.842, 2.597, 19.482} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 1000 次，verify_phase_d（`firefly_result/phaseD_run18/checks_b75.txt`）；攻擊率界限已重建 |
-| `COVSYN_CANDIDATE_CONTACTS`（B77，2026-11-02） | {2.592, 2.361, 2.832, 5.807, 17.968} | run 19 候選 60 在 B77 程式下 `spread_Taiwan_weight` 1000 次，verify_phase_d（`firefly_result/phaseD_run19/checks_b77.txt`）；醫療 2.597 → 5.807（run 19 向量，B76 下限）；攻擊率界限已重建 |
+| `COVSYN_CANDIDATE_CONTACTS`（B75，2026-11-01） | {2.595, 2.305, 3.842, 2.597, 19.482} | run 18 候選 80 在 B75 程式下 `spread_Taiwan_weight` 1000 次，verify_phase_d（`results/models/phaseD_run18/checks_b75.txt`）；攻擊率界限已重建 |
+| `COVSYN_CANDIDATE_CONTACTS`（B77，2026-11-02） | {2.592, 2.361, 2.832, 5.807, 17.968} | run 19 候選 60 在 B77 程式下 `spread_Taiwan_weight` 1000 次，verify_phase_d（`results/models/phaseD_run19/checks_b77.txt`）；醫療 2.597 → 5.807（run 19 向量，B76 下限）；攻擊率界限已重建 |
 
 ## 9. 職場「今天有沒有上班」（B75，2026-10-31）
 
@@ -247,7 +247,7 @@ purpose: Lists every value that calibrates or constrains CovSyn, where it is use
 | Cheng 醫療每接觸攻擊率 | 6 / 698 = 0.860%，Wilson 95% [0.395%, 1.863%] | Cheng 2020 Table 2（印 0.9%，0.4–1.9）；Wilson 法同時重現他印的家戶 7/151 = 4.6%（2.3–9.3）與家人 4/76 = 5.3%（2.1–12.8），所以採用 Wilson；`sar_anchors.wilson_interval` |
 | 本土病例醫療感染數下限 | 0.06212 | Cheng 6 例醫療感染的 exact Poisson 95% 下限 2.2019 ÷ 100 例 × B67 本土換算 (18/29)/(22/100) = 2.8213；即 `LAYER_INFECTIONS_PER_INDEX['health_care']` 的下限 |
 | **醫療接觸數下限** | **0.06212 ÷ 0.018626 = 3.335** | 少於這個數，即使每個接觸都以 Cheng 攻擊率的上限被感染，也達不到 Cheng 醫療感染數的下限；`sar_anchors.health_care_contact_floor()` |
-| 計費下限（B60 內縮） | 3.335 + 1.645 × 0.0672 = **3.446** | σ 取自 run 18 候選 80 在 B75 下 1000 次模擬、200 次 bootstrap 的驗收（2.597，95% [2.47, 2.73]，`firefly_result/phaseD_run18/checks_b76.txt`）；`calibration/charged_targets.json` |
+| 計費下限（B60 內縮） | 3.335 + 1.645 × 0.0672 = **3.446** | σ 取自 run 18 候選 80 在 B75 下 1000 次模擬、200 次 bootstrap 的驗收（2.597，95% [2.47, 2.73]，`results/models/phaseD_run18/checks_b76.txt`）；`calibration/charged_targets.json` |
 | 醫療每接觸累積攻擊率下界 | 0.395%（原 2.39%） | Cheng 6 / 698 的 Wilson 下限。原下界是 Cheng 感染數下限 ÷ run 18 的 2.597 個接觸，高於 Cheng 每接觸攻擊率的上限 1.86%，下限把接觸數推高後就達不到感染數區間的下半段（code review，2026-11-01 使用者同意）；只改 `course_parameters_lb.npy` 索引 108–132，每日下界平均 0.01066 → 0.00175 |
 | 參考值（不計費） | 544 / 55 = 9.89 | Jian 2020 Table 1：本土病例的 1,435 個密切接觸中 544 個為醫院／診所接觸；55 例即台灣病例資料 1–487 號中全部本土病例（2020-01-28 至 04-12 確診） |
 | CovSyn run 18 候選 80（B75） | 全部 2.597；Jian 窗口內 1.40（41.3% 為 0，p90 = 4） | 1000 次 `spread_Taiwan_weight` 的 index case；從感染到隔離 1.69 |

@@ -118,7 +118,7 @@ def shape_search(base, lb, ub, demo, draws, simulations):
 
 
 def main():
-    directory = sys.argv[1] if len(sys.argv) > 1 else 'firefly_result/phaseD_run18'
+    directory = sys.argv[1] if len(sys.argv) > 1 else 'results/models/phaseD_run18'
     if len(sys.argv) > 2 and sys.argv[2] == 'shape':
         with open('./variable/demographic_parameters.pkl', 'rb') as f:
             demo = pickle.load(f)

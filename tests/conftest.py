@@ -23,7 +23,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
-RUN10_BEST = REPO_ROOT / "firefly_result" / "phaseD_run10" / "firefly_best.txt"
+RUN10_BEST = REPO_ROOT / "results" / "models" / "phaseD_run10" / "firefly_best.txt"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))

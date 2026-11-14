@@ -13,7 +13,6 @@ against the acceptance intervals.
 Usage: uv run python scripts/probes/recover_cost_parts.py [firefly_result_dir]
 """
 import concurrent.futures
-import glob
 import os
 import pickle
 import sys
@@ -23,12 +22,11 @@ import numpy as np
 from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.runtime import hardware
+from covsyn.runtime.runs import run_dir_argument
 
 
 def main():
-    directory = sys.argv[1] if len(sys.argv) > 1 else [
-        d for d in sorted(glob.glob('Firefly_result_pop_size_100_*'))
-        if os.path.exists(d + '/firefly_best.txt')][0]
+    directory = str(run_dir_argument(sys.argv, 1, 'uv run python scripts/probes/recover_cost_parts.py RUN_DIR'))
     result = np.loadtxt(os.path.join(directory, 'firefly_best.txt'))
     row = int(np.argmin(result[:, -1]))
     P = result[row, 1:-1]

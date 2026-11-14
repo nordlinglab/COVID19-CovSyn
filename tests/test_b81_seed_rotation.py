@@ -162,3 +162,55 @@ def test_candidates_work_without_an_archive(tmp_path):
     np.savetxt(tmp_path / "firefly_best.txt", bests)
     vectors, _ = load_candidates(tmp_path)
     assert len(vectors) == 2
+
+
+def test_the_run_directory_holds_the_configuration(run):
+    """Task 3: config.json records the seed, workers, settings and initial population."""
+    import hashlib
+    import json
+
+    _, _, path = run
+    config = json.loads((path / "config.json").read_text())
+    assert (config["seed"], config["workers"]) == (7, 2)
+    assert config["settings"]["pop_size"] == POP
+    assert config["settings"]["max_generations"] == GENERATIONS
+    digest = config["initial_population_sha256"]
+    assert len(digest) == 64 and int(digest, 16) >= 0
+    # The same seed draws the same initial population, so its hash repeats.
+    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
+    first = lb + again.rng.uniform(0, 1, (POP, DIM)) * (ub - lb)
+    assert digest == hashlib.sha256(np.ascontiguousarray(first, dtype=float).tobytes()).hexdigest()
+
+
+def test_an_unseeded_run_records_a_seed_that_redraws_it():
+    """Task 3: without a seed the optimiser draws one, so config.json is never seed null."""
+    first = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03)
+    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=first.seed)
+    assert isinstance(first.seed, int)
+    assert np.array_equal(first.rng.uniform(size=5), again.rng.uniform(size=5))
+
+
+def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, tmp_path):
+    """Task 3: a run whose first evaluation fails still leaves its config.json."""
+    import json
+
+    def fails(*args, **kwargs):
+        raise RuntimeError("worker crashed")
+
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    with pytest.raises(RuntimeError):
+        engine.firefly(function=fails, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
+                       demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,
+                       Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)
+    assert json.loads((tmp_path / "config.json").read_text())["seed"] == 7
+
+
+def test_every_file_the_optimiser_writes_marks_its_directory(run):
+    """claim_run_directory's list must cover what a run leaves in its directory."""
+    from covsyn.runtime import runs
+
+    _, _, path = run
+    written = {p.name for p in path.iterdir()}
+    assert written and written <= set(runs.RUN_OUTPUTS), written - set(runs.RUN_OUTPUTS)

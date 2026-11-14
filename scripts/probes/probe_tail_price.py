@@ -11,11 +11,13 @@ ratio, the all-case median, and the cost WITHOUT the tail term -- the difference
 unmodified vector is what the optimizer saves by not growing the tail. The same grid is the
 reachability gate (lesson 2) for the re-weighted target.
 
-Usage: uv run python scripts/probes/probe_tail_price.py
+Usage: uv run python scripts/probes/probe_tail_price.py RUN_DIR [RUN_DIR ...]
 """
+import sys
 import os
 import concurrent.futures
 import pickle
+from pathlib import Path
 
 import numpy as np
 
@@ -23,11 +25,13 @@ from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST
 from covsyn.runtime import hardware
+from covsyn.runtime.runs import run_dir_argument
 
-STARTS = {
-    'run7': 'Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_120_run7/firefly_best.txt',
-    'run8': 'ARCHIVE_20260928_run_phaseD8/firefly_120/firefly_best.txt',
-}
+# Task 3: the starting runs are given as run directories (originally run 7 and run 8).
+# Keyed by the whole path: every run has a revalidation/ and a selected/ subdirectory.
+STARTS = {d: f'{d}/firefly_best.txt' for d in sys.argv[1:]}
+if not STARTS:
+    run_dir_argument(sys.argv, 1, 'uv run python scripts/probes/probe_tail_price.py RUN_DIR [RUN_DIR ...]')
 K_VALUES = [None, 0.6, 0.45, 0.35, 0.25, 0.18, 0.12]
 LAMBDA_FACTORS = [1.0, 1.5, 2.2, 3.0]
 

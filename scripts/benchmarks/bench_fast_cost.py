@@ -8,7 +8,6 @@ Run this on an idle machine only.
 """
 import argparse
 import concurrent.futures
-import glob
 import os
 import pickle
 import time
@@ -25,6 +24,7 @@ def main():
     hardware.add_workers_argument(parser)  # Task 2 (D3)
     parser.add_argument('--warmup', type=int, default=5)
     parser.add_argument('--reps', type=int, default=15)
+    parser.add_argument('run_dir', help='run directory to take vectors from (Task 3)')
     args = parser.parse_args()
     args.workers = hardware.resolve_workers(args.workers, os.environ, None)
 
@@ -35,8 +35,7 @@ def main():
     cheng = (ct['Cheng_contact_array'], ct['Cheng_attack_rate'], ct['norm_weights'])
     columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
 
-    d = [x for x in sorted(glob.glob('Firefly_result_pop_size_100_*'))
-         if os.path.exists(x + '/firefly_best.txt')][0]
+    d = args.run_dir
     res = np.loadtxt(d + '/firefly_best.txt')
     # A spread of vectors, so the timing is not just the best fit's data volume: the search
     # spends most of its evaluations on vectors that produce MORE cases and contacts, which is

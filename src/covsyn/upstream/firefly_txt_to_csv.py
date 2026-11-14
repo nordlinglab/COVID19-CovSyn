@@ -1,6 +1,10 @@
+import sys
+
 import numpy as np
 import pandas as pd
 from pathlib import Path
+
+from covsyn.runtime.runs import run_dir_argument
 
 def get_description():
     description = ['Evaluation']
@@ -61,7 +65,7 @@ def get_description():
 
 if __name__ == '__main__':
     # Load the txt file
-    txt_file_path = Path('firefly_result/Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200')
+    txt_file_path = run_dir_argument(sys.argv, 1, 'uv run python -m covsyn.upstream.firefly_txt_to_csv RUN_DIR')
     bound = np.loadtxt(txt_file_path / 'bound.txt', dtype=float)
     firefly_best = np.loadtxt(txt_file_path / 'firefly_best.txt', dtype=float)
     firefly_final = np.loadtxt(txt_file_path / 'firefly_result.txt', dtype=float)

@@ -10,7 +10,7 @@ Two checks:
 
 Usage:
     uv run python scripts/probes/audit_bounds.py
-    uv run python scripts/probes/audit_bounds.py ./Firefly_result_pop_size_100_alpha_1_betamin_1_gamma_0.131_max_generations_200
+    uv run python scripts/probes/audit_bounds.py results/models/<run-id>
 """
 import sys
 import pickle

@@ -11,12 +11,12 @@ Reproduce from the repository root:
 mkdir -p b75_spread_Taiwan_weight && \
   python -m covsyn.model.data_synthesis_main --mode spread_Taiwan_weight \
     --monte_carlo_number 400 --result_path b75_spread_Taiwan_weight \
-    --cpu_cores 24 --parameter_path firefly_result/phaseD_run18 && \
+    --cpu_cores 24 --parameter_path results/models/phaseD_run18 && \
   python -m covsyn.validation.measure_days b75_spread_Taiwan_weight
 
 mkdir -p b75_mc1000 && \
   python -m covsyn.model.data_synthesis_main --mode spread_Taiwan_weight \
     --monte_carlo_number 1000 --result_path b75_mc1000 \
-    --cpu_cores 24 --parameter_path firefly_result/phaseD_run18 && \
+    --cpu_cores 24 --parameter_path results/models/phaseD_run18 && \
   python -m covsyn.validation.verify_phase_d b75_mc1000 none b75_checks.json 0
 ```

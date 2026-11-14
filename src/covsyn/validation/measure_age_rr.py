@@ -20,7 +20,6 @@ Usage:
 """
 import argparse
 import concurrent.futures
-import glob
 import json
 import os
 import pickle
@@ -125,17 +124,14 @@ def wilson(successes, trials, z=1.959963984540054):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('directory', nargs='?', default=None)
+    parser.add_argument('directory', help='run directory, such as results/models/<run-id>')
     parser.add_argument('n', nargs='?', type=int, default=20000)
     hardware.add_workers_argument(parser)  # Task 2: was 32 workers (D3)
     parser.add_argument('--out', default='validation_reference/age_rr.json')
     args = parser.parse_args()
     workers = hardware.resolve_workers(args.workers, os.environ, None)
 
-    directory = args.directory
-    if directory is None:
-        directory = [d for d in sorted(glob.glob('Firefly_result_pop_size_100_*'))
-                     if os.path.exists(d + '/firefly_best.txt')][0]
+    directory = args.directory  # Task 3: required, no longer a guess among legacy names
     result = np.loadtxt(Path(directory) / 'firefly_best.txt')
     P = result[int(np.argmin(result[:, -1])), 1:-1]
 
