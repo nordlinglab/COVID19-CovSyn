@@ -1683,7 +1683,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
         SystemExit: --resume with --run-dir, --seed, --mode or --warm_start.
     """
     if args.resume is None:
-        return args.mode or 'train'
+        return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
     given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
                                       ('--mode', args.mode), ('--warm_start', args.warm_start))
              if value is not None]  # --seed 0 and a bare --warm_start are given too

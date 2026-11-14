@@ -41,11 +41,6 @@ SAVED_CONFIG = "pipeline.toml"
 RUN_LOG = "run.log"
 PIPELINE_LOG = "pipeline.log"  # every progress line, warning and error, kept with the run
 LOCK = "pipeline.lock"
-# Stages whose checklist caps its workers by memory, at 4.9 GB each (Task 2).
-MEMORY_BOUND = {
-    "select": hardware.CHECKLIST_GB_PER_WORKER,
-    "check": hardware.CHECKLIST_GB_PER_WORKER,
-}
 Execute = Callable[[Sequence, Path | None, bool, Mapping[str, str]], int]
 
 
@@ -105,24 +100,12 @@ def finished_stages(run_dir: Path) -> list[str]:
     return stages
 
 
-def checklist_workers(env: Mapping[str, str]) -> int:
-    """The checklist's workers under its memory cap, now; 1 where not even one fits.
-
-    That is what verify_phase_d.bootstrap_workers falls back to, so it never raises.
-    """
-    try:
-        return hardware.resolve_workers(None, env, hardware.CHECKLIST_GB_PER_WORKER)
-    except hardware.InsufficientMemory:
-        return 1
-
-
 def record_stage(
     run_dir: Path,
     stage: str,
     seconds: float,
     workers: int,
     warnings: Sequence[str] = (),
-    checklist: int | None = None,
 ) -> None:
     """Append one line to run.log for a finished stage.
 
@@ -138,8 +121,6 @@ def record_stage(
         "worker_peak_mb": round(_peak_mb(resource.RUSAGE_CHILDREN), 1),
         "warnings": list(warnings),
     }
-    if checklist is not None:
-        line["checklist_workers"] = checklist
     path = Path(run_dir) / RUN_LOG
     # A kill while writing leaves a line without its newline; start after it, not on it.
     cut_off = False
@@ -172,7 +153,7 @@ def run(
     """
     # Absolute, as steps run from the repository root; not resolved, so a symlinked models
     # directory keeps its results/ siblings.
-    run_dir = runs.logical_abspath(run_dir)
+    run_dir = Path(os.path.abspath(run_dir))
     if resume:
         saved = run_dir / SAVED_CONFIG
         if not saved.is_file():
@@ -182,6 +163,7 @@ def run(
         runs.check_unclaimed(run_dir)  # the optimiser claims it; this fails before anything runs
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / SAVED_CONFIG).write_text(pc.to_toml(config), encoding="utf-8")
+        ps.Layout(run_dir).save()  # from now on the run's tables and figures stay put
     lock = acquire_lock(run_dir)
     try:
         if execute is None:
@@ -218,7 +200,9 @@ def _run_stages(
     report: Callable[[str], None],
 ) -> int:
     env = {} if config.workers is None else {hardware.ENV_VARIABLE: str(config.workers)}
-    steps_env = {**os.environ, **env}
+    # The steps' default: the setting, else COVSYN_WORKERS, else the cores (Task 2); each
+    # step's own count, after its memory cap, is Task 5's to record.
+    workers = hardware.resolve_workers(None, {**os.environ, **env}, None)
 
     def step(args, output=None, append=False, env=None):
         return execute(args, output, append, {**environment, **(env or {})})
@@ -251,25 +235,19 @@ def _run_stages(
         finally:
             for warning in ctx.warnings:
                 report(f"WARNING: {warning}")
-        # The steps' default: the setting, else COVSYN_WORKERS, else the cores (Task 2). Each
-        # step's own count, after its memory cap, is Task 5's to record.
-        workers = hardware.resolve_workers(None, steps_env, None)
-        record_stage(
-            run_dir,
-            name,
-            time.monotonic() - start,
-            workers,
-            ctx.warnings,
-            checklist_workers(steps_env) if name in MEMORY_BOUND else None,
-        )
+        record_stage(run_dir, name, time.monotonic() - start, workers, ctx.warnings)
     report("ALL DONE")
     return 0
 
 
 def resume_name(run_dir: Path) -> str:
     """What to give --resume: the run id under results/models, else the whole path."""
-    models = runs.logical_abspath(runs.RESULTS_ROOT / "models")
-    return run_dir.name if run_dir.parent == models else str(run_dir)
+    models = runs.RESULTS_ROOT / "models"
+    try:
+        inside = models.is_dir() and os.path.samefile(run_dir.parent, models)
+    except OSError:
+        inside = False
+    return run_dir.name if inside else str(run_dir)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -288,7 +266,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.resume:
         given = Path(args.resume)
         run_dir = (
-            runs.logical_abspath(given)
+            Path(os.path.abspath(given))
             if given.is_dir()
             else runs.RESULTS_ROOT / "models" / args.resume
         )

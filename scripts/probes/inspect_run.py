@@ -26,11 +26,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 from pathlib import Path
 
 from covsyn.pipeline.stages import Layout
-from covsyn.runtime.runs import logical_abspath
 
 # The checks a review keeps coming back to; --watch adds more.
 DEFAULT_WATCH = (
@@ -147,7 +147,7 @@ def main() -> None:
     args = parser.parse_args()
     # From inside a run directory, "." must still find its tables; absolute, not resolved,
     # so a symlinked run keeps its results/ siblings.
-    run = logical_abspath(args.run)
+    run = Path(os.path.abspath(args.run))  # its layout.json keeps the tables' place
     watch = DEFAULT_WATCH + tuple(args.watch)
 
     stages = stage_timings(run)

@@ -182,6 +182,7 @@ def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
     assert fo.resume_arguments(args) == "test" and args.seed == 5
     assert fo.resume_arguments(_args()) == "train"
     assert fo.resume_arguments(_args(mode="profile")) == "profile"
+    assert fo.resume_arguments(_args(mode="")) == ""  # then refused as an unknown mode
 
 
 @pytest.mark.parametrize("given", [{"mode": "train"}, {"warm_start": ["a.txt"]}, {"seed": 3},

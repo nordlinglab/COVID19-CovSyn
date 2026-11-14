@@ -598,31 +598,24 @@ def test_a_cut_off_run_log_line_does_not_stop_a_resume(tmp_path, config):
 
 
 def test_run_log_records_the_workers_the_steps_use(tmp_path, config, monkeypatch):
-    """The default every step gets, and for the checklist stages their cap by memory."""
-    from covsyn.runtime import hardware
-
+    """The default every step gets: COVSYN_WORKERS from the shell, when the setting is unset."""
     monkeypatch.setenv("COVSYN_WORKERS", "7")
-    monkeypatch.setattr(hardware, "_available_gb", lambda: 10.0)  # 2 checklist workers fit
     _, run_dir = run_pipeline(tmp_path, config, Recorder())
-    lines = {json.loads(x)["stage"]: json.loads(x) for x in (run_dir / "run.log").read_text()
-             .splitlines()}
-    assert {lines[s]["workers"] for s in STAGES} == {7}
-    assert lines["check"]["checklist_workers"] == lines["select"]["checklist_workers"] == 2
-    assert "checklist_workers" not in lines["synthesise"]
+    assert {json.loads(x)["workers"] for x in (run_dir / "run.log").read_text().splitlines()} \
+        == {7}
 
 
-def test_short_of_memory_a_finished_checklist_stage_is_still_recorded(tmp_path, config,
-                                                                      monkeypatch):
-    """Not even one 4.9 GB worker fits: the checklist ran serially, and the stage is logged."""
+def test_short_of_memory_every_finished_stage_is_still_recorded(tmp_path, config, monkeypatch):
+    """Not even one 4.9 GB checklist worker fits: every stage is still recorded as finished.
+
+    The checklist runs serially then; the pipeline must not fail on its own record.
+    """
     from covsyn.runtime import hardware
 
     monkeypatch.delenv("COVSYN_WORKERS", raising=False)
     monkeypatch.setattr(hardware, "_available_gb", lambda: 1.0)
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert status == 0
-    lines = {json.loads(x)["stage"]: json.loads(x) for x in (run_dir / "run.log").read_text()
-             .splitlines()}
-    assert lines["check"]["checklist_workers"] == 1
+    assert status == 0 and pr.finished_stages(run_dir) == STAGES
 
 
 def test_run_hands_its_lock_to_the_real_steps_and_releases_it(tmp_path, config, monkeypatch):
@@ -642,21 +635,24 @@ def test_run_hands_its_lock_to_the_real_steps_and_releases_it(tmp_path, config, 
     os.close(pr.acquire_lock(run_dir))  # free: the run released it
 
 
-def test_a_symlinked_run_passed_to_run_lays_out_under_results(tmp_path, config, monkeypatch):
-    """run() and a resume from inside the linked directory keep results/tables/<id>."""
+def test_a_run_keeps_its_layout_however_it_is_named_later(tmp_path, config, monkeypatch):
+    """A run's tables stay where layout.json says, whatever path resumes it.
+
+    Started as results/models/r, a link to other storage, then resumed by its real path and
+    from inside it.
+    """
     storage = tmp_path / "storage" / "r"
     storage.mkdir(parents=True)
     models = tmp_path / "results" / "models"
     models.mkdir(parents=True)
     (models / "r").symlink_to(storage)
-    recorder = Recorder(fail={"covsyn.model.data_synthesis_main"})
-    pr.run(config, models / "r", execute=recorder)
-    monkeypatch.chdir(models / "r")
-    monkeypatch.setenv("PWD", str(models / "r"))
+    pr.run(config, models / "r", execute=Recorder(fail={"covsyn.model.data_synthesis_main"}))
+    pr.run(None, storage, execute=Recorder(fail={"covsyn.validation.verify_phase_d"}),
+           resume=True)
+    monkeypatch.chdir(models / "r")  # the working directory is then the physical one
     pr.run(None, Path("."), execute=Recorder(), resume=True)
     assert (tmp_path / "results" / "tables" / "r" / "report.txt").exists()
-    assert not (storage / "tables").exists()
-
+    assert not (storage / "tables").exists() and not (storage / "figures").exists()
 
 def test_check_gap_reads_this_runs_spread_simulations(tmp_path, config):
     """It read a fixed synthetic_data_results_spread_Taiwan_weight in the working directory."""
@@ -702,6 +698,7 @@ def test_the_resume_hint_names_the_run_as_main_finds_it(tmp_path, monkeypatch, i
     """The id under results/models, else the whole path, which --resume also takes."""
     monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
     run_dir = (tmp_path / "results" / "models" / "r") if inside else (tmp_path / "elsewhere" / "r")
+    run_dir.parent.mkdir(parents=True)
     assert pr.resume_name(run_dir) == ("r" if inside else str(run_dir))
 
 

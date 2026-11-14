@@ -396,14 +396,3 @@ def test_run_10s_progress_table_is_where_progress_path_says():
     assert runs.progress_path(run10).is_file()
     assert not (run10 / "progress_metrics.csv").exists()
 
-
-def test_a_relative_path_keeps_the_shells_links(tmp_path, monkeypatch):
-    """Inside a linked directory, "." is named through the link, as $PWD names it."""
-    target = tmp_path / "storage"
-    target.mkdir()
-    (tmp_path / "link").symlink_to(target)
-    monkeypatch.chdir(tmp_path / "link")
-    monkeypatch.setenv("PWD", str(tmp_path / "link"))
-    assert runs.logical_abspath(".") == tmp_path / "link"
-    monkeypatch.setenv("PWD", str(tmp_path))  # a stale $PWD is not trusted
-    assert runs.logical_abspath(".") == target.resolve()
