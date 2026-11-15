@@ -150,37 +150,76 @@ def stage_memory(path: Path) -> dict:
     }
 
 
-def earlier_peaks(run_dir: Path, stage: str) -> tuple[float, float] | None:
-    """The stage's step and worker peaks, in MB, in the latest other run on this configuration.
+def stage_peaks(measurements: Path, watch: memory.MemoryWatch) -> dict:
+    """A stage's memory, as run.log and the stopped-stage log both record it."""
+    return {
+        **stage_memory(measurements),
+        "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),  # None: not read
+        # The plan's once-a-second RSS of the step, the process that owns the pool.
+        "step_sampled_peak_mb": memory.megabytes(watch.steps_peak_bytes),
+        "lowest_available_mb": memory.megabytes(watch.lowest_available),
+    }
 
-    Runs are compared by their saved pipeline.toml. A finished stage's peaks are in run.log, a
-    stopped one's in logs/stopped_stage_memory.jsonl, so a stage killed for want of memory
-    counts too.
-    Only lines of Task 5's format count: before it, worker_peak_mb was the largest over the run
-    so far, not the stage's own. A step's peak is the larger of its measured peak and its
-    sampled RSS; a stage without a pool has no worker peak, taken as 0.
+
+def _peaks_of(line: Mapping) -> tuple[float, float] | None:
+    """A line's step and worker peaks in MB; None if it measured nothing.
+
+    A step's peak is the larger of its measured peak and its sampled RSS; a stage without a
+    pool has no worker peak, taken as 0. Only lines of Task 5's format count: before it,
+    worker_peak_mb was the largest over the run so far, not the stage's own.
+    """
+    if "pipeline_peak_mb" not in line:
+        return None
+    steps = [line.get(k) for k in ("parent_peak_mb", "step_sampled_peak_mb")]
+    worker = line.get("worker_peak_mb")
+    if not any(_number(v) for v in (*steps, worker)):
+        return None
+    return max((v for v in steps if _number(v)), default=0.0), worker if _number(worker) else 0.0
+
+
+def other_runs(run_dir: Path) -> list[Path]:
+    """The other run directories beside run_dir on its configuration.
+
+    Links are skipped without being followed, as is anything but a directory: a link in
+    results/models to a dead share must not stall the run (Task 4).
     """
     saved = (run_dir / SAVED_CONFIG).read_text(encoding="utf-8")
     found = []
-    # glob, not iterdir and stat: a link in results/models to a dead share must not stall the
-    # run (Task 4, test_other_runs_are_never_looked_at).
-    for config in run_dir.parent.glob(f"*/{SAVED_CONFIG}"):
-        other = config.parent
-        if other == run_dir:
-            continue
-        if config.read_text(encoding="utf-8", errors="replace") != saved:
-            continue
-        for log in (other / RUN_LOG, other / "logs" / STOPPED_LOG):
-            for line in json_lines(log):
-                if line.get("stage") != stage or "pipeline_peak_mb" not in line:
-                    continue
-                steps = [line.get(k) for k in ("parent_peak_mb", "step_sampled_peak_mb")]
-                worker = line.get("worker_peak_mb")
-                if not any(_number(v) for v in (*steps, worker)):
-                    continue  # nothing was measured
-                parent = max((v for v in steps if _number(v)), default=0.0)
-                found.append((log.stat().st_mtime, parent, worker if _number(worker) else 0.0))
-    return max(found)[1:] if found else None
+    with os.scandir(run_dir.parent) as entries:
+        for entry in entries:
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                continue
+            other = Path(entry.path)
+            config = other / SAVED_CONFIG
+            if other.name == run_dir.name or not config.is_file():
+                continue
+            if config.read_text(encoding="utf-8", errors="replace") == saved:
+                found.append(other)
+    return found
+
+
+def earlier_peaks(run_dir: Path, stage: str) -> tuple[float, float] | None:
+    """The stage's step and worker peaks, in MB, from earlier runs on this configuration.
+
+    The base is the latest finished stage in another run's run.log, by its time. A stopped
+    attempt, in logs/stopped_stage_memory.jsonl of another run or of this one (a resume), can
+    only raise it: one that stopped early, for another reason, shows less than it would have
+    needed.
+    """
+    finished = []
+    stopped = []
+    for other in other_runs(run_dir):
+        for line in json_lines(other / RUN_LOG):
+            if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
+                finished.append((str(line.get("finished", "")), peaks))
+    for run in (*other_runs(run_dir), run_dir):
+        for line in json_lines(run / "logs" / STOPPED_LOG):
+            if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
+                stopped.append(peaks)
+    candidates = ([max(finished)[1]] if finished else []) + stopped
+    if not candidates:
+        return None
+    return max(p for p, _ in candidates), max(w for _, w in candidates)
 
 
 def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
@@ -438,24 +477,17 @@ def _run_stages(
                     f"{memory.mb_text(watch.parent_peak_bytes)}, a step at most "
                     f"{memory.mb_text(watch.steps_peak_bytes)} (sampled once a second); {steps}"
                 )
-                # For the next run's memory check: this attempt's peaks, though it stopped.
+                # For the next memory check, a resume's too: this attempt's peaks, though it
+                # stopped.
                 with contextlib.suppress(OSError):
                     line = {
                         "stage": name,
                         "stopped": datetime.now().isoformat(timespec="seconds"),
-                        **stage_memory(measurements),
-                        "step_sampled_peak_mb": memory.megabytes(watch.steps_peak_bytes),
-                        "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),
+                        **stage_peaks(measurements, watch),
                     }
                     with open(layout.logs / STOPPED_LOG, "a", encoding="utf-8") as f:
                         f.write(json.dumps(line) + "\n")
-        peaks = {
-            **stage_memory(measurements),
-            "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),  # None: not read
-            # The plan's once-a-second RSS of the step, the process that owns the pool.
-            "step_sampled_peak_mb": memory.megabytes(watch.steps_peak_bytes),
-            "lowest_available_mb": memory.megabytes(watch.lowest_available),
-        }
+        peaks = stage_peaks(measurements, watch)
         # The watch's warning for run.log, once, however often its report was tried, and even
         # if no report got through: the memory was low whatever the output did.
         warnings = [*ctx.warnings, *([] if watch.warning is None else [watch.warning])]

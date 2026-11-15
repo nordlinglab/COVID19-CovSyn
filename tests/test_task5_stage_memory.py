@@ -10,8 +10,10 @@ through ``covsyn.runtime.measure``; the pipeline keeps the largest of a stage's 
 from __future__ import annotations
 
 import json
+import os
 import re
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -183,8 +185,10 @@ def test_low_memory_is_reported_while_the_stage_runs(tmp_path, config, monkeypat
     assert text.count("WARNING: only") == len(STAGES) and "WARNING: WARNING" not in text
 
 
-def test_a_failed_stage_leaves_its_memory_readings(tmp_path, config):
+def test_a_failed_stage_leaves_its_memory_readings(tmp_path, config, monkeypatch):
     """The least available memory, and a file of the steps' peaks that a resume keeps."""
+    # Its resume reads the stopped attempt's peaks (made up, and large): let them fit.
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(1e15))
     import re
     from pathlib import Path
 
@@ -306,8 +310,10 @@ def test_a_stage_that_fits_runs(tmp_path, config, monkeypatch):
     assert status == 0
 
 
-def test_a_resumed_stage_starts_its_measurements_afresh(tmp_path, config):
+def test_a_resumed_stage_starts_its_measurements_afresh(tmp_path, config, monkeypatch):
     """The steps of a stage killed earlier do not count for the stage run again."""
+    # Its resume reads the stopped attempt's peaks (made up, and large): let them fit.
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(1e15))
     peaks = {"covsyn.model.data_synthesis_main": (500.0, 9000.0)}
     status, run_dir = run_pipeline(
         tmp_path, config, Measuring(peaks, fail={"covsyn.model.data_synthesis_main"})
@@ -318,8 +324,10 @@ def test_a_resumed_stage_starts_its_measurements_afresh(tmp_path, config):
     assert run_log(run_dir)["synthesise"]["worker_peak_mb"] == 1000.0
 
 
-def test_only_stopped_attempts_leave_their_measurements(tmp_path, config):
+def test_only_stopped_attempts_leave_their_measurements(tmp_path, config, monkeypatch):
     """A finished stage's peaks are in run.log; its file goes. A stopped attempt's stays."""
+    # Its resume reads the stopped attempt's peaks (made up, and large): let them fit.
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(1e15))
     peaks = {"covsyn.model.data_synthesis_main": (500.0, 9000.0),
              "covsyn.calibration.firefly_optimizer": (300.0, 900.0)}  # fmt: skip
     status, run_dir = run_pipeline(
@@ -542,7 +550,10 @@ def test_a_step_that_wrote_no_peak_still_counts_next_time(tmp_path, config, monk
     assert run_log(first)["optimise"]["worker_peak_mb"] is None
     second = first.parent / "20261116-090000_b30c141_phase-d"
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))  # 100 MB free
-    assert prun(config, second, execute=Recorder()) == 1  # the ~210 MB step does not fit
+    assert prun(config, second, execute=Recorder()) == 1
+    assert (
+        "stage optimise needs about" in (second / pr.PIPELINE_LOG).read_text()
+    )  # the ~210 MB step does not fit
 
 
 def test_a_stopped_stage_counts_next_time(tmp_path, config, monkeypatch):
@@ -564,3 +575,93 @@ def test_a_stopped_stage_counts_next_time(tmp_path, config, monkeypatch):
     second = first.parent / "20261116-090000_b30c141_phase-d"
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))
     assert prun(config, second, execute=Recorder()) == 1
+    assert "stage optimise needs about" in (second / pr.PIPELINE_LOG).read_text()
+
+
+def _line(stage, parent, worker, sampled=None, **when):
+    return {"stage": stage, "parent_peak_mb": parent, "worker_peak_mb": worker,
+            "step_sampled_peak_mb": sampled, "pipeline_peak_mb": 50.0, **when}  # fmt: skip
+
+
+def _earlier(tmp_path, config, name, finished=(), stopped=()):
+    run = tmp_path / "results" / "models" / name
+    (run / "logs").mkdir(parents=True)
+    (run / pr.SAVED_CONFIG).write_text(pc.to_toml(config))
+    (run / pr.RUN_LOG).write_text("".join(json.dumps(x) + "\n" for x in finished))
+    (run / "logs" / pr.STOPPED_LOG).write_text("".join(json.dumps(x) + "\n" for x in stopped))
+    return run
+
+
+def test_a_stopped_attempt_only_raises_the_estimate(tmp_path, config, monkeypatch):
+    """An attempt that stopped early, for another reason, cannot lower a finished run's peaks."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, 1000.0, finished="2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        stopped=[_line("optimise", None, None, 50.0, stopped="2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # 7000 + 2 x 1000 > 8000, as the finished run showed
+    assert "stage optimise needs about 9000 MB" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_the_latest_finished_line_is_found_by_its_time_not_its_files(tmp_path, config, monkeypatch):
+    """A later finished stage wins over an earlier one, however the files were touched."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 100.0, 100.0, finished="2026-11-03T10:00:00")],
+    )
+    old = _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, 1000.0, finished="2026-11-01T10:00:00")],
+    )
+    (old / pr.RUN_LOG).touch()  # newest file, oldest line
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0  # 100 + 2 x 100 fits; the 2026-11-03 line is the latest
+
+
+def test_a_resumed_run_checks_its_own_stopped_attempt(tmp_path, config, monkeypatch):
+    """--resume after a stage was killed for want of memory checks that stage again."""
+    status, run_dir = run_pipeline(
+        tmp_path, config, Recorder(fail={"covsyn.calibration.firefly_optimizer"})
+    )
+    assert status == 1
+    with open(run_dir / "logs" / pr.STOPPED_LOG, "a") as f:  # as a killed big step leaves it
+        f.write(json.dumps(_line("optimise", None, 5000.0, 7000.0, stopped="2099-01-01T00:00:00"))
+                + "\n")  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    assert prun(None, run_dir, execute=Recorder(), resume=True) == 1
+    assert "stage optimise needs about" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_a_linked_run_is_not_looked_into(tmp_path, config, monkeypatch):
+    """A link in results/models, to a dead share say, is skipped without following it."""
+    models = tmp_path / "results" / "models"
+    models.mkdir(parents=True)
+    (models / "old").symlink_to(tmp_path / "gone")
+    followed = []
+    real = os.scandir
+
+    def watching(path=".", *args, **kwargs):
+        if "old" in Path(str(path)).parts:
+            followed.append(str(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "scandir", watching)
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0 and followed == []
