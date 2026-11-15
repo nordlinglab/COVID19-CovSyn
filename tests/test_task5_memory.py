@@ -346,3 +346,48 @@ def test_a_step_that_reuses_a_finished_steps_pid_is_sampled(monkeypatch):
     monkeypatch.setattr(memory, "rss_bytes", lambda process=None: process._rss)
     watch._sample_steps()
     assert watch.steps_peak_bytes == 300 * MIB
+
+
+def test_without_its_own_command_the_watch_never_rules_a_child_out(monkeypatch):
+    """Without the pipeline's own command, a child seen before it exec'd is looked at again."""
+
+    class Child:
+        pid = 7
+        command = ["python", "-m", "pytest"]  # not yet exec'd
+
+        def cmdline(self):
+            return self.command
+
+        def is_running(self):
+            return True
+
+    child = Child()
+    watch = memory.MemoryWatch(steps=True, system=lambda: (50, 100))
+    watch._own_cmdline = None
+    monkeypatch.setattr(watch.process, "children", lambda: [child])
+    monkeypatch.setattr(memory, "rss_bytes", lambda process=None: 300 * MIB)
+    watch._sample_steps()
+    child.command = ["python", "-m", memory.STEP_MODULE, "-m", "x"]
+    watch._sample_steps()
+    assert watch.steps_peak_bytes == 300 * MIB
+
+
+def test_handles_of_ended_children_are_not_kept(monkeypatch):
+    """Only the current children's handles stay."""
+
+    class Child:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def cmdline(self):
+            return ["python", "-m", memory.STEP_MODULE]
+
+        def is_running(self):
+            return True
+
+    watch = memory.MemoryWatch(steps=True, system=lambda: (50, 100))
+    monkeypatch.setattr(memory, "rss_bytes", lambda process=None: 1)
+    for pid in range(10):
+        monkeypatch.setattr(watch.process, "children", lambda pid=pid: [Child(pid)])
+        watch._sample_steps()
+    assert list(watch._steps) == [9]

@@ -162,15 +162,22 @@ class MemoryWatch:
 
     def _sample_steps(self) -> None:
         denied = None
-        for child in self.process.children():
+        children = self.process.children()
+        current = {child.pid for child in children}
+        for kept in (self._steps, self._others):  # only the current children's handles stay
+            for pid in [pid for pid in kept if pid not in current]:
+                del kept[pid]
+        for child in children:
             try:
                 step = self._kept(self._steps, child.pid)
                 if step is None and self._kept(self._others, child.pid) is None:
                     command = child.cmdline()
                     if STEP_MODULE in command:
                         self._steps[child.pid] = step = child
-                    elif command != self._own_cmdline:  # exec'd into something else: never
-                        self._others[child.pid] = child  # a step, so not read again
+                    elif self._own_cmdline is not None and command != self._own_cmdline:
+                        # exec'd into something else, never a step: not read again. Without
+                        # the pipeline's own command, a child just forked cannot be told apart.
+                        self._others[child.pid] = child
                 if step is not None:
                     rss = rss_bytes(step)
                     self.steps_peak_bytes = max(self.steps_peak_bytes or 0, rss)
