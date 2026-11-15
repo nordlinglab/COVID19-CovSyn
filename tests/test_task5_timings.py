@@ -396,10 +396,12 @@ def test_a_second_interrupt_during_the_shutdown_keeps_the_runs_error(tmp_path, m
     import concurrent.futures
 
     shutdown = concurrent.futures.ProcessPoolExecutor.shutdown
+    interrupts = []
 
     def interrupted(self, *args, **kwargs):
-        shutdown(self, wait=False, cancel_futures=True)
+        shutdown(self, *args, **kwargs)  # the workers are joined, then the second Ctrl-C
         if kwargs.get("cancel_futures"):
+            interrupts.append(kwargs)
             raise KeyboardInterrupt
 
     monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "shutdown", interrupted)
@@ -408,6 +410,7 @@ def test_a_second_interrupt_during_the_shutdown_keeps_the_runs_error(tmp_path, m
     path.mkdir()
     with pytest.raises(Killed):
         optimise(path, killed_after(POP + 3))
+    assert interrupts == [{"wait": True, "cancel_futures": True}]  # it was raised, and kept out
 
 
 def test_after_a_failure_every_close_error_is_said_and_none_raised(capsys):
