@@ -439,7 +439,7 @@ def _run_stages(
         }
         # The watch's warning for run.log, once, however often its report was tried, and even
         # if no report got through: the memory was low whatever the output did.
-        warnings = [*ctx.warnings, *([watch.warning] if watch.warning else [])]
+        warnings = [*ctx.warnings, *([] if watch.warning is None else [watch.warning])]
         record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)
         measurements.unlink(missing_ok=True)  # in run.log now; a stopped attempt's stays
     report("ALL DONE")

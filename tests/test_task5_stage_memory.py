@@ -461,5 +461,6 @@ def test_a_warning_whose_report_wrote_nothing_is_in_run_log_once(tmp_path, confi
     monkeypatch.setattr(pr.Reporter, "__call__", failing)
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 0 and list(run_log(run_dir)) == STAGES
+    assert "below 10%" not in (run_dir / pr.PIPELINE_LOG).read_text()  # no report got through
     for line in run_log(run_dir).values():
         assert sum("below 10%" in w for w in line["warnings"]) == 1
