@@ -119,6 +119,11 @@ def finished_stages(run_dir: Path) -> list[str]:
     return [line["stage"] for line in json_lines(Path(run_dir) / RUN_LOG) if "stage" in line]
 
 
+def _mb(n: int | None) -> float | None:
+    """Bytes as MB to 0.1 MB; None stays None, a reading that never succeeded."""
+    return None if n is None else round(n / memory.MB, 1)
+
+
 def _number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -410,25 +415,23 @@ def _run_stages(
         finally:
             for warning in ctx.warnings:
                 report(f"WARNING: {warning}")
-            if not finished and watch.lowest_available is not None:  # whatever stopped it
+            started = watch.thread.ident is not None  # not a stage the memory check refused
+            if not finished and started:  # whatever stopped it
                 steps = (
                     f"the steps' peaks are in {measurements}"
                     if measurements.exists()
                     else "no step reported its peaks"
                 )
+                lowest, peak = _mb(watch.lowest_available), _mb(watch.parent_peak_bytes)
                 report(
                     f"memory in stage {name}: lowest available "
-                    f"{watch.lowest_available / memory.MB:.0f} MB, this process at most "
-                    f"{watch.parent_peak_bytes / memory.MB:.0f} MB; {steps}"
+                    f"{'unknown' if lowest is None else f'{lowest:.0f} MB'}, this process at "
+                    f"most {'unknown' if peak is None else f'{peak:.0f} MB'}; {steps}"
                 )
         peaks = {
             **stage_memory(measurements),
-            "pipeline_peak_mb": round(watch.parent_peak_bytes / memory.MB, 1),
-            "lowest_available_mb": (  # None when every reading failed
-                None
-                if watch.lowest_available is None
-                else round(watch.lowest_available / memory.MB, 1)
-            ),
+            "pipeline_peak_mb": _mb(watch.parent_peak_bytes),  # None: no reading succeeded
+            "lowest_available_mb": _mb(watch.lowest_available),
         }
         warnings = [*ctx.warnings, *memory_warnings]
         record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)

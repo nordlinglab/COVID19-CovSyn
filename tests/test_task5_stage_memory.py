@@ -385,3 +385,20 @@ def test_each_line_goes_to_stdout_in_one_write(monkeypatch):
     monkeypatch.setattr(sys, "stdout", Recording())
     pr.say("stage optimise")
     assert len(writes) == 1 and writes[0].endswith("stage optimise\n")
+
+
+def test_a_stopped_stage_says_what_it_knows_when_a_reading_failed(tmp_path, config, monkeypatch):
+    """No available-memory reading still leaves the line, the pipeline's peak and the file."""
+
+    def failing():
+        raise OSError("/proc/meminfo unreadable")
+
+    monkeypatch.setattr(memory, "system_memory", failing)
+    peaks = {"covsyn.model.data_synthesis_main": (500.0, 9000.0)}
+    status, run_dir = run_pipeline(
+        tmp_path, config, Measuring(peaks, fail={"covsyn.model.data_synthesis_main"})
+    )
+    assert status == 1
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "memory in stage synthesise: lowest available unknown, this process at most" in log
+    assert "memory_synthesise_" in log
