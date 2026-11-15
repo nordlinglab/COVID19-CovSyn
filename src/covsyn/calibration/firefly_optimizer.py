@@ -1714,11 +1714,13 @@ class Firefly:
 
             executor.shutdown()  # the workers write their profiles as they exit
         except BaseException:
-            # A failed or stopped run cancels the tasks not yet started and waits for the running
-            # ones, at most one task of SIMULATIONS_PER_TASK simulations each (tens of ms), so no
-            # worker outlives the run; an error of the shutdown must not replace the run's own.
+            # A failed or stopped run cancels the tasks not yet started and waits for the rest:
+            # those running and those already queued, at most two per worker of
+            # SIMULATIONS_PER_TASK simulations each (about 25 ms a task), so no worker outlives
+            # the run. Nothing the shutdown raises, a second Ctrl-C included, replaces the run's
+            # own error.
             failed = True
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(BaseException):
                 executor.shutdown(wait=True, cancel_futures=True)
             raise
         finally:  # whatever ended the run, shutdown included; its own error stays the one raised
