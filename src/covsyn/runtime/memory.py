@@ -19,6 +19,7 @@ from collections.abc import Callable
 import psutil
 
 LOW_MEMORY_FRACTION = 0.10  # warn below this share of the total (plan, Task 5)
+WARNING_ATTEMPTS = 3  # a warning that fails to send is tried on this many samples
 MB = 1e6
 
 
@@ -110,6 +111,7 @@ class MemoryWatch:
         self.lowest_available: int | None = None
         self.warned = False
         self._pending: str | None = None  # a warning to send
+        self._attempts = 0
         self.started = False
         self.failed: set[str] = set()  # the reads whose failure was reported
         self._stop = threading.Event()
@@ -135,8 +137,14 @@ class MemoryWatch:
             self._pending = low_memory_warning(available, total)
 
     def _send_warning(self) -> None:
-        self.warn(self._pending)
-        self._pending = None  # only once sent: a failed send is tried again next sample
+        # Tried again on the next samples if it fails, but not for ever: a warn that fails
+        # after writing part of it would otherwise repeat that part every second.
+        self._attempts += 1
+        message = self._pending
+        if self._attempts >= WARNING_ATTEMPTS:
+            self._pending = None
+        self.warn(message)
+        self._pending = None
 
     def _guarded(self, read: Callable[[], None]) -> None:
         """Run one read; its failure (/proc unreadable, a full disk) is reported once, not fatal."""

@@ -281,3 +281,16 @@ def test_megabytes_keeps_none():
     """One conversion for every table and log: bytes to MB to 0.1 MB, None for no reading."""
     assert memory.megabytes(1_500_000) == 1.5
     assert memory.megabytes(None) is None
+
+
+def test_a_warning_that_keeps_failing_is_not_sent_every_second():
+    """Tried a few times, then given up: a warn that half-works must not repeat for hours."""
+    calls = []
+
+    def failing(message):
+        calls.append(message)
+        raise BrokenPipeError
+
+    with memory.MemoryWatch(interval=0.01, warn=failing, system=lambda: (5, 100)):
+        time.sleep(0.3)
+    assert len(calls) == memory.WARNING_ATTEMPTS
