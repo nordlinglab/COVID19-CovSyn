@@ -154,13 +154,17 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
 
 @pytest.mark.parametrize("config", [None, '{"claimed": true}', '{"seed": null}', "not json",
                                     '{"seed": 1}', '{"seed": 1, "settings": {}}',
-                                    '{"seed": true, "settings": {"mode": "train"}}'])
+                                    '{"seed": true, "settings": {"mode": "train"}}',
+                                    '{"seed": 1, "settings": {"mode": "bogus"}}',
+                                    '{"seed": -1, "settings": {"mode": "train"}}', "directory"])
 def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
     """A claim marker, a missing file, or no seed or mode would resume the wrong run.
 
     The mode sets the population size, which must match the checkpoint's.
     """
-    if config is not None:
+    if config == "directory":
+        (tmp_path / "config.json").mkdir()
+    elif config is not None:
         (tmp_path / "config.json").write_text(config)
     with pytest.raises(SystemExit) as stop:
         fo.resumed_settings(tmp_path)
@@ -279,3 +283,34 @@ def test_the_optimiser_refuses_a_lost_table_at_startup(tmp_path, monkeypatch, ca
     assert stop.value.code == runs.NOT_RESUMABLE
     assert "no progress table" in capsys.readouterr().err
     assert (run / "bound.txt").read_text() == "kept\n"  # nothing rewritten
+
+
+def test_a_config_the_disk_cannot_read_now_can_be_retried(tmp_path, monkeypatch):
+    """An I/O error that may pass is not NOT_RESUMABLE: retrying can help."""
+    import errno
+
+    (tmp_path / "config.json").write_text('{"seed": 1, "settings": {"mode": "train"}}')
+
+    def failing(self, *args, **kwargs):
+        raise OSError(errno.EIO, "I/O error")
+
+    monkeypatch.setattr(fo.Path, "read_text", failing)
+    with pytest.raises(SystemExit) as stop:
+        fo.resumed_settings(tmp_path)
+    assert stop.value.code != runs.NOT_RESUMABLE and "could not read" in str(stop.value.code)
+
+
+def test_the_optimiser_refuses_a_run_without_a_checkpoint_at_startup(tmp_path, monkeypatch,
+                                                                    capsys):
+    """Killed before initial.npz: nothing to continue, said before any input loads."""
+    import json
+    import sys
+
+    run = tmp_path / "results" / "models" / "r"
+    run.mkdir(parents=True)
+    (run / "config.json").write_text(json.dumps({"seed": 1, "settings": {"mode": "test"}}))
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
+    with pytest.raises(SystemExit) as stop:
+        fo.main()
+    assert stop.value.code == runs.NOT_RESUMABLE
+    assert "no checkpoint" in capsys.readouterr().err

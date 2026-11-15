@@ -770,6 +770,7 @@ def test_an_optimiser_that_cannot_resume_gets_no_resume_hint(tmp_path, config, c
     assert prun(None, run_dir, execute=Refuses(), resume=True) == 1
     out = capsys.readouterr().out
     assert "cannot be resumed" in out and "Resume with" not in out
+    assert str(run_dir / "optimiser.log") in out  # where the reason is
 
 
 def test_an_empty_resume_is_refused_not_a_new_run(monkeypatch, capsys):
@@ -801,3 +802,16 @@ def test_status_3_from_another_step_is_an_ordinary_failure(tmp_path, config, cap
     status, _ = run_pipeline(tmp_path, config, Three())
     out = capsys.readouterr().out
     assert status == 1 and "Resume with" in out and "cannot be resumed" not in out
+
+
+def test_an_error_inside_a_stage_keeps_its_traceback(tmp_path, monkeypatch):
+    """main() explains only a missing pipeline run and a run in use; others propagate."""
+    monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
+    (tmp_path / "results" / "models" / "r").mkdir(parents=True)
+
+    def broken(*args, **kwargs):
+        raise FileNotFoundError("an input of the check stage")
+
+    monkeypatch.setattr(pr, "run", broken)
+    with pytest.raises(FileNotFoundError, match="check stage"):
+        pr.main(["--resume", "r"])

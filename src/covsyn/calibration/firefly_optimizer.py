@@ -1665,6 +1665,10 @@ class Firefly:
                 fireflies, intensities)
 
 
+# The modes main() knows; a run recorded with another cannot be continued.
+OPTIMISER_MODES = ('train', 'test', 'profile')
+
+
 def not_resumable(message: str) -> None:
     """Stop with runs.NOT_RESUMABLE: the run cannot be resumed, so retrying cannot help."""
     print(message, file=sys.stderr)
@@ -1682,14 +1686,15 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
     try:
         config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
         seed, mode = config['seed'], config['settings']['mode']
-    except (FileNotFoundError, ValueError, KeyError, TypeError) as error:
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
+            TypeError) as error:  # what retrying cannot change
         not_resumable(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
                       f'({error!r})')
     except OSError as error:  # a disk that may come back: retrying can help, so not that code
         raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})')
-    if not isinstance(seed, int) or isinstance(seed, bool):
+    if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
         not_resumable(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
-    if not isinstance(mode, str):
+    if mode not in OPTIMISER_MODES:
         not_resumable(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
     return seed, mode
 

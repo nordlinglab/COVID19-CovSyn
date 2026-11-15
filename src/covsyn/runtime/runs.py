@@ -66,7 +66,9 @@ def resume_problem(run_dir: Path) -> str | None:
     table is missing mean the table is lost or elsewhere; nothing is rebuilt or looked for.
     """
     last = last_checkpoint(run_dir)
-    if last is not None and last.name.startswith("generation_"):
+    if last is None:
+        return f"{run_dir} holds no checkpoint to resume from"
+    if last.name.startswith("generation_"):
         table = progress_path(run_dir)
         if not table.exists():
             return (
