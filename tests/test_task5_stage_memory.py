@@ -649,19 +649,74 @@ def test_a_resumed_run_checks_its_own_stopped_attempt(tmp_path, config, monkeypa
     assert "stage optimise needs about" in (run_dir / pr.PIPELINE_LOG).read_text()
 
 
-def test_a_linked_run_is_not_looked_into(tmp_path, config, monkeypatch):
-    """A link in results/models, to a dead share say, is skipped without following it."""
+def test_a_linked_run_or_config_is_not_looked_into(tmp_path, config, monkeypatch):
+    """A link in results/models, to a dead share say, is skipped without following it.
+
+    So is a run whose pipeline.toml is a link.
+    """
     models = tmp_path / "results" / "models"
-    models.mkdir(parents=True)
+    (models / "real").mkdir(parents=True)
     (models / "old").symlink_to(tmp_path / "gone")
+    (models / "real" / pr.SAVED_CONFIG).symlink_to(tmp_path / "gone.toml")
     followed = []
-    real = os.scandir
 
-    def watching(path=".", *args, **kwargs):
-        if "old" in Path(str(path)).parts:
-            followed.append(str(path))
-        return real(path, *args, **kwargs)
+    def watching(function):
+        def watched(path=".", *args, **kwargs):
+            # lstat and stat(follow_symlinks=False) look at a link without following it.
+            follows = function is not os.lstat and kwargs.get("follow_symlinks", True)
+            parts = set(Path(str(path)).parts)
+            linked = {"old", "gone", "gone.toml"} & parts or (
+                "real" in parts and str(path).endswith(pr.SAVED_CONFIG)
+            )
+            if follows and linked:
+                followed.append((function.__name__, str(path)))
+            return function(path, *args, **kwargs)
 
-    monkeypatch.setattr(os, "scandir", watching)
+        return watched
+
+    for name in ("scandir", "stat", "lstat"):
+        monkeypatch.setattr(os, name, watching(getattr(os, name)))
     status, _ = run_pipeline(tmp_path, config, Recorder())
     assert status == 0 and followed == []
+
+
+def test_an_attempt_that_stopped_before_the_last_finished_one_is_superseded(
+    tmp_path, config, monkeypatch
+):
+    """A stage once killed by a since-fixed leak is not refused for ever."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        stopped=[_line("optimise", None, None, 7000.0, stopped="2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 100.0, finished="2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(1e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0  # 500 + 2 x 100 fits; the older stopped attempt does not count
+
+
+def test_the_estimate_is_one_attempts_not_a_mix(tmp_path, config, monkeypatch):
+    """Step and worker peaks come from the same attempt: the largest need of any one of them."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, 100.0, finished="2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        stopped=[_line("optimise", 50.0, 3000.0, stopped="2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(13e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "4")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0  # 7400 and 12050 fit in 13000; the mix 7000 + 4 x 3000 would not

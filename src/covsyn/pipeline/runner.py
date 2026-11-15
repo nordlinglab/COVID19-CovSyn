@@ -180,46 +180,52 @@ def _peaks_of(line: Mapping) -> tuple[float, float] | None:
 def other_runs(run_dir: Path) -> list[Path]:
     """The other run directories beside run_dir on its configuration.
 
-    Links are skipped without being followed, as is anything but a directory: a link in
-    results/models to a dead share must not stall the run (Task 4).
+    Links are skipped without being followed, a run's linked pipeline.toml too, as is anything
+    but a directory: a link in results/models to a dead share must not stall the run (Task 4).
     """
     saved = (run_dir / SAVED_CONFIG).read_text(encoding="utf-8")
     found = []
     with os.scandir(run_dir.parent) as entries:
         for entry in entries:
-            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+            if not entry.is_dir(follow_symlinks=False):  # False for a link too
                 continue
             other = Path(entry.path)
             config = other / SAVED_CONFIG
-            if other.name == run_dir.name or not config.is_file():
+            if other.name == run_dir.name or config.is_symlink() or not config.is_file():
                 continue
             if config.read_text(encoding="utf-8", errors="replace") == saved:
                 found.append(other)
     return found
 
 
-def earlier_peaks(run_dir: Path, stage: str) -> tuple[float, float] | None:
-    """The stage's step and worker peaks, in MB, from earlier runs on this configuration.
+def _time(line: Mapping, key: str) -> str:
+    """A line's ISO time, or "" when it has none; times are the run's machine's local times."""
+    value = line.get(key)
+    return value if isinstance(value, str) else ""
 
-    The base is the latest finished stage in another run's run.log, by its time. A stopped
-    attempt, in logs/stopped_stage_memory.jsonl of another run or of this one (a resume), can
-    only raise it: one that stopped early, for another reason, shows less than it would have
-    needed.
+
+def earlier_peaks(run_dir: Path, stage: str) -> list[tuple[float, float]]:
+    """The stage's (step, worker) peaks in MB of the attempts the memory check counts.
+
+    The latest finished stage in another run on this configuration, by its time, and every
+    attempt that stopped after it, in logs/stopped_stage_memory.jsonl of another run or of this
+    one (a resume): a stopped attempt may have needed more, but one that stopped before the
+    latest finished stage is superseded by it. Each pair is one attempt's, never a mix.
     """
+    runs_here = other_runs(run_dir)
     finished = []
-    stopped = []
-    for other in other_runs(run_dir):
+    for other in runs_here:
         for line in json_lines(other / RUN_LOG):
             if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
-                finished.append((str(line.get("finished", "")), peaks))
-    for run in (*other_runs(run_dir), run_dir):
+                finished.append((_time(line, "finished"), peaks))
+    since, base = max(finished) if finished else ("", None)
+    stopped = []
+    for run in (*runs_here, run_dir):
         for line in json_lines(run / "logs" / STOPPED_LOG):
             if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
-                stopped.append(peaks)
-    candidates = ([max(finished)[1]] if finished else []) + stopped
-    if not candidates:
-        return None
-    return max(p for p, _ in candidates), max(w for _, w in candidates)
+                if _time(line, "stopped") > since or not since:
+                    stopped.append(peaks)
+    return ([base] if base is not None else []) + stopped
 
 
 def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
@@ -233,11 +239,11 @@ def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
     counts once per worker, so a stage that would fit may be refused; by how much the estimate
     overstates a whole stage is not yet measured.
     """
-    peaks = earlier_peaks(run_dir, stage)
-    if peaks is None:
+    attempts = earlier_peaks(run_dir, stage)
+    if not attempts:
         return None
-    parent, worker = peaks
-    needed = parent + workers * worker
+    # The largest need of any one attempt, with this run's workers.
+    needed, parent, worker = max((p + workers * w, p, w) for p, w in attempts)
     available = memory.available_bytes() / memory.MB
     if needed <= available:
         return None
