@@ -219,7 +219,8 @@ def close_tables(tables: Iterable[Table], failing: bool = False) -> None:
                 with contextlib.suppress(Exception):
                     print(f"could not close {getattr(table, 'path', table)}: {error!r}",
                           file=sys.stderr)  # fmt: skip
-            first = first or error
+            if first is None:
+                first = error
     if first is not None and not failing:
         raise first
 
