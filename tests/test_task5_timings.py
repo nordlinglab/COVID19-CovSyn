@@ -222,21 +222,46 @@ def test_dropping_rows_skips_rows_that_are_not_whole(tmp_path):
         assert list(csv.reader(f)) == [["generation", "best_cost"], ["0", "1.0"], ["1", "4.0"]]
 
 
-def test_a_row_with_other_keys_is_written_under_the_tables_header(tmp_path):
-    """A failed evaluation's cost parts differ; its row still lines up with the header."""
+def test_a_row_with_other_keys_is_written_under_the_tables_header(tmp_path, capsys):
+    """A failed evaluation's cost parts differ; its row lines up, and a lost column is said."""
     path = tmp_path / "progress.csv"
-    timings.append_row(path, ["generation", "a", "b"], {"generation": 0, "a": 1, "b": 2})
-    timings.append_row(path, ["generation", "b", "c"], {"generation": 1, "b": 3, "c": 4})
+    first = timings.Table(path, ["generation", "a", "b"])
+    first.write({"generation": 0, "a": 1, "b": 2})
+    first.close()
+    again = timings.Table(path)  # a resumed run's table, over the header already there
+    again.write({"generation": 1, "b": 3, "c": 4})
+    again.write({"generation": 2, "b": 5, "c": 6})
+    again.close()
     with open(path, newline="") as f:
-        assert list(csv.reader(f)) == [["generation", "a", "b"], ["0", "1", "2"], ["1", "", "3"]]
-    fo.drop_progress_after(path, 1)
+        rows = list(csv.reader(f))
+    assert rows == [["generation", "a", "b"], ["0", "1", "2"], ["1", "", "3"], ["2", "", "5"]]
+    assert capsys.readouterr().err.count("'c'") == 1  # said once, not per row
+    fo.drop_progress_after(path, 2)
     with open(path, newline="") as f:
-        assert len(list(csv.reader(f))) == 3
+        assert len(list(csv.reader(f))) == 4
 
 
-def test_a_new_table_replaces_what_was_there(tmp_path):
-    """Generation 0 starts the progress table afresh."""
-    path = tmp_path / "progress.csv"
-    path.write_text("old,header\n1,2\n")
-    timings.append_row(path, ["generation"], {"generation": 0}, new=True)
-    assert path.read_bytes() == b"generation\r\n0\r\n"
+def test_a_table_stays_open_and_each_row_is_on_disk_at_once(tmp_path):
+    """One open per run, not per row (13 ms each on a Windows drive under WSL)."""
+    path = tmp_path / "t.csv"
+    table = timings.Table(path, ["generation", "x"])
+    table.write({"generation": 0, "x": 1})
+    opened = table.file
+    table.write({"generation": 1, "x": 2})
+    assert table.file is opened
+    assert path.read_text().splitlines() == ["generation,x", "0,1", "1,2"]
+    table.close()
+    table.close()  # twice is harmless
+
+
+def test_a_header_cut_off_by_a_kill_is_written_again_on_resume(tmp_path, run):
+    """The resume drops the cut header, and the table starts again under a whole one."""
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(3 * POP + 5))
+    generation_table = runs.progress_path(path).parent / timings.GENERATION_TABLE
+    generation_table.write_text("generation,start_un")  # the header, cut off
+    optimise(path, objective, resume=True)
+    rows = table(path, timings.GENERATION_TABLE)
+    assert list(rows[0]) == list(timings.GENERATION_COLUMNS)

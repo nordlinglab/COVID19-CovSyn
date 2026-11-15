@@ -1556,8 +1556,11 @@ class Firefly:
         cost_parts = [{} for _ in range(self.pop_size)]
         # Task 5: one row per evaluation and per generation, beside progress.csv.
         tables = runs.progress_path(result_path).parent
-        evaluation_table = tables / timings.EVALUATION_TABLE
-        generation_table = tables / timings.GENERATION_TABLE
+        evaluation_table = timings.Table(tables / timings.EVALUATION_TABLE,
+                                         timings.EVALUATION_COLUMNS)
+        generation_table = timings.Table(tables / timings.GENERATION_TABLE,
+                                         timings.GENERATION_COLUMNS)
+        progress_table = timings.Table(runs.progress_path(result_path))
         clock = timings.GenerationClock(-1, max_workers)
 
         def evaluate(k, vector, offset):
@@ -1568,7 +1571,7 @@ class Firefly:
                              Cheng_attack_rate, norm_weights, seed_offset=offset)
             row = {'generation': clock.generation, 'candidate': k, 'start_unix_s': round(start, 6),
                    'end_unix_s': round(time.time(), 6), **timings.LAST}
-            timings.append_row(evaluation_table, timings.EVALUATION_COLUMNS, row)
+            evaluation_table.write(row)
             clock.add_evaluation(timings.LAST)
             return value
 
@@ -1577,7 +1580,7 @@ class Firefly:
             started = time.perf_counter_ns()
             save_checkpoint(result_path, clock.generation, state)
             clock.checkpoint_ns += time.perf_counter_ns() - started
-            timings.append_row(generation_table, timings.GENERATION_COLUMNS, clock.row())
+            generation_table.write(clock.row())
 
         if checkpoint is not None:
             print(f'resuming after generation {int(checkpoint["generation"])}', flush=True)
@@ -1621,8 +1624,8 @@ class Firefly:
             evaluations = int(checkpoint['evaluations'])
             new_alpha = float(checkpoint['alpha'])
             start = int(checkpoint['generation']) + 1
-            for table in (runs.progress_path(result_path), evaluation_table, generation_table):
-                drop_progress_after(table, start - 1)
+            for table in (progress_table, evaluation_table, generation_table):
+                drop_progress_after(table.path, start - 1)
         # search_range = ub - lb
 
         for generation in tqdm(range(start, max_generations)):
@@ -1691,10 +1694,9 @@ class Firefly:
                    'best_cost': float(np.min(intensities))}
             row.update(cost_parts[best_idx])
             row.update(decode_metrics(fireflies[best_idx]))
-            csv_path = runs.progress_path(result_path)  # Task 4: results/tables/<run-id>/
-            csv_path.parent.mkdir(parents=True, exist_ok=True)
-            # Generation 0 starts the table; later rows go under its header (Task 5).
-            timings.append_row(csv_path, row.keys(), row, new=generation == 0)
+            # Task 4: results/tables/<run-id>/progress.csv. A new run starts it, and a resume
+            # has trimmed it to its checkpoint; rows go under its header (Task 5).
+            progress_table.write(row)
             # Task 4: after the progress row, so a resumed run drops a row written past it.
             # Task 5: the timing row follows the checkpoint, whose time it records; a kill
             # between the two leaves that generation without one.
@@ -1703,6 +1705,8 @@ class Firefly:
                 worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
 
         executor.shutdown()  # the workers write their profiles as they exit
+        for table in (progress_table, evaluation_table, generation_table):
+            table.close()
         if self.profile_dir is not None:  # Task 5
             merged = profiling.merge_profiles(self.profile_dir, tables)
             print(f'profile: {merged}, top {profiling.TOP} in {tables / profiling.TOP_TABLE}; '
