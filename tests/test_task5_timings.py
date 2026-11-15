@@ -463,7 +463,7 @@ def _snapshot(pids):
 
 
 def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, monkeypatch):
-    """A task running when the run fails is finished, and each of the pool's workers ends.
+    """A task running when the run fails is finished, and every worker the pool started ends.
 
     The task outlasts the run's cleanup by far (2 s), so a shutdown that did not wait would
     return before it finished, on a slow drive too.
@@ -479,9 +479,10 @@ def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, 
                 future.result()  # a worker that failed to start says why
             assert time.monotonic() < deadline, "the task never started"
             time.sleep(0.01)
-        # The pool's own workers, not other children; copied in one step, as its manager thread
-        # may change the dict. They exist once submit has returned, with fork (Linux) and spawn
-        # (macOS) alike: submit starts the workers it needs before returning.
+        # The pool's own workers, not other children; copied at once, as its manager thread may
+        # change the dict. Every worker the pool has started is in it once submit has returned:
+        # all of them under fork (Linux, Python 3.13), the one this task needs under spawn
+        # (macOS) or forkserver (Linux from Python 3.14), which start workers as tasks come.
         seen["workers"] = _snapshot(executor._processes.copy())
         raise Killed
 
