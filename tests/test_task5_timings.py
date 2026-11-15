@@ -375,3 +375,17 @@ def test_close_tables_closes_all_whatever_one_raises(tmp_path, capsys):
     assert "could not close" in capsys.readouterr().err  # said, as it is not raised
     with pytest.raises(ValueError):
         timings.close_tables([Bad()])
+
+
+def test_a_second_close_error_is_said(tmp_path, capsys):
+    """Only the first is raised; a later one is not lost without a word."""
+
+    class Bad:
+        path = "bad.csv"
+
+        def close(self):
+            raise OSError("No space left on device")
+
+    with pytest.raises(OSError):
+        timings.close_tables([Bad(), Bad()])
+    assert capsys.readouterr().err.count("could not close bad.csv") == 1

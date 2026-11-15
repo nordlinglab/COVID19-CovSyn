@@ -206,19 +206,20 @@ class Table:
 def close_tables(tables: Iterable[Table], failing: bool = False) -> None:
     """Close every table, even when one fails to close.
 
-    After a run that failed (``failing``), a close error is left out, so the run's own error is
-    the one raised; otherwise the first close error is raised once all are closed.
+    After a run that failed (``failing``), a close error is said on stderr, so the run's own
+    error is the one raised; otherwise the first close error is raised once all are closed,
+    and any later one is said.
     """
     first = None
     for table in tables:
         try:
             table.close()
         except Exception as error:  # a flush can fail in more ways than OSError
-            first = first or error
-            if failing:  # not raised, so said: its last rows may be lost
+            if first is not None or failing:  # not raised, so said: its last rows may be lost
                 with contextlib.suppress(Exception):
                     print(f"could not close {getattr(table, 'path', table)}: {error!r}",
                           file=sys.stderr)  # fmt: skip
+            first = first or error
     if first is not None and not failing:
         raise first
 
