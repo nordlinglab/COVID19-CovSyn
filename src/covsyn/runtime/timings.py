@@ -156,8 +156,10 @@ class Table:
     """A CSV table the optimiser appends to, kept open for the run, each row flushed at once.
 
     Opening a file per row cost 13 ms on a Windows drive under WSL, more than the per-row work
-    of an evaluation's whole bookkeeping; a flushed row is on disk at once, and a resume drops
-    a row a kill cut off. A row is written in the columns of the header already in the file,
+    of an evaluation's whole bookkeeping. Each row is flushed to the operating system at once,
+    so killing the process loses at most the row being written, which a resume drops; a power
+    cut can lose what the system had not yet written to disk.
+    A row is written in the columns of the header already in the file,
     else of ``columns``, else of its own keys: a value it lacks is left blank (an objective
     other than fast_cost's, or a failed evaluation's cost parts, fill fewer), and one the header
     lacks is left out, which is said once on stderr.
@@ -169,6 +171,7 @@ class Table:
         self.columns = None if columns is None else list(columns)
         self.file = None
         self.writer: csv.DictWriter | None = None
+        self.header: frozenset[str] = frozenset()
         self.left_out: set[str] = set()
 
     def _open(self, row: Mapping) -> None:
@@ -180,6 +183,7 @@ class Table:
         self.file = open(self.path, "a", newline="")  # noqa: SIM115 (closed by close())
         fieldnames = header or self.columns or list(row)
         self.writer = csv.DictWriter(self.file, fieldnames=fieldnames, extrasaction="ignore")
+        self.header = frozenset(fieldnames)  # made once, not for every row
         if not header:
             self.writer.writeheader()
 
@@ -187,7 +191,7 @@ class Table:
         """Append one row and flush it."""
         if self.writer is None:
             self._open(row)
-        lost = set(row) - set(self.writer.fieldnames) - self.left_out
+        lost = row.keys() - self.header - self.left_out
         if lost:
             self.left_out |= lost
             print(f"{self.path.name}: columns not in its header, left out: "
