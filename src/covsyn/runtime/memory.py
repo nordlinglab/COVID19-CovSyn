@@ -129,8 +129,8 @@ class MemoryWatch:
             self._pending = low_memory_warning(available, total)
 
     def _send_warning(self) -> None:
-        message, self._pending = self._pending, None
-        self.warn(message)
+        self.warn(self._pending)
+        self._pending = None  # only once sent: a failed send is tried again next sample
 
     def _guarded(self, read: Callable[[], None]) -> None:
         """Run one read; its failure (/proc unreadable, a full disk) is reported once, not fatal."""
