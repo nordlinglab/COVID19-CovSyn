@@ -1,0 +1,27 @@
+# covsyn-pipeline settings (Task 4); `covsyn-pipeline --config default` reads this file.
+# The values are phase_d_chain.sh's defaults at b30c141, where each was an environment variable.
+
+[optimise]
+mode = "train"
+config_name = "phase-d"   # the name in a new run id
+# B49: firefly_best.txt files whose best vectors seed the initial population (WARM_START).
+warm_start = ["results/models/phaseD_run10/firefly_best.txt"]
+
+[revalidate]
+enabled = true   # B56, E87 (REVALIDATE)
+blocks = 10      # E95: 4 left the choice noisy (REVALIDATION_BLOCKS)
+
+[select]
+enabled = true   # B60 (SELECT)
+top = 5          # candidates the checklist chooses among (SELECT_TOP)
+
+[synthesise]
+monte_carlo = 1000              # A5: at least 1000; 100 was shown to be unreliable
+independent_seed_start = 500000 # B60: clear of the objective, revalidation and the probes
+
+[check]
+age_rr_cases = 20000   # E68: about 4300 infections over the four age bands
+previous_checks = ""   # checks.json of the previous run, to compare with (PREVIOUS_CHECKS)
+
+[run]
+workers = 0   # 0: each step's own default (Task 2); otherwise COVSYN_WORKERS for every step

@@ -12,7 +12,8 @@ Usage (repository root, after uv sync):
 
 Writes OUT_DIR/revalidation.csv (every candidate) and OUT_DIR/firefly_best.txt (every candidate
 with its validation cost, so its minimum is the chosen vector), and copies the run's other files
-(bound.txt, progress_metrics.csv, ...), so the post-run chain can be pointed at OUT_DIR.
+(bound.txt, ...), so the post-run chain can be pointed at OUT_DIR; the progress table stays in
+results/tables/<run-id>/, where runs.progress_path finds it from OUT_DIR too.
 """
 
 from __future__ import annotations
@@ -110,14 +111,19 @@ def write_best_file(path: Path, vectors: np.ndarray, costs: np.ndarray) -> None:
     np.savetxt(path, rows, fmt="%.7f")
 
 
+# Written here, or the pipeline's records of the whole run rather than of the optimiser.
+NOT_COPIED = ("firefly_best.txt", "revalidation.csv", "optimiser.log", "run.log",
+              "pipeline.toml", "pipeline.log", "pipeline.lock")
+
+
 def copy_run_files(firefly_dir: Path, out_dir: Path) -> None:
     """Copy every file of the optimizer run except the two this module writes itself.
 
-    phase_d_chain.sh replaces the run directory with OUT_DIR before the run report, and
-    show_final reads progress_metrics.csv from it, so OUT_DIR must hold the whole run.
+    The steps after it read the run from OUT_DIR, so OUT_DIR must hold the whole run; the
+    pipeline's own records of the run (Task 4) stay with the run itself.
     """
     for source in Path(firefly_dir).iterdir():
-        if source.is_file() and source.name not in ("firefly_best.txt", "revalidation.csv"):
+        if source.is_file() and source.name not in NOT_COPIED:
             shutil.copy(source, Path(out_dir) / source.name)
 
 

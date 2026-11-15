@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 ENV_VARIABLE = "COVSYN_WORKERS"
 # Share of the available memory the workers may take, leaving room for the parent and others.
 MEMORY_SHARE = 0.8
-# Peak memory per worker of the checklist bootstrap (scripts/launch_phase_d.sh, B86, E98).
+# Peak memory per worker of the checklist bootstrap (B86, E98).
 # The other stages get theirs from the peak worker memory that Task 5 records.
 CHECKLIST_GB_PER_WORKER = 4.9
 
@@ -339,7 +339,7 @@ def resolve_workers(
 ) -> int:
     """The worker count: ``--workers``, else ``COVSYN_WORKERS``, else :func:`default_workers`.
 
-    An empty ``COVSYN_WORKERS`` counts as unset, because launch_phase_d.sh forwards unset
+    An empty ``COVSYN_WORKERS`` counts as unset, because a shell forwards unset
     variables into the chain's tmux session as empty strings (B86). An unusable one falls back
     to the default with a warning, as B86 decided for VERIFY_WORKERS: the chain reads it hours
     into a run, where a typo must neither stop the run nor mean zero workers. ``--workers`` is

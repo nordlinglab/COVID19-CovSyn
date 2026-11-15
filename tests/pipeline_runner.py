@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Run the post-optimisation pipeline on a small fixed dataset, for the pipeline regression tests.
 
-``phaseD_chain.sh`` turns a finished firefly run into synthetic data, the acceptance checklist,
+``covsyn-pipeline`` turns a finished firefly run into synthetic data, the acceptance checklist,
 the run report, the constraint table and the validation figures.
 Moving those scripts can break them silently (finding E71), so this runs every step on a small
 dataset built from the run 10 best vector with fixed seeds, and records what each step produced:
@@ -60,7 +60,7 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
     """Command line of every text-producing step, keyed by a stable name."""
     spread, first = str(workdir / MODES[0]), str(workdir / MODES[1])
     checks = str(workdir / "phaseD_checks.json")
-    # Order matters and follows phaseD_chain.sh: measure_age_rr.py writes
+    # Order matters and follows the pipeline: measure_age_rr.py writes
     # validation_reference/age_rr.json, which verify_phaseD.py reads.
     return {
         "measure_age_rr": ["-m", "covsyn.validation.measure_age_rr", RUN_DIR, "400"],
@@ -71,17 +71,26 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
         "tw_check": ["-m", "covsyn.validation.tw_check", first],
         "measure_days": ["-m", "covsyn.validation.measure_days", spread],
         "show_final": ["-m", "covsyn.validation.show_final", RUN_DIR],
-        "check_gap": ["-m", "covsyn.validation.check_gap", RUN_DIR],
+        "check_gap": ["-m", "covsyn.validation.check_gap", RUN_DIR, spread],
         "show_bounds": ["-m", "covsyn.validation.show_bounds"],
     }
 
 
 def figure_steps(workdir: Path) -> dict[str, list[str]]:
-    """Command line of every figure step of phaseD_chain.sh, writing into ``workdir/figures``."""
+    """Command line of every figure step of the pipeline, writing into ``workdir/figures``.
+
+    The figures and their arguments come from covsyn.pipeline.stages, so this checks the
+    pipeline's own definitions (Task 4); the dictionary below is the same list written out.
+    """
+    from covsyn.pipeline import stages
+
     spread, first = str(workdir / MODES[0]), str(workdir / MODES[1])
     figs = str(workdir / "figures")
     checks = str(workdir / "phaseD_checks.json")
-    return {
+    shared = {name: ["-m", f"covsyn.figures.{name}",
+                     *map(str, stages.validation_figure_args(name, spread, first, figs, RUN_DIR))]
+              for name in stages.VALIDATION_FIGURES}
+    written_out = {
         "validate_layers": ["-m", "covsyn.figures.validate_layers", spread, figs, RUN_DIR],
         "validate_infection": ["-m", "covsyn.figures.validate_infection", spread, figs],
         "plot_diagnostics": ["-m", "covsyn.figures.plot_diagnostics", spread, figs],
@@ -96,6 +105,8 @@ def figure_steps(workdir: Path) -> dict[str, list[str]]:
         "compare_healthcare_municipality": ["-m", "covsyn.figures.compare_healthcare_municipality", spread, figs],
         "plot_todolist923": ["-m", "covsyn.figures.plot_todolist923", spread, RUN_DIR, checks, figs + "/todolist923"],
     }
+    assert {k: v for k, v in written_out.items() if k in shared} == shared, "the pipeline's figures changed"
+    return {**shared, "plot_todolist923": written_out["plot_todolist923"]}
 
 
 def run_step(args: list[str], workdir: Path) -> subprocess.CompletedProcess[str]:

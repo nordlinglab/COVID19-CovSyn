@@ -204,3 +204,6 @@ tools/
 !/results/models/phaseD_run18/
 !/results/models/phaseD_run19/
 !/results/models/legacy_gamma0131_g200/
+!/results/tables/
+/results/tables/*
+!/results/tables/phaseD_run10/

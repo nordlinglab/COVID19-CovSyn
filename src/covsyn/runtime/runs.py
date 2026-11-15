@@ -10,7 +10,7 @@ directories are created, so a fresh clone needs none of them in advance. ``resul
 the repository root wherever a command starts.
 
 Usage: ``uv run python -m covsyn.runtime.runs CONFIG_NAME`` prints the path of a new run
-directory, which launch_phase_d.sh passes to the optimiser (``--run-dir``), which claims it,
+directory, which a caller passes to the optimiser (``--run-dir``), which claims it,
 and to the chain; ``uv run python -m covsyn.runtime.runs --check DIR`` exits 1 when DIR holds a
 run.
 """
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import re
 import subprocess
@@ -35,16 +36,61 @@ from covsyn.runtime import hardware
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RESULTS_ROOT = REPO_ROOT / "results"
+# The optimiser's checkpoint directory (Task 4), here so a caller need not import the optimiser.
+CHECKPOINTS = "checkpoints"
+
+
+def last_checkpoint(run_dir: Path) -> Path | None:
+    """The optimiser's last finished checkpoint in a run, or None (Task 4).
+
+    A generation's checkpoint is generation_<4 digits>.npz; before any, initial.npz holds the
+    scored initial population. A .tmp file is one a kill cut short, and never counts.
+    """
+    folder = Path(run_dir) / CHECKPOINTS
+    found = sorted(folder.glob("generation_[0-9][0-9][0-9][0-9].npz"))
+    if found:
+        return found[-1]
+    initial = folder / "initial.npz"
+    return initial if initial.is_file() else None
+
+
+# The optimiser's exit status when a run cannot be resumed at all, so the pipeline does not
+# suggest a resume that would fail the same way (Task 4).
+NOT_RESUMABLE = 3
+
+
+def resume_problem(run_dir: Path) -> str | None:
+    """Why a run cannot be resumed, or None (Task 4).
+
+    It has no checkpoint at all; or its finished generations lost their progress table, which
+    each generation writes before its checkpoint, so the table is lost or elsewhere and nothing
+    is rebuilt or looked for. The pipeline asks only once it knows a checkpoint exists, as it
+    starts a run without one afresh.
+    """
+    last = last_checkpoint(run_dir)
+    if last is None:
+        return f"{run_dir} holds no checkpoint to resume from"
+    if last.name.startswith("generation_"):
+        table = progress_path(run_dir)
+        if not table.exists():
+            return (
+                f"{run_dir} has finished generations but no progress table at {table}; "
+                "nothing is rebuilt or looked for elsewhere"
+            )
+    return None
+
+
 # What an optimiser run writes; a directory holding any of them already holds a run.
 RUN_OUTPUTS = (
     "config.json",
     "bound.txt",
     "firefly_result_first_initial_guess.txt",
-    "progress_metrics.csv",
+    "progress.csv",  # here only for a run directory outside results/models, see progress_path
     "firefly_archive.txt",
     "firefly_result.txt",
     "firefly_best.txt",
     "firefly_worst.txt",
+    "checkpoints",  # one per generation (Task 4)
     "revalidation",  # written into the run directory by the chain
     "selected",
 )
@@ -139,6 +185,31 @@ def new_run_directory(config_name: str, root: Path = RESULTS_ROOT, **id_fields: 
     return claim_run_directory(new_run_path(config_name, root, **id_fields))
 
 
+def run_root(path: Path) -> Path:
+    """The run directory a path belongs to: the ancestor directly under a ``models`` directory.
+
+    The chain hands steps a run's revalidation/ or selected/ subdirectory; they belong to the
+    run above. A path with no ``models`` ancestor, as in a test, is its own run.
+    """
+    path = Path(path)
+    for level in (path, *path.parents):
+        if level.parent.name == "models":
+            return level
+    return path
+
+
+def progress_path(run_dir: Path) -> Path:
+    """Where a run's per-generation progress table lives (Task 3, Task 4).
+
+    ``results/tables/<run-id>/progress.csv`` for a run under ``results/models/<run-id>``, else
+    ``progress.csv`` in the run directory itself.
+    """
+    root = run_root(Path(os.path.abspath(run_dir)))
+    if root.parent.name == "models":
+        return root.parent.parent / "tables" / root.name / "progress.csv"
+    return root / "progress.csv"
+
+
 def check_unclaimed(path: Path) -> None:
     """Refuse a directory that holds a run, without creating or claiming anything.
 
@@ -154,6 +225,9 @@ def check_unclaimed(path: Path) -> None:
         if level.is_symlink() and not level.exists() or level.exists() and not level.is_dir():
             raise FileExistsError(f"{level} is not a directory; give a run directory")
     found = [n for n in RUN_OUTPUTS if (path / n).exists() or (path / n).is_symlink()]
+    table = progress_path(path)
+    if table != Path(os.path.abspath(path)) / "progress.csv" and table.exists():
+        found.append(str(table))  # in results/tables/<run-id>, not counted by RUN_OUTPUTS
     if found:
         raise FileExistsError(
             f"{path} already holds a run ({', '.join(found)}); give a new directory "

@@ -29,17 +29,22 @@ def _check(name, value, target, ok, within=False):
             "decision": "B00", "unit": "", "note": "", "ci": None, "interval": False}
 
 
+def checks_path(run, tag=""):
+    """Where the pipeline keeps a run's checklist (Task 4)."""
+    return ir.Layout(run).tables / f"checks{tag}.json"
+
+
 @pytest.fixture
 def run(tmp_path):
-    """A run directory with the files the chain keeps, in their real places."""
+    """A run directory with the files the pipeline keeps, in their real places."""
+    tmp_path = tmp_path / "results" / "models" / "r"
     (tmp_path / "selected" / "candidates" / "candidate_7").mkdir(parents=True)
     (tmp_path / "selected" / "candidates" / "candidate_3").mkdir(parents=True)
-    (tmp_path / "validation_reference").mkdir()
-    (tmp_path / "phaseD_chain.log").write_text(
-        "noise before\n"
-        "[chain 11-05 06:34:23] validation best: candidate 7, train 1.0, validation 2.0\n"
+    checks_path(tmp_path).parent.mkdir(parents=True)
+    (tmp_path / "run.log").write_text(
+        '{"stage": "select", "finished": "2026-11-05T06:34:23", "seconds": 812.4}\n'
         "not a stage line\n"
-        "[chain 11-05 08:02:46] ALL DONE\n")
+        '{"stage": "figures", "finished": "2026-11-05T08:02:46", "seconds": 95.0}\n')
     seven = [_check("contacts per day before onset, household", 2.1152, [2.27, 3.28], False),
              _check("locked age risk ratio input", None, [0.39, 1.0], False),
              _check("offspring dispersion k", 0.2668, [0.2, 0.35], True),
@@ -50,7 +55,7 @@ def run(tmp_path):
     for name, checks in (("candidate_7", seven), ("candidate_3", three)):
         (tmp_path / "selected" / "candidates" / name / "checks.json").write_text(
             json.dumps({"checks": checks}))
-    (tmp_path / "validation_reference" / "phaseD_checks.json").write_text(
+    checks_path(tmp_path).write_text(
         json.dumps({"checks": seven}))
     with open(tmp_path / "selected" / "revalidation.csv", "w", newline="") as f:
         f.write("candidate,training_cost,validation_mean,validation_sd\n"
@@ -58,21 +63,21 @@ def run(tmp_path):
     return tmp_path
 
 
-def test_the_stage_lines_are_read_from_the_chain_log(run):
-    """Only the chain's own bracketed lines, so stray output cannot shift the timings."""
+def test_the_stage_lines_are_read_from_run_log(run):
+    """Only the pipeline's JSON records, so stray output cannot shift the timings."""
     stages = ir.stage_timings(run)
-    assert [s[0] for s in stages] == ["11-05 06:34:23", "11-05 08:02:46"]
-    assert stages[1][1] == "ALL DONE"
+    assert [s[0] for s in stages] == ["2026-11-05T06:34:23", "2026-11-05T08:02:46"]
+    assert stages[1][1] == "figures, 95 s"
 
 
-def test_a_missing_chain_log_is_not_an_error(tmp_path):
+def test_a_missing_run_log_is_not_an_error(tmp_path):
     """A directory without the log must give an empty list, not raise."""
     assert ir.stage_timings(tmp_path) == []
 
 
 def test_a_check_with_no_value_is_not_counted_as_a_failure(run):
     """B14's locked age risk ratio has value None; the chain does not count it either."""
-    checks = ir.read_checks(run / "validation_reference" / "phaseD_checks.json")
+    checks = ir.read_checks(checks_path(run))
     assert ir.failing(checks) == ["contacts per day before onset, household"]
 
 
@@ -86,7 +91,7 @@ def test_a_check_whose_value_is_nan_is_not_counted_as_a_failure():
 
 def test_an_informational_check_is_never_a_failure(run):
     """A check whose target is None is reported only, so it cannot fail."""
-    checks = ir.read_checks(run / "validation_reference" / "phaseD_checks.json")
+    checks = ir.read_checks(checks_path(run))
     assert "free text" not in ir.failing(checks)
 
 
@@ -136,7 +141,7 @@ def test_the_watch_list_names_the_checks_a_review_returns_to(run):
 
 def test_value_of_returns_none_for_an_absent_check(run):
     """A watched name the run does not have must read as absent, not as zero."""
-    checks = ir.read_checks(run / "validation_reference" / "phaseD_checks.json")
+    checks = ir.read_checks(checks_path(run))
     assert ir.value_of(checks, "a check that does not exist") is None
 
 
@@ -148,3 +153,9 @@ def test_an_older_run_is_read_under_the_current_name_and_marked():
     assert ir.watched_value(old, name) == (98.0, "older run: P(largest <= 8)")
     assert ir.watched_value(new, name) == (94.0, "")
     assert "samples of 579 cases whose largest is at most 8" not in ir.DEFAULT_WATCH
+
+
+def test_from_inside_a_run_directory_the_checklists_are_found(run, monkeypatch):
+    """The usage runs it from the run directory, where "." has no models parent until resolved."""
+    monkeypatch.chdir(run)
+    assert ir.Layout(Path(".").resolve()).tables == checks_path(run).parent

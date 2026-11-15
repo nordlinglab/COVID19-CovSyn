@@ -129,7 +129,7 @@ def test_progress_metrics_record_this_generation_not_a_running_best(run):
     import csv
 
     _, _, path = run
-    with open(path / "progress_metrics.csv") as f:
+    with open(path / "progress.csv") as f:  # Task 4: a test directory keeps it in place
         rows = list(csv.DictReader(f))
     assert len(rows) == GENERATIONS
     assert [int(r["generation"]) for r in rows] == list(range(GENERATIONS))

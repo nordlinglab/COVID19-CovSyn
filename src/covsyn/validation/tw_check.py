@@ -47,7 +47,10 @@ print('=== Taiwan first outbreak (28 local index cases seeded on their reported 
       'dates, 365 days; finding E29) ===')
 for path in paths:
     summarise(path, path)
-for path in sorted(glob.glob('synthetic_data_results_taiwan_first_outbreak_*')):
+# Earlier runs left in the working directory are listed only when no run is named: given a
+# run, as the pipeline gives it, the report is that run's alone (Task 4).
+for path in (sorted(glob.glob('synthetic_data_results_taiwan_first_outbreak_*'))
+             if not sys.argv[1:] else []):
     if path not in paths:
         summarise(path, 'previous: ' + path)
 print('\nObserved Taiwan first wave: 55 cumulative local confirmed cases, 3 local deaths.')
