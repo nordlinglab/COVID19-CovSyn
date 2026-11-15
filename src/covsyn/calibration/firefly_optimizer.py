@@ -3,6 +3,7 @@ import concurrent.futures
 import copy
 import csv
 import functools
+import io
 import json
 import numpy as np
 import pickle
@@ -1180,10 +1181,11 @@ def drop_progress_after(path: Path, generation: int) -> None:
     text = path.read_text(newline='')
     if text and not text.endswith('\n'):
         text = text[:text.rfind('\n') + 1]
-    rows = list(csv.DictReader(text.splitlines(keepends=True)))
+    reader = csv.DictReader(io.StringIO(text, newline=''))  # csv's own line rules
+    rows = list(reader)
     with open(path, 'w', newline='') as f:
-        if rows:
-            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        if reader.fieldnames:  # the header stays when every row goes
+            writer = csv.DictWriter(f, fieldnames=reader.fieldnames)
             writer.writeheader()
             writer.writerows(r for r in rows if int(r['generation']) <= generation)
 
@@ -1680,9 +1682,11 @@ class Firefly:
             row.update(decode_metrics(fireflies[best_idx]))
             csv_path = runs.progress_path(result_path)  # Task 4: results/tables/<run-id>/
             csv_path.parent.mkdir(parents=True, exist_ok=True)
+            # A table a kill cut down to nothing gets its header again (Task 5).
+            new = generation == 0 or not csv_path.exists() or csv_path.stat().st_size == 0
             with open(csv_path, 'w' if generation == 0 else 'a', newline='') as cf:
                 writer = csv.DictWriter(cf, fieldnames=list(row.keys()))
-                if generation == 0:
+                if new:
                     writer.writeheader()
                 writer.writerow(row)
             # Task 4: after the progress row, so a resumed run drops a row written past it.

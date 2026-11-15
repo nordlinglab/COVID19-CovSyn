@@ -178,3 +178,36 @@ def test_a_row_cut_off_by_a_kill_is_dropped_on_resume(tmp_path, run, cut_off):
     got = [tuple(r[k] for k in keys) for r in table(path, timings.EVALUATION_TABLE)]
     want = [tuple(r[k] for k in keys) for r in table(run, timings.EVALUATION_TABLE)]
     assert got == want
+
+
+def test_dropping_rows_keeps_csv_line_rules(tmp_path):
+    """A cell holding a form feed or a line separator stays one cell, as csv reads it."""
+    path = tmp_path / "t.csv"
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerows([["generation", "note"], [0, "a\x0cb"], [1, "c d"], [2, "e"]])
+    fo.drop_progress_after(path, 1)
+    with open(path, newline="") as f:
+        assert list(csv.reader(f)) == [["generation", "note"], ["0", "a\x0cb"], ["1", "c d"]]
+
+
+def test_dropping_every_row_keeps_the_header(tmp_path):
+    """The header stays, so rows appended after it are still read by name."""
+    path = tmp_path / "t.csv"
+    path.write_text("generation,best_cost\n3,1.0\n")
+    fo.drop_progress_after(path, 1)
+    assert path.read_bytes() == b"generation,best_cost\r\n"
+
+
+def test_a_progress_table_left_empty_gets_its_header_again(tmp_path, monkeypatch):
+    """A table a kill cut down to nothing is written with its header when generation > 0."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(3 * POP + 5))
+    runs.progress_path(path).write_text("genera")  # the header, cut off
+    optimise(path, objective, resume=True)
+    with open(runs.progress_path(path), newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows and "best_cost" in rows[0]
