@@ -124,3 +124,20 @@ def test_watch_stops_its_thread():
     with memory.MemoryWatch(interval=0.01) as watch:
         pass
     assert not watch.thread.is_alive()
+
+
+def _own_pid() -> tuple[int, int]:
+    import os
+
+    return memory.this_process().pid, os.getpid()
+
+
+@pytest.mark.parametrize("method", ["fork", "spawn"])
+def test_a_worker_measures_itself_not_its_parent(method):
+    """The cached process handle is the worker's own, also after a fork."""
+    memory.rss_bytes()  # cache the parent's handle before forking
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context(method)
+    ) as pool:
+        cached, actual = pool.submit(_own_pid).result()
+    assert cached == actual
