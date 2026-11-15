@@ -285,7 +285,8 @@ def earlier_estimate(
     """The stage's latest complete earlier measurements on this configuration, by kind.
 
     Among another run's run.log lines that measured the whole stage (:func:`complete`), the
-    latest finished one, by its finished time, of each kind: with a pool (a worker peak above
+    latest finished, by finished time then run id, of each kind (all of them where one run
+    finished the stage more than once at that time): with a pool (a worker peak above
     0), and without (its steps ran serially, under a memory cap say). This run may run either
     way, and a serial run does all its work in the step, so both count and the larger need
     decides. A later incomplete line is skipped and an earlier complete one used; stopped
@@ -344,9 +345,10 @@ def memory_problem(
     """Why the stage would not fit in the available memory, or None (Task 5).
 
     A conservative check at the stage's start, not a guarantee. The need is estimated from the
-    latest complete earlier measurements on this configuration, one with a pool and one without
-    (:func:`earlier_estimate`), as the step's own peak plus this run's workers x the peak per
-    worker; the larger of the two decides. The step's peak is a
+    latest complete earlier measurements on this configuration, with a pool and without
+    (:func:`earlier_estimate`; several of a kind where one run finished the stage twice at one
+    time), each as the step's own peak plus this run's workers x the peak per worker; the
+    largest decides. The step's peak is a
     conservative addition to the plan's formula. The sum is not the peaks' simultaneous total,
     and data, code, start method, worker count or other processes may change the next run's
     need; stopped attempts are not used, so a stage once stopped for want of memory may run out
@@ -375,9 +377,9 @@ def memory_problem(
                 "configuration, so its need cannot be estimated"
             )
         return None
-    # The larger need decides; at an equal need, the run id, then the kind, so the advice does
-    # not depend on the order the other runs are listed in.
-    estimate = max(estimates, key=lambda e: (e.need(workers), e.run, e.pooled))
+    # The larger need decides; at an equal need, the run id, the kind, then the peaks, so the
+    # message does not depend on the order the runs or their lines are listed in.
+    estimate = max(estimates, key=lambda e: (e.need(workers), e.run, e.pooled, e.step, e.worker))
     needed = estimate.need(workers)
     available = memory.available_bytes() / memory.MB
     if needed <= available:
