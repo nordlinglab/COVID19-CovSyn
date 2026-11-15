@@ -495,7 +495,7 @@
    "returncode": 0
   }
  },
- "generated_at_commit": "f1cb71cb48721defbd24db881a00d57cc314ba0b",
+ "generated_at_commit": "2bbf25e3bd0d6cea49dba1f577ec81c0d1382531",
  "reports": {
   "check_constraints": {
    "returncode": 0,
@@ -505,7 +505,7 @@
   "check_gap": {
    "returncode": 0,
    "stdout_head": "=== best firefly (cost 2.0260, row 55 of 100) ===\nparam gamma means: latent 4.43  infectious 6.96  pre-onset window 1.38\nage risk ratios  : [0.390, 1.000, 1.900, 1.440]\ninfectiousness   : Gamma shape k 0.177, cap 28.65 (B17)\ntransition p     : asx->R 0.253  sym->R 0.899  crit->R 0.858\n   mean daily attack rate household     0.0097\n   mean daily attack rate school        0.0062\n   mean daily attack",
-   "stdout_sha256": "a471771447c15e3385b3b28472ee1d99b78cde82ed3f9ebfce2d9f64da685628"
+   "stdout_sha256": "cf9efe71b0aac54b5eee7726a543c1176d632be81bcbcfd23199ab243b21a86c"
   },
   "constraint_summary": {
    "sha256": "f1d8e62c298f2cea7290b7c85276aeac965c40c1112f0e82753feee57d5b8e29"
