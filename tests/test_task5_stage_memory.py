@@ -19,6 +19,7 @@ import pytest
 
 from covsyn.pipeline import config as pc
 from covsyn.pipeline import runner as pr
+from covsyn.pipeline import stages as ps
 from covsyn.runtime import measure, memory
 from tests.test_task4_pipeline import STAGES, Recorder, prun, run_pipeline
 
@@ -829,9 +830,7 @@ def test_a_resume_without_a_checkpoint_measures_the_whole_optimiser(tmp_path, co
     assert line["partial"] is False and pr.complete(line)
 
 
-def test_a_line_without_a_worker_peak_is_not_used_where_another_has_one(
-    tmp_path, config, monkeypatch
-):
+def test_an_older_pooled_line_counts_beside_a_later_serial_one(tmp_path, config, monkeypatch):
     """A run that spawned no pool says nothing of one with a pool: the pooled one counts too.
 
     Its larger need decides.
@@ -957,7 +956,7 @@ def test_a_later_serial_run_that_needed_more_decides(tmp_path, config, monkeypat
 
 
 def test_select_turned_off_is_not_checked(tmp_path, config, monkeypatch):
-    """Revalidation on, selection off: the select stage runs nothing and is not checked."""
+    """Revalidation on, selection off: select runs nothing, and later stages read revalidation."""
     import dataclasses
 
     off = dataclasses.replace(config, select=False)
@@ -969,6 +968,67 @@ def test_select_turned_off_is_not_checked(tmp_path, config, monkeypatch):
     )
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     status, run_dir = run_pipeline(tmp_path, off, Recorder())
-    assert (
-        status == 0 and "stage select: no complete" not in (run_dir / pr.PIPELINE_LOG).read_text()
+    assert status == 0
+    assert "stage select: no complete" not in (run_dir / pr.PIPELINE_LOG).read_text()
+    context = ps.Context(off, ps.Layout(run_dir), lambda *a, **k: 0)
+    assert context.candidate == run_dir / "revalidation"
+
+
+def test_an_older_serial_line_counts_beside_a_later_pooled_one(tmp_path, config, monkeypatch):
+    """This run may run serially too: the older serial 9000 MB beats 500 + 1 x 900."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 9000.0, None, "2026-11-01T10:00:00")],
     )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 900.0, "2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "1")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "run 20261101-000000_aaaaaaa_phase-d" in log and "with no pool" in log
+
+
+def test_two_lines_of_one_run_at_one_time_take_the_larger(tmp_path, config, monkeypatch):
+    """Same run, same second: the larger need, not the first line."""
+    _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d",
+             finished=[_line("optimise", 100.0, 100.0, "2026-11-01T10:00:00"),
+                       _line("optimise", 7000.0, 1000.0, "2026-11-01T10:00:00")])  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+
+
+def test_a_zero_worker_peak_is_no_pool(tmp_path, config, monkeypatch):
+    """A worker peak of 0 MB measured no worker: the older pooled line counts too."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 900.0, "2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 0.0, "2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(5e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+
+
+def test_a_step_run_by_may_can_be_partial(tmp_path, config):
+    """Partial reaches the stage through may() as well as must()."""
+    context = ps.Context(config, ps.Layout(tmp_path / "run"), lambda *a, **k: 0)
+    context.may(["-m", "x"], "x", partial=True)
+    assert context.partial is True and context.steps == ["-m x"]

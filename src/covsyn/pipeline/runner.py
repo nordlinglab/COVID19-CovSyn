@@ -169,11 +169,19 @@ def stage_peaks(measurements: Path, watch: memory.MemoryWatch) -> dict:
 
 
 class Estimate(NamedTuple):
-    """An earlier run's peaks in MB for a stage, and which run they come from."""
+    """An earlier run's peaks in MB for a stage, and which run they come from.
+
+    ``pooled``: its steps spawned a pool, measured as a worker peak above 0.
+    """
 
     step: float
     worker: float
     run: str
+    pooled: bool
+
+    def need(self, workers: int) -> float:
+        """The memory in MB this stage would need with ``workers``."""
+        return self.step + workers * self.worker
 
 
 def _lines(run: Path, *parts: str) -> list[dict]:
@@ -274,15 +282,17 @@ def earlier_estimate(
     warn: Callable[[str], None] | None = None,
     history: Mapping[Path, list[dict]] | None = None,
 ) -> list[Estimate]:
-    """The stage's peaks in the latest complete earlier measurement on this configuration.
+    """The stage's latest complete earlier measurements on this configuration, by kind.
 
-    The latest finished stage in another run's run.log, by its finished time, among the lines
-    that measured the whole stage (:func:`complete`): a later incomplete one is skipped and an
-    earlier complete one used. Stopped attempts are not used. If that line measured no worker
-    peak (its steps spawned no pool, run serially under a memory cap say) while an earlier
-    complete line did, the latest such pooled line counts too, as this run may spawn a pool:
-    the larger need of the two decides. The plan names "an earlier run on the same
-    configuration"; the latest complete one keeps the rule simple to check.
+    Among another run's run.log lines that measured the whole stage (:func:`complete`), the
+    latest finished one, by its finished time, of each kind: with a pool (a worker peak above
+    0), and without (its steps ran serially, under a memory cap say). This run may run either
+    way, and a serial run does all its work in the step, so both count and the larger need
+    decides. A later incomplete line is skipped and an earlier complete one used; stopped
+    attempts are not used. The latest line of a kind keeps counting however old it is, until
+    a later one of that kind replaces it: the conservative outcome. The plan names "an earlier
+    run on the same configuration"; the latest complete one of each kind keeps the rule simple
+    to check.
 
     Args:
         run_dir: This run's directory, itself never used.
@@ -292,12 +302,12 @@ def earlier_estimate(
         history: Each other run's run.log lines (:func:`histories`); read here when None.
 
     Returns:
-        The latest complete line's peaks, and the latest pooled one's when that differs, each
-        with the run it comes from; empty when no earlier run measured the stage whole.
+        The latest complete measurement of each kind, at most two; empty when no earlier run
+        measured the stage whole.
     """
     others = other_runs(run_dir) if others is None else others
     history = histories(others) if history is None else history
-    timed = []
+    latest: dict[bool, tuple] = {}
     for other in others:
         for line in history.get(other, []):
             if line.get("stage") != stage or not complete(line):
@@ -308,17 +318,15 @@ def earlier_estimate(
                     warn(f"WARNING: {other.name}'s {stage} has no valid finished time; not used")
                 continue
             worker = line.get("worker_peak_mb")
+            pooled = _number(worker) and worker > 0
             estimate = Estimate(
-                line["parent_peak_mb"], worker if _number(worker) else 0.0, other.name
+                line["parent_peak_mb"], worker if pooled else 0.0, other.name, pooled
             )
-            timed.append((when, other.name, _number(worker), estimate))
-    if not timed:
-        return []
-    latest = max(timed, key=lambda t: t[:2])  # equal times: the larger run id
-    pooled = [t for t in timed if t[2]]
-    if latest[2] or not pooled:
-        return [latest[3]]
-    return [latest[3], max(pooled, key=lambda t: t[:2])[3]]
+            # The latest, by time then run id; at one time in one run, the larger need.
+            key = (when, other.name, estimate.step, estimate.worker)
+            if pooled not in latest or key > latest[pooled][0]:
+                latest[pooled] = (key, estimate)
+    return [estimate for _, estimate in latest.values()]
 
 
 def memory_problem(
@@ -332,8 +340,9 @@ def memory_problem(
     """Why the stage would not fit in the available memory, or None (Task 5).
 
     A conservative check at the stage's start, not a guarantee. The need is estimated from the
-    latest complete earlier measurement on this configuration (:func:`earlier_estimate`) as
-    the step's own peak plus this run's workers x the peak per worker. The step's peak is a
+    latest complete earlier measurements on this configuration, one with a pool and one without
+    (:func:`earlier_estimate`), as the step's own peak plus this run's workers x the peak per
+    worker; the larger of the two decides. The step's peak is a
     conservative addition to the plan's formula. The sum is not the peaks' simultaneous total,
     and data, code, start method, worker count or other processes may change the next run's
     need; stopped attempts are not used, so a stage once stopped for want of memory may run out
@@ -362,7 +371,8 @@ def memory_problem(
                 "configuration, so its need cannot be estimated"
             )
         return None
-    needed, estimate = max((e.step + workers * e.worker, e) for e in estimates)
+    estimate = max(estimates, key=lambda e: e.need(workers))  # the larger need decides
+    needed = estimate.need(workers)
     available = memory.available_bytes() / memory.MB
     if needed <= available:
         return None
@@ -371,6 +381,10 @@ def memory_problem(
         f"{workers} workers x {estimate.worker:.0f} MB, the peaks of run {estimate.run} on "
         f"this configuration), but only {available:.0f} MB is available; free memory, or try "
         "fewer workers, which need not save memory in proportion"
+        if estimate.pooled
+        else f"stage {stage} needs about {needed:.0f} MB (its steps' peak with no pool, in run "
+        f"{estimate.run} on this configuration), but only {available:.0f} MB is available; "
+        "free memory: fewer workers will not help a step that runs without a pool"
     )
 
 
