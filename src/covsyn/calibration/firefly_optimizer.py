@@ -1719,8 +1719,9 @@ class Firefly:
             # SIMULATIONS_PER_TASK simulations (about 25 ms each, if each simulation ends: the
             # wait has no timeout), so, unless Ctrl-C is pressed again, no worker outlives the
             # run. A Ctrl-C in a terminal reaches the workers too, and may end their tasks, or
-            # the pool, before that. A second Ctrl-C cuts the wait short, as asked; neither it nor
-            # any error of the shutdown replaces the run's own error.
+            # break the pool, before those tasks would have finished; the wait then ends sooner.
+            # A second Ctrl-C cuts the wait short, as asked; neither it nor any error of the
+            # shutdown replaces the run's own error.
             failed = True
             with contextlib.suppress(BaseException):
                 executor.shutdown(wait=True, cancel_futures=True)

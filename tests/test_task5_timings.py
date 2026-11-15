@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import csv
-import os
 import time
 
 import numpy as np
@@ -443,37 +442,43 @@ def test_after_a_failure_every_close_error_is_said_and_none_raised(capsys):
     assert "could not close a.csv" in err and "could not close b.csv" in err
 
 
-def _sleep_after_writing_pid(path, seconds):
-    path.write_text(str(os.getpid()))
+def _sleep_after_starting(flag, seconds):
+    flag.write_text("started")
     time.sleep(seconds)
     return "finished"
 
 
+def _ended(pid):
+    try:
+        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:  # gone, or gone between listing and asking
+        return True
+
+
 def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, monkeypatch):
-    """A task running when the run fails finishes, not cancelled, and every worker ends."""
-    pid_file = tmp_path / "worker.pid"
-    futures = []
+    """A task running when the run fails is finished, and each of the pool's workers ends.
+
+    The task outlasts the run's cleanup by far (2 s), so a shutdown that did not wait would
+    return before it finished, on a slow drive too.
+    """
+    started = tmp_path / "started"
+    seen = {}
 
     def failing(P, demo, executor, *args, **kwargs):
-        futures.append(executor.submit(_sleep_after_writing_pid, pid_file, 0.3))
+        seen["future"] = future = executor.submit(_sleep_after_starting, started, 2.0)
         deadline = time.monotonic() + 30
-        while not (pid_file.exists() and pid_file.read_text()):  # until the task runs
+        while not started.exists():  # until the task runs
+            if future.done():
+                future.result()  # a worker that failed to start says why
             assert time.monotonic() < deadline, "the task never started"
             time.sleep(0.01)
+        seen["workers"] = list(executor._processes)  # the pool's own, not other children
         raise Killed
 
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "killed"
     path.mkdir()
-    before = {child.pid for child in psutil.Process().children(recursive=True)}
     with pytest.raises(Killed):
         optimise(path, failing)
-    (future,) = futures
-    assert future.done() and not future.cancelled() and future.result() == "finished"
-    left = [
-        child
-        for child in psutil.Process().children(recursive=True)
-        if child.pid not in before and child.is_running()
-        and child.status() != psutil.STATUS_ZOMBIE
-    ]  # fmt: skip
-    assert left == []
+    assert seen["future"].done() and seen["future"].result() == "finished"
+    assert seen["workers"] and all(_ended(pid) for pid in seen["workers"])
