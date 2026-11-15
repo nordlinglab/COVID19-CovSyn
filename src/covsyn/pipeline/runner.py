@@ -399,8 +399,9 @@ def _run_stages(
         memory_warnings: list[str] = []
 
         def warn(message, kept=memory_warnings):
+            if message not in kept:  # once for run.log, however often the report is tried
+                kept.append(message)
             report(f"WARNING: {message}")
-            kept.append(message)  # after reporting, so a report tried again is kept once
 
         watch = memory.MemoryWatch(warn=warn)
         finished = False

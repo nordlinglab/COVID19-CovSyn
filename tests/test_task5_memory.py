@@ -263,7 +263,7 @@ def test_no_rss_reading_is_none_not_zero(monkeypatch):
 
 
 def test_a_warning_that_failed_once_is_sent_again():
-    """A stderr broken for a moment does not lose the low-memory warning for good."""
+    """A stderr broken for a moment does not lose the warning, and a sent one is not resent."""
     sent = []
 
     def flaky(message):
@@ -272,8 +272,9 @@ def test_a_warning_that_failed_once_is_sent_again():
             raise BrokenPipeError
         sent.append(message)
 
-    with memory.MemoryWatch(interval=0.01, warn=flaky, system=lambda: (5, 100)):
-        time.sleep(0.1)
+    watch = memory.MemoryWatch(warn=flaky, system=lambda: (5, 100))
+    for _ in range(10):  # samples taken by hand: no thread, no timing
+        watch.sample()
     assert len(sent) == 2 and sent[1].startswith("only")
 
 
@@ -291,6 +292,7 @@ def test_a_warning_that_keeps_failing_is_not_sent_every_second():
         calls.append(message)
         raise BrokenPipeError
 
-    with memory.MemoryWatch(interval=0.01, warn=failing, system=lambda: (5, 100)):
-        time.sleep(0.3)
+    watch = memory.MemoryWatch(warn=failing, system=lambda: (5, 100))
+    for _ in range(10):  # samples taken by hand: no thread, no timing
+        watch.sample()
     assert len(calls) == memory.WARNING_ATTEMPTS

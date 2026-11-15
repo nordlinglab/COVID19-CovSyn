@@ -429,3 +429,19 @@ def test_a_refused_stage_writes_no_memory_line(tmp_path, config, monkeypatch):
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1 and "memory in stage" not in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_a_warning_whose_report_failed_is_still_in_run_log(tmp_path, config, monkeypatch):
+    """The stage's record has it once, though its report failed after writing pipeline.log."""
+    monkeypatch.setattr(memory, "system_memory", lambda: (5, 100))
+    call = pr.Reporter.__call__
+
+    def failing(self, message):
+        call(self, message)
+        if message.startswith("WARNING: only"):
+            raise RuntimeError("a custom stream")
+
+    monkeypatch.setattr(pr.Reporter, "__call__", failing)
+    _, run_dir = run_pipeline(tmp_path, config, Recorder())
+    for line in run_log(run_dir).values():
+        assert sum("below 10%" in w for w in line["warnings"]) == 1

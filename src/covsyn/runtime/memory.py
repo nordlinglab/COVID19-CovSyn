@@ -140,11 +140,12 @@ class MemoryWatch:
         # Tried again on the next samples if it fails, but not for ever: a warn that fails
         # after writing part of it would otherwise repeat that part every second.
         self._attempts += 1
-        message = self._pending
-        if self._attempts >= WARNING_ATTEMPTS:
+        try:
+            self.warn(self._pending)
             self._pending = None
-        self.warn(message)
-        self._pending = None
+        finally:
+            if self._attempts >= WARNING_ATTEMPTS:
+                self._pending = None
 
     def _guarded(self, read: Callable[[], None]) -> None:
         """Run one read; its failure (/proc unreadable, a full disk) is reported once, not fatal."""
