@@ -95,23 +95,24 @@ class Reporter:
         """Report one line."""
         line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}\n"
         if self.log is not None:
-            try:
-                with self.lock, open(self.log, "a", encoding="utf-8") as f:
-                    f.write(line)
-            except OSError as error:
-                if not self.log_failed:  # said once, not for every line after
-                    self.log_failed = True
-                    with contextlib.suppress(Exception):
-                        sys.stderr.write(f"could not write {self.log}: {error!r}\n")
+            with self.lock:  # the once-flag too, as two threads may fail together
+                try:
+                    with open(self.log, "a", encoding="utf-8") as f:
+                        f.write(line)
+                except OSError as error:
+                    if not self.log_failed:  # said once, not for every line after
+                        self.log_failed = True
+                        with contextlib.suppress(Exception):
+                            sys.stderr.write(f"could not write {self.log}: {error!r}\n")
         if sys.stdout is not None:  # None when started without one
             with contextlib.suppress(OSError, ValueError):  # a broken pipe, a closed stdout
                 sys.stdout.write(line)  # in one write call, not print's two
                 sys.stdout.flush()
 
 
-def say(message: str, log: Path | None = None) -> None:
-    """Report one line; see Reporter."""
-    Reporter(log)(message)
+def say(message: str) -> None:
+    """Print one progress line, outside a run; a run reports through its own Reporter."""
+    Reporter()(message)
 
 
 def json_lines(path: Path) -> list[dict]:
@@ -426,8 +427,9 @@ def _run_stages(
         finally:
             for warning in ctx.warnings:
                 report(f"WARNING: {warning}")
-            started = watch.thread.ident is not None  # not a stage the memory check refused
-            if not finished and started:  # whatever stopped it
+            if (
+                not finished and watch.started
+            ):  # not a stage the memory check refused  # whatever stopped it
                 steps = (
                     f"the steps' peaks are in {measurements}"
                     if measurements.exists()

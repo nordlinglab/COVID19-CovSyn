@@ -419,3 +419,13 @@ def test_an_unwritable_pipeline_log_is_said_once(tmp_path, config, capsys):
     (run_dir / pr.PIPELINE_LOG).mkdir(parents=True)
     run_pipeline(tmp_path, config, Recorder())
     assert capsys.readouterr().err.count("could not write") == 1
+
+
+def test_a_refused_stage_writes_no_memory_line(tmp_path, config, monkeypatch):
+    """The memory check refused it before it started: nothing was measured."""
+    earlier_run(tmp_path, pc.to_toml(config), "20261101-000000_aaaaaaa_phase-d",
+                "optimise", 5000.0, 4)  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1 and "memory in stage" not in (run_dir / pr.PIPELINE_LOG).read_text()

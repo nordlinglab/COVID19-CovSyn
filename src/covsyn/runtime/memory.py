@@ -110,6 +110,7 @@ class MemoryWatch:
         self.lowest_available: int | None = None
         self.warned = False
         self._pending: str | None = None  # a warning to send
+        self.started = False
         self.failed: set[str] = set()  # the reads whose failure was reported
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, name="memory-watch", daemon=True)
@@ -156,6 +157,7 @@ class MemoryWatch:
     def __enter__(self) -> MemoryWatch:
         """Start sampling."""
         self.thread.start()
+        self.started = True
         return self
 
     def __exit__(self, *exc: object) -> None:
