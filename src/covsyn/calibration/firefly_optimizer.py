@@ -1737,10 +1737,12 @@ def not_resumable(message: str) -> None:
     raise SystemExit(runs.NOT_RESUMABLE)
 
 
-def resumed_settings(run_dir: Path) -> tuple[int, str]:
-    """The seed and mode a run recorded in its config.json, to resume it with (Task 4).
+def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
+    """The seed, mode and stage timing a run recorded in its config.json, to resume it with.
 
-    The mode sets the population size and the generations, which must match the checkpoint.
+    The mode sets the population size and the generations, which must match the checkpoint
+    (Task 4). The stage timing, False when not recorded, keeps the timing table's stage columns
+    as they started (Task 5).
 
     Raises:
         SystemExit: With code runs.NOT_RESUMABLE when retrying cannot help: config.json is
@@ -1751,6 +1753,7 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
     try:
         config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
         seed, mode = config['seed'], config['settings']['mode']
+        stage_timing = config['settings'].get('stage_timing') is True
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
             TypeError) as error:  # what retrying cannot change
         not_resumable(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
@@ -1763,7 +1766,7 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
         not_resumable(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
     if mode == 'profile':  # Task 5: its population is the worker count of that run
         not_resumable(f'{run_dir} is a profile, which is run again rather than resumed')
-    return seed, mode
+    return seed, mode, stage_timing
 
 
 def resume_arguments(args: argparse.Namespace) -> str:
@@ -1792,15 +1795,8 @@ def resume_arguments(args: argparse.Namespace) -> str:
     problem = runs.resume_problem(args.resume)
     if problem is not None:
         not_resumable(problem)
-    args.seed, mode = resumed_settings(args.resume)
-    args.stage_timings = recorded_stage_timing(args.resume)  # Task 5: as the run started
+    args.seed, mode, args.stage_timings = resumed_settings(args.resume)
     return mode
-
-
-def recorded_stage_timing(run_dir: Path) -> bool:
-    """Whether the run, by its config.json, times run_covid's stages; False if it says nothing."""
-    config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
-    return config.get('settings', {}).get('stage_timing') is True
 
 
 def run_directory_for(run_dir: Path | None, config_name: str) -> Path:

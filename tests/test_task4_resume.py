@@ -152,7 +152,7 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
 
     (tmp_path / "config.json").write_text(json.dumps({"seed": 123,
                                                       "settings": {"mode": "test"}}))
-    assert fo.resumed_settings(tmp_path) == (123, "test")
+    assert fo.resumed_settings(tmp_path) == (123, "test", False)
 
 
 @pytest.mark.parametrize("config", [None, '{"claimed": true}', '{"seed": null}', "not json",
