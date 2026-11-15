@@ -10,6 +10,7 @@ every pipeline step runs in a fresh process with a fresh pool.
 
 from __future__ import annotations
 
+import contextlib
 import resource
 import sys
 import threading
@@ -114,14 +115,19 @@ class MemoryWatch:
             self.lowest_available = available
         if not self.warned and is_low(available, total):
             self.warned = True
-            try:
-                self.warn(low_memory_warning(available, total))
-            except Exception as error:  # a full disk must not stop the sampling
-                print(f"memory watch: could not report low memory ({error!r})", file=sys.stderr)
+            self.warn(low_memory_warning(available, total))
+
+    def _safe_sample(self) -> None:
+        """A sample whose failure, of psutil or of the warning, does not stop the watch."""
+        try:
+            self.sample()
+        except Exception as error:  # e.g. /proc unreadable for a moment, or a full disk
+            with contextlib.suppress(Exception):  # stderr may be the broken part
+                print(f"memory watch: a sample failed ({error!r})", file=sys.stderr)
 
     def _run(self) -> None:
         while True:
-            self.sample()
+            self._safe_sample()
             if self._stop.wait(self.interval):
                 return
 
@@ -134,4 +140,4 @@ class MemoryWatch:
         """Stop sampling, after a last sample."""
         self._stop.set()
         self.thread.join()
-        self.sample()
+        self._safe_sample()  # must not replace the stage's own result or exception

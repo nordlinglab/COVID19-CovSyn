@@ -176,3 +176,23 @@ def test_a_warning_that_cannot_be_written_does_not_stop_the_sampling():
         time.sleep(0.2)
         alive = w.thread.is_alive()
     assert alive and w.lowest_available == 3
+
+
+def test_a_sample_that_fails_does_not_stop_the_watch(monkeypatch):
+    """A failing read of the memory, and a failing stderr, leave the thread sampling."""
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise OSError("/proc unreadable")
+        return (50, 100)
+
+    def broken_print(*args, **kwargs):
+        raise BrokenPipeError
+
+    monkeypatch.setattr("builtins.print", broken_print)
+    with memory.MemoryWatch(interval=0.01, system=flaky) as watch:
+        time.sleep(0.2)
+        alive = watch.thread.is_alive()
+    assert alive and watch.lowest_available == 50
