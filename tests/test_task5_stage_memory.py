@@ -402,3 +402,20 @@ def test_a_stopped_stage_says_what_it_knows_when_a_reading_failed(tmp_path, conf
     log = (run_dir / pr.PIPELINE_LOG).read_text()
     assert "memory in stage synthesise: lowest available unknown, this process at most" in log
     assert "memory_synthesise_" in log
+
+
+def test_a_pipeline_without_stdout_still_runs(tmp_path, config, monkeypatch):
+    """Started detached with no stdout (sys.stdout is None), it reports into pipeline.log."""
+    import sys
+
+    monkeypatch.setattr(sys, "stdout", None)
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0 and "ALL DONE" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_an_unwritable_pipeline_log_is_said_once(tmp_path, config, capsys):
+    """Not once per line for the rest of the run."""
+    run_dir = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
+    (run_dir / pr.PIPELINE_LOG).mkdir(parents=True)
+    run_pipeline(tmp_path, config, Recorder())
+    assert capsys.readouterr().err.count("could not write") == 1

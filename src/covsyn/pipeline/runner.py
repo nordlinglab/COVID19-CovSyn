@@ -76,26 +76,42 @@ def run_module(
         return subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, **options).returncode
 
 
-# The memory watch reports from its own thread (Task 5); the lock keeps pipeline.log's lines
-# whole, and is not held while printing, so a stdout nobody reads cannot stop the watch.
-_SAYING = threading.Lock()
+class Reporter:
+    """Timestamped progress lines, printed and, given a run's pipeline.log, kept there.
+
+    The run's log is written first, so a terminal that went away loses nothing from it; neither
+    a full disk nor a broken or missing stdout may replace a stage's status or error. The memory
+    watch reports from its own thread (Task 5): the lock keeps pipeline.log's lines whole, and
+    is not held while printing, so a stdout nobody reads cannot stop the watch.
+    """
+
+    def __init__(self, log: Path | None = None) -> None:
+        """Report into ``log`` as well as to stdout."""
+        self.log = log
+        self.lock = threading.Lock()
+        self.log_failed = False
+
+    def __call__(self, message: str) -> None:
+        """Report one line."""
+        line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}\n"
+        if self.log is not None:
+            try:
+                with self.lock, open(self.log, "a", encoding="utf-8") as f:
+                    f.write(line)
+            except OSError as error:
+                if not self.log_failed:  # said once, not for every line after
+                    self.log_failed = True
+                    with contextlib.suppress(Exception):
+                        sys.stderr.write(f"could not write {self.log}: {error!r}\n")
+        if sys.stdout is not None:  # None when started without one
+            with contextlib.suppress(OSError, ValueError):  # a broken pipe, a closed stdout
+                sys.stdout.write(line)  # in one write call, not print's two
+                sys.stdout.flush()
 
 
 def say(message: str, log: Path | None = None) -> None:
-    """A timestamped progress line, printed and, given a run's pipeline.log, kept there."""
-    line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}\n"
-    # The run's log first, so a terminal that went away loses nothing from it; neither a full
-    # disk nor a broken stdout may replace a stage's status or error.
-    if log is not None:
-        try:
-            with _SAYING, open(log, "a", encoding="utf-8") as f:  # not held while printing
-                f.write(line)
-        except OSError as error:
-            with contextlib.suppress(Exception):
-                sys.stderr.write(f"could not write {log}: {error!r}\n")
-    with contextlib.suppress(OSError, ValueError):  # a broken pipe, a closed stdout
-        sys.stdout.write(line)  # one write, so another thread's line cannot split it
-        sys.stdout.flush()
+    """Report one line; see Reporter."""
+    Reporter(log)(message)
 
 
 def json_lines(path: Path) -> list[dict]:
@@ -327,7 +343,7 @@ def run(
     try:
         if execute is None:
             execute = functools.partial(run_module, keep_fds=(lock,))
-        report = functools.partial(say, log=run_dir / PIPELINE_LOG)
+        report = Reporter(run_dir / PIPELINE_LOG)
         return _run_stages(config, run_dir, execute, resume, report)
     finally:
         os.close(lock)  # the lock goes with the last descriptor, a step's included
