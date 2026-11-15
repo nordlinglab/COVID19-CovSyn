@@ -262,58 +262,63 @@ def complete(line: Mapping) -> bool:
     )
 
 
+def histories(others: Sequence[Path]) -> dict[Path, list[dict]]:
+    """Each other run's run.log lines, read once for the memory check (see :func:`_lines`)."""
+    return {other: _lines(other, RUN_LOG) for other in others}
+
+
 def earlier_estimate(
     run_dir: Path,
     stage: str,
     others: Sequence[Path] | None = None,
     warn: Callable[[str], None] | None = None,
-    workers: int | None = None,
     history: Mapping[Path, list[dict]] | None = None,
 ) -> Estimate | None:
     """The stage's peaks in the latest complete earlier measurement on this configuration.
 
     The latest finished stage in another run's run.log, by its finished time, among the lines
     that measured the whole stage (:func:`complete`): a later incomplete one is skipped and an
-    earlier complete one used. Stopped attempts are not used. The plan names "an earlier run on
-    the same configuration"; taking the latest complete one keeps the rule simple to check.
+    earlier complete one used. Stopped attempts are not used. A line without a worker peak, a
+    stage that spawned no pool, is used only if no complete line of the stage has one: a run
+    whose steps ran serially, under a memory cap say, says nothing of one with a pool. The plan
+    names "an earlier run on the same configuration"; the latest complete one keeps the rule
+    simple to check.
 
     Args:
         run_dir: This run's directory, itself never used.
         stage: The stage to be checked.
         others: The other runs, as :func:`other_runs` lists them; listed here when None.
-        warn: Told of each complete line skipped for want of a valid finished time.
-        workers: This run's workers. A line without a worker peak from a run with fewer
-            workers is skipped: that run may have spawned no pool where this one will.
-        history: Each other run's run.log lines, read once; read here when None.
+        warn: Told of each complete line skipped, and why.
+        history: Each other run's run.log lines (:func:`histories`); read here when None.
 
     Returns:
         The step and worker peaks in MB and the run they come from, or None when no earlier
         run on this configuration measured the stage whole.
     """
     others = other_runs(run_dir) if others is None else others
-    history = {other: _lines(other, RUN_LOG) for other in others} if history is None else history
+    history = histories(others) if history is None else history
+    lines = [
+        (other, line)
+        for other in others
+        for line in history.get(other, [])
+        if line.get("stage") == stage and complete(line)
+    ]
+    pooled = any(_number(line.get("worker_peak_mb")) for _, line in lines)
     found = []
-    for other in others:
-        for line in history.get(other, []):
-            if line.get("stage") != stage or not complete(line):
-                continue
-            worker = line.get("worker_peak_mb")
-            recorded = line.get("workers")
-            if (
-                not _number(worker)
-                and workers is not None
-                and (not _number(recorded) or recorded < workers)
-            ):
-                continue
-            when = finished_at(line)
-            if when is None:
-                if warn is not None:
-                    warn(f"WARNING: {other.name}'s {stage} has no valid finished time; not used")
-                continue
-            estimate = Estimate(
-                line["parent_peak_mb"], worker if _number(worker) else 0.0, other.name
-            )
-            found.append((when, other.name, estimate))
+    for other, line in lines:
+        worker = line.get("worker_peak_mb")
+        if pooled and not _number(worker):
+            if warn is not None:
+                warn(f"{other.name}'s {stage} measured no worker peak, where another run did; "
+                     "not used")  # fmt: skip
+            continue
+        when = finished_at(line)
+        if when is None:
+            if warn is not None:
+                warn(f"WARNING: {other.name}'s {stage} has no valid finished time; not used")
+            continue
+        estimate = Estimate(line["parent_peak_mb"], worker if _number(worker) else 0.0, other.name)
+        found.append((when, other.name, estimate))
     return max(found)[2] if found else None  # equal times: the larger run id
 
 
@@ -324,6 +329,7 @@ def memory_problem(
     others: Sequence[Path] | None = None,
     report: Callable[[str], None] | None = None,
     history: Mapping[Path, list[dict]] | None = None,
+    off: bool = False,
 ) -> str | None:
     """Why the stage would not fit in the available memory, or None (Task 5).
 
@@ -342,22 +348,17 @@ def memory_problem(
         workers: This run's workers.
         others: The other runs, as :func:`other_runs` lists them.
         report: Told when no earlier measurement can be used, and of lines skipped.
-        history: Each other run's run.log lines, read once.
+        history: Each other run's run.log lines, read once (:func:`histories`).
+        off: The configuration turns the stage off, so it runs no step: nothing to say.
 
     Returns:
         The reason to refuse the stage, or None when it fits or cannot be checked.
     """
     others = other_runs(run_dir) if others is None else others
-    history = {other: _lines(other, RUN_LOG) for other in others} if history is None else history
-    estimate = earlier_estimate(run_dir, stage, others, report, workers, history)
-    ran_nothing = all(  # a stage this configuration turns off has nothing to estimate
-        line.get("steps") == []
-        for lines in history.values()
-        for line in lines
-        if line.get("stage") == stage
-    ) and any(line.get("stage") == stage for lines in history.values() for line in lines)
+    history = histories(others) if history is None else history
+    estimate = earlier_estimate(run_dir, stage, others, report, history)
     if estimate is None:
-        if report is not None and not ran_nothing:
+        if report is not None and not off:
             report(
                 f"memory check for stage {stage}: no complete earlier measurement on this "
                 "configuration, so its need cannot be estimated"
@@ -402,8 +403,9 @@ def record_stage(
         "lowest_available_mb": peaks.get("lowest_available_mb"),
         "pipeline_peak_mb": peaks.get("pipeline_peak_mb"),
         "step_sampled_peak_mb": peaks.get("step_sampled_peak_mb"),
-        # Whether the memory check may use this line (complete): the steps the stage ran,
-        # how many wrote their measurement, and whether it ran only the rest of a stage.
+        # Whether the memory check may use this line (complete): the names of the steps the
+        # stage ran and of those that wrote their measurement, and whether it ran only the
+        # rest of its work.
         "steps": peaks.get("steps"),
         "steps_measured": peaks.get("steps_measured"),
         "partial": peaks.get("partial", False),
@@ -586,10 +588,11 @@ def _run_stages(
                 except OSError as error:  # the check goes without them, as a new run would
                     report(f"WARNING: could not list the other runs ({error!r})")
                     others = []
-                history = {other: _lines(other, RUN_LOG) for other in others}
-            # An optimiser resumed from a checkpoint will measure only the rest of its stage.
-            partial = name == "optimise" and resume and ps.has_checkpoint(run_dir)
-            problem = memory_problem(run_dir, name, workers, others, report, history)
+                history = histories(others)
+            off = (name == "revalidate" and not config.revalidate) or (
+                name == "select" and not (config.revalidate and config.select)
+            )
+            problem = memory_problem(run_dir, name, workers, others, report, history, off)
             if problem is not None:
                 raise ps.StageFailed(problem)
             with watch:
@@ -620,7 +623,7 @@ def _run_stages(
                     f"{memory.mb_text(watch.parent_peak_bytes)}, a step at most "
                     f"{memory.mb_text(watch.steps_peak_bytes)} (sampled once a second); {steps}"
                 )
-        peaks = {**stage_peaks(measurements, watch), "steps": ctx.steps, "partial": partial}
+        peaks = {**stage_peaks(measurements, watch), "steps": ctx.steps, "partial": ctx.partial}
         # The watch's warning for run.log, once, however often its report was tried, and even
         # if no report got through: the memory was low whatever the output did.
         warnings = [*ctx.warnings, *([] if watch.warning is None else [watch.warning])]

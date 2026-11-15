@@ -24,7 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from covsyn.pipeline.config import PipelineConfig
-from covsyn.runtime import runs
+from covsyn.runtime import measure, runs
 
 SPREAD_MODE = "spread_Taiwan_weight"
 FIRST_MODE = "taiwan_first_outbreak"
@@ -75,13 +75,15 @@ class Context:
         self._run_step = step
         self.warnings: list[str] = []
         # Task 5: each step this stage ran, as its measurement names it ("-m <module>"), so the
-        # memory check can tell a stage whose every step measured.
+        # memory check can tell a stage whose every step measured; and whether the stage ran
+        # only the rest of its work (an optimiser continued from a checkpoint).
         self.steps: list[str] = []
+        self.partial = False
 
     def step(self, args: list, **options) -> int:
         """Run one step and return its status."""
         args = [str(a) for a in args]
-        self.steps.append(" ".join(args[:2]) if args[:1] == ["-m"] else args[0] if args else "")
+        self.steps.append(measure.step_name(args))
         return self._run_step(args, **options)
 
     @property
@@ -123,6 +125,7 @@ def optimise(ctx: Context, resume: bool) -> None:
         if problem is not None:  # the optimiser would refuse too; resuming cannot help
             raise StageFailed(problem, resumable=False)
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
+        ctx.partial = True  # it measures only the generations left
         ctx.must(args, "the optimiser", resuming=True, output=log, append=True)
         return
     if resume:

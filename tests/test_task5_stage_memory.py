@@ -829,8 +829,10 @@ def test_a_resume_without_a_checkpoint_measures_the_whole_optimiser(tmp_path, co
     assert line["partial"] is False and pr.complete(line)
 
 
-def test_a_line_without_a_worker_peak_from_fewer_workers_is_not_used(tmp_path, config, monkeypatch):
-    """One worker may have spawned no pool, where eight will: the earlier peak counts."""
+def test_a_line_without_a_worker_peak_is_not_used_where_another_has_one(
+    tmp_path, config, monkeypatch
+):
+    """A run whose steps spawned no pool says nothing of one with a pool: the pooled one counts."""
     _earlier(
         tmp_path,
         config,
@@ -846,8 +848,10 @@ def test_a_line_without_a_worker_peak_from_fewer_workers_is_not_used(tmp_path, c
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(5e9))
     monkeypatch.setenv("COVSYN_WORKERS", "8")
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert status == 1  # 500 + 8 x 900, from the run with 8 workers
-    assert "run 20261101-000000_aaaaaaa_phase-d" in (run_dir / pr.PIPELINE_LOG).read_text()
+    assert status == 1  # 500 + 8 x 900, from the run with a pool
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "run 20261101-000000_aaaaaaa_phase-d" in log
+    assert "20261102-000000_aaaaaaa_phase-d's optimise measured no worker peak" in log
 
 
 def test_one_step_measured_twice_does_not_stand_in_for_another(tmp_path, config, monkeypatch):
@@ -862,14 +866,16 @@ def test_one_step_measured_twice_does_not_stand_in_for_another(tmp_path, config,
     assert status == 0  # not complete, so not used
 
 
-def test_a_stage_that_ran_no_step_is_not_said_to_be_unchecked(tmp_path, config, monkeypatch):
-    """A stage the configuration turns off has nothing to estimate."""
-    _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d",
-             finished=[_line("revalidate", None, None, "2026-11-01T10:00:00", steps=(),
-                             measured=())])  # fmt: skip
-    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+def test_a_stage_turned_off_is_not_said_to_be_unchecked(tmp_path, config):
+    """Revalidation off: it runs no step, so it is not reported; a stage that runs still is."""
+    import dataclasses
+
+    off = dataclasses.replace(config, revalidate=False)
+    status, run_dir = run_pipeline(tmp_path, off, Recorder())
     assert status == 0
-    assert "stage revalidate: no complete" not in (run_dir / pr.PIPELINE_LOG).read_text()
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "stage revalidate: no complete" not in log and "stage select: no complete" not in log
+    assert "stage optimise: no complete" in log
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
@@ -880,3 +886,14 @@ def test_a_peak_that_is_no_finite_number_is_not_used(tmp_path, config, monkeypat
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, _ = run_pipeline(tmp_path, config, Recorder())
     assert status == 0
+
+
+def test_a_stage_that_never_had_a_pool_is_estimated_from_its_step(tmp_path, config, monkeypatch):
+    """No complete line has a worker peak: the latest one's step peak is the need."""
+    _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d",
+             finished=[_line("report", 9000.0, None, "2026-11-01T10:00:00", steps=("-m r",),
+                             measured=("-m r",))])  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "stage report needs about 9000 MB" in (run_dir / pr.PIPELINE_LOG).read_text()

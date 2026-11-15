@@ -40,6 +40,16 @@ def _record(path: str, step: str) -> None:
         f.write(json.dumps(line) + "\n")
 
 
+def step_name(argv: list[str]) -> str:
+    """A step's name from its python arguments: "-m <module>", "-c", or the script.
+
+    The measurement records it, and the pipeline names its steps by it too, to match them.
+    """
+    if not argv:
+        return ""
+    return {"-m": f"-m {argv[1]}" if len(argv) > 1 else "-m", "-c": "-c"}.get(argv[0], argv[0])
+
+
 def run(argv: list[str]) -> None:
     """Run ``argv`` as the arguments of ``python`` would be."""
     if argv[0] == "-m":
@@ -60,8 +70,7 @@ def main() -> None:
         sys.exit("usage: uv run python -m covsyn.runtime.measure -m <module> [args]")
     path = os.environ.get(ENV)
     if path is not None:
-        step = {"-m": f"-m {argv[1]}", "-c": "-c"}.get(argv[0], argv[0])
-        atexit.register(_record, path, step)
+        atexit.register(_record, path, step_name(argv))
     run(argv)
 
 
