@@ -101,10 +101,11 @@ class MemoryWatch:
         )
         self.system = system or system_memory
         self.process = psutil.Process()
-        self.parent_peak_bytes = 0
+        self.parent_peak_bytes: int | None = None  # None until an RSS read succeeds
         self.lowest_available: int | None = None
         self.warned = False
-        self.failed = False
+        self._pending: str | None = None  # a warning to send
+        self.failed: set[str] = set()  # the reads whose failure was reported
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, name="memory-watch", daemon=True)
 
@@ -112,9 +113,12 @@ class MemoryWatch:
         """Take one sample; the RSS, the available memory and the warning fail separately."""
         self._guarded(self._sample_rss)
         self._guarded(self._sample_available)
+        if self._pending is not None:
+            self._guarded(self._send_warning)
 
     def _sample_rss(self) -> None:
-        self.parent_peak_bytes = max(self.parent_peak_bytes, rss_bytes(self.process))
+        rss = rss_bytes(self.process)
+        self.parent_peak_bytes = max(self.parent_peak_bytes or 0, rss)
 
     def _sample_available(self) -> None:
         available, total = self.system()
@@ -122,15 +126,19 @@ class MemoryWatch:
             self.lowest_available = available
         if not self.warned and is_low(available, total):
             self.warned = True
-            self.warn(low_memory_warning(available, total))
+            self._pending = low_memory_warning(available, total)
+
+    def _send_warning(self) -> None:
+        message, self._pending = self._pending, None
+        self.warn(message)
 
     def _guarded(self, read: Callable[[], None]) -> None:
-        """Run one read; a failure (/proc unreadable, a full disk) is reported once, not fatal."""
+        """Run one read; its failure (/proc unreadable, a full disk) is reported once, not fatal."""
         try:
             read()
         except Exception as error:
-            if not self.failed:
-                self.failed = True
+            if read.__name__ not in self.failed:
+                self.failed.add(read.__name__)
                 with contextlib.suppress(Exception):  # stderr may be the broken part
                     print(f"memory watch: a sample failed ({error!r})", file=sys.stderr)
 

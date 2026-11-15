@@ -221,3 +221,42 @@ def test_a_lasting_failure_is_reported_once(capsys):
     with memory.MemoryWatch(interval=0.01, system=failing):
         time.sleep(0.2)
     assert capsys.readouterr().err.count("memory watch:") == 1
+
+
+def test_each_kind_of_failure_is_reported_once(capsys, monkeypatch):
+    """A blip in the RSS read does not silence a later failure of the available memory."""
+    import psutil
+
+    real = psutil.Process.memory_info
+    calls = {"rss": 0, "system": 0}
+
+    def blip(self):
+        calls["rss"] += 1
+        if calls["rss"] == 1:
+            raise psutil.AccessDenied()
+        return real(self)
+
+    def later(*args):
+        calls["system"] += 1
+        if calls["system"] > 3:
+            raise OSError("/proc/meminfo unreadable")
+        return (50, 100)
+
+    monkeypatch.setattr(psutil.Process, "memory_info", blip)
+    with memory.MemoryWatch(interval=0.01, system=later):
+        time.sleep(0.2)
+    err = capsys.readouterr().err
+    assert err.count("memory watch:") == 2 and "AccessDenied" in err and "meminfo" in err
+
+
+def test_no_rss_reading_is_none_not_zero(monkeypatch):
+    """A peak never read is unknown, not 0 MB."""
+    import psutil
+
+    def denied(self):
+        raise psutil.AccessDenied()
+
+    monkeypatch.setattr(psutil.Process, "memory_info", denied)
+    with memory.MemoryWatch(interval=0.01, system=lambda: (50, 100)) as watch:
+        time.sleep(0.05)
+    assert watch.parent_peak_bytes is None
