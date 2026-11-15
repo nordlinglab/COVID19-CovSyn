@@ -235,8 +235,9 @@ def earlier_run(
     line = {"stage": stage, "workers": workers, "parent_peak_mb": parent_peak_mb,
             "worker_peak_mb": worker_peak_mb}  # fmt: skip
     if task5:  # measured whole: the memory check may use it
-        line.update(pipeline_peak_mb=50.0, finished="2026-11-01T10:00:00+08:00", steps=1,
-                    steps_measured=1, partial=False)  # fmt: skip
+        line.update(pipeline_peak_mb=50.0, finished="2026-11-01T10:00:00+08:00",
+                    steps=[OPTIMISER_STEP], steps_measured=[OPTIMISER_STEP],
+                    partial=False)  # fmt: skip
     (run_dir / pr.RUN_LOG).write_text(json.dumps(line) + "\n")
     return run_dir
 
@@ -533,7 +534,7 @@ def test_a_step_that_wrote_no_peak_makes_its_stage_unusable(tmp_path, config, mo
 
     _, first = run_pipeline(tmp_path, config, Unmeasured())
     line = run_log(first)["optimise"]
-    assert (line["steps"], line["steps_measured"]) == (1, 0)  # the step, killed unmeasured
+    assert (line["steps"], line["steps_measured"]) == ([OPTIMISER_STEP], [])  # killed unmeasured
     second = first.parent / "20261116-090000_b30c141_phase-d"
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))
     assert prun(config, second, execute=Recorder()) == 0
@@ -559,27 +560,29 @@ def test_run_log_says_whether_a_stage_was_measured_whole(tmp_path, config):
     peaks = {"covsyn.calibration.firefly_optimizer": (300.0, 900.0)}
     _, run_dir = run_pipeline(tmp_path, config, Measuring(peaks))
     line = run_log(run_dir)["optimise"]
-    assert (line["steps"], line["steps_measured"], line["partial"]) == (1, 1, False)
+    assert (line["steps"], line["steps_measured"], line["partial"]) == (
+        [OPTIMISER_STEP],
+        [OPTIMISER_STEP],
+        False,
+    )
     assert pr.complete(line)
     assert pr.finished_at(line).utcoffset() is not None
 
 
 def test_a_resumed_optimiser_measured_only_the_rest(tmp_path, config, monkeypatch):
-    """Its line is partial, so a later run does not take it for the whole stage."""
+    """Continued from a checkpoint, its line is partial: not taken for the whole stage."""
     peaks = {"covsyn.calibration.firefly_optimizer": (300.0, 900.0)}
     status, run_dir = run_pipeline(
-        tmp_path, config, Measuring(peaks, fail={"covsyn.calibration.revalidation"})
+        tmp_path, config, Measuring(peaks, fail={"covsyn.calibration.firefly_optimizer"})
     )
     assert status == 1
+    (run_dir / "checkpoints").mkdir()
+    (run_dir / "checkpoints" / "generation_0000.npz").write_text("x")  # one to continue from
+    table = tmp_path / "results" / "tables" / run_dir.name / "progress.csv"
+    table.write_text("generation,best_cost\n0,1.0\n")  # its generation's row (Task 4)
     assert prun(None, run_dir, execute=Measuring(peaks), resume=True) == 0
-    assert run_log(run_dir)["optimise"]["partial"] is False  # finished before the resume
-    monkeypatch.setattr(pr, "finished_stages", lambda path: [])  # resume everything
-    other = tmp_path / "results" / "models" / "20261116-090000_b30c141_phase-d"
-    prun(config, other, execute=Measuring(peaks))
-    assert prun(None, other, execute=Measuring(peaks), resume=True) == 0
-    lines = [json.loads(t) for t in (other / pr.RUN_LOG).read_text().splitlines()]
-    resumed = [x for x in lines if x["stage"] == "optimise"][-1]
-    assert resumed["partial"] is True and not pr.complete(resumed)
+    line = run_log(run_dir)["optimise"]
+    assert line["partial"] is True and not pr.complete(line)
 
 
 @pytest.mark.parametrize("finished", [None, "unknown", "2026-13-40T99:00:00", 5])
@@ -649,11 +652,15 @@ def test_times_in_other_zones_keep_their_order(tmp_path, config, monkeypatch):
     assert status == 1  # London's, the later, decides
 
 
-def _line(stage, parent, worker, finished, steps=1, measured=1, partial=False):
+OPTIMISER_STEP = "-m covsyn.calibration.firefly_optimizer"
+
+
+def _line(stage, parent, worker, finished, steps=(OPTIMISER_STEP,),
+          measured=(OPTIMISER_STEP,), partial=False, workers=8):  # fmt: skip
     """A run.log line of Task 5's format; whole, so usable, unless told otherwise."""
     return {"stage": stage, "parent_peak_mb": parent, "worker_peak_mb": worker,
-            "pipeline_peak_mb": 50.0, "finished": finished, "steps": steps,
-            "steps_measured": measured, "partial": partial}  # fmt: skip
+            "pipeline_peak_mb": 50.0, "finished": finished, "steps": list(steps),
+            "steps_measured": list(measured), "partial": partial, "workers": workers}  # fmt: skip
 
 
 def _earlier(tmp_path, config, name, finished=()):
@@ -745,7 +752,11 @@ def test_a_later_finished_stage_without_its_measurement_does_not_drop_an_earlier
         config,
         "20261102-000000_aaaaaaa_phase-d",
         # two steps ran, one measured: not whole, so not used
-        finished=[_line("optimise", 600.0, None, "2026-11-02T10:00:00", steps=2, measured=1)],
+        finished=[
+            _line(
+                "optimise", 600.0, None, "2026-11-02T10:00:00", steps=(OPTIMISER_STEP, "-m other")
+            )
+        ],
     )
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "4")
@@ -804,3 +815,68 @@ def test_a_finished_resume_lists_no_other_run(tmp_path, config, monkeypatch):
     monkeypatch.setattr(pr, "other_runs", lambda path: calls.append(path) or [])
     assert prun(None, run_dir, execute=Recorder(), resume=True) == 0
     assert calls == []
+
+
+def test_a_resume_without_a_checkpoint_measures_the_whole_optimiser(tmp_path, config):
+    """Killed before its first checkpoint, the optimiser starts again: not partial."""
+    peaks = {"covsyn.calibration.firefly_optimizer": (300.0, 900.0)}
+    status, run_dir = run_pipeline(
+        tmp_path, config, Measuring(peaks, fail={"covsyn.calibration.firefly_optimizer"})
+    )
+    assert status == 1
+    assert prun(None, run_dir, execute=Measuring(peaks), resume=True) == 0
+    line = run_log(run_dir)["optimise"]
+    assert line["partial"] is False and pr.complete(line)
+
+
+def test_a_line_without_a_worker_peak_from_fewer_workers_is_not_used(tmp_path, config, monkeypatch):
+    """One worker may have spawned no pool, where eight will: the earlier peak counts."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 900.0, "2026-11-01T10:00:00", workers=8)],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, None, "2026-11-02T10:00:00", workers=1)],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(5e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # 500 + 8 x 900, from the run with 8 workers
+    assert "run 20261101-000000_aaaaaaa_phase-d" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_one_step_measured_twice_does_not_stand_in_for_another(tmp_path, config, monkeypatch):
+    """The steps are matched by name, not counted."""
+    twice = (OPTIMISER_STEP, OPTIMISER_STEP)
+    line = _line("optimise", 500.0, 900.0, "2026-11-01T10:00:00",
+                 steps=(OPTIMISER_STEP, "-m other"), measured=twice)  # fmt: skip
+    _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d", finished=[line])
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(1e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0  # not complete, so not used
+
+
+def test_a_stage_that_ran_no_step_is_not_said_to_be_unchecked(tmp_path, config, monkeypatch):
+    """A stage the configuration turns off has nothing to estimate."""
+    _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d",
+             finished=[_line("revalidate", None, None, "2026-11-01T10:00:00", steps=(),
+                             measured=())])  # fmt: skip
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+    assert "stage revalidate: no complete" not in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_a_peak_that_is_no_finite_number_is_not_used(tmp_path, config, monkeypatch, bad):
+    """NaN or Infinity in a run.log line refuses nothing and is not used."""
+    run = _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d")
+    (run / pr.RUN_LOG).write_text(json.dumps(_line("optimise", bad, 900.0, "2026-11-01T10:00:00")))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0

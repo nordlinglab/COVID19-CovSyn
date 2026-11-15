@@ -72,8 +72,17 @@ class Context:
         """Hold ``config`` and ``layout``; ``step`` runs one module and returns its status."""
         self.config = config
         self.layout = layout
-        self.step = step
+        self._run_step = step
         self.warnings: list[str] = []
+        # Task 5: each step this stage ran, as its measurement names it ("-m <module>"), so the
+        # memory check can tell a stage whose every step measured.
+        self.steps: list[str] = []
+
+    def step(self, args: list, **options) -> int:
+        """Run one step and return its status."""
+        args = [str(a) for a in args]
+        self.steps.append(" ".join(args[:2]) if args[:1] == ["-m"] else args[0] if args else "")
+        return self._run_step(args, **options)
 
     @property
     def candidate(self) -> Path:
