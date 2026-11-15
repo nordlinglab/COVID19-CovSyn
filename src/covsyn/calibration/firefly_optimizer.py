@@ -1708,7 +1708,7 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
         raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})')
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
         not_resumable(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
-    if mode not in OPTIMISER_MODES:
+    if not isinstance(mode, str) or mode not in OPTIMISER_MODES:  # a list would not hash
         not_resumable(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
     return seed, mode
 
@@ -1727,9 +1727,14 @@ def resume_arguments(args: argparse.Namespace) -> str:
     given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
                                       ('--mode', args.mode), ('--warm_start', args.warm_start))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
-    if given:
+    if given:  # a mistake in the command, reported before anything is read
         sys.exit(f'--resume takes the directory, seed, mode and warm start from the run; '
                  f'remove {", ".join(given)}')
+    # Then the checkpoints: a run killed before any has nothing to continue, whatever its
+    # config.json holds, and that is the reason to report.
+    problem = runs.resume_problem(args.resume)
+    if problem is not None:
+        not_resumable(problem)
     args.seed, mode = resumed_settings(args.resume)
     return mode
 
@@ -1773,12 +1778,7 @@ def main() -> None:
     max_workers = hardware.resolve_workers(args.workers, os.environ, None, cores=cores.count)
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
-    # The checkpoints first: a run killed before any has nothing to continue, whatever its
-    # config.json holds, and that is the reason to report. Both are read before any input.
-    problem = runs.resume_problem(args.resume) if args.resume is not None else None
-    if problem is not None:
-        not_resumable(problem)
-    mode = resume_arguments(args)
+    mode = resume_arguments(args)  # every resume check, before any input loads
     if args.resume is None and args.run_dir is not None:
         runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')

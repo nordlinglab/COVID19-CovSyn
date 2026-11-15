@@ -160,7 +160,8 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
                                     '{"seed": true, "settings": {"mode": "train"}}',
                                     '{"seed": 1, "settings": {"mode": "bogus"}}',
                                     '{"seed": -1, "settings": {"mode": "train"}}', "directory",
-                                    "below a file"])
+                                    "below a file",
+                                    '{"seed": 1, "settings": {"mode": ["train"]}}'])
 def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
     """A claim marker, a missing file, or no seed or mode would resume the wrong run.
 
@@ -186,11 +187,20 @@ def _args(**given):
     return argparse.Namespace(**{**values, **given})
 
 
+def test_a_mistaken_option_is_reported_before_a_missing_checkpoint(tmp_path):
+    """--resume with --seed is the command's mistake, said first and as such (status 1)."""
+    with pytest.raises(SystemExit) as stop:
+        fo.resume_arguments(_args(resume=tmp_path, seed=5))
+    assert "remove --seed" in str(stop.value.code)
+
+
 def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
     """main() runs the mode config.json recorded: it sets the population the checkpoint holds."""
     import json
 
     (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": {"mode": "test"}}))
+    (tmp_path / "checkpoints").mkdir()
+    (tmp_path / "checkpoints" / "initial.npz").write_text("x")  # something to continue
     args = _args(resume=tmp_path)
     assert fo.resume_arguments(args) == "test" and args.seed == 5
     assert fo.resume_arguments(_args()) == "train"
