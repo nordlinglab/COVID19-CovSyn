@@ -1693,10 +1693,8 @@ class Firefly:
             row.update(decode_metrics(fireflies[best_idx]))
             csv_path = runs.progress_path(result_path)  # Task 4: results/tables/<run-id>/
             csv_path.parent.mkdir(parents=True, exist_ok=True)
-            if generation == 0:
-                csv_path.write_text('')
-            # A table a kill cut down to nothing gets its header again (Task 5).
-            timings.append_row(csv_path, row.keys(), row)
+            # Generation 0 starts the table; later rows go under its header (Task 5).
+            timings.append_row(csv_path, row.keys(), row, new=generation == 0)
             # Task 4: after the progress row, so a resumed run drops a row written past it.
             # Task 5: the timing row follows the checkpoint, whose time it records; a kill
             # between the two leaves that generation without one.

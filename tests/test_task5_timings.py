@@ -220,3 +220,23 @@ def test_dropping_rows_skips_rows_that_are_not_whole(tmp_path):
     fo.drop_progress_after(path, 1)
     with open(path, newline="") as f:
         assert list(csv.reader(f)) == [["generation", "best_cost"], ["0", "1.0"], ["1", "4.0"]]
+
+
+def test_a_row_with_other_keys_is_written_under_the_tables_header(tmp_path):
+    """A failed evaluation's cost parts differ; its row still lines up with the header."""
+    path = tmp_path / "progress.csv"
+    timings.append_row(path, ["generation", "a", "b"], {"generation": 0, "a": 1, "b": 2})
+    timings.append_row(path, ["generation", "b", "c"], {"generation": 1, "b": 3, "c": 4})
+    with open(path, newline="") as f:
+        assert list(csv.reader(f)) == [["generation", "a", "b"], ["0", "1", "2"], ["1", "", "3"]]
+    fo.drop_progress_after(path, 1)
+    with open(path, newline="") as f:
+        assert len(list(csv.reader(f))) == 3
+
+
+def test_a_new_table_replaces_what_was_there(tmp_path):
+    """Generation 0 starts the progress table afresh."""
+    path = tmp_path / "progress.csv"
+    path.write_text("old,header\n1,2\n")
+    timings.append_row(path, ["generation"], {"generation": 0}, new=True)
+    assert path.read_bytes() == b"generation\r\n0\r\n"

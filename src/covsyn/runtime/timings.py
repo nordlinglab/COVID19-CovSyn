@@ -151,17 +151,22 @@ def summarise_tasks(tasks: Iterable[Mapping]) -> dict:
     return fields
 
 
-def append_row(path: Path, columns: Iterable[str], row: Mapping) -> None:
-    """Append ``row`` to the table at ``path``, with the header when the table is new.
+def append_row(path: Path, columns: Iterable[str], row: Mapping, new: bool = False) -> None:
+    """Append ``row`` to the table at ``path``, under the table's own header.
 
-    A value the row lacks is left blank: an objective other than fast_cost's fills only the
-    optimiser's own columns.
+    ``columns`` is the header of a table that is new, empty (a kill can leave one so), or
+    replaced (``new``). A row is written in the header's columns: a value it lacks is left
+    blank, as an objective other than fast_cost's, or a failed evaluation's cost parts, fill
+    fewer columns, and one the header lacks is left out.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    new = not path.exists() or path.stat().st_size == 0
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(columns), extrasaction="ignore")
-        if new:
+    header = None
+    if not new and path.exists() and path.stat().st_size > 0:
+        with open(path, newline="") as f:
+            header = next(csv.reader(f), None)
+    with open(path, "w" if new else "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=header or list(columns), extrasaction="ignore")
+        if not header:
             writer.writeheader()
         writer.writerow({key: "" if value is None else value for key, value in row.items()})
 
