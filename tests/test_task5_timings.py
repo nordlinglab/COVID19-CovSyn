@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import concurrent.futures
 import csv
+import os
 import time
 
 import numpy as np
+import psutil
 import pytest
 
 from covsyn.calibration import fast_cost
@@ -442,31 +444,36 @@ def test_after_a_failure_every_close_error_is_said_and_none_raised(capsys):
 
 
 def _sleep_after_writing_pid(path, seconds):
-    import os
-
-    with open(path, "w") as f:
-        f.write(str(os.getpid()))
+    path.write_text(str(os.getpid()))
     time.sleep(seconds)
-    return 0
+    return "finished"
 
 
-def test_a_failed_run_leaves_no_worker_running(tmp_path, monkeypatch):
-    """A task still running when the run fails is waited for, and its worker ends with the run."""
-    import psutil
-
+def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, monkeypatch):
+    """A task running when the run fails finishes, not cancelled, and every worker ends."""
     pid_file = tmp_path / "worker.pid"
+    futures = []
 
     def failing(P, demo, executor, *args, **kwargs):
-        future = executor.submit(_sleep_after_writing_pid, pid_file, 1.0)
-        while not pid_file.exists() or not pid_file.read_text():  # the task is running
+        futures.append(executor.submit(_sleep_after_writing_pid, pid_file, 0.3))
+        deadline = time.monotonic() + 30
+        while not (pid_file.exists() and pid_file.read_text()):  # until the task runs
+            assert time.monotonic() < deadline, "the task never started"
             time.sleep(0.01)
-        del future
         raise Killed
 
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "killed"
     path.mkdir()
+    before = {child.pid for child in psutil.Process().children(recursive=True)}
     with pytest.raises(Killed):
         optimise(path, failing)
-    pid = int(pid_file.read_text())
-    assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    (future,) = futures
+    assert future.done() and not future.cancelled() and future.result() == "finished"
+    left = [
+        child
+        for child in psutil.Process().children(recursive=True)
+        if child.pid not in before and child.is_running()
+        and child.status() != psutil.STATUS_ZOMBIE
+    ]  # fmt: skip
+    assert left == []
