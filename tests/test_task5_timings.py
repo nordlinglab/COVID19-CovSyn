@@ -391,18 +391,29 @@ def test_a_second_close_error_is_said(tmp_path, capsys):
     assert capsys.readouterr().err.count("could not close bad.csv") == 1
 
 
-def test_a_second_interrupt_during_the_shutdown_keeps_the_runs_error(tmp_path, monkeypatch):
-    """Ctrl-C again while a failed run waits for its workers: the run's own error is raised."""
+class SecondInterrupt(BaseException):
+    """Stands in for a second Ctrl-C.
+
+    A BaseException, like KeyboardInterrupt, which would stop the whole pytest session if it
+    got through.
+    """
+
+
+def test_a_second_interrupt_after_the_shutdown_keeps_the_runs_error(tmp_path, monkeypatch):
+    """An interrupt raised by a failed run's shutdown, once it has waited: the run's error."""
     import concurrent.futures
+    import inspect
 
     shutdown = concurrent.futures.ProcessPoolExecutor.shutdown
     interrupts = []
 
     def interrupted(self, *args, **kwargs):
-        shutdown(self, *args, **kwargs)  # the workers are joined, then the second Ctrl-C
-        if kwargs.get("cancel_futures"):
-            interrupts.append(kwargs)
-            raise KeyboardInterrupt
+        shutdown(self, *args, **kwargs)  # the workers are joined, then the second interrupt
+        call = inspect.signature(shutdown).bind(self, *args, **kwargs)
+        call.apply_defaults()  # what the call means, not how it is spelt
+        if call.arguments["cancel_futures"]:
+            interrupts.append((call.arguments["wait"], call.arguments["cancel_futures"]))
+            raise SecondInterrupt
 
     monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "shutdown", interrupted)
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
@@ -410,7 +421,7 @@ def test_a_second_interrupt_during_the_shutdown_keeps_the_runs_error(tmp_path, m
     path.mkdir()
     with pytest.raises(Killed):
         optimise(path, killed_after(POP + 3))
-    assert interrupts == [{"wait": True, "cancel_futures": True}]  # it was raised, and kept out
+    assert interrupts == [(True, True)]  # it was raised, and kept out
 
 
 def test_after_a_failure_every_close_error_is_said_and_none_raised(capsys):
