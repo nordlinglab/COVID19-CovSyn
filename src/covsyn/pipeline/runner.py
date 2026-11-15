@@ -288,7 +288,7 @@ def earlier_estimate(
     latest finished, by finished time then run id, of each kind (all of them where one run
     finished the stage more than once at that time): with a pool (a worker peak above
     0), and without (its steps ran serially, under a memory cap say). This run may run either
-    way, and a serial run does all its work in the step, so both count and the larger need
+    way, and a serial run does all its work in the step, so both count and the largest need
     decides. A later incomplete line is skipped and an earlier complete one used; stopped
     attempts are not used. The latest line of a kind keeps counting however old it is, until
     a later one of that kind replaces it: the conservative outcome. The plan names "an earlier
@@ -377,9 +377,9 @@ def memory_problem(
                 "configuration, so its need cannot be estimated"
             )
         return None
-    # The larger need decides; at an equal need, the run id, the kind, then the peaks, so the
-    # message does not depend on the order the runs or their lines are listed in.
-    estimate = max(estimates, key=lambda e: (e.need(workers), e.run, e.pooled, e.step, e.worker))
+    # The larger need decides; at an equal need, the estimate itself (its peaks, run and kind),
+    # so the message does not depend on the order the runs or their lines are listed in.
+    estimate = max(estimates, key=lambda e: (e.need(workers), e))
     needed = estimate.need(workers)
     available = memory.available_bytes() / memory.MB
     if needed <= available:
