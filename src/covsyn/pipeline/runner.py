@@ -76,17 +76,18 @@ def run_module(
         return subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, **options).returncode
 
 
-_SAYING = threading.Lock()  # the memory watch reports from its own thread (Task 5)
+# The memory watch reports from its own thread (Task 5); the lock keeps pipeline.log's lines
+# whole, and is not held while printing, so a stdout nobody reads cannot stop the watch.
+_SAYING = threading.Lock()
 
 
 def say(message: str, log: Path | None = None) -> None:
     """A timestamped progress line, printed and, given a run's pipeline.log, kept there."""
     line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}"
-    with _SAYING:
-        print(line, flush=True)
-        if log is not None:
-            with open(log, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
+    print(line, flush=True)
+    if log is not None:
+        with _SAYING, open(log, "a", encoding="utf-8") as f:  # not held while printing
+            f.write(line + "\n")
 
 
 def json_lines(path: Path) -> list[dict]:
