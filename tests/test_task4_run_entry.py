@@ -163,6 +163,7 @@ def test_any_resume_input_is_refused_or_names_one_run(tmp_path_factory, text, in
     assert path.parent == root / "models" and path.name not in ("", ".", "..")
     assert "/" not in path.name and not any(c.isspace() for c in path.name)
     assert not path.is_symlink()
+    assert path.name == Path(given).name  # the run named, not another one
 
 
 def test_the_storage_path_of_a_linked_models_directory_is_refused(tmp_path, monkeypatch):

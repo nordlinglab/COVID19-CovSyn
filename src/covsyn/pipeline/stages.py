@@ -84,11 +84,18 @@ class Context:
             return self.layout.run / "revalidation"
         return self.layout.run
 
-    def must(self, args: list, what: str, **options) -> None:
-        """Run a step the chain stopped on."""
+    def must(self, args: list, what: str, resuming: bool = False, **options) -> None:
+        """Run a step the chain stopped on.
+
+        ``resuming``: the optimiser continuing a run, whose status runs.NOT_RESUMABLE means
+        retrying cannot help; from any other step, that status is an ordinary failure.
+        """
         status = self.step(args, **options)
-        if status == runs.NOT_RESUMABLE:
-            raise StageFailed(f"{what} failed: the run cannot be resumed", resumable=False)
+        if resuming and status == runs.NOT_RESUMABLE:
+            log = options.get("output")
+            raise StageFailed(
+                f"{what} failed: the run cannot be resumed (see {log})", resumable=False
+            )
         if status != 0:
             raise StageFailed(f"{what} failed")
 
@@ -102,12 +109,12 @@ def optimise(ctx: Context, resume: bool) -> None:
     """The optimiser, into the run directory; continued from its checkpoint when resuming."""
     run = ctx.layout.run
     log = run / "optimiser.log"
-    if resume and runs.last_checkpoint(run) is not None:
+    if resume and has_checkpoint(run):
         problem = runs.resume_problem(run)
         if problem is not None:  # the optimiser would refuse too; resuming cannot help
             raise StageFailed(problem, resumable=False)
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
-        ctx.must(args, "the optimiser", output=log, append=True)
+        ctx.must(args, "the optimiser", resuming=True, output=log, append=True)
         return
     if resume:
         # Killed before its first checkpoint (while scoring the initial population): nothing

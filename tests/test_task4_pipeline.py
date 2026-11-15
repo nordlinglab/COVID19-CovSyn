@@ -770,3 +770,34 @@ def test_an_optimiser_that_cannot_resume_gets_no_resume_hint(tmp_path, config, c
     assert prun(None, run_dir, execute=Refuses(), resume=True) == 1
     out = capsys.readouterr().out
     assert "cannot be resumed" in out and "Resume with" not in out
+
+
+def test_an_empty_resume_is_refused_not_a_new_run(monkeypatch, capsys):
+    """--resume "$RUN_ID" with RUN_ID unset must not start a whole new optimisation."""
+    started = []
+    monkeypatch.setattr(pr, "run", lambda *a, **k: started.append(a) or 0)
+    with pytest.raises(SystemExit) as stop:
+        pr.main(["--resume", ""])
+    assert stop.value.code == 2 and started == []
+
+
+def test_a_directory_without_a_pipeline_run_is_reported(tmp_path, monkeypatch, capsys):
+    """An optimiser-only run holds no pipeline.toml: a message and status 1."""
+    monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
+    (tmp_path / "results" / "models" / "r").mkdir(parents=True)
+    assert pr.main(["--resume", "r"]) == 1
+    assert "holds no pipeline run" in capsys.readouterr().err
+
+
+def test_status_3_from_another_step_is_an_ordinary_failure(tmp_path, config, capsys):
+    """Only the resuming optimiser's status 3 means 'cannot be resumed'."""
+
+    class Three(Recorder):
+        def __call__(self, args, output, append, env):
+            status = super().__call__(args, output, append, env)
+            return 3 if str(args[1]) == "covsyn.calibration.revalidation" else status
+
+    capsys.readouterr()
+    status, _ = run_pipeline(tmp_path, config, Three())
+    out = capsys.readouterr().out
+    assert status == 1 and "Resume with" in out and "cannot be resumed" not in out

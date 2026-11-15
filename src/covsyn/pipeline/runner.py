@@ -132,6 +132,14 @@ def record_stage(
         f.write(("\n" if cut_off else "") + json.dumps(line) + "\n")
 
 
+class NoPipelineRun(FileNotFoundError):
+    """The directory holds no pipeline run to resume."""
+
+
+class RunInUse(RuntimeError):
+    """Another pipeline, or a step one left running, holds the run's lock."""
+
+
 def standard_run_dir(run_dir: Path | str, results_root: Path) -> Path:
     """The run directory, if it is results_root/models/<run-id> written out; else refused.
 
@@ -167,12 +175,7 @@ def resolve_resume(given: str, results_root: Path) -> Path:
     Raises:
         ValueError: Anything else, ".", a storage path or a subdirectory included.
     """
-    if (
-        not given
-        or given in (".", "..")
-        or given != given.strip()
-        or any(c.isspace() for c in given)
-    ):
+    if not given or given in (".", "..") or any(c.isspace() for c in given):
         raise ValueError(f"{given!r} names no run: give its run id")
     if "/" not in given and "\\" not in given:
         return standard_run_dir(Path(results_root) / "models" / given, results_root)
@@ -212,7 +215,7 @@ def run(
     if resume:
         saved = run_dir / SAVED_CONFIG
         if not saved.is_file():
-            raise FileNotFoundError(f"{run_dir} holds no pipeline run to resume ({SAVED_CONFIG})")
+            raise NoPipelineRun(f"{run_dir} holds no pipeline run to resume ({SAVED_CONFIG})")
         config = pc.parse(saved.read_text(encoding="utf-8"), str(saved))
     else:
         runs.check_unclaimed(run_dir)  # the optimiser claims it; this fails before anything runs
@@ -239,7 +242,7 @@ def acquire_lock(run_dir: Path) -> int:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
-        raise RuntimeError(
+        raise RunInUse(
             f"{run_dir} is in use by another pipeline, or by a step one left "
             "running; wait for it, or stop it, before resuming"
         ) from None
@@ -316,7 +319,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="continue results/models/<RUN_ID>; give the run id, or that path in full",
     )
     args = parser.parse_args(argv)
-    if args.resume:
+    if args.resume is not None:  # '' too: an unset $RUN_ID must not start a new run
         try:
             run_dir = resolve_resume(args.resume, runs.RESULTS_ROOT)
             if not run_dir.is_dir():
@@ -325,7 +328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(str(error))
         try:
             return run(None, run_dir, resume=True)
-        except (FileNotFoundError, RuntimeError) as error:  # no pipeline run, or one in use
+        except (NoPipelineRun, RunInUse) as error:  # what the command can explain; not a stage
             print(f"covsyn-pipeline: {error}", file=sys.stderr)
             return 1
     config = pc.load(args.config)

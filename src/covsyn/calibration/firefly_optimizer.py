@@ -1162,11 +1162,11 @@ def check_progress_table(run_dir: Path) -> None:
     """Refuse to resume a run whose finished generations lost their progress table (Task 4).
 
     Raises:
-        FileNotFoundError: See runs.resume_problem.
+        SystemExit: runs.NOT_RESUMABLE, as at startup; see runs.resume_problem.
     """
     problem = runs.resume_problem(run_dir)
     if problem is not None:
-        raise FileNotFoundError(problem)
+        not_resumable(problem)
 
 
 def drop_progress_after(path: Path, generation: int) -> None:
@@ -1682,9 +1682,11 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
     try:
         config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
         seed, mode = config['seed'], config['settings']['mode']
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (FileNotFoundError, ValueError, KeyError, TypeError) as error:
         not_resumable(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
                       f'({error!r})')
+    except OSError as error:  # a disk that may come back: retrying can help, so not that code
+        raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})')
     if not isinstance(seed, int) or isinstance(seed, bool):
         not_resumable(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
     if not isinstance(mode, str):
@@ -1753,8 +1755,9 @@ def main() -> None:
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
     mode = resume_arguments(args)
-    if args.resume is not None and runs.resume_problem(args.resume) is not None:
-        not_resumable(runs.resume_problem(args.resume))  # at startup, before any input loads
+    problem = runs.resume_problem(args.resume) if args.resume is not None else None
+    if problem is not None:
+        not_resumable(problem)  # at startup, before any input loads
     if args.resume is None and args.run_dir is not None:
         runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')

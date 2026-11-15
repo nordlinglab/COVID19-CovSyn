@@ -227,8 +227,9 @@ def test_a_missing_progress_table_stops_a_resume(tmp_path, uninterrupted):
     with pytest.raises(Killed):
         optimise(path, killed_after(3 * POP + 5))
     runs.progress_path(path).unlink()
-    with pytest.raises(FileNotFoundError, match="no progress table"):
+    with pytest.raises(SystemExit) as stop:
         optimise(path, objective, resume=True)
+    assert stop.value.code == runs.NOT_RESUMABLE
     assert not runs.progress_path(path).exists()  # not rebuilt
 
 
@@ -257,9 +258,9 @@ def test_a_missing_table_in_the_results_layout_stops_before_the_pool(tmp_path, m
     started = []
     monkeypatch.setattr(fo.concurrent.futures, "ProcessPoolExecutor",
                         lambda *a, **k: started.append(1))
-    with pytest.raises(FileNotFoundError, match="no progress table"):
+    with pytest.raises(SystemExit) as stop:
         optimise(run, objective, resume=True)
-    assert started == []  # checked before any worker started
+    assert stop.value.code == runs.NOT_RESUMABLE and started == []  # before any worker
 
 
 def test_the_optimiser_refuses_a_lost_table_at_startup(tmp_path, monkeypatch, capsys):
