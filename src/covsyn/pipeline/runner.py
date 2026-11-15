@@ -147,9 +147,11 @@ def standard_run_dir(run_dir: Path | str, results_root: Path) -> Path:
         raise ValueError(f"{text!r} names no run: give its run id, or results/models/<run id>")
     path = Path(os.path.abspath(text))
     models = Path(os.path.abspath(results_root)) / "models"
-    # The parent may be named through a link above it (macOS's /tmp, a linked home), while
-    # RESULTS_ROOT is resolved; only the run directory itself must not be a link.
-    if os.path.realpath(path.parent) != os.path.realpath(models):
+    # A link above results/ (macOS's /tmp, a linked home) may name it, as RESULTS_ROOT is
+    # resolved; but the path must still read .../results/models/<id>, so the storage path of a
+    # linked results/models is refused like any other.
+    named = (path.parent.name, path.parent.parent.name) == ("models", models.parent.name)
+    if not named or os.path.realpath(path.parent) != os.path.realpath(models):
         raise ValueError(f"{text} is not results/models/<run id> ({models}); give the run id")
     if path.is_symlink():
         raise ValueError(
@@ -165,7 +167,12 @@ def resolve_resume(given: str, results_root: Path) -> Path:
     Raises:
         ValueError: Anything else, ".", a storage path or a subdirectory included.
     """
-    if not given or given in (".", ".."):
+    if (
+        not given
+        or given in (".", "..")
+        or given != given.strip()
+        or any(c.isspace() for c in given)
+    ):
         raise ValueError(f"{given!r} names no run: give its run id")
     if "/" not in given and "\\" not in given:
         return standard_run_dir(Path(results_root) / "models" / given, results_root)
@@ -312,9 +319,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.resume:
         try:
             run_dir = resolve_resume(args.resume, runs.RESULTS_ROOT)
+            if not run_dir.is_dir():
+                raise ValueError(f"no run {args.resume!r} in {run_dir.parent}")
         except ValueError as error:
             parser.error(str(error))
-        return run(None, run_dir, resume=True)
+        try:
+            return run(None, run_dir, resume=True)
+        except (FileNotFoundError, RuntimeError) as error:  # no pipeline run, or one in use
+            print(f"covsyn-pipeline: {error}", file=sys.stderr)
+            return 1
     config = pc.load(args.config)
     return run(config, runs.new_run_path(config.config_name, runs.RESULTS_ROOT))
 

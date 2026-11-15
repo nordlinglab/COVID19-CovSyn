@@ -1158,21 +1158,15 @@ def load_last_checkpoint(directory: Path) -> dict:
         return {name: saved[name] for name in saved.files}
 
 
-def check_progress_table(run_dir: Path, generation: int) -> None:
-    """Refuse to resume after a finished generation whose progress table is gone (Task 4).
-
-    A generation writes its progress row before its checkpoint, so a missing table is lost or
-    elsewhere; resuming would start a new one. Nothing is rebuilt or looked for elsewhere.
-    Before any generation (initial.npz) there is no row yet, which is fine.
+def check_progress_table(run_dir: Path) -> None:
+    """Refuse to resume a run whose finished generations lost their progress table (Task 4).
 
     Raises:
-        FileNotFoundError: Generations up to ``generation`` are done and the table is missing.
+        FileNotFoundError: See runs.resume_problem.
     """
-    table = runs.progress_path(run_dir)
-    if generation >= 0 and not table.exists():
-        raise FileNotFoundError(
-            f'{run_dir} has generations up to {generation} but no progress table at {table}; '
-            'nothing is rebuilt or looked for elsewhere')
+    problem = runs.resume_problem(run_dir)
+    if problem is not None:
+        raise FileNotFoundError(problem)
 
 
 def drop_progress_after(path: Path, generation: int) -> None:
@@ -1510,7 +1504,7 @@ class Firefly:
         # Task 4: a resumed run continues from its last checkpoint; its config.json stands.
         checkpoint = load_last_checkpoint(result_path) if resume else None
         if checkpoint is not None:
-            check_progress_table(result_path, int(checkpoint['generation']))
+            check_progress_table(result_path)
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
@@ -1671,6 +1665,12 @@ class Firefly:
                 fireflies, intensities)
 
 
+def not_resumable(message: str) -> None:
+    """Stop with runs.NOT_RESUMABLE: the run cannot be resumed, so retrying cannot help."""
+    print(message, file=sys.stderr)
+    raise SystemExit(runs.NOT_RESUMABLE)
+
+
 def resumed_settings(run_dir: Path) -> tuple[int, str]:
     """The seed and mode a run recorded in its config.json, to resume it with (Task 4).
 
@@ -1683,12 +1683,12 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
         config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
         seed, mode = config['seed'], config['settings']['mode']
     except (OSError, ValueError, KeyError, TypeError) as error:
-        raise SystemExit(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
-                         f'({error!r})')
+        not_resumable(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
+                      f'({error!r})')
     if not isinstance(seed, int) or isinstance(seed, bool):
-        raise SystemExit(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
+        not_resumable(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
     if not isinstance(mode, str):
-        raise SystemExit(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
+        not_resumable(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
     return seed, mode
 
 
@@ -1753,6 +1753,8 @@ def main() -> None:
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
     mode = resume_arguments(args)
+    if args.resume is not None and runs.resume_problem(args.resume) is not None:
+        not_resumable(runs.resume_problem(args.resume))  # at startup, before any input loads
     if args.resume is None and args.run_dir is not None:
         runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')

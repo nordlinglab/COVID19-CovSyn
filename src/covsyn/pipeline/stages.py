@@ -86,7 +86,10 @@ class Context:
 
     def must(self, args: list, what: str, **options) -> None:
         """Run a step the chain stopped on."""
-        if self.step(args, **options) != 0:
+        status = self.step(args, **options)
+        if status == runs.NOT_RESUMABLE:
+            raise StageFailed(f"{what} failed: the run cannot be resumed", resumable=False)
+        if status != 0:
             raise StageFailed(f"{what} failed")
 
     def may(self, args: list, what: str, **options) -> None:
@@ -99,15 +102,10 @@ def optimise(ctx: Context, resume: bool) -> None:
     """The optimiser, into the run directory; continued from its checkpoint when resuming."""
     run = ctx.layout.run
     log = run / "optimiser.log"
-    if resume and has_checkpoint(run):
-        last = runs.last_checkpoint(run)
-        if last.name.startswith("generation_") and not runs.progress_path(run).exists():
-            # The optimiser would refuse too (check_progress_table); resuming cannot help.
-            raise StageFailed(
-                f"{run} has finished generations but no progress table at "
-                f"{runs.progress_path(run)}",
-                resumable=False,
-            )
+    if resume and runs.last_checkpoint(run) is not None:
+        problem = runs.resume_problem(run)
+        if problem is not None:  # the optimiser would refuse too; resuming cannot help
+            raise StageFailed(problem, resumable=False)
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
         ctx.must(args, "the optimiser", output=log, append=True)
         return

@@ -162,8 +162,9 @@ def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
     """
     if config is not None:
         (tmp_path / "config.json").write_text(config)
-    with pytest.raises(SystemExit, match="cannot be resumed"):
+    with pytest.raises(SystemExit) as stop:
         fo.resumed_settings(tmp_path)
+    assert stop.value.code == runs.NOT_RESUMABLE  # the pipeline then suggests no retry
 
 
 def _args(**given):
@@ -245,6 +246,7 @@ def test_a_run_killed_before_any_generation_resumes_without_a_table(tmp_path, un
 
 def test_a_missing_table_in_the_results_layout_stops_before_the_pool(tmp_path, monkeypatch):
     """results/models/<id> keeps its table in results/tables/<id>; missing, nothing starts."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)  # restored afterwards
     run = tmp_path / "results" / "models" / "r"
     run.mkdir(parents=True)
     with pytest.raises(Killed):
@@ -258,3 +260,21 @@ def test_a_missing_table_in_the_results_layout_stops_before_the_pool(tmp_path, m
     with pytest.raises(FileNotFoundError, match="no progress table"):
         optimise(run, objective, resume=True)
     assert started == []  # checked before any worker started
+
+
+def test_the_optimiser_refuses_a_lost_table_at_startup(tmp_path, monkeypatch, capsys):
+    """--resume on generations without their table stops before any input loads."""
+    import json
+    import sys
+
+    run = tmp_path / "results" / "models" / "r"
+    (run / "checkpoints").mkdir(parents=True)
+    (run / "checkpoints" / "generation_0002.npz").write_text("x")
+    (run / "config.json").write_text(json.dumps({"seed": 1, "settings": {"mode": "test"}}))
+    (run / "bound.txt").write_text("kept\n")
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
+    with pytest.raises(SystemExit) as stop:
+        fo.main()
+    assert stop.value.code == runs.NOT_RESUMABLE
+    assert "no progress table" in capsys.readouterr().err
+    assert (run / "bound.txt").read_text() == "kept\n"  # nothing rewritten

@@ -142,22 +142,43 @@ def test_selected_and_revalidation_find_their_runs_table(results):
 
 def test_a_full_path_through_a_linked_parent_is_accepted(results, tmp_path):
     """A link above the run, as macOS's /tmp or a linked home, is fine; the run itself not."""
-    (tmp_path / "alias").symlink_to(results)
-    given = tmp_path / "alias" / "models" / RUN_ID
+    (tmp_path / "alias").symlink_to(tmp_path)  # as /tmp is a link to /private/tmp
+    given = tmp_path / "alias" / "results" / "models" / RUN_ID
     assert pr.resolve_resume(str(given), results) == results / "models" / RUN_ID
 
 
 @settings(max_examples=300, deadline=None)
-@given(st.text(alphabet=st.sampled_from(list("ab0-_./\\ ")), max_size=12))
-def test_any_resume_input_is_refused_or_names_one_run(tmp_path_factory, text):
-    """Whatever is given, the result is a direct child of results/models, never a link."""
+@given(st.text(alphabet=st.sampled_from(list("ab0-_./\\ \n")), max_size=12),
+       st.sampled_from(["", "models/", ""]), st.booleans())
+def test_any_resume_input_is_refused_or_names_one_run(tmp_path_factory, text, inner, absolute):
+    """Any input, relative or whole, names one child of results/models, or writes nothing."""
     root = tmp_path_factory.mktemp("r") / "results"
     (root / "models").mkdir(parents=True)
+    given = f"{root}/{inner}{text}" if absolute else text
     try:
-        path = pr.resolve_resume(text, root)
+        path = pr.resolve_resume(given, root)
     except ValueError:
         assert sorted(root.rglob("*")) == [root / "models"]  # nothing written
         return
     assert path.parent == root / "models" and path.name not in ("", ".", "..")
-    assert "/" not in path.name and not path.is_symlink()
-    assert path.name == text or Path(text).name == path.name
+    assert "/" not in path.name and not any(c.isspace() for c in path.name)
+    assert not path.is_symlink()
+
+
+def test_the_storage_path_of_a_linked_models_directory_is_refused(tmp_path, monkeypatch):
+    """results/models -> /storage/models: /storage/models/<id> is a storage path, refused."""
+    storage = tmp_path / "storage" / "models"
+    (storage / RUN_ID).mkdir(parents=True)
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "models").symlink_to(storage)
+    with pytest.raises(ValueError, match="results/models"):
+        pr.resolve_resume(str(storage / RUN_ID), results)
+    assert pr.resolve_resume(RUN_ID, results) == results / "models" / RUN_ID
+
+
+@pytest.mark.parametrize("given", [" ", RUN_ID + "\n", " " + RUN_ID, "a b"])
+def test_a_run_id_with_white_space_is_refused(results, given):
+    """A pasted id with a newline or a space names no run."""
+    with pytest.raises(ValueError, match="names no run"):
+        pr.resolve_resume(given, results)

@@ -54,6 +54,28 @@ def last_checkpoint(run_dir: Path) -> Path | None:
     return initial if initial.is_file() else None
 
 
+# The optimiser's exit status when a run cannot be resumed at all, so the pipeline does not
+# suggest a resume that would fail the same way (Task 4).
+NOT_RESUMABLE = 3
+
+
+def resume_problem(run_dir: Path) -> str | None:
+    """Why a run with checkpoints cannot be resumed, or None (Task 4).
+
+    A generation writes its progress row before its checkpoint, so finished generations whose
+    table is missing mean the table is lost or elsewhere; nothing is rebuilt or looked for.
+    """
+    last = last_checkpoint(run_dir)
+    if last is not None and last.name.startswith("generation_"):
+        table = progress_path(run_dir)
+        if not table.exists():
+            return (
+                f"{run_dir} has finished generations but no progress table at {table}; "
+                "nothing is rebuilt or looked for elsewhere"
+            )
+    return None
+
+
 # What an optimiser run writes; a directory holding any of them already holds a run.
 RUN_OUTPUTS = (
     "config.json",

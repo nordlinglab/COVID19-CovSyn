@@ -472,6 +472,7 @@ def test_the_command_resumes_a_run_by_id(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pr, "run", fake_run)
     monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
+    (tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d").mkdir(parents=True)
     assert pr.main(["--resume", "20261115-090000_b30c141_phase-d"]) == 0
     assert seen["run_dir"] == tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
     assert seen["resume"] and seen["config"] is None
@@ -725,3 +726,47 @@ def test_run_checks_against_covsyns_own_results_by_default(tmp_path, config):
     with pytest.raises(ValueError, match="results/models"):
         pr.run(config, tmp_path / "results" / "models" / "r", execute=Recorder())
     assert not (tmp_path / "results").exists()
+
+
+def test_a_mistyped_run_id_is_a_usage_error(tmp_path, monkeypatch, capsys):
+    """An id with no run behind it gets the usage, status 2, not a traceback."""
+    monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
+    (tmp_path / "results" / "models").mkdir(parents=True)
+    with pytest.raises(SystemExit) as stop:
+        pr.main(["--resume", "20261115-09000_typo"])
+    assert stop.value.code == 2 and "no run" in capsys.readouterr().err
+
+
+def test_a_run_in_use_is_reported_on_the_command_line(tmp_path, config, monkeypatch, capsys):
+    """Another pipeline holds the run: a message and status 1, not a traceback."""
+    import fcntl
+    import os
+
+    recorder = Recorder(fail={"covsyn.model.data_synthesis_main"})
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
+    fd = os.open(run_dir / "pipeline.lock", os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        assert pr.main(["--resume", run_dir.name]) == 1
+    finally:
+        os.close(fd)
+    assert "in use" in capsys.readouterr().err
+
+
+def test_an_optimiser_that_cannot_resume_gets_no_resume_hint(tmp_path, config, capsys):
+    """Exit status NOT_RESUMABLE from the optimiser: the pipeline does not suggest retrying."""
+
+    class Refuses(Recorder):
+        def __call__(self, args, output, append, env):
+            status = super().__call__(args, output, append, env)
+            return pr.runs.NOT_RESUMABLE if "--resume" in [str(a) for a in args] else status
+
+    recorder = Recorder(fail={"covsyn.calibration.firefly_optimizer"})
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    (run_dir / "checkpoints").mkdir()
+    (run_dir / "checkpoints" / "initial.npz").write_text("x")
+    capsys.readouterr()
+    assert prun(None, run_dir, execute=Refuses(), resume=True) == 1
+    out = capsys.readouterr().out
+    assert "cannot be resumed" in out and "Resume with" not in out
