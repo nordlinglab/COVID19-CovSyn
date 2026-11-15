@@ -417,6 +417,9 @@ def test_resume_continues_the_optimiser_from_its_checkpoint(tmp_path, config):
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     (run_dir / "checkpoints").mkdir()
     (run_dir / "checkpoints" / "generation_0003.npz").write_text("x")
+    table = pr.runs.progress_path(run_dir)  # its rows, written before each checkpoint
+    table.parent.mkdir(parents=True, exist_ok=True)
+    table.write_text("generation\n0\n1\n2\n3\n")
     recorder = Recorder()
     prun(None, run_dir, execute=recorder, resume=True)
     assert recorder.calls[0][2:] == ["--resume", str(run_dir)]
@@ -682,17 +685,9 @@ def test_tw_check_lists_earlier_runs_only_when_given_no_run(tmp_path):
     assert "previous:" not in given.stdout, given.stdout + given.stderr
 
 
-@pytest.mark.parametrize("spelling", ["inside", "elsewhere", "linked"])
-def test_the_resume_hint_names_the_run_as_main_finds_it(tmp_path, monkeypatch, spelling):
-    """The id when the run is in results/models, however its parent is spelled; else the path."""
-    monkeypatch.setattr(pr.runs, "RESULTS_ROOT", tmp_path / "results")
-    models = tmp_path / "results" / "models"
-    models.mkdir(parents=True)
-    (tmp_path / "alias").symlink_to(models)  # results/models named another way
-    run_dir = {"inside": models / "r", "elsewhere": tmp_path / "elsewhere" / "r",
-               "linked": tmp_path / "alias" / "r"}[spelling]
-    run_dir.parent.mkdir(parents=True, exist_ok=True)
-    assert pr.resume_name(run_dir) == ("r" if spelling != "elsewhere" else str(run_dir))
+def test_the_resume_hint_is_the_run_id(tmp_path):
+    """Every run is results/models/<run-id>, so --resume takes its id."""
+    assert pr.resume_name(tmp_path / "results" / "models" / "r") == "r"
 
 def test_a_symlinked_models_directory_keeps_its_results_siblings(tmp_path):
     """Absolute, not resolved: a linked results/models/<id> still lays out under results/."""
@@ -702,3 +697,31 @@ def test_a_symlinked_models_directory_keeps_its_results_siblings(tmp_path):
     (tmp_path / "results" / "models" / "r").symlink_to(storage)
     layout = ps.Layout(tmp_path / "results" / "models" / "r")
     assert layout.tables == tmp_path / "results" / "tables" / "r"
+
+
+def test_a_resume_that_cannot_help_is_not_suggested(tmp_path, config, capsys):
+    """Finished generations without their progress table: stop, without a resume hint."""
+    recorder = Recorder(fail={"covsyn.calibration.firefly_optimizer"})
+    _, run_dir = run_pipeline(tmp_path, config, recorder)
+    (run_dir / "checkpoints").mkdir()
+    (run_dir / "checkpoints" / "generation_0003.npz").write_text("x")
+    capsys.readouterr()
+    recorder = Recorder()
+    assert prun(None, run_dir, execute=recorder, resume=True) == 1
+    out = capsys.readouterr().out
+    assert "no progress table" in out and "Resume with" not in out
+    assert recorder.calls == []  # the optimiser was not started
+
+
+def test_the_command_line_refuses_a_bad_resume_with_its_usage(capsys):
+    """main() turns a refused --resume into a usage error (status 2), not a traceback."""
+    with pytest.raises(SystemExit) as stop:
+        pr.main(["--resume", "."])
+    assert stop.value.code == 2 and "names no run" in capsys.readouterr().err
+
+
+def test_run_checks_against_covsyns_own_results_by_default(tmp_path, config):
+    """Without results_root, a directory outside RESULTS_ROOT/models is refused."""
+    with pytest.raises(ValueError, match="results/models"):
+        pr.run(config, tmp_path / "results" / "models" / "r", execute=Recorder())
+    assert not (tmp_path / "results").exists()

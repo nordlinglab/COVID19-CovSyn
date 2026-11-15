@@ -147,14 +147,16 @@ def standard_run_dir(run_dir: Path | str, results_root: Path) -> Path:
         raise ValueError(f"{text!r} names no run: give its run id, or results/models/<run id>")
     path = Path(os.path.abspath(text))
     models = Path(os.path.abspath(results_root)) / "models"
-    if path.parent != models:
+    # The parent may be named through a link above it (macOS's /tmp, a linked home), while
+    # RESULTS_ROOT is resolved; only the run directory itself must not be a link.
+    if os.path.realpath(path.parent) != os.path.realpath(models):
         raise ValueError(f"{text} is not results/models/<run id> ({models}); give the run id")
     if path.is_symlink():
         raise ValueError(
             f"{path} is a link; a run behind a link is not supported, as its "
             "tables and figures could go elsewhere"
         )
-    return path
+    return models / path.name  # one spelling, so its tables and figures have one place
 
 
 def resolve_resume(given: str, results_root: Path) -> Path:
@@ -272,10 +274,12 @@ def _run_stages(
         try:
             function(ctx, resume) if name == "optimise" else function(ctx)
         except ps.StageFailed as error:
-            report(
-                f"ERROR: {error}; stopping. Resume with: covsyn-pipeline --resume "
-                f"{resume_name(run_dir)}"
+            hint = (
+                f" Resume with: covsyn-pipeline --resume {resume_name(run_dir)}"
+                if error.resumable
+                else ""
             )
+            report(f"ERROR: {error}; stopping.{hint}")
             return 1
         finally:
             for warning in ctx.warnings:
@@ -286,13 +290,8 @@ def _run_stages(
 
 
 def resume_name(run_dir: Path) -> str:
-    """What to give --resume: the run id under results/models, else the whole path."""
-    models = runs.RESULTS_ROOT / "models"
-    try:
-        inside = models.is_dir() and os.path.samefile(run_dir.parent, models)
-    except OSError:
-        inside = False
-    return run_dir.name if inside else str(run_dir)
+    """What to give --resume: the run id, which names results/models/<run-id>."""
+    return run_dir.name
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -305,7 +304,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="a packaged configuration, such as default, or a TOML file",
     )
     group.add_argument(
-        "--resume", metavar="RUN_ID", help="continue results/models/<RUN_ID>, or a run directory"
+        "--resume",
+        metavar="RUN_ID",
+        help="continue results/models/<RUN_ID>; give the run id, or that path in full",
     )
     args = parser.parse_args(argv)
     if args.resume:

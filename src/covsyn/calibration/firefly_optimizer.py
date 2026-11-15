@@ -1158,6 +1158,23 @@ def load_last_checkpoint(directory: Path) -> dict:
         return {name: saved[name] for name in saved.files}
 
 
+def check_progress_table(run_dir: Path, generation: int) -> None:
+    """Refuse to resume after a finished generation whose progress table is gone (Task 4).
+
+    A generation writes its progress row before its checkpoint, so a missing table is lost or
+    elsewhere; resuming would start a new one. Nothing is rebuilt or looked for elsewhere.
+    Before any generation (initial.npz) there is no row yet, which is fine.
+
+    Raises:
+        FileNotFoundError: Generations up to ``generation`` are done and the table is missing.
+    """
+    table = runs.progress_path(run_dir)
+    if generation >= 0 and not table.exists():
+        raise FileNotFoundError(
+            f'{run_dir} has generations up to {generation} but no progress table at {table}; '
+            'nothing is rebuilt or looked for elsewhere')
+
+
 def drop_progress_after(path: Path, generation: int) -> None:
     """Keep the progress rows up to generation; later ones were written after its checkpoint."""
     if not path.exists():
@@ -1492,6 +1509,8 @@ class Firefly:
             print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
         # Task 4: a resumed run continues from its last checkpoint; its config.json stands.
         checkpoint = load_last_checkpoint(result_path) if resume else None
+        if checkpoint is not None:
+            check_progress_table(result_path, int(checkpoint['generation']))
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
@@ -1557,14 +1576,7 @@ class Firefly:
             evaluations = int(checkpoint['evaluations'])
             new_alpha = float(checkpoint['alpha'])
             start = int(checkpoint['generation']) + 1
-            table = runs.progress_path(result_path)
-            # A finished generation wrote its progress row before its checkpoint, so a missing
-            # table means it is elsewhere or lost: stop, rather than start a new one.
-            if start > 0 and not table.exists():
-                raise FileNotFoundError(
-                    f'{result_path} has generations up to {start - 1} but no progress table '
-                    f'at {table}; nothing is rebuilt or looked for elsewhere')
-            drop_progress_after(table, start - 1)
+            drop_progress_after(runs.progress_path(result_path), start - 1)
         # search_range = ub - lb
 
         for generation in tqdm(range(start, max_generations)):

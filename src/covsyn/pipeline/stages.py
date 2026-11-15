@@ -34,6 +34,11 @@ CHENG_MODE = "cheng2020"
 class StageFailed(RuntimeError):
     """A step the chain stopped on failed, so the run stops after this stage."""
 
+    def __init__(self, message: str, resumable: bool = True) -> None:
+        """``resumable`` False: resuming would fail the same way, so no resume is suggested."""
+        super().__init__(message)
+        self.resumable = resumable
+
 
 class Layout:
     """Where a run's files go: its models directory and the tables and figures beside it."""
@@ -95,6 +100,14 @@ def optimise(ctx: Context, resume: bool) -> None:
     run = ctx.layout.run
     log = run / "optimiser.log"
     if resume and has_checkpoint(run):
+        last = runs.last_checkpoint(run)
+        if last.name.startswith("generation_") and not runs.progress_path(run).exists():
+            # The optimiser would refuse too (check_progress_table); resuming cannot help.
+            raise StageFailed(
+                f"{run} has finished generations but no progress table at "
+                f"{runs.progress_path(run)}",
+                resumable=False,
+            )
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
         ctx.must(args, "the optimiser", output=log, append=True)
         return

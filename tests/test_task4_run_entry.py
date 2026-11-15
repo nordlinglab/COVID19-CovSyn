@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from covsyn.pipeline import config as pc
 from covsyn.pipeline import runner as pr
@@ -136,3 +138,26 @@ def test_selected_and_revalidation_find_their_runs_table(results):
     table = results / "tables" / RUN_ID / "progress.csv"
     for sub in ("", "selected", "revalidation"):
         assert runs.progress_path(run / sub if sub else run) == table
+
+
+def test_a_full_path_through_a_linked_parent_is_accepted(results, tmp_path):
+    """A link above the run, as macOS's /tmp or a linked home, is fine; the run itself not."""
+    (tmp_path / "alias").symlink_to(results)
+    given = tmp_path / "alias" / "models" / RUN_ID
+    assert pr.resolve_resume(str(given), results) == results / "models" / RUN_ID
+
+
+@settings(max_examples=300, deadline=None)
+@given(st.text(alphabet=st.sampled_from(list("ab0-_./\\ ")), max_size=12))
+def test_any_resume_input_is_refused_or_names_one_run(tmp_path_factory, text):
+    """Whatever is given, the result is a direct child of results/models, never a link."""
+    root = tmp_path_factory.mktemp("r") / "results"
+    (root / "models").mkdir(parents=True)
+    try:
+        path = pr.resolve_resume(text, root)
+    except ValueError:
+        assert sorted(root.rglob("*")) == [root / "models"]  # nothing written
+        return
+    assert path.parent == root / "models" and path.name not in ("", ".", "..")
+    assert "/" not in path.name and not path.is_symlink()
+    assert path.name == text or Path(text).name == path.name

@@ -241,3 +241,20 @@ def test_a_run_killed_before_any_generation_resumes_without_a_table(tmp_path, un
     assert not runs.progress_path(path).exists()
     optimise(path, objective, resume=True)
     assert progress(path) == progress(whole_path)
+
+
+def test_a_missing_table_in_the_results_layout_stops_before_the_pool(tmp_path, monkeypatch):
+    """results/models/<id> keeps its table in results/tables/<id>; missing, nothing starts."""
+    run = tmp_path / "results" / "models" / "r"
+    run.mkdir(parents=True)
+    with pytest.raises(Killed):
+        optimise(run, killed_after(3 * POP + 5))
+    table = runs.progress_path(run)
+    assert table == tmp_path / "results" / "tables" / "r" / "progress.csv" and table.exists()
+    table.unlink()
+    started = []
+    monkeypatch.setattr(fo.concurrent.futures, "ProcessPoolExecutor",
+                        lambda *a, **k: started.append(1))
+    with pytest.raises(FileNotFoundError, match="no progress table"):
+        optimise(run, objective, resume=True)
+    assert started == []  # checked before any worker started
