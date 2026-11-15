@@ -18,6 +18,7 @@ from collections.abc import Callable
 
 import psutil
 
+STEP_MODULE = "covsyn.runtime.measure"  # what a pipeline step runs under (Task 5)
 LOW_MEMORY_FRACTION = 0.10  # warn below this share of the total (plan, Task 5)
 WARNING_ATTEMPTS = 3  # a warning that fails to send is tried on this many samples
 MB = 1e6
@@ -85,10 +86,11 @@ def system_memory() -> tuple[int, int]:
 
 
 class MemoryWatch:
-    """Samples this process's RSS and the available memory once per interval, in a thread.
+    """Samples this process's RSS, its steps' RSS and the available memory, in a thread.
 
-    Records the largest RSS and the smallest available memory seen, and warns once when the
-    available memory falls below LOW_MEMORY_FRACTION of the total. Use it as a context manager.
+    Records the largest RSS of this process and, with ``steps``, of its measured steps, and the
+    smallest available memory seen, and warns once when the available memory falls below
+    LOW_MEMORY_FRACTION of the total. Use it as a context manager.
     """
 
     def __init__(
@@ -96,13 +98,14 @@ class MemoryWatch:
         interval: float = 1.0,
         warn: Callable[[str], None] | None = None,
         system: Callable[[], tuple[int, int]] | None = None,
-        children: bool = False,
+        steps: bool = False,
     ) -> None:
         """Sample every ``interval`` seconds; ``warn`` prints to stderr by default.
 
         ``system`` gives the available and total memory; system_memory by default.
-        ``children``: also sample the RSS of this process's direct children, the pipeline's
-        steps, from outside, as a thread inside a step would make its forks unsafe.
+        ``steps``: also sample the RSS of this process's children that are pipeline steps, run
+        under covsyn.runtime.measure, from outside, as a thread inside a step would make its
+        forks unsafe. A step shorter than the interval may be missed.
         """
         self.interval = interval
         self.warn = warn or (
@@ -111,8 +114,11 @@ class MemoryWatch:
         self.system = system or system_memory
         self.process = psutil.Process()
         self.parent_peak_bytes: int | None = None  # None until an RSS read succeeds
-        self.children = children
-        self.children_peak_bytes: int | None = None  # the largest direct child's, sampled
+        self.steps = steps
+        # The largest step's sampled RSS; None if no sample caught a step or every read failed
+        # (said on stderr).
+        self.steps_peak_bytes: int | None = None
+        self._steps: dict[int, psutil.Process] = {}  # pid -> handle, kept once known a step
         self.lowest_available: int | None = None
         self.warning: str | None = None  # the low-memory warning, once made
         self._pending: str | None = None  # a warning to send
@@ -125,8 +131,8 @@ class MemoryWatch:
     def sample(self) -> None:
         """Take one sample; the RSS, the available memory and the warning fail separately."""
         self._guarded(self._sample_rss)
-        if self.children:
-            self._guarded(self._sample_children)
+        if self.steps:
+            self._guarded(self._sample_steps)
         self._guarded(self._sample_available)
         if self._pending is not None:
             self._guarded(self._send_warning)
@@ -135,11 +141,23 @@ class MemoryWatch:
         rss = rss_bytes(self.process)
         self.parent_peak_bytes = max(self.parent_peak_bytes or 0, rss)
 
-    def _sample_children(self) -> None:
+    def _sample_steps(self) -> None:
+        denied = None
         for child in self.process.children():
-            with contextlib.suppress(psutil.NoSuchProcess):  # one that just ended
-                rss = rss_bytes(child)
-                self.children_peak_bytes = max(self.children_peak_bytes or 0, rss)
+            try:
+                # Not a step yet may be one soon: just forked, it has not run measure yet.
+                if child.pid not in self._steps and STEP_MODULE in child.cmdline():
+                    self._steps[child.pid] = child
+                step = self._steps.get(child.pid)
+                if step is not None and step.is_running():
+                    rss = rss_bytes(step)
+                    self.steps_peak_bytes = max(self.steps_peak_bytes or 0, rss)
+            except psutil.NoSuchProcess:  # ended while it was looked at
+                continue
+            except psutil.Error as error:  # one child denied stops neither the others nor this
+                denied = error
+        if denied is not None:
+            raise denied  # reported once, by _guarded
 
     def _sample_available(self) -> None:
         available, total = self.system()

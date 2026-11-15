@@ -477,12 +477,46 @@ def test_run_log_has_the_steps_rss_sampled_once_a_second(tmp_path, config):
     class Running(Recorder):
         def __call__(self, args, output, append, env):
             if str(args[1]) == "covsyn.calibration.firefly_optimizer":
-                pr.run_module(["-c", code], None, False, {})
+                pr.run_module(["-c", code], None, False, env)  # a measured step
             return super().__call__(args, output, append, env)
 
     _, run_dir = run_pipeline(tmp_path, config, Running())
     lines = run_log(run_dir)
-    assert lines["optimise"]["parent_sampled_peak_mb"] >= 199 * MIB / memory.MB
-    # No step process ran in figures; other children of the test process may (a pool helper).
-    figures = lines["figures"]["parent_sampled_peak_mb"]
-    assert figures is None or figures < 199 * MIB / memory.MB
+    assert lines["optimise"]["step_sampled_peak_mb"] >= 199 * MIB / memory.MB
+    assert lines["figures"]["step_sampled_peak_mb"] is None  # no step process ran
+
+
+def test_a_stopped_stage_reports_its_sampled_step_peak(tmp_path, config):
+    """A step killed before its measurement is written leaves only the sampled RSS."""
+    code = (
+        "import numpy as np, time, os; b = np.ones(200 * 1024**2 // 8); time.sleep(3.5); "
+        "os._exit(9)"  # killed: no atexit, so no measurement line
+    )
+
+    class Killed(Recorder):
+        def __call__(self, args, output, append, env):
+            if str(args[1]) == "covsyn.calibration.firefly_optimizer":
+                pr.run_module(["-c", code], None, False, env)
+                return 1
+            return super().__call__(args, output, append, env)
+
+    status, run_dir = run_pipeline(tmp_path, config, Killed())
+    assert status == 1
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "no step reported its peaks" in log and "a step at most 2" in log
+
+
+def test_the_memory_check_uses_the_sampled_step_peak_when_none_was_measured(
+    tmp_path, config, monkeypatch
+):
+    """An earlier step without its measurement still counts, by its sampled RSS."""
+    run = tmp_path / "results" / "models" / "20261101-000000_aaaaaaa_phase-d"
+    run.mkdir(parents=True)
+    (run / pr.SAVED_CONFIG).write_text(pc.to_toml(config))
+    line = {"stage": "optimise", "workers": 2, "parent_peak_mb": None, "worker_peak_mb": 1000.0,
+            "pipeline_peak_mb": 50.0, "step_sampled_peak_mb": 7000.0}  # fmt: skip
+    (run / pr.RUN_LOG).write_text(json.dumps(line) + "\n")
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # 7000 + 2 x 1000 > 8000

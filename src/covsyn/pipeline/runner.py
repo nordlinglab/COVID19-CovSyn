@@ -169,14 +169,10 @@ def earlier_peaks(run_dir: Path, stage: str) -> tuple[float, float] | None:
                 and "pipeline_peak_mb" in line
                 and _number(line.get("worker_peak_mb"))
             ):
-                parent = line.get("parent_peak_mb")
-                found.append(
-                    (
-                        log.stat().st_mtime,
-                        parent if _number(parent) else 0.0,
-                        line["worker_peak_mb"],
-                    )
-                )
+                # The step's peak: its measured one, or, if it wrote none, its sampled RSS.
+                steps = [line.get(k) for k in ("parent_peak_mb", "step_sampled_peak_mb")]
+                parent = max((v for v in steps if _number(v)), default=0.0)
+                found.append((log.stat().st_mtime, parent, line["worker_peak_mb"]))
     return max(found)[1:] if found else None
 
 
@@ -185,10 +181,11 @@ def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
 
     A conservative check at the stage's start, not a guarantee: the need is estimated as the
     step's own peak plus workers x the peak per worker of an earlier run, and data, code, start
-    method, worker count or other processes may change the next run's need. The step's peak is
-    added to the plan's workers x peak. A forked worker's RSS also counts pages it shares with
-    its parent, which the estimate then counts once per worker, so a stage that would fit may be
-    refused; by how much the estimate overstates a whole stage is not yet measured.
+    method, worker count or other processes may change the next run's need. The step's peak,
+    which the plan leaves out, is its measured peak or, without one, its sampled RSS. On Linux,
+    a forked worker's RSS also counts pages it shares with its parent, which the estimate then
+    counts once per worker, so a stage that would fit may be refused; by how much the estimate
+    overstates a whole stage is not yet measured.
     """
     peaks = earlier_peaks(run_dir, stage)
     if peaks is None:
@@ -217,8 +214,9 @@ def record_stage(
     """Append one line to run.log for a finished stage.
 
     ``peaks``: the largest peak of the stage's steps' own processes and of their workers, None
-    where no step measured one (:func:`stage_memory`), and this process's largest sampled RSS
-    and the least available memory during the stage.
+    where no step measured one (:func:`stage_memory`); the steps' RSS the pipeline sampled once
+    a second (step_sampled_peak_mb), and its own (pipeline_peak_mb), None where no sample
+    caught one; and the least available memory during the stage.
     """
     peaks = peaks or {}
     line = {
@@ -230,7 +228,7 @@ def record_stage(
         "worker_peak_mb": peaks.get("worker_peak_mb"),
         "lowest_available_mb": peaks.get("lowest_available_mb"),
         "pipeline_peak_mb": peaks.get("pipeline_peak_mb"),
-        "parent_sampled_peak_mb": peaks.get("parent_sampled_peak_mb"),
+        "step_sampled_peak_mb": peaks.get("step_sampled_peak_mb"),
         "warnings": list(warnings),
     }
     path = Path(run_dir) / RUN_LOG
@@ -399,9 +397,7 @@ def _run_stages(
         start = time.monotonic()
         # The pipeline's own RSS and the available memory, once a second (Task 5). A warning is
         # reported at once: a stage killed for want of memory may never reach its end.
-        watch = memory.MemoryWatch(
-            warn=lambda message: report(f"WARNING: {message}"), children=True
-        )
+        watch = memory.MemoryWatch(warn=lambda message: report(f"WARNING: {message}"), steps=True)
         finished = False
         try:
             problem = memory_problem(run_dir, name, workers)
@@ -428,18 +424,20 @@ def _run_stages(
                     if measurements.exists()
                     else "no step reported its peaks"
                 )
-                lowest, peak = watch.lowest_available, watch.parent_peak_bytes
-                report(  # rounded once, from the bytes
-                    f"memory in stage {name}: lowest available "
-                    f"{'unknown' if lowest is None else f'{lowest / memory.MB:.0f} MB'}, this "
-                    f"process at most {'unknown' if peak is None else f'{peak / memory.MB:.0f} MB'}"
-                    f"; {steps}"
+
+                def mb(n):  # rounded once, from the bytes
+                    return "unknown" if n is None else f"{n / memory.MB:.0f} MB"
+
+                report(
+                    f"memory in stage {name}: lowest available {mb(watch.lowest_available)}, "
+                    f"this process at most {mb(watch.parent_peak_bytes)}, a step at most "
+                    f"{mb(watch.steps_peak_bytes)} (sampled once a second); {steps}"
                 )
         peaks = {
             **stage_memory(measurements),
             "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),  # None: not read
             # The plan's once-a-second RSS of the step, the process that owns the pool.
-            "parent_sampled_peak_mb": memory.megabytes(watch.children_peak_bytes),
+            "step_sampled_peak_mb": memory.megabytes(watch.steps_peak_bytes),
             "lowest_available_mb": memory.megabytes(watch.lowest_available),
         }
         # The watch's warning for run.log, once, however often its report was tried, and even
