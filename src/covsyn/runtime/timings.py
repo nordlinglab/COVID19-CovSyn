@@ -212,7 +212,7 @@ def close_tables(tables: Iterable[Table], failing: bool = False) -> None:
     for table in tables:
         try:
             table.close()
-        except OSError as error:
+        except Exception as error:  # a flush can fail in more ways than OSError
             first = first or error
     if first is not None and not failing:
         raise first

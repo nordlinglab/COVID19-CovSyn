@@ -307,7 +307,7 @@ def test_a_run_that_fails_shuts_its_pool_down(tmp_path, monkeypatch):
     shutdown = concurrent.futures.ProcessPoolExecutor.shutdown
 
     def recording(self, *args, **kwargs):
-        shut.append(self)
+        shut.append((self, kwargs))  # a failed run must not wait for the running tasks
         return shutdown(self, *args, **kwargs)
 
     monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "shutdown", recording)
@@ -316,7 +316,7 @@ def test_a_run_that_fails_shuts_its_pool_down(tmp_path, monkeypatch):
     path.mkdir()
     with pytest.raises(Killed):
         optimise(path, killed_after(POP + 3))
-    assert shut
+    assert shut and shut[-1][1] == {"wait": False, "cancel_futures": True}
 
 
 def test_a_table_that_fails_to_close_neither_hides_the_error_nor_leaves_others_open(
@@ -339,3 +339,38 @@ def test_a_table_that_fails_to_close_neither_hides_the_error_nor_leaves_others_o
     with pytest.raises(Killed):
         optimise(path, killed_after(POP + 3))
     assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])
+
+
+def test_a_finished_run_raises_a_table_that_failed_to_close(tmp_path, monkeypatch):
+    """Without a failure of its own, a run whose table could not be closed says so."""
+    close = timings.Table.close
+    closed = []
+
+    def failing(self):
+        closed.append(self.path.name)
+        close(self)
+        if self.path.name == "progress.csv":
+            raise OSError("No space left on device")
+
+    monkeypatch.setattr(timings.Table, "close", failing)
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "whole"
+    path.mkdir()
+    with pytest.raises(OSError, match="No space"):
+        optimise(path, objective)
+    assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])
+
+
+def test_close_tables_closes_all_whatever_one_raises(tmp_path):
+    """Not only an OSError: any error of one close leaves the others to be closed."""
+
+    class Bad:
+        def close(self):
+            raise ValueError("I/O operation on closed file")
+
+    good = timings.Table(tmp_path / "t.csv", ["generation"])
+    good.write({"generation": 0})
+    timings.close_tables([Bad(), good], failing=True)
+    assert good.file is None
+    with pytest.raises(ValueError):
+        timings.close_tables([Bad()])

@@ -1,6 +1,5 @@
 import argparse
 import concurrent.futures
-import contextlib
 import copy
 import csv
 import functools
@@ -1562,6 +1561,7 @@ class Firefly:
         generation_table = timings.Table(tables / timings.GENERATION_TABLE,
                                          timings.GENERATION_COLUMNS)
         progress_table = timings.Table(runs.progress_path(result_path))
+        failed = False
         try:  # the pool and the tables are closed however the run ends
             clock = timings.GenerationClock(-1, max_workers)
 
@@ -1711,14 +1711,14 @@ class Firefly:
                     worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
                     dim))
 
-        except BaseException:  # the pool and the tables go too, and the run's error is raised
-            with contextlib.suppress(Exception):
-                executor.shutdown(cancel_futures=True)
-            timings.close_tables((progress_table, evaluation_table, generation_table),
-                                 failing=True)
+            executor.shutdown()  # the workers write their profiles as they exit
+        except BaseException:  # a failed or stopped run does not wait for its running tasks
+            failed = True
+            executor.shutdown(wait=False, cancel_futures=True)
             raise
-        executor.shutdown()  # the workers write their profiles as they exit
-        timings.close_tables((progress_table, evaluation_table, generation_table))
+        finally:  # whatever ended the run, shutdown included; its own error stays the one raised
+            timings.close_tables((progress_table, evaluation_table, generation_table),
+                                 failing=failed)
         if self.profile_dir is not None:  # Task 5
             merged = profiling.merge_profiles(self.profile_dir, tables)
             print(f'profile: {merged}, top {profiling.TOP} in {tables / profiling.TOP_TABLE}; '
