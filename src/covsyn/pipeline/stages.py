@@ -95,12 +95,17 @@ class Context:
             return self.layout.run / "revalidation"
         return self.layout.run
 
-    def must(self, args: list, what: str, resuming: bool = False, **options) -> None:
+    def must(
+        self, args: list, what: str, resuming: bool = False, partial: bool = False, **options
+    ) -> None:
         """Run a step the chain stopped on.
 
         ``resuming``: the optimiser continuing a run, whose status runs.NOT_RESUMABLE means
         retrying cannot help; from any other step, that status is an ordinary failure.
+        ``partial``: the step does only the rest of the stage's work, so the stage's memory
+        measurement is not of the whole stage (Task 5).
         """
+        self.partial = self.partial or partial
         status = self.step(args, **options)
         if resuming and status == runs.NOT_RESUMABLE:
             log = options.get("output")
@@ -125,8 +130,8 @@ def optimise(ctx: Context, resume: bool) -> None:
         if problem is not None:  # the optimiser would refuse too; resuming cannot help
             raise StageFailed(problem, resumable=False)
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
-        ctx.partial = True  # it measures only the generations left
-        ctx.must(args, "the optimiser", resuming=True, output=log, append=True)
+        # It runs only the generations left, so its memory is not the whole stage's.
+        ctx.must(args, "the optimiser", resuming=True, partial=True, output=log, append=True)
         return
     if resume:
         # Killed before its first checkpoint (while scoring the initial population): nothing
@@ -172,9 +177,18 @@ def discard_optimiser_output(run: Path) -> None:
             table.unlink()
 
 
+def turned_off(stage: str, config: PipelineConfig) -> bool:
+    """Whether the configuration turns the stage off, so it runs no step."""
+    if stage == "revalidate":
+        return not config.revalidate
+    if stage == "select":
+        return not (config.revalidate and config.select)
+    return False
+
+
 def revalidate(ctx: Context) -> None:
     """Re-score the candidates on unseen seed blocks (B56, E87), starting afresh."""
-    if not ctx.config.revalidate:
+    if turned_off("revalidate", ctx.config):
         return
     out = ctx.layout.run / "revalidation"
     shutil.rmtree(out, ignore_errors=True)
@@ -193,7 +207,7 @@ def revalidate(ctx: Context) -> None:
 
 def select(ctx: Context) -> None:
     """Run the checklist for the best revalidated candidates and keep the best (B60)."""
-    if not (ctx.config.revalidate and ctx.config.select):
+    if turned_off("select", ctx.config):
         return
     ctx.must(
         [

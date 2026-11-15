@@ -851,7 +851,8 @@ def test_a_line_without_a_worker_peak_is_not_used_where_another_has_one(
     assert status == 1  # 500 + 8 x 900, from the run with a pool
     log = (run_dir / pr.PIPELINE_LOG).read_text()
     assert "run 20261101-000000_aaaaaaa_phase-d" in log
-    assert "20261102-000000_aaaaaaa_phase-d's optimise measured no worker peak" in log
+    assert "1 later line(s) measured no worker peak" in log
+    assert "(20261102-000000_aaaaaaa_phase-d)" in log
 
 
 def test_one_step_measured_twice_does_not_stand_in_for_another(tmp_path, config, monkeypatch):
@@ -897,3 +898,66 @@ def test_a_stage_that_never_had_a_pool_is_estimated_from_its_step(tmp_path, conf
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1
     assert "stage report needs about 9000 MB" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_an_unusable_pooled_line_does_not_drop_a_usable_pool_less_one(
+    tmp_path, config, monkeypatch
+):
+    """A pooled line without a valid time cannot be used, so the pool-less one is."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 900.0, "garbage")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 9000.0, None, "2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "run 20261102-000000_aaaaaaa_phase-d" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_pool_less_lines_older_than_the_chosen_one_are_not_reported(tmp_path, config, monkeypatch):
+    """Only a skipped line later than the chosen one matters, said once with a WARNING."""
+    for day in range(1, 4):
+        _earlier(
+            tmp_path,
+            config,
+            f"2026110{day}-000000_aaaaaaa_phase-d",
+            finished=[_line("optimise", 100.0, None, f"2026-11-0{day}T10:00:00")],
+        )
+    _earlier(
+        tmp_path,
+        config,
+        "20261105-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 100.0, 100.0, "2026-11-05T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261106-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 100.0, None, "2026-11-06T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert log.count("measured no worker peak") == 1
+    assert "WARNING: stage optimise: 1 later line" in log
+
+
+def test_a_turned_off_stage_is_not_checked_at_all(tmp_path, config, monkeypatch):
+    """Its old lines cannot refuse it, as it runs nothing."""
+    import dataclasses
+
+    _earlier(tmp_path, dataclasses.replace(config, revalidate=False),
+             "20261101-000000_aaaaaaa_phase-d",
+             finished=[_line("revalidate", 9e9, 9e9, "2026-11-01T10:00:00")])  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    status, _ = run_pipeline(tmp_path, dataclasses.replace(config, revalidate=False), Recorder())
+    assert status == 0

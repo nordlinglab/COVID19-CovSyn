@@ -280,7 +280,9 @@ def earlier_estimate(
     that measured the whole stage (:func:`complete`): a later incomplete one is skipped and an
     earlier complete one used. Stopped attempts are not used. A line without a worker peak, a
     stage that spawned no pool, is used only if no complete line of the stage has one: a run
-    whose steps ran serially, under a memory cap say, says nothing of one with a pool. The plan
+    whose steps ran serially, under a memory cap say, says nothing of one with a pool, so an
+    older pooled line may decide where a later one ran with fewer workers: the more
+    conservative outcome. The plan
     names "an earlier run on the same configuration"; the latest complete one keeps the rule
     simple to check.
 
@@ -303,23 +305,29 @@ def earlier_estimate(
         for line in history.get(other, [])
         if line.get("stage") == stage and complete(line)
     ]
-    pooled = any(_number(line.get("worker_peak_mb")) for _, line in lines)
-    found = []
+    timed = []
     for other, line in lines:
-        worker = line.get("worker_peak_mb")
-        if pooled and not _number(worker):
-            if warn is not None:
-                warn(f"{other.name}'s {stage} measured no worker peak, where another run did; "
-                     "not used")  # fmt: skip
-            continue
         when = finished_at(line)
         if when is None:
             if warn is not None:
                 warn(f"WARNING: {other.name}'s {stage} has no valid finished time; not used")
             continue
-        estimate = Estimate(line["parent_peak_mb"], worker if _number(worker) else 0.0, other.name)
-        found.append((when, other.name, estimate))
-    return max(found)[2] if found else None  # equal times: the larger run id
+        timed.append((when, other.name, line))
+    pooled = any(_number(line.get("worker_peak_mb")) for _, _, line in timed)
+    found, pool_less = [], []
+    for when, name, line in timed:
+        worker = line.get("worker_peak_mb")
+        if pooled and not _number(worker):
+            pool_less.append((when, name))
+            continue
+        estimate = Estimate(line["parent_peak_mb"], worker if _number(worker) else 0.0, name)
+        found.append((when, name, estimate))
+    chosen = max(found) if found else None
+    later = [n for when, n in pool_less if chosen is None or (when, n) > chosen[:2]]
+    if later and warn is not None:  # only a skip that could have changed the choice
+        warn(f"WARNING: stage {stage}: {len(later)} later line(s) measured no worker peak, "
+             f"where an earlier run did, so not used ({', '.join(sorted(later))})")  # fmt: skip
+    return chosen[2] if chosen else None  # equal times: the larger run id
 
 
 def memory_problem(
@@ -329,7 +337,6 @@ def memory_problem(
     others: Sequence[Path] | None = None,
     report: Callable[[str], None] | None = None,
     history: Mapping[Path, list[dict]] | None = None,
-    off: bool = False,
 ) -> str | None:
     """Why the stage would not fit in the available memory, or None (Task 5).
 
@@ -349,7 +356,6 @@ def memory_problem(
         others: The other runs, as :func:`other_runs` lists them.
         report: Told when no earlier measurement can be used, and of lines skipped.
         history: Each other run's run.log lines, read once (:func:`histories`).
-        off: The configuration turns the stage off, so it runs no step: nothing to say.
 
     Returns:
         The reason to refuse the stage, or None when it fits or cannot be checked.
@@ -358,7 +364,7 @@ def memory_problem(
     history = histories(others) if history is None else history
     estimate = earlier_estimate(run_dir, stage, others, report, history)
     if estimate is None:
-        if report is not None and not off:
+        if report is not None:
             report(
                 f"memory check for stage {stage}: no complete earlier measurement on this "
                 "configuration, so its need cannot be estimated"
@@ -589,10 +595,11 @@ def _run_stages(
                     report(f"WARNING: could not list the other runs ({error!r})")
                     others = []
                 history = histories(others)
-            off = (name == "revalidate" and not config.revalidate) or (
-                name == "select" and not (config.revalidate and config.select)
+            # A stage the configuration turns off runs no step: nothing to check.
+            off = ps.turned_off(name, config)
+            problem = (
+                None if off else memory_problem(run_dir, name, workers, others, report, history)
             )
-            problem = memory_problem(run_dir, name, workers, others, report, history, off)
             if problem is not None:
                 raise ps.StageFailed(problem)
             with watch:
