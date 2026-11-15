@@ -110,11 +110,6 @@ class Reporter:
                 sys.stdout.flush()
 
 
-def say(message: str) -> None:
-    """Print one progress line, outside a run; a run reports through its own Reporter."""
-    Reporter()(message)
-
-
 def json_lines(path: Path) -> list[dict]:
     """The JSON objects of a JSON-lines file; a line cut off by a kill, or no object, is skipped."""
     path = Path(path)
@@ -427,9 +422,8 @@ def _run_stages(
         finally:
             for warning in ctx.warnings:
                 report(f"WARNING: {warning}")
-            if (
-                not finished and watch.started
-            ):  # not a stage the memory check refused  # whatever stopped it
+            # Whatever stopped the stage, unless the memory check refused it before it started.
+            if not finished and watch.started:
                 steps = (
                     f"the steps' peaks are in {measurements}"
                     if measurements.exists()

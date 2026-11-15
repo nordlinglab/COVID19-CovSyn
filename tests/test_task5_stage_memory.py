@@ -383,7 +383,7 @@ def test_each_line_goes_to_stdout_in_one_write(monkeypatch):
             pass
 
     monkeypatch.setattr(sys, "stdout", Recording())
-    pr.say("stage optimise")
+    pr.Reporter()("stage optimise")
     assert len(writes) == 1 and writes[0].endswith("stage optimise\n")
 
 
