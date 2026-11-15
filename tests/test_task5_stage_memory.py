@@ -1145,25 +1145,30 @@ def test_an_equal_need_gives_one_message_whatever_the_line_order(
 
 
 @pytest.mark.parametrize("order", [1, -1])
+@pytest.mark.parametrize("serial_first", [True, False])
 def test_an_equal_need_across_kinds_is_named_the_same_in_any_listing(
-    tmp_path, config, monkeypatch, order
+    tmp_path, config, monkeypatch, order, serial_first
 ):
-    """A serial 5000 MB and a pooled 1000 + 8 x 500 tie: the serial one, whatever the order.
+    """A serial and a pooled 5000 MB tie: the serial one, whatever the names and order.
 
-    Across kinds a tie is always decided by the peaks, as the pooled line's step is smaller;
-    within a kind, several estimates come only from one run at one time, so the run and kind
-    in the key are never reached. The runs are listed in both orders.
+    The choice depends on neither: the serial run takes the earlier and the later name in turn,
+    and other_runs is patched to list the runs both ways (its own listing is tested elsewhere).
+    At a tie the pooled line's step is the smaller, as pooled means a worker peak above 0, so
+    the peaks pick the serial line; a rule preferring the serial kind would too, and the test
+    cannot tell them apart.
     """
+    names = ["20261101-000000_aaaaaaa_phase-d", "20261102-000000_bbbbbbb_phase-d"]
+    serial_name, pooled_name = names if serial_first else names[::-1]
     serial = _earlier(
         tmp_path,
         config,
-        "20261101-000000_aaaaaaa_phase-d",
+        serial_name,
         finished=[_line("optimise", 5000.0, None, "2026-11-01T10:00:00")],
     )
     pooled = _earlier(
         tmp_path,
         config,
-        "20261102-000000_bbbbbbb_phase-d",
+        pooled_name,
         finished=[_line("optimise", 1000.0, 500.0, "2026-11-01T10:00:00")],
     )
     monkeypatch.setattr(pr, "other_runs", lambda run_dir: [serial, pooled][::order])
@@ -1173,6 +1178,7 @@ def test_an_equal_need_across_kinds_is_named_the_same_in_any_listing(
     assert status == 1
     log = (run_dir / pr.PIPELINE_LOG).read_text()
     assert f"run {serial.name}" in log and f"run {pooled.name}" not in log
+    assert "needs about 5000 MB (its steps' peak with no pool" in log
 
 
 def test_fewer_workers_is_advised_beside_a_serial_need_that_fits(tmp_path, config, monkeypatch):
