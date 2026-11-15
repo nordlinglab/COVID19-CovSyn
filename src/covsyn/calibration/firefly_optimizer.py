@@ -1561,152 +1561,159 @@ class Firefly:
         generation_table = timings.Table(tables / timings.GENERATION_TABLE,
                                          timings.GENERATION_COLUMNS)
         progress_table = timings.Table(runs.progress_path(result_path))
-        clock = timings.GenerationClock(-1, max_workers)
+        try:  # the tables are closed however the run ends
+            clock = timings.GenerationClock(-1, max_workers)
 
-        def evaluate(k, vector, offset):
-            """Score one firefly, recording its row and adding it to the generation's."""
-            timings.LAST.clear()
-            start = time.time()
-            value = function(vector, demographic_parameters, executor, Cheng_contact_array,
-                             Cheng_attack_rate, norm_weights, seed_offset=offset)
-            row = {'generation': clock.generation, 'candidate': k, 'start_unix_s': round(start, 6),
-                   'end_unix_s': round(time.time(), 6), **timings.LAST}
-            evaluation_table.write(row)
-            clock.add_evaluation(timings.LAST)
-            return value
+            def evaluate(k, vector, offset):
+                """Score one firefly, recording its row and adding it to the generation's."""
+                timings.LAST.clear()
+                start = time.time()
+                value = function(vector, demographic_parameters, executor, Cheng_contact_array,
+                                 Cheng_attack_rate, norm_weights, seed_offset=offset)
+                row = {'generation': clock.generation, 'candidate': k,
+                       'start_unix_s': round(start, 6),
+                       'end_unix_s': round(time.time(), 6), **timings.LAST}
+                evaluation_table.write(row)
+                clock.add_evaluation(timings.LAST)
+                return value
 
-        def finish_generation(state):
-            """Checkpoint the generation, then write its timing row."""
-            started = time.perf_counter_ns()
-            save_checkpoint(result_path, clock.generation, state)
-            clock.checkpoint_ns += time.perf_counter_ns() - started
-            generation_table.write(clock.row())
+            def finish_generation(state):
+                """Checkpoint the generation, then write its timing row."""
+                started = time.perf_counter_ns()
+                save_checkpoint(result_path, clock.generation, state)
+                clock.checkpoint_ns += time.perf_counter_ns() - started
+                generation_table.write(clock.row())
 
-        if checkpoint is not None:
-            print(f'resuming after generation {int(checkpoint["generation"])}', flush=True)
-        else:
-            print(f'evaluating initial population: {self.pop_size} fireflies '
-                  f'({self.simulations} simulations each)...', flush=True)
-        for k in range(self.pop_size if checkpoint is None else 0):
-            intensities[k] = evaluate(k, fireflies[k], 0)
-            cost_parts[k] = dict(LAST_COST_PARTS)
-            print(f'  initial firefly {k+1}/{self.pop_size}: cost={intensities[k]:.4f}', flush=True)
-        print(f'initial population evaluated: best_cost={np.min(intensities):.4f}', flush=True)
-        # B49 / E78: the initial population counts. It used to start from 10e10 and was only
-        # updated after a firefly MOVED, so an initial point -- a warm start of 2.49 in the test
-        # of run 9 -- was never recorded as the best.
-        # B81: no running minimum over generations -- see generation_seed_offset. The archive
-        # below carries positions from across the search into the candidate pool instead.
-        archive = []
-        worst_fireflies = np.zeros(np.shape(fireflies))
-        worst_intensities = np.zeros(np.shape(intensities))
-        worst_iteration = np.zeros(np.shape(intensities))
-        evaluations = self.pop_size
-        new_alpha = self.alpha
-        start = 0
-        if checkpoint is None:
-            # Save the first random guess
-            result = np.hstack((fireflies, np.matrix(intensities).T))
-            np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
-                       result, fmt='%.7f')
-            finish_generation(self._state(
-                normalized_fireflies, fireflies, intensities, cost_parts, archive,
-                worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
-        else:
-            normalized_fireflies = checkpoint['normalized'].copy()
-            fireflies = checkpoint['fireflies'].copy()
-            intensities = checkpoint['intensities'].copy()
-            cost_parts = json.loads(str(checkpoint['cost_parts']))
-            archive = [row for row in checkpoint['archive']]
-            worst_fireflies = checkpoint['worst_fireflies'].copy()
-            worst_intensities = checkpoint['worst_intensities'].copy()
-            worst_iteration = checkpoint['worst_iteration'].copy()
-            evaluations = int(checkpoint['evaluations'])
-            new_alpha = float(checkpoint['alpha'])
-            start = int(checkpoint['generation']) + 1
-            for table in (progress_table, evaluation_table, generation_table):
-                drop_progress_after(table.path, start - 1)
-        # search_range = ub - lb
+            if checkpoint is not None:
+                print(f'resuming after generation {int(checkpoint["generation"])}', flush=True)
+            else:
+                print(f'evaluating initial population: {self.pop_size} fireflies '
+                      f'({self.simulations} simulations each)...', flush=True)
+            for k in range(self.pop_size if checkpoint is None else 0):
+                intensities[k] = evaluate(k, fireflies[k], 0)
+                cost_parts[k] = dict(LAST_COST_PARTS)
+                print(f'  initial firefly {k+1}/{self.pop_size}: cost={intensities[k]:.4f}',
+                      flush=True)
+            print(f'initial population evaluated: best_cost={np.min(intensities):.4f}', flush=True)
+            # B49 / E78: the initial population counts. It used to start from 10e10 and was only
+            # updated after a firefly MOVED, so an initial point -- a warm start of 2.49 in the test
+            # of run 9 -- was never recorded as the best.
+            # B81: no running minimum over generations -- see generation_seed_offset. The archive
+            # below carries positions from across the search into the candidate pool instead.
+            archive = []
+            worst_fireflies = np.zeros(np.shape(fireflies))
+            worst_intensities = np.zeros(np.shape(intensities))
+            worst_iteration = np.zeros(np.shape(intensities))
+            evaluations = self.pop_size
+            new_alpha = self.alpha
+            start = 0
+            if checkpoint is None:
+                # Save the first random guess
+                result = np.hstack((fireflies, np.matrix(intensities).T))
+                np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
+                           result, fmt='%.7f')
+                finish_generation(self._state(
+                    normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                    worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
+                    dim))
+            else:
+                normalized_fireflies = checkpoint['normalized'].copy()
+                fireflies = checkpoint['fireflies'].copy()
+                intensities = checkpoint['intensities'].copy()
+                cost_parts = json.loads(str(checkpoint['cost_parts']))
+                archive = [row for row in checkpoint['archive']]
+                worst_fireflies = checkpoint['worst_fireflies'].copy()
+                worst_intensities = checkpoint['worst_intensities'].copy()
+                worst_iteration = checkpoint['worst_iteration'].copy()
+                evaluations = int(checkpoint['evaluations'])
+                new_alpha = float(checkpoint['alpha'])
+                start = int(checkpoint['generation']) + 1
+                for table in (progress_table, evaluation_table, generation_table):
+                    drop_progress_after(table.path, start - 1)
+            # search_range = ub - lb
 
-        for generation in tqdm(range(start, max_generations)):
-            # B81: this generation's block, and every firefly re-scored on it -- the brightest
-            # included, since its score came from another block and cannot be compared here.
-            offset = generation_seed_offset(generation, self.simulations)
-            clock = timings.GenerationClock(generation, max_workers)
-            if generation > 0:   # generation 0's block is the initial one, already scored (F7)
-                for k in range(self.pop_size):
-                    intensities[k] = evaluate(k, fireflies[k], offset)
-                    cost_parts[k] = dict(LAST_COST_PARTS)
-                    evaluations += 1
-            new_alpha *= 0.97
-            moves = generation_rng(self.seed, generation)  # Task 4
-            for i in range(self.pop_size):
-                if i % 10 == 0:
-                    print(f'  gen {generation} | firefly {i}/{self.pop_size} | '
-                          f'evals {evaluations} | best {np.min(intensities):.4f}', flush=True)
-                # B49 / E78: the brightest firefly stays where it is. The move condition below
-                # is >=, which includes j == i, so every firefly -- the best one too -- took a
-                # random step of up to new_alpha / 2 of the whole range every generation and the
-                # population never kept its best point. Only the current best is exempt; every
-                # other firefly moves exactly as before.
-                if i == int(np.argmin(intensities)):
-                    continue
-                for j in range(self.pop_size):
-                    # print('i, j: ', i, j)
-                    if intensities[i] >= intensities[j]:
-                        moving = time.perf_counter_ns()
-                        r = np.sum(
-                            np.square(normalized_fireflies[i] - normalized_fireflies[j]), axis=-1)
-                        beta = self.betamin * np.exp(-self.gamma * r)
-                        # steps = new_alpha * \
-                        #     (self.rng.random(dim) - 0.5) * search_range
-                        steps = new_alpha*(moves.random(dim) - 0.5)
-                        normalized_fireflies[i] += beta * \
-                            (normalized_fireflies[j] -
-                             normalized_fireflies[i]) + steps
-                        # fireflies[i] = np.clip(fireflies[i], lb, ub)
-                        normalized_fireflies[i] = np.clip(
-                            normalized_fireflies[i], 0, 1)
-                        fireflies[i] = normalized_fireflies[i]*(ub-lb) + lb
-                        clock.moves_ns += time.perf_counter_ns() - moving
-                        # print(fireflies[i])
-                        intensities[i] = evaluate(i, fireflies[i], offset)
+            for generation in tqdm(range(start, max_generations)):
+                # B81: this generation's block, and every firefly re-scored on it -- the brightest
+                # included, since its score came from another block and cannot be compared here.
+                offset = generation_seed_offset(generation, self.simulations)
+                clock = timings.GenerationClock(generation, max_workers)
+                if generation > 0:   # generation 0's block is the initial one, already scored (F7)
+                    for k in range(self.pop_size):
+                        intensities[k] = evaluate(k, fireflies[k], offset)
+                        cost_parts[k] = dict(LAST_COST_PARTS)
                         evaluations += 1
-                        # (per-evaluation print removed; see per-generation summary below)
-                        cost_parts[i] = dict(LAST_COST_PARTS)
-                        if intensities[i] > worst_intensities[i]:
-                            worst_fireflies[i] = fireflies[i]
-                            worst_intensities[i] = intensities[i]
-                            worst_iteration[i] = evaluations
-            # Per-generation progress for live monitoring: lower best_cost = better fit.
-            # B81: this generation's own block, so the column is not a convergence curve --
-            # a rise can be the block, not the search.
-            print(f'generation {generation}: best_cost={np.min(intensities):.4f} '
-                  f'offset={offset} evals={evaluations}', flush=True)
+                new_alpha *= 0.97
+                moves = generation_rng(self.seed, generation)  # Task 4
+                for i in range(self.pop_size):
+                    if i % 10 == 0:
+                        print(f'  gen {generation} | firefly {i}/{self.pop_size} | '
+                              f'evals {evaluations} | best {np.min(intensities):.4f}', flush=True)
+                    # B49 / E78: the brightest firefly stays where it is. The move condition below
+                    # is >=, which includes j == i, so every firefly -- the best one too -- took a
+                    # random step of up to new_alpha / 2 of the whole range every generation and the
+                    # population never kept its best point. Only the current best is exempt; every
+                    # other firefly moves exactly as before.
+                    if i == int(np.argmin(intensities)):
+                        continue
+                    for j in range(self.pop_size):
+                        # print('i, j: ', i, j)
+                        if intensities[i] >= intensities[j]:
+                            moving = time.perf_counter_ns()
+                            r = np.sum(
+                                np.square(normalized_fireflies[i] - normalized_fireflies[j]),
+                                axis=-1)
+                            beta = self.betamin * np.exp(-self.gamma * r)
+                            # steps = new_alpha * \
+                            #     (self.rng.random(dim) - 0.5) * search_range
+                            steps = new_alpha*(moves.random(dim) - 0.5)
+                            normalized_fireflies[i] += beta * \
+                                (normalized_fireflies[j] -
+                                 normalized_fireflies[i]) + steps
+                            # fireflies[i] = np.clip(fireflies[i], lb, ub)
+                            normalized_fireflies[i] = np.clip(
+                                normalized_fireflies[i], 0, 1)
+                            fireflies[i] = normalized_fireflies[i]*(ub-lb) + lb
+                            clock.moves_ns += time.perf_counter_ns() - moving
+                            # print(fireflies[i])
+                            intensities[i] = evaluate(i, fireflies[i], offset)
+                            evaluations += 1
+                            # (per-evaluation print removed; see per-generation summary below)
+                            cost_parts[i] = dict(LAST_COST_PARTS)
+                            if intensities[i] > worst_intensities[i]:
+                                worst_fireflies[i] = fireflies[i]
+                                worst_intensities[i] = intensities[i]
+                                worst_iteration[i] = evaluations
+                # Per-generation progress for live monitoring: lower best_cost = better fit.
+                # B81: this generation's own block, so the column is not a convergence curve --
+                # a rise can be the block, not the search.
+                print(f'generation {generation}: best_cost={np.min(intensities):.4f} '
+                      f'offset={offset} evals={evaluations}', flush=True)
 
-            # Append this generation's best solution's decoded metrics to a CSV so the
-            # run can be plotted/inspected live (and aborted early if values look wrong).
-            best_idx = int(np.argmin(intensities))
-            if generation % ARCHIVE_EVERY == 0:
-                archive.append(np.concatenate(
-                    ([generation], fireflies[best_idx], [intensities[best_idx]])))
-            row = {'generation': generation, 'seed_offset': offset,
-                   'best_cost': float(np.min(intensities))}
-            row.update(cost_parts[best_idx])
-            row.update(decode_metrics(fireflies[best_idx]))
-            # Task 4: results/tables/<run-id>/progress.csv. A new run starts it, and a resume
-            # has trimmed it to its checkpoint; rows go under its header (Task 5).
-            progress_table.write(row)
-            # Task 4: after the progress row, so a resumed run drops a row written past it.
-            # Task 5: the timing row follows the checkpoint, whose time it records; a kill
-            # between the two leaves that generation without one.
-            finish_generation(self._state(
-                normalized_fireflies, fireflies, intensities, cost_parts, archive,
-                worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
+                # Append this generation's best solution's decoded metrics to a CSV so the
+                # run can be plotted/inspected live (and aborted early if values look wrong).
+                best_idx = int(np.argmin(intensities))
+                if generation % ARCHIVE_EVERY == 0:
+                    archive.append(np.concatenate(
+                        ([generation], fireflies[best_idx], [intensities[best_idx]])))
+                row = {'generation': generation, 'seed_offset': offset,
+                       'best_cost': float(np.min(intensities))}
+                row.update(cost_parts[best_idx])
+                row.update(decode_metrics(fireflies[best_idx]))
+                # Task 4: results/tables/<run-id>/progress.csv. A new run starts it, and a resume
+                # has trimmed it to its checkpoint; rows go under its header (Task 5).
+                progress_table.write(row)
+                # Task 4: after the progress row, so a resumed run drops a row written past it.
+                # Task 5: the timing row follows the checkpoint, whose time it records; a kill
+                # between the two leaves that generation without one.
+                finish_generation(self._state(
+                    normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                    worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
+                    dim))
 
-        executor.shutdown()  # the workers write their profiles as they exit
-        for table in (progress_table, evaluation_table, generation_table):
-            table.close()
+            executor.shutdown()  # the workers write their profiles as they exit
+        finally:
+            for table in (progress_table, evaluation_table, generation_table):
+                table.close()
         if self.profile_dir is not None:  # Task 5
             merged = profiling.merge_profiles(self.profile_dir, tables)
             print(f'profile: {merged}, top {profiling.TOP} in {tables / profiling.TOP_TABLE}; '

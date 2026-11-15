@@ -279,3 +279,21 @@ def test_an_attempt_without_a_checkpoint_leaves_no_timing_tables(tmp_path):
         (tables / name).write_text("generation,start_un")
     ps.discard_optimiser_output(run)
     assert list(tables.iterdir()) == []
+
+
+def test_a_run_that_fails_closes_its_tables(tmp_path, monkeypatch):
+    """However the run ends, its three tables are closed."""
+    closed = []
+    close = timings.Table.close
+
+    def recording(self):
+        closed.append(self.path.name)
+        close(self)
+
+    monkeypatch.setattr(timings.Table, "close", recording)
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(POP + 3))
+    assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])
