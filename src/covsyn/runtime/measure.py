@@ -27,15 +27,13 @@ from covsyn.runtime import memory
 ENV = "COVSYN_MEASURE"
 
 
-def _mb(n: int) -> float | None:
-    return round(n / memory.MB, 1) if n else None  # no child: RUSAGE_CHILDREN is 0
-
-
 def _record(path: str, step: str) -> None:
     line = {
         "step": step,
-        "parent_peak_mb": _mb(memory.peak_rss_bytes(resource.RUSAGE_SELF)),
-        "worker_peak_mb": _mb(memory.peak_rss_bytes(resource.RUSAGE_CHILDREN)),
+        "parent_peak_mb": memory.megabytes(memory.peak_rss_bytes(resource.RUSAGE_SELF)),
+        "worker_peak_mb": memory.megabytes(  # no child: RUSAGE_CHILDREN is 0
+            memory.peak_rss_bytes(resource.RUSAGE_CHILDREN) or None
+        ),
     }
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(line) + "\n")

@@ -135,11 +135,6 @@ def finished_stages(run_dir: Path) -> list[str]:
     return [line["stage"] for line in json_lines(Path(run_dir) / RUN_LOG) if "stage" in line]
 
 
-def _mb(n: int | None) -> float | None:
-    """Bytes as MB to 0.1 MB; None stays None, a reading that never succeeded."""
-    return None if n is None else round(n / memory.MB, 1)
-
-
 def _number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -438,16 +433,19 @@ def _run_stages(
                     if measurements.exists()
                     else "no step reported its peaks"
                 )
-                lowest, peak = _mb(watch.lowest_available), _mb(watch.parent_peak_bytes)
-                report(
+                lowest, peak = watch.lowest_available, watch.parent_peak_bytes
+                report(  # rounded once, from the bytes
                     f"memory in stage {name}: lowest available "
-                    f"{'unknown' if lowest is None else f'{lowest:.0f} MB'}, this process at "
-                    f"most {'unknown' if peak is None else f'{peak:.0f} MB'}; {steps}"
+                    f"{'unknown' if lowest is None else f'{lowest / memory.MB:.0f} MB'}, this "
+                    f"process at most {'unknown' if peak is None else f'{peak / memory.MB:.0f} MB'}"
+                    f"; {steps}"
                 )
         peaks = {
             **stage_memory(measurements),
-            "pipeline_peak_mb": _mb(watch.parent_peak_bytes),  # None: no reading succeeded
-            "lowest_available_mb": _mb(watch.lowest_available),
+            "pipeline_peak_mb": memory.megabytes(
+                watch.parent_peak_bytes
+            ),  # None: no reading succeeded
+            "lowest_available_mb": memory.megabytes(watch.lowest_available),
         }
         warnings = [*ctx.warnings, *memory_warnings]
         record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)

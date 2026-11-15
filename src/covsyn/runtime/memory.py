@@ -22,6 +22,11 @@ LOW_MEMORY_FRACTION = 0.10  # warn below this share of the total (plan, Task 5)
 MB = 1e6
 
 
+def megabytes(n: float | None) -> float | None:
+    """Bytes as MB (10^6) to 0.1 MB; None, a reading that never succeeded, stays None."""
+    return None if n is None else round(n / MB, 1)
+
+
 def ru_maxrss_bytes(value: int, platform: str = sys.platform) -> int:
     """``ru_maxrss`` in bytes: bytes on macOS, KiB on Linux.
 

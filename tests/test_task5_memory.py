@@ -260,3 +260,24 @@ def test_no_rss_reading_is_none_not_zero(monkeypatch):
     with memory.MemoryWatch(interval=0.01, system=lambda: (50, 100)) as watch:
         time.sleep(0.05)
     assert watch.parent_peak_bytes is None
+
+
+def test_a_warning_that_failed_once_is_sent_again():
+    """A stderr broken for a moment does not lose the low-memory warning for good."""
+    sent = []
+
+    def flaky(message):
+        if not sent:
+            sent.append(None)
+            raise BrokenPipeError
+        sent.append(message)
+
+    with memory.MemoryWatch(interval=0.01, warn=flaky, system=lambda: (5, 100)):
+        time.sleep(0.1)
+    assert len(sent) == 2 and sent[1].startswith("only")
+
+
+def test_megabytes_keeps_none():
+    """One conversion for every table and log: bytes to MB to 0.1 MB, None for no reading."""
+    assert memory.megabytes(1_500_000) == 1.5
+    assert memory.megabytes(None) is None

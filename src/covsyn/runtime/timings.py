@@ -74,11 +74,6 @@ def seconds(ns: float) -> float:
     return round(ns / NS, 6)
 
 
-def megabytes(n: float) -> float:
-    """Bytes as MB (10^6), to 0.1 MB."""
-    return round(n / memory.MB, 1)
-
-
 class TaskClock:
     """One pool task's timing and memory, measured in the worker."""
 
@@ -142,9 +137,9 @@ def summarise_tasks(tasks: Iterable[Mapping]) -> dict:
         "run_covid_s": seconds(sum(task["run_covid_ns"] for task in tasks)),
         "case_reduction_s": seconds(sum(task["reduction_ns"] for task in tasks)),
         "busy_s": seconds(sum(task["busy_ns"] for task in tasks)),
-        "worker_rss_before_mb": megabytes(max(first.values())) if first else None,
-        "worker_rss_after_mb": megabytes(max(last.values())) if last else None,
-        "worker_peak_mb": megabytes(max(peak.values())) if peak else None,
+        "worker_rss_before_mb": memory.megabytes(max(first.values())) if first else None,
+        "worker_rss_after_mb": memory.megabytes(max(last.values())) if last else None,
+        "worker_peak_mb": memory.megabytes(max(peak.values())) if peak else None,
         "worker_rss": last,
     }
     for stage in STAGES:
@@ -269,8 +264,8 @@ class GenerationClock:
             "busy_s": round(self.busy_s, 6),
             "workers": self.workers,
             "utilisation": round(self.busy_s / (self.workers * wall), 4) if wall > 0 else None,
-            "parent_rss_mb": megabytes(memory.rss_bytes()),
-            "worker_rss_sum_mb": megabytes(sum(rss)) if rss else None,
-            "worker_rss_max_mb": megabytes(max(rss)) if rss else None,
-            "available_mb": megabytes(available),
+            "parent_rss_mb": memory.megabytes(memory.rss_bytes()),
+            "worker_rss_sum_mb": memory.megabytes(sum(rss)) if rss else None,
+            "worker_rss_max_mb": memory.megabytes(max(rss)) if rss else None,
+            "available_mb": memory.megabytes(available),
         }
