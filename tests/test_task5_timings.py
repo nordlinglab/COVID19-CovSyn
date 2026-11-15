@@ -211,3 +211,12 @@ def test_a_progress_table_left_empty_gets_its_header_again(tmp_path, monkeypatch
     with open(runs.progress_path(path), newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows and "best_cost" in rows[0]
+
+
+def test_dropping_rows_skips_rows_that_are_not_whole(tmp_path):
+    """A row short of cells, or without a generation, is dropped rather than kept or fatal."""
+    path = tmp_path / "t.csv"
+    path.write_text("generation,best_cost\n0,1.0\n0\n,2.0\n1,3.0,9\n1,4.0\n")
+    fo.drop_progress_after(path, 1)
+    with open(path, newline="") as f:
+        assert list(csv.reader(f)) == [["generation", "best_cost"], ["0", "1.0"], ["1", "4.0"]]

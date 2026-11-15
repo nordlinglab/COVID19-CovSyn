@@ -126,25 +126,31 @@ def test_watch_stops_its_thread():
     assert not watch.thread.is_alive()
 
 
-def _own_pid() -> tuple[int, int]:
+def _task_reading_100_mib() -> tuple[int, int, int]:
     import os
 
     from covsyn.calibration import fast_cost
+    from covsyn.runtime import timings
 
-    return fast_cost._WORKER_PROCESS.pid, os.getpid()
+    clock = timings.TaskClock(False, fast_cost._WORKER_PROCESS)
+    block = np.ones(100 * MIB // 8)
+    record = clock.record()
+    del block
+    return record["pid"], os.getpid(), record["rss_after"] - record["rss_before"]
 
 
 @pytest.mark.parametrize("method", ["fork", "spawn"])
 def test_a_worker_measures_itself_not_its_parent(method, demographic_parameters):
-    """The handle a worker keeps for its memory reads is its own, also after a fork."""
+    """A task's memory reads are its worker's own, also after a fork: they see its 100 MiB."""
     from covsyn.calibration import fast_cost
 
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=1, mp_context=multiprocessing.get_context(method),
         initializer=fast_cost.init_worker, initargs=(demographic_parameters, 1),
     ) as pool:  # fmt: skip
-        kept, actual = pool.submit(_own_pid).result()
-    assert kept == actual
+        recorded, actual, grown = pool.submit(_task_reading_100_mib).result()
+    assert recorded == actual
+    assert grown >= 99 * MIB
 
 
 def test_rss_of_a_given_process():

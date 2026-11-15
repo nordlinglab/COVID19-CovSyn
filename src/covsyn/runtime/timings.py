@@ -21,6 +21,8 @@ import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+import psutil
+
 from covsyn.model.data_synthesis_main import STAGES
 from covsyn.runtime import memory
 
@@ -80,13 +82,17 @@ def megabytes(n: float) -> float:
 class TaskClock:
     """One pool task's timing and memory, measured in the worker."""
 
-    def __init__(self, stage_timing: bool, process=None) -> None:
-        """Start the task: its PID, wall-clock start and RSS; ``process`` is this process."""
-        self.process = process
+    def __init__(self, stage_timing: bool, process: psutil.Process | None = None) -> None:
+        """Start the task: its PID, wall-clock start and RSS.
+
+        ``process`` is a handle on this process that the worker keeps; without one, the task
+        makes its own, once.
+        """
+        self.process = process or psutil.Process()
         self.pid = os.getpid()
         self.start = time.time()
         self.started = time.perf_counter_ns()
-        self.rss_before = memory.rss_bytes(process)
+        self.rss_before = memory.rss_bytes(self.process)
         self.run_covid_ns = 0
         self.reduction_ns = 0
         self.stage_ns: dict[str, int] | None = {} if stage_timing else None

@@ -137,6 +137,21 @@ def test_a_worker_without_tasks_writes_no_profile(
     profiling.merge_profiles(tmp_path, tmp_path)
 
 
+def test_a_profile_that_could_not_start_is_not_written(tmp_path):
+    """If enabling fails (another profiler active), the worker still writes no empty profile."""
+
+    class Refusing:
+        def enable(self):
+            raise ValueError("Another profiling tool is already active")
+
+    worker = profiling.WorkerProfile(tmp_path)
+    worker.profile = Refusing()
+    with pytest.raises(ValueError):
+        worker.enable()
+    worker.dump()
+    assert not list(tmp_path.iterdir())
+
+
 def test_a_profile_run_cannot_be_resumed(tmp_path):
     """Its population is the worker count; a profile is run again, not continued."""
     (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": {"mode": "profile"}}))

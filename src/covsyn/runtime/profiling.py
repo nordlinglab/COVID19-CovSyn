@@ -50,8 +50,8 @@ class WorkerProfile:
 
     def enable(self) -> None:
         """Profile from now on."""
-        self.used = True
         self.profile.enable()
+        self.used = True  # only once enabled: an empty profile cannot be read
 
     def disable(self) -> None:
         """Stop profiling."""
