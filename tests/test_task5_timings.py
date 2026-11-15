@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import csv
+import time
 
 import numpy as np
 import pytest
@@ -394,8 +395,8 @@ def test_a_second_close_error_is_said(tmp_path, capsys):
 class SecondInterrupt(BaseException):
     """Stands in for a second Ctrl-C.
 
-    A BaseException, like KeyboardInterrupt, which would stop the whole pytest session if it
-    got through.
+    A KeyboardInterrupt that got through would stop the whole pytest session; this
+    BaseException, which pytest turns into one test failure, would not.
     """
 
 
@@ -405,11 +406,12 @@ def test_a_second_interrupt_after_the_shutdown_keeps_the_runs_error(tmp_path, mo
     import inspect
 
     shutdown = concurrent.futures.ProcessPoolExecutor.shutdown
+    signature = inspect.signature(shutdown)
     interrupts = []
 
     def interrupted(self, *args, **kwargs):
         shutdown(self, *args, **kwargs)  # the workers are joined, then the second interrupt
-        call = inspect.signature(shutdown).bind(self, *args, **kwargs)
+        call = signature.bind(self, *args, **kwargs)
         call.apply_defaults()  # what the call means, not how it is spelt
         if call.arguments["cancel_futures"]:
             interrupts.append((call.arguments["wait"], call.arguments["cancel_futures"]))
@@ -437,3 +439,34 @@ def test_after_a_failure_every_close_error_is_said_and_none_raised(capsys):
     timings.close_tables([Bad("a.csv"), Bad("b.csv")], failing=True)
     err = capsys.readouterr().err
     assert "could not close a.csv" in err and "could not close b.csv" in err
+
+
+def _sleep_after_writing_pid(path, seconds):
+    import os
+
+    with open(path, "w") as f:
+        f.write(str(os.getpid()))
+    time.sleep(seconds)
+    return 0
+
+
+def test_a_failed_run_leaves_no_worker_running(tmp_path, monkeypatch):
+    """A task still running when the run fails is waited for, and its worker ends with the run."""
+    import psutil
+
+    pid_file = tmp_path / "worker.pid"
+
+    def failing(P, demo, executor, *args, **kwargs):
+        future = executor.submit(_sleep_after_writing_pid, pid_file, 1.0)
+        while not pid_file.exists() or not pid_file.read_text():  # the task is running
+            time.sleep(0.01)
+        del future
+        raise Killed
+
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, failing)
+    pid = int(pid_file.read_text())
+    assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
