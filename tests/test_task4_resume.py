@@ -104,10 +104,13 @@ def test_a_finished_run_resumes_to_the_same_result(uninterrupted):
         np.testing.assert_array_equal(np.asarray(got), np.asarray(want))
 
 
-def test_resuming_without_a_checkpoint_is_an_error(tmp_path):
+def test_resuming_without_a_checkpoint_is_an_error(tmp_path, capsys):
     """Nothing to resume from is a mistake to report, not a fresh start in an old directory."""
-    with pytest.raises(FileNotFoundError, match="checkpoint"):
+    with pytest.raises(SystemExit) as stop:
         optimise(tmp_path, objective, resume=True)
+    assert stop.value.code == runs.NOT_RESUMABLE and "checkpoint" in capsys.readouterr().err
+    with pytest.raises(FileNotFoundError, match="checkpoint"):
+        fo.load_last_checkpoint(tmp_path)
 
 
 def test_progress_rows_after_the_checkpoint_are_dropped(tmp_path, uninterrupted):
@@ -156,18 +159,23 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
                                     '{"seed": 1}', '{"seed": 1, "settings": {}}',
                                     '{"seed": true, "settings": {"mode": "train"}}',
                                     '{"seed": 1, "settings": {"mode": "bogus"}}',
-                                    '{"seed": -1, "settings": {"mode": "train"}}', "directory"])
+                                    '{"seed": -1, "settings": {"mode": "train"}}', "directory",
+                                    "below a file"])
 def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
     """A claim marker, a missing file, or no seed or mode would resume the wrong run.
 
     The mode sets the population size, which must match the checkpoint's.
     """
+    run = tmp_path
     if config == "directory":
         (tmp_path / "config.json").mkdir()
+    elif config == "below a file":  # --resume given a file: NotADirectoryError
+        run = tmp_path / "a_file"
+        run.write_text("x")
     elif config is not None:
         (tmp_path / "config.json").write_text(config)
     with pytest.raises(SystemExit) as stop:
-        fo.resumed_settings(tmp_path)
+        fo.resumed_settings(run)
     assert stop.value.code == runs.NOT_RESUMABLE  # the pipeline then suggests no retry
 
 
@@ -309,6 +317,7 @@ def test_the_optimiser_refuses_a_run_without_a_checkpoint_at_startup(tmp_path, m
     run = tmp_path / "results" / "models" / "r"
     run.mkdir(parents=True)
     (run / "config.json").write_text(json.dumps({"seed": 1, "settings": {"mode": "test"}}))
+    monkeypatch.chdir(tmp_path)  # no ./variable here: loading any input would fail instead
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
     with pytest.raises(SystemExit) as stop:
         fo.main()

@@ -60,10 +60,12 @@ NOT_RESUMABLE = 3
 
 
 def resume_problem(run_dir: Path) -> str | None:
-    """Why a run with checkpoints cannot be resumed, or None (Task 4).
+    """Why a run cannot be resumed, or None (Task 4).
 
-    A generation writes its progress row before its checkpoint, so finished generations whose
-    table is missing mean the table is lost or elsewhere; nothing is rebuilt or looked for.
+    It has no checkpoint at all; or its finished generations lost their progress table, which
+    each generation writes before its checkpoint, so the table is lost or elsewhere and nothing
+    is rebuilt or looked for. The pipeline asks only once it knows a checkpoint exists, as it
+    starts a run without one afresh.
     """
     last = last_checkpoint(run_dir)
     if last is None:

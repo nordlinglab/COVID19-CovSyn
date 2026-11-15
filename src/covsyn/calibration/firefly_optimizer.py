@@ -1159,7 +1159,8 @@ def load_last_checkpoint(directory: Path) -> dict:
 
 
 def check_progress_table(run_dir: Path) -> None:
-    """Refuse to resume a run whose finished generations lost their progress table (Task 4).
+    """Refuse to resume a run without a checkpoint, or whose finished generations lost their
+    progress table (Task 4).
 
     Raises:
         SystemExit: runs.NOT_RESUMABLE, as at startup; see runs.resume_problem.
@@ -1502,9 +1503,9 @@ class Firefly:
             fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
             print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
         # Task 4: a resumed run continues from its last checkpoint; its config.json stands.
+        if resume:
+            check_progress_table(result_path)  # a checkpoint, and its table: else NOT_RESUMABLE
         checkpoint = load_last_checkpoint(result_path) if resume else None
-        if checkpoint is not None:
-            check_progress_table(result_path)
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
@@ -1665,8 +1666,18 @@ class Firefly:
                 fireflies, intensities)
 
 
-# The modes main() knows; a run recorded with another cannot be continued.
-OPTIMISER_MODES = ('train', 'test', 'profile')
+# Each mode's (pop_size, alpha, betamin, gamma, max_generations); main() runs these, and a run
+# recorded with another mode cannot be continued.
+OPTIMISER_MODES = {
+    # B51 (E79): gamma was 0.131, but r is the SQUARED distance over all 199 normalised
+    # dimensions, whose expectation between two uniform points is d/6 = 33; at the median r of
+    # 29.7 that gave beta = 0.02, i.e. no attraction -- run 9 never moved off its warm start in
+    # 120 generations. gamma = 6/d makes beta = 1/e = 0.37 at the typical distance and lets it
+    # approach 1 as fireflies close in.
+    'train': (100, 1, 1, 0.03, 120),
+    'test': (3, 1, 1, 0.01, 10),
+    'profile': (10, 1, 1, 0.01, 3),
+}
 
 
 def not_resumable(message: str) -> None:
@@ -1681,7 +1692,10 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
     The mode sets the population size and the generations, which must match the checkpoint.
 
     Raises:
-        SystemExit: The directory holds no config.json with both, so it cannot be resumed.
+        SystemExit: With code runs.NOT_RESUMABLE when retrying cannot help: config.json is
+            missing, not a file, unreadable as JSON, or lacks a seed of at least 0 or a mode
+            of OPTIMISER_MODES. With a message (status 1) for any other read error, which may
+            pass.
     """
     try:
         config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
@@ -1759,42 +1773,20 @@ def main() -> None:
     max_workers = hardware.resolve_workers(args.workers, os.environ, None, cores=cores.count)
     print(f'performance cores: {cores.count} ({cores.method}); workers: {max_workers}')
     # result_path = Path(args.result_path)
-    mode = resume_arguments(args)
+    # The checkpoints first: a run killed before any has nothing to continue, whatever its
+    # config.json holds, and that is the reason to report. Both are read before any input.
     problem = runs.resume_problem(args.resume) if args.resume is not None else None
     if problem is not None:
-        not_resumable(problem)  # at startup, before any input loads
+        not_resumable(problem)
+    mode = resume_arguments(args)
     if args.resume is None and args.run_dir is not None:
         runs.check_unclaimed(args.run_dir)  # fails at startup; the claim comes after the inputs
     print(f'mode: {mode}')
     # shift_percentage = args.shift_percentage
-    if mode == 'train':
-        # pop_size = 50
-        pop_size = 100
-        alpha = 1
-        betamin = 1
-        # B51 (E79): gamma was 0.131, but r below is the SQUARED distance over all 199
-        # normalised dimensions, whose expectation between two uniform points is d/6 = 33; at
-        # the median r of 29.7 that gave beta = 0.02, i.e. no attraction -- run 9 never moved
-        # off its warm start in 120 generations. gamma = 6/d makes beta = 1/e = 0.37 at the
-        # typical distance and lets it approach 1 as fireflies close in.
-        gamma = 0.03
-        max_generations = 120
-        # max_generations = 100
-    elif mode == 'test':
-        pop_size = 3
-        alpha = 1
-        betamin = 1
-        gamma = 0.01
-        max_generations = 10
-    elif mode == 'profile':
-        pop_size = 10
-        alpha = 1
-        betamin = 1
-        gamma = 0.01
-        max_generations = 3
-    else:
+    if mode not in OPTIMISER_MODES:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
+    pop_size, alpha, betamin, gamma, max_generations = OPTIMISER_MODES[mode]
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
