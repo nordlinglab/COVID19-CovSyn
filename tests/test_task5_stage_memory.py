@@ -160,34 +160,58 @@ def test_low_memory_during_a_stage_is_a_warning_of_it(tmp_path, config, monkeypa
 
 
 def test_low_memory_is_reported_while_the_stage_runs(tmp_path, config, monkeypatch):
-    """Live, once per stage: a stage killed for want of memory may never reach its end."""
+    """Live, once per stage, with one prefix: a stage killed for want of memory may not end."""
     import time
+    from pathlib import Path
 
     monkeypatch.setattr(memory, "system_memory", lambda: (5, 100))
     seen = []
 
     class Watching(Recorder):
         def __call__(self, args, output, append, env):
-            time.sleep(0.2)  # the watch samples as the stage starts
-            run_dir = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
-            seen.append("below 10%" in (run_dir / pr.PIPELINE_LOG).read_text())
+            log = Path(env[measure.ENV]).parent.parent / pr.PIPELINE_LOG  # run/logs/...
+            deadline = time.monotonic() + 5
+            while "below 10%" not in log.read_text() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            seen.append("below 10%" in log.read_text())
             return super().__call__(args, output, append, env)
 
     _, run_dir = run_pipeline(tmp_path, config, Watching())
     assert seen and all(seen)
-    assert (run_dir / pr.PIPELINE_LOG).read_text().count("below 10%") == len(STAGES)
+    text = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert text.count("WARNING: only") == len(STAGES) and "WARNING: WARNING" not in text
 
 
 def test_a_failed_stage_leaves_its_memory_readings(tmp_path, config):
-    """The least available memory and where the steps' peaks are, for a stage that stopped."""
+    """The least available memory, and a file of the steps' peaks that a resume keeps."""
+    import re
+    from pathlib import Path
+
     status, run_dir = run_pipeline(
         tmp_path, config, Recorder(fail={"covsyn.model.data_synthesis_main"})
     )
     assert status == 1
     log = (run_dir / pr.PIPELINE_LOG).read_text()
-    assert (
-        "memory in stage synthesise: lowest available" in log and "memory_synthesise.jsonl" in log
-    )
+    assert "memory in stage synthesise: lowest available" in log
+    (named,) = re.findall(r"peaks are in (\S+memory_synthesise\S*\.jsonl)", log)
+    Path(named).write_text("{}\n")  # as a step of the failed attempt would have
+    assert prun(None, run_dir, execute=Recorder(), resume=True) == 0
+    assert Path(named).exists()
+
+
+def test_a_stage_stopped_by_an_interrupt_leaves_its_memory_readings(tmp_path, config):
+    """Any exit before the stage's end, not only a failed step."""
+
+    class Interrupted(Recorder):
+        def __call__(self, args, output, append, env):
+            if "covsyn.model.data_synthesis_main" in map(str, args):
+                raise KeyboardInterrupt
+            return super().__call__(args, output, append, env)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_pipeline(tmp_path, config, Interrupted())
+    run_dir = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
+    assert "memory in stage synthesise" in (run_dir / pr.PIPELINE_LOG).read_text()
 
 
 def earlier_run(

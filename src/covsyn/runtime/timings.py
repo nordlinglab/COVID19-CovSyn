@@ -190,7 +190,7 @@ class GenerationClock:
         wall_ns = time.perf_counter_ns() - self.started
         available, total = memory.available_bytes(), memory.total_bytes()
         if memory.is_low(available, total):
-            warn(memory.low_memory_warning(available, total))
+            warn(f"WARNING: {memory.low_memory_warning(available, total)}")
         rss = list(self.worker_rss.values())
         wall = wall_ns / NS
         return {

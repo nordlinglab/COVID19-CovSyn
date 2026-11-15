@@ -64,9 +64,9 @@ def is_low(available: int, total: int) -> bool:
 
 
 def low_memory_warning(available: int, total: int) -> str:
-    """The warning for low memory, giving the share left."""
+    """The warning for low memory, giving the share left; the reporter adds its prefix."""
     return (
-        f"WARNING: only {available / MB:.0f} MB available, {100 * available / total:.0f}% "
+        f"only {available / MB:.0f} MB available, {100 * available / total:.0f}% "
         f"of the memory (below {100 * LOW_MEMORY_FRACTION:.0f}%)"
     )
 
@@ -95,7 +95,9 @@ class MemoryWatch:
         ``system`` gives the available and total memory; system_memory by default.
         """
         self.interval = interval
-        self.warn = warn or (lambda message: print(message, file=sys.stderr, flush=True))
+        self.warn = warn or (
+            lambda message: print(f"WARNING: {message}", file=sys.stderr, flush=True)
+        )
         self.system = system or system_memory
         self.process = psutil.Process()
         self.parent_peak_bytes = 0
@@ -112,7 +114,10 @@ class MemoryWatch:
             self.lowest_available = available
         if not self.warned and is_low(available, total):
             self.warned = True
-            self.warn(low_memory_warning(available, total))
+            try:
+                self.warn(low_memory_warning(available, total))
+            except Exception as error:  # a full disk must not stop the sampling
+                print(f"memory watch: could not report low memory ({error!r})", file=sys.stderr)
 
     def _run(self) -> None:
         while True:

@@ -29,6 +29,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
@@ -74,13 +75,17 @@ def run_module(
         return subprocess.run(command, stdout=f, stderr=subprocess.STDOUT, **options).returncode
 
 
+_SAYING = threading.Lock()  # the memory watch reports from its own thread (Task 5)
+
+
 def say(message: str, log: Path | None = None) -> None:
     """A timestamped progress line, printed and, given a run's pipeline.log, kept there."""
     line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}"
-    print(line, flush=True)
-    if log is not None:
-        with open(log, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+    with _SAYING:
+        print(line, flush=True)
+        if log is not None:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
 
 
 def json_lines(path: Path) -> list[dict]:
@@ -360,9 +365,9 @@ def _run_stages(
     for name, function in ps.STAGES:
         if name in done:
             continue
-        # Task 5: the stage's steps append their peaks here; a killed attempt's do not count.
-        measurements = layout.logs / f"memory_{name}.jsonl"
-        measurements.unlink(missing_ok=True)
+        # Task 5: the stage's steps append their peaks here, one file per attempt, so a resumed
+        # stage counts only its own and a failed attempt's stay where pipeline.log says.
+        measurements = layout.logs / f"memory_{name}_{datetime.now():%Y%m%d-%H%M%S-%f}.jsonl"
         environment = {**env, measure.ENV: str(measurements)}
         ctx = ps.Context(config, layout, step)
         report(f"stage {name}")
@@ -376,12 +381,14 @@ def _run_stages(
             report(f"WARNING: {message}")
 
         watch = memory.MemoryWatch(warn=warn)
+        finished = False
         try:
             problem = memory_problem(run_dir, name, workers)
             if problem is not None:
                 raise ps.StageFailed(problem)
             with watch:
                 function(ctx, resume) if name == "optimise" else function(ctx)
+            finished = True
         except ps.StageFailed as error:
             hint = (
                 f" Resume with: covsyn-pipeline --resume {resume_name(run_dir)}"
@@ -389,17 +396,17 @@ def _run_stages(
                 else ""
             )
             report(f"ERROR: {error}; stopping.{hint}")
-            if watch.lowest_available is not None:
+            return 1
+        finally:
+            for warning in ctx.warnings:
+                report(f"WARNING: {warning}")
+            if not finished and watch.lowest_available is not None:  # whatever stopped it
                 report(
                     f"memory in stage {name}: lowest available "
                     f"{watch.lowest_available / memory.MB:.0f} MB, this process at most "
                     f"{watch.parent_peak_bytes / memory.MB:.0f} MB; the steps' peaks are in "
                     f"{measurements}"
                 )
-            return 1
-        finally:
-            for warning in ctx.warnings:
-                report(f"WARNING: {warning}")
         peaks = {
             **stage_memory(measurements),
             "pipeline_peak_mb": round(watch.parent_peak_bytes / memory.MB, 1),

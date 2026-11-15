@@ -116,7 +116,7 @@ def test_watch_records_the_peak_and_warns_once_when_memory_is_low():
     assert watch.lowest_available == 4
     assert watch.parent_peak_bytes >= memory.rss_bytes() // 2
     assert len(warnings) == 1
-    assert "5% of the memory" in warnings[0]
+    assert warnings[0].startswith("only") and "5% of the memory" in warnings[0]
 
 
 def test_watch_stops_its_thread():
@@ -152,3 +152,21 @@ def test_rss_of_a_given_process():
     import psutil
 
     assert 0 < memory.rss_bytes(psutil.Process()) <= memory.peak_rss_bytes()
+
+
+def test_the_warning_has_no_prefix_of_its_own():
+    """Whoever reports it adds "WARNING: ", once."""
+    assert not memory.low_memory_warning(5, 100).startswith("WARNING")
+
+
+def test_a_warning_that_cannot_be_written_does_not_stop_the_sampling():
+    """The watch keeps sampling when its warn callback raises, as a full disk would make it."""
+    samples = iter([(5, 100), (4, 100), (3, 100)])
+
+    def warn(message):
+        raise OSError("No space left on device")
+
+    with memory.MemoryWatch(interval=0.01, warn=warn, system=lambda: next(samples, (3, 100))) as w:
+        time.sleep(0.2)
+        alive = w.thread.is_alive()
+    assert alive and w.lowest_available == 3
