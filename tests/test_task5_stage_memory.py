@@ -681,6 +681,12 @@ def test_a_linked_run_or_config_is_not_looked_into(tmp_path, config, monkeypatch
 
         return watched
 
+    run_dir = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
+    run_dir.mkdir()
+    (run_dir / pr.SAVED_CONFIG).write_text(pc.to_toml(config))
+    assert "logged" in [p.name for p in pr.other_runs(run_dir)]  # its logs are what is tested
+    (run_dir / pr.SAVED_CONFIG).unlink()
+    run_dir.rmdir()
     for name in ("scandir", "stat", "lstat"):
         monkeypatch.setattr(os, name, watching(getattr(os, name)))
     status, _ = run_pipeline(tmp_path, config, Recorder())
@@ -772,5 +778,84 @@ def test_a_stopped_attempt_without_a_later_time_is_kept(tmp_path, config, monkey
     )
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "2")
-    status, _ = run_pipeline(tmp_path, config, Recorder())
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1
+    assert (
+        "a stopped attempt of 20261101-000000_aaaaaaa_phase-d"
+        in (run_dir / pr.PIPELINE_LOG).read_text()
+    )
+
+
+def test_a_later_finished_stage_without_its_measurement_does_not_drop_an_earlier_one(
+    tmp_path, config, monkeypatch
+):
+    """A finished stage whose step wrote no measurement does not supersede one that did."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 3000.0, finished="2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", None, None, 600.0, finished="2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "4")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # 500 + 4 x 3000, from the run that measured
+    assert (
+        "a finished run, 20261101-000000_aaaaaaa_phase-d, on this"
+        in (run_dir / pr.PIPELINE_LOG).read_text()
+    )
+
+
+def test_a_measured_stage_after_a_stopped_attempt_supersedes_it(tmp_path, config, monkeypatch):
+    """The finished stage that came after it, measured, decides, whatever came later still."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        stopped=[_line("optimise", 500.0, 3000.0, stopped="2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 100.0, finished="2026-11-02T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261103-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", None, None, 600.0, finished="2026-11-03T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "4")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0  # 500 + 4 x 100 and 600 fit; the stopped attempt came before both
+
+
+def test_another_runs_unreadable_log_stops_nothing(tmp_path, config, monkeypatch):
+    """A sibling's log that is a directory, or unreadable, is skipped, not fatal."""
+    run = _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d")
+    (run / pr.RUN_LOG).unlink()
+    (run / pr.RUN_LOG).mkdir()
+    (run / "logs" / pr.STOPPED_LOG).chmod(0)
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+
+
+def test_a_finished_resume_lists_no_other_run(tmp_path, config, monkeypatch):
+    """With every stage done, nothing beside the run is read."""
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+
+    def refused(path):
+        raise PermissionError("not to be read")
+
+    monkeypatch.setattr(pr, "other_runs", refused)
+    assert prun(None, run_dir, execute=Recorder(), resume=True) == 0

@@ -35,6 +35,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from covsyn.pipeline import config as pc
 from covsyn.pipeline import stages as ps
@@ -161,30 +162,60 @@ def stage_peaks(measurements: Path, watch: memory.MemoryWatch) -> dict:
     }
 
 
-def _peaks_of(line: Mapping) -> tuple[float, float, bool] | None:
-    """A line's step and worker peaks in MB, and whether a worker peak was measured.
+class Peaks(NamedTuple):
+    """One attempt's step and worker peaks in MB, and whether both were measured."""
 
-    A step's peak is the larger of its measured peak and its sampled RSS; a stage without a
-    worker peak, as one without a pool, takes 0 for it. None if the line measured nothing.
-    Only lines of Task 5's format count: before it, worker_peak_mb was the largest over the run
-    so far, not the stage's own.
+    step: float
+    worker: float
+    measured: bool
+
+
+class Attempt(NamedTuple):
+    """An attempt the memory check counts: its peaks in MB and where they come from."""
+
+    step: float
+    worker: float
+    source: str
+
+
+def _peaks_of(line: Mapping) -> Peaks | None:
+    """A line's peaks; None if it measured nothing.
+
+    A step's peak is the larger of its measured peak and its sampled RSS; a missing worker
+    peak, as a stage without a pool has, is taken as 0. ``measured``: the step wrote its
+    measurement and a worker peak, so the line can supersede earlier attempts. Only lines of
+    Task 5's format count: before it, worker_peak_mb was the largest over the run so far.
     """
     if "pipeline_peak_mb" not in line:
         return None
-    steps = [line.get(k) for k in ("parent_peak_mb", "step_sampled_peak_mb")]
-    worker = line.get("worker_peak_mb")
-    if not any(_number(v) for v in (*steps, worker)):
+    measured_step, sampled, worker = (
+        line.get(k) for k in ("parent_peak_mb", "step_sampled_peak_mb", "worker_peak_mb")
+    )
+    if not any(_number(v) for v in (measured_step, sampled, worker)):
         return None
-    step = max((v for v in steps if _number(v)), default=0.0)
-    return step, (worker if _number(worker) else 0.0), _number(worker)
+    step = max((v for v in (measured_step, sampled) if _number(v)), default=0.0)
+    return Peaks(
+        step, worker if _number(worker) else 0.0, _number(measured_step) and _number(worker)
+    )
 
 
 def _lines(run: Path, *parts: str) -> list[dict]:
-    """A run's JSON-lines file, unless it or the folder it is in is a link (Task 4)."""
+    """A run's JSON-lines file; nothing if it is not a readable file.
+
+    Nothing too if the run, the file or a folder on the way is a link (Task 4: a dead share
+    must not stall or stop the run).
+    """
     path = run.joinpath(*parts)
-    if any(run.joinpath(*parts[: k + 1]).is_symlink() for k in range(len(parts))):
+    try:
+        if run.is_symlink() or any(
+            run.joinpath(*parts[: k + 1]).is_symlink() for k in range(len(parts))
+        ):
+            return []
+        if not path.is_file():
+            return []
+        return json_lines(path)
+    except OSError:
         return []
-    return json_lines(path)
 
 
 def other_runs(run_dir: Path) -> list[Path]:
@@ -214,38 +245,37 @@ def _time(line: Mapping, key: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def earlier_peaks(
-    run_dir: Path, stage: str, others: Sequence[Path] | None = None
-) -> list[tuple[float, float, str]]:
-    """The (step, worker) peaks in MB, and source, of the attempts the memory check counts.
+def earlier_peaks(run_dir: Path, stage: str, others: Sequence[Path] | None = None) -> list[Attempt]:
+    """The attempts at the stage the memory check counts, from runs on this configuration.
 
-    The latest finished stage in another run on this configuration, by its time, and every
-    attempt that stopped no earlier, in logs/stopped_stage_memory.jsonl of another run or of
-    this one (a resume): a stopped attempt may have needed more. One that stopped before the
-    latest finished stage is superseded by it, unless that stage measured no worker peak and
-    the stopped one did, or the stopped one has no time to compare. Each pair is one attempt's,
-    never a mix. ``others``: the other runs, as :func:`other_runs` lists them.
+    Every finished stage in another run's run.log and every stopped attempt, in
+    logs/stopped_stage_memory.jsonl of another run or of this one (a resume), that came no
+    earlier than the latest finished stage that measured its step and workers, or has no time
+    to compare: a later measured stage supersedes what came before it. An attempt may have
+    needed more than a later one, so all of these count, each with its own peaks, never a mix.
+    ``others``: the other runs, as :func:`other_runs` lists them.
     """
     others = other_runs(run_dir) if others is None else others
-    finished = []
+    seen = []  # (time, peaks, source, finished)
     for other in others:
         for line in _lines(other, RUN_LOG):
             if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
-                finished.append((_time(line, "finished"), peaks, f"a finished run, {other.name}"))
-    since, base, source = max(finished) if finished else ("", None, "")
-    attempts = [] if base is None else [(base[0], base[1], source)]
+                seen.append(
+                    (_time(line, "finished"), peaks, f"a finished run, {other.name},", True)
+                )
     for run in (*others, run_dir):
-        label = (
-            "this run's stopped attempt" if run == run_dir else f"a stopped attempt of {run.name}"
+        source = (
+            "this run's stopped attempt" if run == run_dir else f"a stopped attempt of {run.name},"
         )
         for line in _lines(run, "logs", STOPPED_LOG):
-            if line.get("stage") != stage or (peaks := _peaks_of(line)) is None:
-                continue
-            when = _time(line, "stopped")
-            superseded = base is not None and when and when < since and (base[2] or not peaks[2])
-            if not superseded:
-                attempts.append((peaks[0], peaks[1], label))
-    return attempts
+            if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
+                seen.append((_time(line, "stopped"), peaks, source, False))
+    since = max((t for t, peaks, _, done in seen if done and peaks.measured and t), default="")
+    return [
+        Attempt(peaks.step, peaks.worker, source)
+        for when, peaks, source, _ in seen
+        if not when or when >= since
+    ]
 
 
 def memory_problem(
@@ -265,7 +295,9 @@ def memory_problem(
     if not attempts:
         return None
     # The largest need of any one attempt, with this run's workers.
-    needed, parent, worker, source = max((p + workers * w, p, w, s) for p, w, s in attempts)
+    needed, parent, worker, source = max(
+        (a.step + workers * a.worker, a.step, a.worker, a.source) for a in attempts
+    )
     available = memory.available_bytes() / memory.MB
     if needed <= available:
         return None
@@ -458,7 +490,7 @@ def _run_stages(
             "configuration or COVSYN_WORKERS"
         )
     done = set(finished_stages(run_dir))
-    others = other_runs(run_dir)  # listed once: the memory check reads them at every stage
+    others = None  # listed once, when a stage first needs the memory check
     report(f"run directory {run_dir}" + (f"; finished: {', '.join(sorted(done))}" if done else ""))
     for name, function in ps.STAGES:
         if name in done:
@@ -475,6 +507,12 @@ def _run_stages(
         watch = memory.MemoryWatch(warn=lambda message: report(f"WARNING: {message}"), steps=True)
         finished = False
         try:
+            if others is None:
+                try:
+                    others = other_runs(run_dir)
+                except OSError as error:  # the check goes without them, as a new run would
+                    report(f"WARNING: could not list the other runs ({error!r})")
+                    others = []
             problem = memory_problem(run_dir, name, workers, others)
             if problem is not None:
                 raise ps.StageFailed(problem)
