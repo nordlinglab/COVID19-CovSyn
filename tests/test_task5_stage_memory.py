@@ -187,14 +187,14 @@ def test_a_failed_stage_leaves_its_memory_readings(tmp_path, config):
     import re
     from pathlib import Path
 
+    peaks = {"covsyn.model.data_synthesis_main": (500.0, 9000.0)}
     status, run_dir = run_pipeline(
-        tmp_path, config, Recorder(fail={"covsyn.model.data_synthesis_main"})
+        tmp_path, config, Measuring(peaks, fail={"covsyn.model.data_synthesis_main"})
     )
     assert status == 1
     log = (run_dir / pr.PIPELINE_LOG).read_text()
     assert "memory in stage synthesise: lowest available" in log
     (named,) = re.findall(r"peaks are in (\S+memory_synthesise\S*\.jsonl)", log)
-    Path(named).write_text("{}\n")  # as a step of the failed attempt would have
     assert prun(None, run_dir, execute=Recorder(), resume=True) == 0
     assert Path(named).exists()
 
@@ -211,7 +211,23 @@ def test_a_stage_stopped_by_an_interrupt_leaves_its_memory_readings(tmp_path, co
     with pytest.raises(KeyboardInterrupt):
         run_pipeline(tmp_path, config, Interrupted())
     run_dir = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
-    assert "memory in stage synthesise" in (run_dir / pr.PIPELINE_LOG).read_text()
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "memory in stage synthesise" in log
+    assert "no step reported its peaks" in log and "memory_synthesise" not in log
+
+
+def test_a_log_that_cannot_be_written_keeps_the_stages_status(tmp_path, config, monkeypatch):
+    """Writing the memory readings may fail (a full disk); the run still ends with status 1."""
+    say = pr.say
+
+    def failing(message, log=None):
+        if message.startswith("memory in stage"):
+            raise OSError("No space left on device")
+        say(message, log)
+
+    monkeypatch.setattr(pr, "say", failing)
+    status, _ = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.model.data_synthesis_main"}))
+    assert status == 1
 
 
 def earlier_run(

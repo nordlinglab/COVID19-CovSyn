@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import functools
 import json
@@ -401,12 +402,18 @@ def _run_stages(
             for warning in ctx.warnings:
                 report(f"WARNING: {warning}")
             if not finished and watch.lowest_available is not None:  # whatever stopped it
-                report(
-                    f"memory in stage {name}: lowest available "
-                    f"{watch.lowest_available / memory.MB:.0f} MB, this process at most "
-                    f"{watch.parent_peak_bytes / memory.MB:.0f} MB; the steps' peaks are in "
-                    f"{measurements}"
+                steps = (
+                    f"the steps' peaks are in {measurements}"
+                    if measurements.exists()
+                    else "no step reported its peaks"
                 )
+                # A log that cannot be written must not replace the stage's status or error.
+                with contextlib.suppress(OSError):
+                    report(
+                        f"memory in stage {name}: lowest available "
+                        f"{watch.lowest_available / memory.MB:.0f} MB, this process at most "
+                        f"{watch.parent_peak_bytes / memory.MB:.0f} MB; {steps}"
+                    )
         peaks = {
             **stage_memory(measurements),
             "pipeline_peak_mb": round(watch.parent_peak_bytes / memory.MB, 1),
