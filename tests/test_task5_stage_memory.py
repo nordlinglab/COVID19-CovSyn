@@ -68,7 +68,15 @@ def test_a_measured_step_reports_its_own_and_its_largest_workers_peak(tmp_path, 
     assert line["parent_peak_mb"] >= 200 * MIB / memory.MB
     assert line["worker_peak_mb"] >= 300 * MIB / memory.MB
     assert line["worker_peak_mb"] < line["parent_peak_mb"] + 300 * MIB / memory.MB
-    assert line["lowest_available_mb"] > 0 and line["low_memory"] is False
+
+
+def test_a_measured_step_runs_no_thread_of_its_own(tmp_path):
+    """A step that forks its workers must be single-threaded when it forks (Python 3.12+)."""
+    out = tmp_path / "out.txt"
+    env = {measure.ENV: str(tmp_path / "memory.jsonl")}
+    code = "import threading; print(threading.active_count())"
+    assert pr.run_module(["-c", code], out, False, env) == 0
+    assert out.read_text().strip() == "1"
 
 
 def test_a_measured_step_keeps_its_exit_status(tmp_path, step_module):
@@ -94,7 +102,7 @@ class Measuring(Recorder):
     """A recorder whose steps report the peaks in ``peaks``, by module."""
 
     def __init__(self, peaks, fail=()):
-        """Report ``peaks[module]`` (parent MB, worker MB, low memory) for each step."""
+        """Report ``peaks[module]`` (parent MB, worker MB) for each step."""
         super().__init__(fail)
         self.peaks = peaks
 
@@ -103,9 +111,8 @@ class Measuring(Recorder):
         status = super().__call__(args, output, append, env)
         module = str(args[1])
         if module in self.peaks:
-            parent, worker, low = self.peaks[module]
-            line = {"step": f"-m {module}", "parent_peak_mb": parent, "worker_peak_mb": worker,
-                    "lowest_available_mb": 1000.0, "low_memory": low}  # fmt: skip
+            parent, worker = self.peaks[module]
+            line = {"step": f"-m {module}", "parent_peak_mb": parent, "worker_peak_mb": worker}
             with open(env[measure.ENV], "a") as f:
                 f.write(json.dumps(line) + "\n")
         return status
@@ -120,10 +127,10 @@ def run_log(run_dir):
 def test_run_log_has_each_stages_own_peaks(tmp_path, config):
     """The largest over a stage's steps, not over the whole run so far."""
     peaks = {
-        "covsyn.calibration.firefly_optimizer": (300.0, 900.0, False),
-        "covsyn.model.data_synthesis_main": (500.0, 2000.0, False),  # synthesise
-        "covsyn.validation.verify_phase_d": (700.0, None, False),  # check
-        "covsyn.validation.measure_age_rr": (100.0, 4900.0, False),  # check
+        "covsyn.calibration.firefly_optimizer": (300.0, 900.0),
+        "covsyn.model.data_synthesis_main": (500.0, 2000.0),  # synthesise
+        "covsyn.validation.verify_phase_d": (700.0, None),  # check
+        "covsyn.validation.measure_age_rr": (100.0, 4900.0),  # check
     }
     _, run_dir = run_pipeline(tmp_path, config, Measuring(peaks))
     lines = run_log(run_dir)
@@ -142,22 +149,31 @@ def test_a_stage_whose_steps_report_nothing_has_no_peaks(tmp_path, config):
         assert line["parent_peak_mb"] is None and line["worker_peak_mb"] is None
 
 
-def test_low_memory_in_a_step_is_a_warning_of_its_stage(tmp_path, config):
-    """The step warns in its log; the pipeline repeats it in run.log and pipeline.log."""
-    peaks = {"covsyn.model.data_synthesis_main": (500.0, 2000.0, True)}
-    _, run_dir = run_pipeline(tmp_path, config, Measuring(peaks))
-    warnings = run_log(run_dir)["synthesise"]["warnings"]
-    assert any("below 10%" in w for w in warnings)
+def test_low_memory_during_a_stage_is_a_warning_of_it(tmp_path, config, monkeypatch):
+    """The pipeline samples the available memory; below 10% it warns in run.log and pipeline.log."""
+    monkeypatch.setattr(memory, "system_memory", lambda: (5, 100))
+    _, run_dir = run_pipeline(tmp_path, config, Recorder())
+    for line in run_log(run_dir).values():
+        assert any("below 10%" in w for w in line["warnings"])
+        assert line["lowest_available_mb"] is not None
     assert "below 10%" in (run_dir / pr.PIPELINE_LOG).read_text()
 
 
-def earlier_run(tmp_path, config, name, stage, worker_peak_mb, workers):
-    """A finished run beside the next one, with the same configuration unless told otherwise."""
+def earlier_run(
+    tmp_path, config, name, stage, worker_peak_mb, workers, parent_peak_mb=100.0, task5=True
+):
+    """A finished run beside the next one, with the same configuration unless told otherwise.
+
+    ``task5``: its run.log line is of Task 5's format, with the stage's own peaks; before it,
+    worker_peak_mb was the largest over the run so far.
+    """
     run_dir = tmp_path / "results" / "models" / name
     run_dir.mkdir(parents=True)
     (run_dir / pr.SAVED_CONFIG).write_text(config)
-    line = {"stage": stage, "workers": workers, "parent_peak_mb": 100.0,
+    line = {"stage": stage, "workers": workers, "parent_peak_mb": parent_peak_mb,
             "worker_peak_mb": worker_peak_mb}  # fmt: skip
+    if task5:
+        line["pipeline_peak_mb"] = 50.0
     (run_dir / pr.RUN_LOG).write_text(json.dumps(line) + "\n")
     return run_dir
 
@@ -173,7 +189,7 @@ def test_a_stage_that_would_not_fit_is_refused(tmp_path, config, monkeypatch):
     assert status == 1
     assert recorder.calls == []
     log = (run_dir / pr.PIPELINE_LOG).read_text()
-    assert "optimise" in log and "10000 MB" in log and "8000 MB" in log
+    assert "optimise" in log and "10100 MB" in log and "8000 MB" in log
     assert "Resume with" in log
 
 
@@ -185,6 +201,41 @@ def test_the_check_uses_only_runs_on_the_same_configuration(tmp_path, config, mo
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, _ = run_pipeline(tmp_path, config, Recorder())
     assert status == 0
+
+
+def test_the_steps_own_peak_counts_too(tmp_path, config, monkeypatch):
+    """6000 MB in the step itself and 2 x 500 MB in its workers do not fit in 6500 MB."""
+    earlier_run(tmp_path, pc.to_toml(config), "20261101-000000_aaaaaaa_phase-d",
+                "optimise", 500.0, 4, parent_peak_mb=6000.0)  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(6.5e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+
+
+def test_a_run_log_from_before_task_5_is_not_used(tmp_path, config, monkeypatch):
+    """Its worker peak is the run's so far, not the stage's, so it says nothing of the stage."""
+    earlier_run(tmp_path, pc.to_toml(config), "20261101-000000_aaaaaaa_phase-d",
+                "optimise", 5000.0, 4, task5=False)  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+
+
+def test_a_line_that_is_not_an_object_is_skipped(tmp_path, config, monkeypatch):
+    """A run.log or measurement line that parses but is not a JSON object stops nothing."""
+    run_dir = earlier_run(tmp_path, pc.to_toml(config), "20261101-000000_aaaaaaa_phase-d",
+                          "optimise", 3000.0, 4)  # fmt: skip
+    with open(run_dir / pr.RUN_LOG, "a") as f:
+        f.write("[]\n7\n")
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    assert pr.finished_stages(run_dir) == ["optimise"]
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+    (tmp_path / "m.jsonl").write_text('[]\n{"parent_peak_mb": 5}\n')
+    assert pr.stage_memory(tmp_path / "m.jsonl")["parent_peak_mb"] == 5
 
 
 def test_a_stage_that_fits_runs(tmp_path, config, monkeypatch):
@@ -199,11 +250,11 @@ def test_a_stage_that_fits_runs(tmp_path, config, monkeypatch):
 
 def test_a_resumed_stage_starts_its_measurements_afresh(tmp_path, config):
     """The steps of a stage killed earlier do not count for the stage run again."""
-    peaks = {"covsyn.model.data_synthesis_main": (500.0, 9000.0, False)}
+    peaks = {"covsyn.model.data_synthesis_main": (500.0, 9000.0)}
     status, run_dir = run_pipeline(
         tmp_path, config, Measuring(peaks, fail={"covsyn.model.data_synthesis_main"})
     )
     assert status == 1
-    peaks = {"covsyn.model.data_synthesis_main": (400.0, 1000.0, False)}
+    peaks = {"covsyn.model.data_synthesis_main": (400.0, 1000.0)}
     assert prun(None, run_dir, execute=Measuring(peaks), resume=True) == 0
     assert run_log(run_dir)["synthesise"]["worker_peak_mb"] == 1000.0

@@ -67,7 +67,8 @@ def low_memory_warning(available: int, total: int) -> str:
     )
 
 
-def _system() -> tuple[int, int]:
+def system_memory() -> tuple[int, int]:
+    """The available and the total memory, in bytes."""
     memory = psutil.virtual_memory()
     return memory.available, memory.total
 
@@ -83,12 +84,15 @@ class MemoryWatch:
         self,
         interval: float = 1.0,
         warn: Callable[[str], None] | None = None,
-        system: Callable[[], tuple[int, int]] = _system,
+        system: Callable[[], tuple[int, int]] | None = None,
     ) -> None:
-        """Sample every ``interval`` seconds; ``warn`` prints to stderr by default."""
+        """Sample every ``interval`` seconds; ``warn`` prints to stderr by default.
+
+        ``system`` gives the available and total memory; system_memory by default.
+        """
         self.interval = interval
         self.warn = warn or (lambda message: print(message, file=sys.stderr, flush=True))
-        self.system = system
+        self.system = system or system_memory
         self.parent_peak_bytes = 0
         self.lowest_available: int | None = None
         self.warned = False

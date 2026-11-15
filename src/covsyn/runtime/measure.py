@@ -3,14 +3,14 @@
 """Run one pipeline step and record its peak memory (Task 5).
 
 ``python -m covsyn.runtime.measure -m <module> <args>`` runs the module as ``python -m`` would,
-then appends one JSON line to the file named by ``COVSYN_MEASURE``: the step's own peak RSS,
-its largest worker's, the largest RSS a background thread sampled once a second, the least
-available memory seen, and whether that fell below 10% of the total. ``-c <code>`` and a
-script path work too.
+then appends one JSON line to the file named by ``COVSYN_MEASURE``: the step's own peak RSS and
+its largest worker's. ``-c <code>`` and a script path work too.
 
 A step is a fresh process with a fresh pool, so its ``ru_maxrss`` covers that step alone, and
 ``RUSAGE_CHILDREN`` its largest worker. The line is written at exit, after the pools' workers
-have been joined, so the largest worker is known; the step's exit status is kept.
+have been joined, so the largest worker is known; the step's exit status is kept. The step runs
+no thread of its own, as one would make every fork of its pool workers unsafe; the pipeline
+samples the available memory instead.
 """
 
 from __future__ import annotations
@@ -27,19 +27,15 @@ from covsyn.runtime import memory
 ENV = "COVSYN_MEASURE"
 
 
-def _mb(n: int | None) -> float | None:
-    return None if not n else round(n / memory.MB, 1)
+def _mb(n: int) -> float | None:
+    return round(n / memory.MB, 1) if n else None  # no child: RUSAGE_CHILDREN is 0
 
 
-def _record(path: str, step: str, watch: memory.MemoryWatch) -> None:
-    watch.__exit__(None, None, None)
+def _record(path: str, step: str) -> None:
     line = {
         "step": step,
         "parent_peak_mb": _mb(memory.peak_rss_bytes(resource.RUSAGE_SELF)),
         "worker_peak_mb": _mb(memory.peak_rss_bytes(resource.RUSAGE_CHILDREN)),
-        "parent_sampled_peak_mb": _mb(watch.parent_peak_bytes),
-        "lowest_available_mb": _mb(watch.lowest_available),
-        "low_memory": watch.warned,
     }
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(line) + "\n")
@@ -65,9 +61,8 @@ def main() -> None:
         sys.exit("usage: uv run python -m covsyn.runtime.measure -m <module> [args]")
     path = os.environ.get(ENV)
     if path is not None:
-        watch = memory.MemoryWatch().__enter__()
         step = {"-m": f"-m {argv[1]}", "-c": "-c"}.get(argv[0], argv[0])
-        atexit.register(_record, path, step, watch)
+        atexit.register(_record, path, step)
     run(argv)
 
 

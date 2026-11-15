@@ -27,7 +27,6 @@ import fcntl
 import functools
 import json
 import os
-import resource
 import subprocess
 import sys
 import time
@@ -84,37 +83,50 @@ def say(message: str, log: Path | None = None) -> None:
             f.write(line + "\n")
 
 
-def stage_memory(path: Path) -> dict:
-    """A stage's peaks from its steps' measurements: the largest over the steps.
-
-    ``low_memory`` is whether any step saw available memory below 10% of the total.
-    """
+def json_lines(path: Path) -> list[dict]:
+    """The JSON objects of a JSON-lines file; a line cut off by a kill, or no object, is skipped."""
+    path = Path(path)
+    if not path.exists():
+        return []
     lines = []
-    if path.exists():
-        for text in path.read_text(errors="replace").splitlines():
-            try:
-                lines.append(json.loads(text))
-            except ValueError:  # cut off by a kill
-                continue
+    for text in path.read_text(errors="replace").splitlines():
+        try:
+            line = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(line, dict):
+            lines.append(line)
+    return lines
+
+
+def finished_stages(run_dir: Path) -> list[str]:
+    """The stages run.log records as finished; a line cut off by a kill is not one."""
+    return [line["stage"] for line in json_lines(Path(run_dir) / RUN_LOG) if "stage" in line]
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def stage_memory(path: Path) -> dict:
+    """A stage's peaks from its steps' measurements: the largest over the steps, or None."""
+    lines = json_lines(path)
 
     def largest(key):
-        values = [line[key] for line in lines if isinstance(line.get(key), (int, float))]
+        values = [line[key] for line in lines if _number(line.get(key))]
         return max(values) if values else None
 
-    lowest = [line["lowest_available_mb"] for line in lines if line.get("lowest_available_mb")]
     return {
         "parent_peak_mb": largest("parent_peak_mb"),
         "worker_peak_mb": largest("worker_peak_mb"),
-        "lowest_available_mb": min(lowest) if lowest else None,
-        "low_memory": any(line.get("low_memory") for line in lines),
     }
 
 
-def earlier_worker_peak(run_dir: Path, stage: str) -> float | None:
-    """The stage's worker peak in MB in the latest other run on the same configuration.
+def earlier_peaks(run_dir: Path, stage: str) -> tuple[float, float] | None:
+    """The stage's step and worker peaks, in MB, in the latest other run on this configuration.
 
-    Runs are compared by their saved pipeline.toml; a run without one, or without the stage's
-    worker peak in its run.log, gives nothing.
+    Runs are compared by their saved pipeline.toml. Only run.log lines of Task 5's format count:
+    before it, worker_peak_mb was the largest over the run so far, not the stage's own.
     """
     saved = (run_dir / SAVED_CONFIG).read_text(encoding="utf-8")
     found = []
@@ -124,44 +136,45 @@ def earlier_worker_peak(run_dir: Path, stage: str) -> float | None:
             continue
         if (other / SAVED_CONFIG).read_text(encoding="utf-8", errors="replace") != saved:
             continue
-        for text in log.read_text(errors="replace").splitlines():
-            try:
-                line = json.loads(text)
-            except ValueError:
-                continue
-            if line.get("stage") == stage and isinstance(line.get("worker_peak_mb"), (int, float)):
-                found.append((log.stat().st_mtime, line["worker_peak_mb"]))
-    return max(found)[1] if found else None
+        for line in json_lines(log):
+            if (
+                line.get("stage") == stage
+                and "pipeline_peak_mb" in line
+                and _number(line.get("worker_peak_mb"))
+            ):
+                parent = line.get("parent_peak_mb")
+                found.append(
+                    (
+                        log.stat().st_mtime,
+                        parent if _number(parent) else 0.0,
+                        line["worker_peak_mb"],
+                    )
+                )
+    return max(found)[1:] if found else None
 
 
 def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
-    """Why the stage would not fit in the available memory, or None (Task 5)."""
-    peak = earlier_worker_peak(run_dir, stage)
-    if peak is None:
+    """Why the stage would not fit in the available memory, or None (Task 5).
+
+    The need is the step's own peak plus workers x the peak per worker. A forked worker's RSS
+    counts the pages it shares with its parent, so on Linux the need is overstated: in the
+    optimiser, a forked worker's RSS is 153 MB of which 7 MB is its own; refusing a stage that
+    would fit is the safer error than running one out of memory.
+    """
+    peaks = earlier_peaks(run_dir, stage)
+    if peaks is None:
         return None
-    needed = workers * peak
+    parent, worker = peaks
+    needed = parent + workers * worker
     available = memory.available_bytes() / memory.MB
     if needed <= available:
         return None
     return (
-        f"stage {stage} needs about {needed:.0f} MB ({workers} workers x {peak:.0f} MB, the "
-        f"peak per worker of an earlier run on this configuration), but only "
-        f"{available:.0f} MB is available; free memory or set fewer workers"
+        f"stage {stage} needs about {needed:.0f} MB ({parent:.0f} MB for its steps and "
+        f"{workers} workers x {worker:.0f} MB, the peaks of an earlier run on this "
+        f"configuration), but only {available:.0f} MB is available; free memory or set "
+        "fewer workers"
     )
-
-
-def finished_stages(run_dir: Path) -> list[str]:
-    """The stages run.log records as finished; a line cut off by a kill is not one."""
-    path = Path(run_dir) / RUN_LOG
-    if not path.exists():
-        return []
-    stages = []
-    for line in path.read_text(errors="replace").splitlines():
-        try:
-            stages.append(json.loads(line)["stage"])
-        except (ValueError, KeyError, TypeError):
-            continue
-    return stages
 
 
 def record_stage(
@@ -174,9 +187,9 @@ def record_stage(
 ) -> None:
     """Append one line to run.log for a finished stage.
 
-    ``peaks`` is :func:`stage_memory`'s: the largest peak of the stage's steps' own processes
-    and of their workers, None where no step measured one. ``pipeline_peak_mb`` is this
-    process's, over the whole run so far.
+    ``peaks``: the largest peak of the stage's steps' own processes and of their workers, None
+    where no step measured one (:func:`stage_memory`), and this process's largest sampled RSS
+    and the least available memory during the stage.
     """
     peaks = peaks or {}
     line = {
@@ -187,7 +200,7 @@ def record_stage(
         "parent_peak_mb": peaks.get("parent_peak_mb"),
         "worker_peak_mb": peaks.get("worker_peak_mb"),
         "lowest_available_mb": peaks.get("lowest_available_mb"),
-        "pipeline_peak_mb": round(memory.peak_rss_bytes(resource.RUSAGE_SELF) / memory.MB, 1),
+        "pipeline_peak_mb": peaks.get("pipeline_peak_mb"),
         "warnings": list(warnings),
     }
     path = Path(run_dir) / RUN_LOG
@@ -354,11 +367,14 @@ def _run_stages(
         ctx = ps.Context(config, layout, step)
         report(f"stage {name}")
         start = time.monotonic()
+        # The pipeline's own RSS and the available memory, once a second (Task 5).
+        watch = memory.MemoryWatch(warn=ctx.warnings.append)
         try:
             problem = memory_problem(run_dir, name, workers)
             if problem is not None:
                 raise ps.StageFailed(problem)
-            function(ctx, resume) if name == "optimise" else function(ctx)
+            with watch:
+                function(ctx, resume) if name == "optimise" else function(ctx)
         except ps.StageFailed as error:
             hint = (
                 f" Resume with: covsyn-pipeline --resume {resume_name(run_dir)}"
@@ -368,15 +384,13 @@ def _run_stages(
             report(f"ERROR: {error}; stopping.{hint}")
             return 1
         finally:
-            peaks = stage_memory(measurements)
-            if peaks["low_memory"]:
-                ctx.warnings.append(
-                    f"available memory fell below {100 * memory.LOW_MEMORY_FRACTION:.0f}% "
-                    f"of the total (lowest {peaks['lowest_available_mb']} MB); see the "
-                    "step logs"
-                )
             for warning in ctx.warnings:
                 report(f"WARNING: {warning}")
+        peaks = {
+            **stage_memory(measurements),
+            "pipeline_peak_mb": round(watch.parent_peak_bytes / memory.MB, 1),
+            "lowest_available_mb": round(watch.lowest_available / memory.MB, 1),
+        }
         record_stage(run_dir, name, time.monotonic() - start, workers, ctx.warnings, peaks)
     report("ALL DONE")
     return 0
