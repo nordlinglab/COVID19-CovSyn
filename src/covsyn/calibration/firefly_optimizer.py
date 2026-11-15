@@ -1769,13 +1769,16 @@ def resume_arguments(args: argparse.Namespace) -> str:
     than ignored.
 
     Raises:
-        SystemExit: --resume with --run-dir, --seed, --mode or --warm_start.
+        SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations or
+            --stage-timings.
     """
     if args.resume is None:
         return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
     given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
                                       ('--mode', args.mode), ('--warm_start', args.warm_start),
-                                      ('--simulations', getattr(args, 'simulations', None)))
+                                      ('--simulations', getattr(args, 'simulations', None)),
+                                      ('--stage-timings',
+                                       getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
     if given:  # a mistake in the command, reported before anything is read
         sys.exit(f'--resume takes the directory, seed, mode and warm start from the run; '
@@ -1786,7 +1789,14 @@ def resume_arguments(args: argparse.Namespace) -> str:
     if problem is not None:
         not_resumable(problem)
     args.seed, mode = resumed_settings(args.resume)
+    args.stage_timings = recorded_stage_timing(args.resume)  # Task 5: as the run started
     return mode
+
+
+def recorded_stage_timing(run_dir: Path) -> bool:
+    """Whether the run, by its config.json, times run_covid's stages; False if it says nothing."""
+    config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
+    return config.get('settings', {}).get('stage_timing') is True
 
 
 def run_directory_for(run_dir: Path | None, config_name: str) -> Path:
