@@ -305,7 +305,10 @@ def test_run_outputs_name_every_file_the_optimiser_writes():
 
     written |= {timings.EVALUATION_TABLE, timings.GENERATION_TABLE}  # beside progress.csv
     files = {name for name in runs.RUN_OUTPUTS if "." in name}
-    assert written == files, (written - files, files - written)
+    # Every name written is listed, and every listed file is written; the listed directories
+    # are written by other code too (checkpoints, revalidation, selected), profile here.
+    assert written <= set(runs.RUN_OUTPUTS), written - set(runs.RUN_OUTPUTS)
+    assert files <= written, files - written
 
 
 def test_a_dangling_link_counts_as_a_run_output(tmp_path):

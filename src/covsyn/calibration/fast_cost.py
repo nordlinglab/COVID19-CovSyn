@@ -44,7 +44,7 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_p
                                            largest_spreader_percentile, offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
-from covsyn.runtime import timings
+from covsyn.runtime import profiling, timings
 
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix')
@@ -59,17 +59,22 @@ CHENG_GROUPS = (('Household', ('Household',)),
 _WORKER_DEMOGRAPHIC_PARAMETERS = None
 _WORKER_TAIWAN_MATRIX_COLUMNS = None
 _WORKER_STAGE_TIMING = False
+_WORKER_PROFILE = None
 
 
-def init_worker(demographic_parameters, taiwan_matrix_columns, stage_timing=False):
+def init_worker(demographic_parameters, taiwan_matrix_columns, stage_timing=False,
+                profile_dir=None):
     """Give each worker the read-only data once, instead of once per task.
 
-    stage_timing (Task 5): time run_covid's stages in every task of this worker.
+    Task 5: stage_timing times run_covid's stages in every task of this worker; profile_dir,
+    when given, makes the worker profile its tasks into profile_dir/worker_<pid>.prof.
     """
     global _WORKER_DEMOGRAPHIC_PARAMETERS, _WORKER_TAIWAN_MATRIX_COLUMNS, _WORKER_STAGE_TIMING
+    global _WORKER_PROFILE
     _WORKER_DEMOGRAPHIC_PARAMETERS = demographic_parameters
     _WORKER_TAIWAN_MATRIX_COLUMNS = taiwan_matrix_columns
     _WORKER_STAGE_TIMING = stage_timing
+    _WORKER_PROFILE = None if profile_dir is None else profiling.start_worker_profile(profile_dir)
 
 
 class _OneCase:
@@ -171,6 +176,17 @@ def _index_case_scalars(course, contact, social=None):
 
 
 def run_batch(seeds, P, columns):
+    """One pool task, profiled in profile mode; see _run_batch."""
+    if _WORKER_PROFILE is None:
+        return _run_batch(seeds, P, columns)
+    _WORKER_PROFILE.enable()  # Task 5: the task only, not the wait for the next one
+    try:
+        return _run_batch(seeds, P, columns)
+    finally:
+        _WORKER_PROFILE.disable()
+
+
+def _run_batch(seeds, P, columns):
     """One pool task: run several simulations and return only what the parent needs.
 
     Per simulation: the index case's scalars, and per CASE (in order) the Cheng bins and the
@@ -319,16 +335,17 @@ def reduce_outcomes(scalars):
 
 
 def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
-                  norm_weights, seed_offset=0):
+                  norm_weights, seed_offset=0, simulations=None):
     """Same contract as firefly_optimizer.cost_function, including the 1e6 on failure (E31).
 
     seed_offset shifts the simulation seeds; 0, the default, is the objective the optimizer
-    uses. revalidation.py scores candidates on other offsets (E87).
+    uses. revalidation.py scores candidates on other offsets (E87). simulations (Task 5) is S,
+    by default fo.SIMULATIONS_PER_EVALUATION; only profile mode changes it.
     """
     timings.LAST.clear()  # Task 5: this evaluation's timings, for the optimiser's table
     try:
         return _cost_function(P, demographic_parameters, executor, Cheng_contact_array,
-                              Cheng_attack_rate, norm_weights, seed_offset)
+                              Cheng_attack_rate, norm_weights, seed_offset, simulations)
     except Exception:
         traceback.print_exc()
         print('fast_cost: simulation failed for this parameter vector, charging '
@@ -343,8 +360,8 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
 
 
 def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
-                   norm_weights, seed_offset=0):
-    source_case_number = fo.SIMULATIONS_PER_EVALUATION
+                   norm_weights, seed_offset=0, simulations=None):
+    source_case_number = fo.SIMULATIONS_PER_EVALUATION if simulations is None else simulations
     repeat_number = 1
     case_limit = source_case_number * repeat_number
     taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')

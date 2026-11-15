@@ -93,6 +93,7 @@ RUN_OUTPUTS = (
     "firefly_best.txt",
     "firefly_worst.txt",
     "checkpoints",  # one per generation (Task 4)
+    "profile",  # the workers' profiles in profile mode (Task 5)
     "revalidation",  # written into the run directory by the chain
     "selected",
 )

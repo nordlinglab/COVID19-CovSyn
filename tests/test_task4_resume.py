@@ -210,7 +210,7 @@ def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
 
 @pytest.mark.parametrize("given", [{"mode": "train"}, {"warm_start": ["a.txt"]}, {"seed": 3},
                                    {"run_dir": "x"}, {"seed": 0}, {"warm_start": []},
-                                   {"mode": ""}])
+                                   {"mode": ""}, {"simulations": 10}])
 def test_an_option_that_would_change_a_resumed_run_is_refused(tmp_path, given):
     """Refused, not silently ignored."""
     with pytest.raises(SystemExit, match="--resume takes"):

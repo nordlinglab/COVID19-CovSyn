@@ -1,12 +1,11 @@
 import argparse
 import concurrent.futures
 import copy
-import cProfile
 import csv
+import functools
 import json
 import numpy as np
 import pickle
-import pstats
 import sys
 import time
 import traceback
@@ -17,7 +16,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.runtime import hardware, runs, timings
+from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
                                             health_care_contact_floor)
@@ -1183,10 +1182,11 @@ def drop_progress_after(path: Path, generation: int) -> None:
             writer.writerows(r for r in rows if int(r['generation']) <= generation)
 
 
-def generation_seed_offset(generation):
+def generation_seed_offset(generation, simulations=SIMULATIONS_PER_EVALUATION):
     """First simulation seed of a generation's own block (B81); generation 0 shares block 0
-    with the initial population, whose scores it starts from (F7)."""
-    return SIMULATIONS_PER_EVALUATION * generation
+    with the initial population, whose scores it starts from (F7). A block is one evaluation's
+    simulations, which only profile mode changes (Task 5)."""
+    return simulations * generation
 
 # E86: the objective summed the contact bins of all 300 simulated cases and compared them
 # with Cheng et al. 2020's totals for 100 cases (the original 100 cases x 3 repeats lost its
@@ -1466,6 +1466,11 @@ class Firefly:
         self.rng = default_rng(self.seed)
         # Task 3: recorded in config.json with the settings above; main() adds its own.
         self.run_settings = {}
+        # Task 5: S, run_covid's stage timing in the workers, and, in profile mode, where the
+        # workers write their profiles.
+        self.simulations = SIMULATIONS_PER_EVALUATION
+        self.stage_timing = False
+        self.profile_dir = None
 
     @staticmethod
     def _state(normalized, fireflies, intensities, cost_parts, archive, worst_fireflies,
@@ -1509,6 +1514,7 @@ class Firefly:
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
+                    'simulations': self.simulations, 'stage_timing': self.stage_timing,
                     **self.run_settings}
         if checkpoint is None:
             runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
@@ -1522,9 +1528,11 @@ class Firefly:
         # plain cost_function() below never reads, so a run using that instead is unaffected.
         from covsyn.calibration.fast_cost import init_worker as _init_reduction_worker
         _columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
+        if self.profile_dir is not None:
+            Path(self.profile_dir).mkdir(parents=True, exist_ok=True)
         executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=max_workers, initializer=_init_reduction_worker,
-            initargs=(demographic_parameters, _columns))
+            initargs=(demographic_parameters, _columns, self.stage_timing, self.profile_dir))
         intensities = np.empty(self.pop_size)
         cost_parts = [{} for _ in range(self.pop_size)]
         # Task 5: one row per evaluation and per generation, beside progress.csv.
@@ -1556,7 +1564,7 @@ class Firefly:
             print(f'resuming after generation {int(checkpoint["generation"])}', flush=True)
         else:
             print(f'evaluating initial population: {self.pop_size} fireflies '
-                  f'({SIMULATIONS_PER_EVALUATION} simulations each)...', flush=True)
+                  f'({self.simulations} simulations each)...', flush=True)
         for k in range(self.pop_size if checkpoint is None else 0):
             intensities[k] = evaluate(k, fireflies[k], 0)
             cost_parts[k] = dict(LAST_COST_PARTS)
@@ -1601,7 +1609,7 @@ class Firefly:
         for generation in tqdm(range(start, max_generations)):
             # B81: this generation's block, and every firefly re-scored on it -- the brightest
             # included, since its score came from another block and cannot be compared here.
-            offset = generation_seed_offset(generation)
+            offset = generation_seed_offset(generation, self.simulations)
             clock = timings.GenerationClock(generation, max_workers)
             if generation > 0:   # generation 0's block is the initial one, already scored (F7)
                 for k in range(self.pop_size):
@@ -1678,7 +1686,12 @@ class Firefly:
                 normalized_fireflies, fireflies, intensities, cost_parts, archive,
                 worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
 
-        executor.shutdown()
+        executor.shutdown()  # the workers write their profiles as they exit
+        if self.profile_dir is not None:  # Task 5
+            merged = profiling.merge_profiles(self.profile_dir, tables)
+            print(f'profile: {merged}, top {profiling.TOP} in {tables / profiling.TOP_TABLE}; '
+                  f'run_covid {100 * profiling.share(merged, "run_covid"):.1f}% of the time',
+                  flush=True)
         # B81: firefly_best.txt keeps one row per firefly -- reproduce_wu2025 and
         # firefly_txt_to_csv require the four result files to have equal row counts -- so the
         # final population fills it, and the snapshots go to firefly_archive.txt, which
@@ -1701,8 +1714,11 @@ OPTIMISER_MODES = {
     # approach 1 as fireflies close in.
     'train': (100, 1, 1, 0.03, 120),
     'test': (3, 1, 1, 0.01, 10),
-    'profile': (10, 1, 1, 0.01, 3),
+    # Task 5: the population is the worker count, set in main(), and S comes from the command
+    # line; a profile is run again, never resumed.
+    'profile': (None, 1, 1, 0.01, 2),
 }
+PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
 
 
 def not_resumable(message: str) -> None:
@@ -1735,6 +1751,8 @@ def resumed_settings(run_dir: Path) -> tuple[int, str]:
         not_resumable(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
     if not isinstance(mode, str) or mode not in OPTIMISER_MODES:  # a list would not hash
         not_resumable(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
+    if mode == 'profile':  # Task 5: its population is the worker count of that run
+        not_resumable(f'{run_dir} is a profile, which is run again rather than resumed')
     return seed, mode
 
 
@@ -1750,7 +1768,8 @@ def resume_arguments(args: argparse.Namespace) -> str:
     if args.resume is None:
         return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
     given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
-                                      ('--mode', args.mode), ('--warm_start', args.warm_start))
+                                      ('--mode', args.mode), ('--warm_start', args.warm_start),
+                                      ('--simulations', getattr(args, 'simulations', None)))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
     if given:  # a mistake in the command, reported before anything is read
         sys.exit(f'--resume takes the directory, seed, mode and warm start from the run; '
@@ -1797,6 +1816,12 @@ def main() -> None:
     parser.add_argument('--seed', type=runs.non_negative_int, default=None,
                         help='seed of the initial population, as config.json records it '
                              '(default: drawn and recorded)')
+    # Task 5
+    parser.add_argument('--simulations', type=int, default=None,
+                        help=f'profile mode: simulations per evaluation, S '
+                             f'(default {PROFILE_SIMULATIONS})')
+    parser.add_argument('--stage-timings', action='store_true',
+                        help="time run_covid's stages into timings_evaluation.csv")
     args = parser.parse_args()
 
     cores = hardware.performance_core_count()
@@ -1812,10 +1837,22 @@ def main() -> None:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
     pop_size, alpha, betamin, gamma, max_generations = OPTIMISER_MODES[mode]
+    # Task 5: a profile has n = workers, 2 generations, and S from the command line.
+    if mode == 'profile':
+        pop_size = max_workers
+        simulations = PROFILE_SIMULATIONS if args.simulations is None else args.simulations
+        if simulations < 1:
+            sys.exit(f'--simulations must be at least 1, not {simulations}')
+    elif args.simulations is not None:
+        sys.exit('--simulations changes the objective, so it is for --mode profile only')
+    else:
+        simulations = SIMULATIONS_PER_EVALUATION
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
     fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start or [])}
+    fa.simulations = simulations
+    fa.stage_timing = args.stage_timings
 
     with open('./variable/contact_parameters.pkl', 'rb') as f:
         contact_parameters = pickle.load(f)
@@ -1890,50 +1927,38 @@ def main() -> None:
     print(f'run directory: {result_path}')
 
     # Optimization
-    if mode == 'profile':
-        # Cprofile
-        with cProfile.Profile() as pr:
-            fa.firefly(function=cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
-                       demographic_parameters=demographic_parameters,
-                       max_generations=max_generations, max_workers=max_workers,
-                       seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
-                       Cheng_contact_array=Cheng_contact_array,
-                       Cheng_attack_rate=Cheng_attack_rate,
-                       norm_weights=norm_weights, resume=args.resume is not None)
-        print("--- Done %s seconds ---" % (time.time() - start_time))
-        stats = pstats.Stats(pr)
-        stats.sort_stats(pstats.SortKey.TIME)
-        # stats.print_stats()
-        Path('./profile_results').mkdir(exist_ok=True)  # Task 5 moves it into the run directory
-        stats.dump_stats(filename='./profile_results/firefly_profiling.prof')
-    else:
-        np.savetxt(result_path/'bound.txt',
-                   np.vstack((lower_bound, upper_bound)))
-        # E65: fast_cost.cost_function reduces inside the workers -- 1.63x on the steady-state
-        # benchmark, on top of the 2.46x the batching gave (run 5 0.1284 s -> run 6 0.0523 s
-        # per evaluation). It is verified bit-identical to cost_function() below on nine
-        # parameter vectors from two runs; cost_function() stays as the reference the
-        # verification compares against, so keep both and re-run verify_fast_cost.py after any
-        # change to either.
-        from covsyn.calibration.fast_cost import cost_function as reducing_cost_function
-        best_fireflies, best_intensities, best_iteration, worst_firefly, worst_intensities, worst_iteration, \
-            fireflies, intensities = fa.firefly(
-                function=reducing_cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
-                demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=max_workers, Cheng_contact_array=Cheng_contact_array,
-                Cheng_attack_rate=Cheng_attack_rate, norm_weights=norm_weights,
-                seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
-                resume=args.resume is not None)
-        fireflies_result = np.hstack((fireflies, np.matrix(intensities).T))
-        best_result = np.hstack(
-            (np.matrix(best_iteration).T, best_fireflies, np.matrix(best_intensities).T))
-        worst_result = np.hstack(
-            (np.matrix(worst_iteration).T, worst_firefly, np.matrix(worst_intensities).T))
+    if mode == 'profile':  # Task 5: the workers profile their tasks into the run directory
+        fa.profile_dir = result_path / 'profile'
+    np.savetxt(result_path/'bound.txt',
+               np.vstack((lower_bound, upper_bound)))
+    # E65: fast_cost.cost_function reduces inside the workers -- 1.63x on the steady-state
+    # benchmark, on top of the 2.46x the batching gave (run 5 0.1284 s -> run 6 0.0523 s
+    # per evaluation). It is verified bit-identical to cost_function() below on nine
+    # parameter vectors from two runs; cost_function() stays as the reference the
+    # verification compares against, so keep both and re-run verify_fast_cost.py after any
+    # change to either.
+    from covsyn.calibration.fast_cost import cost_function as reducing_cost_function
+    if simulations != SIMULATIONS_PER_EVALUATION:  # a profile's S (Task 5)
+        reducing_cost_function = functools.partial(reducing_cost_function,
+                                                   simulations=simulations)
+    best_fireflies, best_intensities, best_iteration, worst_firefly, worst_intensities, worst_iteration, \
+        fireflies, intensities = fa.firefly(
+            function=reducing_cost_function, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
+            demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=max_workers, Cheng_contact_array=Cheng_contact_array,
+            Cheng_attack_rate=Cheng_attack_rate, norm_weights=norm_weights,
+            seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
+            resume=args.resume is not None)
+    fireflies_result = np.hstack((fireflies, np.matrix(intensities).T))
+    best_result = np.hstack(
+        (np.matrix(best_iteration).T, best_fireflies, np.matrix(best_intensities).T))
+    worst_result = np.hstack(
+        (np.matrix(worst_iteration).T, worst_firefly, np.matrix(worst_intensities).T))
 
-        np.savetxt(result_path/'firefly_result.txt',
-                   fireflies_result, fmt='%.7f')
-        np.savetxt(result_path/'firefly_best.txt', best_result, fmt='%.7f')
-        np.savetxt(result_path/'firefly_worst.txt', worst_result, fmt='%.7f')
-        print("--- Done %s seconds ---" % (time.time() - start_time))
+    np.savetxt(result_path/'firefly_result.txt',
+               fireflies_result, fmt='%.7f')
+    np.savetxt(result_path/'firefly_best.txt', best_result, fmt='%.7f')
+    np.savetxt(result_path/'firefly_worst.txt', worst_result, fmt='%.7f')
+    print("--- Done %s seconds ---" % (time.time() - start_time))
 
 
 if __name__ == "__main__":
