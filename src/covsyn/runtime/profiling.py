@@ -32,7 +32,7 @@ TOP_COLUMNS = (
 )
 
 
-def start_worker_profile(profile_dir: Path) -> cProfile.Profile:
+class WorkerProfile:
     """A worker's profile, written to ``worker_<pid>.prof`` in profile_dir when it exits.
 
     A pool worker leaves through threading's shutdown, not through atexit, so the dump is
@@ -40,15 +40,32 @@ def start_worker_profile(profile_dir: Path) -> cProfile.Profile:
     The caller enables the profile around each task only, so waiting for work is not counted;
     a worker that ran no task writes nothing, as pstats cannot read an empty profile.
     """
-    profile = cProfile.Profile()
-    path = Path(profile_dir) / f"worker_{os.getpid()}.prof"
 
-    def dump() -> None:
-        if profile.getstats():
-            profile.dump_stats(str(path))
+    def __init__(self, profile_dir: Path) -> None:
+        """Make the profile and register its dump."""
+        self.profile = cProfile.Profile()
+        self.path = Path(profile_dir) / f"worker_{os.getpid()}.prof"
+        self.used = False
+        threading._register_atexit(self.dump)
 
-    threading._register_atexit(dump)
-    return profile
+    def enable(self) -> None:
+        """Profile from now on."""
+        self.used = True
+        self.profile.enable()
+
+    def disable(self) -> None:
+        """Stop profiling."""
+        self.profile.disable()
+
+    def dump(self) -> None:
+        """Write the profile, if a task ran."""
+        if self.used:
+            self.profile.dump_stats(str(self.path))
+
+
+def start_worker_profile(profile_dir: Path) -> WorkerProfile:
+    """This worker's profile; see WorkerProfile."""
+    return WorkerProfile(profile_dir)
 
 
 def share(path: Path, function: str) -> float:

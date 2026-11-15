@@ -111,6 +111,13 @@ def test_each_worker_writes_its_own_profile(
     assert profiling.share(tmp_path / profiling.MERGED, "run_covid") > 0.5
 
 
+def _pid_after(seconds):
+    import os
+
+    time.sleep(seconds)
+    return os.getpid()
+
+
 def test_a_worker_without_tasks_writes_no_profile(
     tmp_path, run10_vector, demographic_parameters, cheng_data
 ):
@@ -121,7 +128,8 @@ def test_a_worker_without_tasks_writes_no_profile(
         initializer=fast_cost.init_worker,
         initargs=(demographic_parameters, columns, False, tmp_path),
     ) as pool:
-        list(pool.map(abs, [1, 2]))  # both workers start
+        # Two tasks that wait, so the pool starts both workers rather than reusing one.
+        assert len(set(pool.map(_pid_after, [0.5, 0.5]))) == 2
         fast_cost.cost_function(
             run10_vector, demographic_parameters, pool, *cheng_data, simulations=10
         )
