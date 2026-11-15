@@ -393,8 +393,10 @@ def test_each_finished_stage_is_one_line_of_run_log(tmp_path, config):
             "workers",
             "parent_peak_mb",
             "worker_peak_mb",
+            "pipeline_peak_mb",
         }
-        assert line["seconds"] >= 0 and line["parent_peak_mb"] > 0
+        # The steps' own peaks are Task 5's (test_task5_stage_memory); the recorder has none.
+        assert line["seconds"] >= 0 and line["pipeline_peak_mb"] > 0
 
 
 def test_resume_skips_the_finished_stages(tmp_path, config):
@@ -556,8 +558,10 @@ def test_warnings_are_kept_with_the_run(tmp_path, config):
     """
     _, run_dir = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.validation.show_final"}))
     assert "WARNING: the report's show_final failed" in (run_dir / "pipeline.log").read_text()
-    lines = {json.loads(x)["stage"]: json.loads(x) for x in (run_dir / "run.log").read_text()
-             .splitlines()}
+    lines = {
+        json.loads(x)["stage"]: json.loads(x)
+        for x in (run_dir / "run.log").read_text().splitlines()
+    }
     assert lines["report"]["warnings"] == ["the report's show_final failed"]
     assert lines["check"]["warnings"] == []
 
@@ -584,8 +588,10 @@ def test_a_step_inherits_the_runs_lock(tmp_path):
     lock = pr.acquire_lock(tmp_path)
     try:
         out = tmp_path / "out.txt"
-        code = (f"import os; print(os.fstat({lock}).st_ino == "
-                f"os.stat({str(tmp_path / pr.LOCK)!r}).st_ino)")
+        code = (
+            f"import os; print(os.fstat({lock}).st_ino == "
+            f"os.stat({str(tmp_path / pr.LOCK)!r}).st_ino)"
+        )
         assert pr.run_module(["-c", code], out, False, {}, keep_fds=(lock,)) == 0
         assert out.read_text().strip() == "True"
     finally:
@@ -613,8 +619,7 @@ def test_run_log_records_the_workers_the_steps_use(tmp_path, config, monkeypatch
     """The default every step gets: COVSYN_WORKERS from the shell, when the setting is unset."""
     monkeypatch.setenv("COVSYN_WORKERS", "7")
     _, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert {json.loads(x)["workers"] for x in (run_dir / "run.log").read_text().splitlines()} \
-        == {7}
+    assert {json.loads(x)["workers"] for x in (run_dir / "run.log").read_text().splitlines()} == {7}
 
 
 def test_short_of_memory_every_finished_stage_is_still_recorded(tmp_path, config, monkeypatch):
@@ -652,8 +657,10 @@ def test_check_gap_reads_this_runs_spread_simulations(tmp_path, config):
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     gap = next(a for a in recorder.calls if a[1] == "covsyn.validation.check_gap")
-    assert gap[2:] == [str(run_dir / "selected"),
-                       str(run_dir / "synthetic" / "spread_Taiwan_weight")]
+    assert gap[2:] == [
+        str(run_dir / "selected"),
+        str(run_dir / "synthetic" / "spread_Taiwan_weight"),
+    ]
 
 
 def test_a_relative_run_directory_is_made_absolute(tmp_path, config, monkeypatch):
@@ -679,8 +686,12 @@ def test_tw_check_lists_earlier_runs_only_when_given_no_run(tmp_path):
     old = pr.runs.REPO_ROOT / "synthetic_data_results_taiwan_first_outbreak_zz_test_only"
     old.mkdir()
     try:
-        given = subprocess.run([sys.executable, "-m", "covsyn.validation.tw_check", str(tmp_path)],
-                               cwd=pr.runs.REPO_ROOT, capture_output=True, text=True)
+        given = subprocess.run(
+            [sys.executable, "-m", "covsyn.validation.tw_check", str(tmp_path)],
+            cwd=pr.runs.REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
     finally:
         old.rmdir()
     assert "previous:" not in given.stdout, given.stdout + given.stderr
@@ -689,6 +700,7 @@ def test_tw_check_lists_earlier_runs_only_when_given_no_run(tmp_path):
 def test_the_resume_hint_is_the_run_id(tmp_path):
     """Every run is results/models/<run-id>, so --resume takes its id."""
     assert pr.resume_name(tmp_path / "results" / "models" / "r") == "r"
+
 
 def test_a_symlinked_models_directory_keeps_its_results_siblings(tmp_path):
     """Absolute, not resolved: a linked results/models/<id> still lays out under results/."""

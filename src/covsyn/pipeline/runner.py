@@ -8,7 +8,9 @@ that the optimiser has finished is needed. Detach it with what ships with both s
     nohup uv run covsyn-pipeline --config default > pipeline.out 2>&1 &
 
 Each finished stage appends one JSON line to ``results/models/<run-id>/run.log``: the stage,
-its end time, duration, workers, and the peak memory of this process and of the largest step.
+its end time, duration, workers, the peak memory of its steps' own processes and of their
+largest worker (Task 5), and that of this process. A stage that an earlier run on the same
+configuration shows would not fit in the available memory is refused.
 ``--resume <run-id>`` skips the stages in run.log and continues the optimiser from its last
 checkpoint. The configuration is saved with the run as ``pipeline.toml``, so a resumed run
 keeps its settings.
@@ -35,7 +37,7 @@ from pathlib import Path
 
 from covsyn.pipeline import config as pc
 from covsyn.pipeline import stages as ps
-from covsyn.runtime import hardware, runs
+from covsyn.runtime import hardware, measure, memory, runs
 
 SAVED_CONFIG = "pipeline.toml"
 RUN_LOG = "run.log"
@@ -58,6 +60,8 @@ def run_module(
     """
     environment = {**os.environ, **env}
     command = [sys.executable, *map(str, args)]
+    if measure.ENV in environment:  # Task 5: the step records its own and its workers' peaks
+        command[1:1] = ["-m", "covsyn.runtime.measure"]
     options = {
         "cwd": runs.REPO_ROOT,
         "env": environment,
@@ -80,10 +84,70 @@ def say(message: str, log: Path | None = None) -> None:
             f.write(line + "\n")
 
 
-def _peak_mb(who: int) -> float:
-    """Peak resident memory in MB; ru_maxrss is in bytes on macOS and in KiB on Linux."""
-    peak = resource.getrusage(who).ru_maxrss
-    return peak / 1e6 if sys.platform == "darwin" else peak * 1024 / 1e6
+def stage_memory(path: Path) -> dict:
+    """A stage's peaks from its steps' measurements: the largest over the steps.
+
+    ``low_memory`` is whether any step saw available memory below 10% of the total.
+    """
+    lines = []
+    if path.exists():
+        for text in path.read_text(errors="replace").splitlines():
+            try:
+                lines.append(json.loads(text))
+            except ValueError:  # cut off by a kill
+                continue
+
+    def largest(key):
+        values = [line[key] for line in lines if isinstance(line.get(key), (int, float))]
+        return max(values) if values else None
+
+    lowest = [line["lowest_available_mb"] for line in lines if line.get("lowest_available_mb")]
+    return {
+        "parent_peak_mb": largest("parent_peak_mb"),
+        "worker_peak_mb": largest("worker_peak_mb"),
+        "lowest_available_mb": min(lowest) if lowest else None,
+        "low_memory": any(line.get("low_memory") for line in lines),
+    }
+
+
+def earlier_worker_peak(run_dir: Path, stage: str) -> float | None:
+    """The stage's worker peak in MB in the latest other run on the same configuration.
+
+    Runs are compared by their saved pipeline.toml; a run without one, or without the stage's
+    worker peak in its run.log, gives nothing.
+    """
+    saved = (run_dir / SAVED_CONFIG).read_text(encoding="utf-8")
+    found = []
+    for log in run_dir.parent.glob(f"*/{RUN_LOG}"):
+        other = log.parent
+        if other == run_dir or not (other / SAVED_CONFIG).is_file():
+            continue
+        if (other / SAVED_CONFIG).read_text(encoding="utf-8", errors="replace") != saved:
+            continue
+        for text in log.read_text(errors="replace").splitlines():
+            try:
+                line = json.loads(text)
+            except ValueError:
+                continue
+            if line.get("stage") == stage and isinstance(line.get("worker_peak_mb"), (int, float)):
+                found.append((log.stat().st_mtime, line["worker_peak_mb"]))
+    return max(found)[1] if found else None
+
+
+def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
+    """Why the stage would not fit in the available memory, or None (Task 5)."""
+    peak = earlier_worker_peak(run_dir, stage)
+    if peak is None:
+        return None
+    needed = workers * peak
+    available = memory.available_bytes() / memory.MB
+    if needed <= available:
+        return None
+    return (
+        f"stage {stage} needs about {needed:.0f} MB ({workers} workers x {peak:.0f} MB, the "
+        f"peak per worker of an earlier run on this configuration), but only "
+        f"{available:.0f} MB is available; free memory or set fewer workers"
+    )
 
 
 def finished_stages(run_dir: Path) -> list[str]:
@@ -106,19 +170,24 @@ def record_stage(
     seconds: float,
     workers: int,
     warnings: Sequence[str] = (),
+    peaks: Mapping | None = None,
 ) -> None:
     """Append one line to run.log for a finished stage.
 
-    The worker peak is the largest of every step run so far (RUSAGE_CHILDREN cannot be reset);
-    Task 5 replaces it with each stage's own peak.
+    ``peaks`` is :func:`stage_memory`'s: the largest peak of the stage's steps' own processes
+    and of their workers, None where no step measured one. ``pipeline_peak_mb`` is this
+    process's, over the whole run so far.
     """
+    peaks = peaks or {}
     line = {
         "stage": stage,
         "finished": datetime.now().isoformat(timespec="seconds"),
         "seconds": round(seconds, 3),
         "workers": workers,
-        "parent_peak_mb": round(_peak_mb(resource.RUSAGE_SELF), 1),
-        "worker_peak_mb": round(_peak_mb(resource.RUSAGE_CHILDREN), 1),
+        "parent_peak_mb": peaks.get("parent_peak_mb"),
+        "worker_peak_mb": peaks.get("worker_peak_mb"),
+        "lowest_available_mb": peaks.get("lowest_available_mb"),
+        "pipeline_peak_mb": round(memory.peak_rss_bytes(resource.RUSAGE_SELF) / memory.MB, 1),
         "warnings": list(warnings),
     }
     path = Path(run_dir) / RUN_LOG
@@ -278,10 +347,17 @@ def _run_stages(
     for name, function in ps.STAGES:
         if name in done:
             continue
+        # Task 5: the stage's steps append their peaks here; a killed attempt's do not count.
+        measurements = layout.logs / f"memory_{name}.jsonl"
+        measurements.unlink(missing_ok=True)
+        environment = {**env, measure.ENV: str(measurements)}
         ctx = ps.Context(config, layout, step)
         report(f"stage {name}")
         start = time.monotonic()
         try:
+            problem = memory_problem(run_dir, name, workers)
+            if problem is not None:
+                raise ps.StageFailed(problem)
             function(ctx, resume) if name == "optimise" else function(ctx)
         except ps.StageFailed as error:
             hint = (
@@ -292,9 +368,16 @@ def _run_stages(
             report(f"ERROR: {error}; stopping.{hint}")
             return 1
         finally:
+            peaks = stage_memory(measurements)
+            if peaks["low_memory"]:
+                ctx.warnings.append(
+                    f"available memory fell below {100 * memory.LOW_MEMORY_FRACTION:.0f}% "
+                    f"of the total (lowest {peaks['lowest_available_mb']} MB); see the "
+                    "step logs"
+                )
             for warning in ctx.warnings:
                 report(f"WARNING: {warning}")
-        record_stage(run_dir, name, time.monotonic() - start, workers, ctx.warnings)
+        record_stage(run_dir, name, time.monotonic() - start, workers, ctx.warnings, peaks)
     report("ALL DONE")
     return 0
 
