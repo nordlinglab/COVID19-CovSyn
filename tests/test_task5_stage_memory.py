@@ -216,20 +216,6 @@ def test_a_stage_stopped_by_an_interrupt_leaves_its_memory_readings(tmp_path, co
     assert "no step reported its peaks" in log and "memory_synthesise" not in log
 
 
-def test_a_log_that_cannot_be_written_keeps_the_stages_status(tmp_path, config, monkeypatch):
-    """Writing the memory readings may fail (a full disk); the run still ends with status 1."""
-    say = pr.say
-
-    def failing(message, log=None):
-        if message.startswith("memory in stage"):
-            raise OSError("No space left on device")
-        say(message, log)
-
-    monkeypatch.setattr(pr, "say", failing)
-    status, _ = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.model.data_synthesis_main"}))
-    assert status == 1
-
-
 def earlier_run(
     tmp_path, config, name, stage, worker_peak_mb, workers, parent_peak_mb=100.0, task5=True
 ):
@@ -344,3 +330,58 @@ def test_only_stopped_attempts_leave_their_measurements(tmp_path, config):
     assert prun(None, run_dir, execute=Measuring(peaks), resume=True) == 0
     left = sorted(p.name.split("_")[1] for p in (run_dir / "logs").glob("memory_*.jsonl"))
     assert left == ["synthesise"]  # the stopped attempt's, not the finished one's
+
+
+def test_a_stage_whose_memory_could_not_be_read_still_finishes(tmp_path, config, monkeypatch):
+    """No available-memory reading is a blank in run.log, not a crash after the stage."""
+
+    def failing():
+        raise OSError("/proc unreadable")
+
+    monkeypatch.setattr(memory, "system_memory", failing)
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+    assert all(line["lowest_available_mb"] is None for line in run_log(run_dir).values())
+
+
+def test_a_pipeline_log_that_cannot_be_written_keeps_the_status(tmp_path, config):
+    """A full disk under pipeline.log stops no report: a failed stage still gives status 1."""
+    run_dir = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
+    (run_dir / pr.PIPELINE_LOG).mkdir(parents=True)  # every write to it fails
+    status, _ = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.model.data_synthesis_main"}))
+    assert status == 1
+
+
+def test_a_broken_stdout_still_leaves_pipeline_log(tmp_path, config, monkeypatch):
+    """The terminal going away loses nothing from the run's own log."""
+    import sys
+
+    class Broken:
+        def write(self, text):
+            raise BrokenPipeError
+
+        def flush(self):
+            raise BrokenPipeError
+
+    monkeypatch.setattr(sys, "stdout", Broken())
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0
+    assert "ALL DONE" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_each_line_goes_to_stdout_in_one_write(monkeypatch):
+    """So the watch thread's lines cannot split another's."""
+    import sys
+
+    writes = []
+
+    class Recording:
+        def write(self, text):
+            writes.append(text)
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(sys, "stdout", Recording())
+    pr.say("stage optimise")
+    assert len(writes) == 1 and writes[0].endswith("stage optimise\n")

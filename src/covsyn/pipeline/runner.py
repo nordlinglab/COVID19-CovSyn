@@ -83,11 +83,19 @@ _SAYING = threading.Lock()
 
 def say(message: str, log: Path | None = None) -> None:
     """A timestamped progress line, printed and, given a run's pipeline.log, kept there."""
-    line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}"
-    print(line, flush=True)
+    line = f"[pipeline {datetime.now():%m-%d %H:%M:%S}] {message}\n"
+    # The run's log first, so a terminal that went away loses nothing from it; neither a full
+    # disk nor a broken stdout may replace a stage's status or error.
     if log is not None:
-        with _SAYING, open(log, "a", encoding="utf-8") as f:  # not held while printing
-            f.write(line + "\n")
+        try:
+            with _SAYING, open(log, "a", encoding="utf-8") as f:  # not held while printing
+                f.write(line)
+        except OSError as error:
+            with contextlib.suppress(Exception):
+                sys.stderr.write(f"could not write {log}: {error!r}\n")
+    with contextlib.suppress(OSError, ValueError):  # a broken pipe, a closed stdout
+        sys.stdout.write(line)  # one write, so another thread's line cannot split it
+        sys.stdout.flush()
 
 
 def json_lines(path: Path) -> list[dict]:
@@ -408,13 +416,11 @@ def _run_stages(
                     if measurements.exists()
                     else "no step reported its peaks"
                 )
-                # A log that cannot be written must not replace the stage's status or error.
-                with contextlib.suppress(OSError):
-                    report(
-                        f"memory in stage {name}: lowest available "
-                        f"{watch.lowest_available / memory.MB:.0f} MB, this process at most "
-                        f"{watch.parent_peak_bytes / memory.MB:.0f} MB; {steps}"
-                    )
+                report(
+                    f"memory in stage {name}: lowest available "
+                    f"{watch.lowest_available / memory.MB:.0f} MB, this process at most "
+                    f"{watch.parent_peak_bytes / memory.MB:.0f} MB; {steps}"
+                )
         peaks = {
             **stage_memory(measurements),
             "pipeline_peak_mb": round(watch.parent_peak_bytes / memory.MB, 1),
