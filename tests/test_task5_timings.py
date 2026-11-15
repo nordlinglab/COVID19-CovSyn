@@ -307,7 +307,7 @@ def test_a_run_that_fails_shuts_its_pool_down(tmp_path, monkeypatch):
     shutdown = concurrent.futures.ProcessPoolExecutor.shutdown
 
     def recording(self, *args, **kwargs):
-        shut.append((self, kwargs))  # a failed run must not wait for the running tasks
+        shut.append((self, kwargs))  # a failed run cancels what has not started
         return shutdown(self, *args, **kwargs)
 
     monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "shutdown", recording)
@@ -316,7 +316,7 @@ def test_a_run_that_fails_shuts_its_pool_down(tmp_path, monkeypatch):
     path.mkdir()
     with pytest.raises(Killed):
         optimise(path, killed_after(POP + 3))
-    assert shut and shut[-1][1] == {"wait": False, "cancel_futures": True}
+    assert shut and shut[-1][1] == {"wait": True, "cancel_futures": True}
 
 
 def test_a_table_that_fails_to_close_neither_hides_the_error_nor_leaves_others_open(
@@ -361,7 +361,7 @@ def test_a_finished_run_raises_a_table_that_failed_to_close(tmp_path, monkeypatc
     assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])
 
 
-def test_close_tables_closes_all_whatever_one_raises(tmp_path):
+def test_close_tables_closes_all_whatever_one_raises(tmp_path, capsys):
     """Not only an OSError: any error of one close leaves the others to be closed."""
 
     class Bad:
@@ -372,5 +372,6 @@ def test_close_tables_closes_all_whatever_one_raises(tmp_path):
     good.write({"generation": 0})
     timings.close_tables([Bad(), good], failing=True)
     assert good.file is None
+    assert "could not close" in capsys.readouterr().err  # said, as it is not raised
     with pytest.raises(ValueError):
         timings.close_tables([Bad()])

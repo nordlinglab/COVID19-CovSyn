@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+import contextlib
 import copy
 import csv
 import functools
@@ -1549,9 +1550,6 @@ class Firefly:
         _columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
         if self.profile_dir is not None:
             Path(self.profile_dir).mkdir(parents=True, exist_ok=True)
-        executor = concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_workers, initializer=_init_reduction_worker,
-            initargs=(demographic_parameters, _columns, self.stage_timing, self.profile_dir))
         intensities = np.empty(self.pop_size)
         cost_parts = [{} for _ in range(self.pop_size)]
         # Task 5: one row per evaluation and per generation, beside progress.csv.
@@ -1560,7 +1558,10 @@ class Firefly:
                                          timings.EVALUATION_COLUMNS)
         generation_table = timings.Table(tables / timings.GENERATION_TABLE,
                                          timings.GENERATION_COLUMNS)
-        progress_table = timings.Table(runs.progress_path(result_path))
+        progress_table = timings.Table(runs.progress_path(result_path))  # Tables open lazily
+        executor = concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers, initializer=_init_reduction_worker,
+            initargs=(demographic_parameters, _columns, self.stage_timing, self.profile_dir))
         failed = False
         try:  # the pool and the tables are closed however the run ends
             clock = timings.GenerationClock(-1, max_workers)
@@ -1712,9 +1713,13 @@ class Firefly:
                     dim))
 
             executor.shutdown()  # the workers write their profiles as they exit
-        except BaseException:  # a failed or stopped run does not wait for its running tasks
+        except BaseException:
+            # A failed or stopped run cancels the tasks not yet started and waits for the running
+            # ones, at most one task of SIMULATIONS_PER_TASK simulations each (tens of ms), so no
+            # worker outlives the run; an error of the shutdown must not replace the run's own.
             failed = True
-            executor.shutdown(wait=False, cancel_futures=True)
+            with contextlib.suppress(Exception):
+                executor.shutdown(wait=True, cancel_futures=True)
             raise
         finally:  # whatever ended the run, shutdown included; its own error stays the one raised
             timings.close_tables((progress_table, evaluation_table, generation_table),

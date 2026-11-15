@@ -15,6 +15,7 @@ it in place, never rebind it.
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import os
 import sys
@@ -214,6 +215,10 @@ def close_tables(tables: Iterable[Table], failing: bool = False) -> None:
             table.close()
         except Exception as error:  # a flush can fail in more ways than OSError
             first = first or error
+            if failing:  # not raised, so said: its last rows may be lost
+                with contextlib.suppress(Exception):
+                    print(f"could not close {getattr(table, 'path', table)}: {error!r}",
+                          file=sys.stderr)  # fmt: skip
     if first is not None and not failing:
         raise first
 
