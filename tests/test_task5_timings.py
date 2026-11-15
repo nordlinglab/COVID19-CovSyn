@@ -265,3 +265,17 @@ def test_a_header_cut_off_by_a_kill_is_written_again_on_resume(tmp_path, run):
     optimise(path, objective, resume=True)
     rows = table(path, timings.GENERATION_TABLE)
     assert list(rows[0]) == list(timings.GENERATION_COLUMNS)
+
+
+def test_an_attempt_without_a_checkpoint_leaves_no_timing_tables(tmp_path):
+    """Starting the optimiser afresh discards the killed attempt's tables, cut rows and all."""
+    from covsyn.pipeline import stages as ps
+
+    run = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
+    run.mkdir(parents=True)
+    tables = runs.progress_path(run).parent
+    tables.mkdir(parents=True)
+    for name in ("progress.csv", timings.EVALUATION_TABLE, timings.GENERATION_TABLE):
+        (tables / name).write_text("generation,start_un")
+    ps.discard_optimiser_output(run)
+    assert list(tables.iterdir()) == []

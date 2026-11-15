@@ -153,9 +153,11 @@ def discard_optimiser_output(run: Path) -> None:
             shutil.rmtree(path)
         elif path.exists() or path.is_symlink():
             path.unlink()
-    table = runs.progress_path(run)
-    if table.exists():
-        table.unlink()
+    # In results/tables/<run-id>/: progress.csv and the timing tables (Task 5).
+    progress = runs.progress_path(run)
+    for table in (progress, *(progress.parent / name for name in runs.TIMING_TABLES)):
+        if table.exists():
+            table.unlink()
 
 
 def revalidate(ctx: Context) -> None:

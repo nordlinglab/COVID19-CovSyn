@@ -25,12 +25,11 @@ from pathlib import Path
 import psutil
 
 from covsyn.model.data_synthesis_main import STAGES
-from covsyn.runtime import memory
+from covsyn.runtime import memory, runs
 
 LAST: dict = {}
 
-EVALUATION_TABLE = "timings_evaluation.csv"
-GENERATION_TABLE = "timings_generation.csv"
+EVALUATION_TABLE, GENERATION_TABLE = runs.TIMING_TABLES  # beside progress.csv
 EVALUATION_COLUMNS = (
     "generation",
     "candidate",
