@@ -196,3 +196,28 @@ def test_a_sample_that_fails_does_not_stop_the_watch(monkeypatch):
         time.sleep(0.2)
         alive = watch.thread.is_alive()
     assert alive and watch.lowest_available == 50
+
+
+def test_a_failing_rss_read_still_measures_the_available_memory(monkeypatch):
+    """The two reads fail separately: the low-memory warning works without the RSS."""
+    import psutil
+
+    def denied(self):
+        raise psutil.AccessDenied()
+
+    monkeypatch.setattr(psutil.Process, "memory_info", denied)
+    warnings = []
+    with memory.MemoryWatch(interval=0.01, warn=warnings.append, system=lambda: (5, 100)) as w:
+        time.sleep(0.1)
+    assert w.lowest_available == 5 and len(warnings) == 1
+
+
+def test_a_lasting_failure_is_reported_once(capsys):
+    """Not once a second for hours."""
+
+    def failing():
+        raise OSError("/proc unreadable")
+
+    with memory.MemoryWatch(interval=0.01, system=failing):
+        time.sleep(0.2)
+    assert capsys.readouterr().err.count("memory watch:") == 1

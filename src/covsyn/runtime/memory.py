@@ -104,12 +104,19 @@ class MemoryWatch:
         self.parent_peak_bytes = 0
         self.lowest_available: int | None = None
         self.warned = False
+        self.failed = False
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, name="memory-watch", daemon=True)
 
     def sample(self) -> None:
-        """Take one sample."""
+        """Take one sample; the RSS, the available memory and the warning fail separately."""
+        self._guarded(self._sample_rss)
+        self._guarded(self._sample_available)
+
+    def _sample_rss(self) -> None:
         self.parent_peak_bytes = max(self.parent_peak_bytes, rss_bytes(self.process))
+
+    def _sample_available(self) -> None:
         available, total = self.system()
         if self.lowest_available is None or available < self.lowest_available:
             self.lowest_available = available
@@ -117,17 +124,19 @@ class MemoryWatch:
             self.warned = True
             self.warn(low_memory_warning(available, total))
 
-    def _safe_sample(self) -> None:
-        """A sample whose failure, of psutil or of the warning, does not stop the watch."""
+    def _guarded(self, read: Callable[[], None]) -> None:
+        """Run one read; a failure (/proc unreadable, a full disk) is reported once, not fatal."""
         try:
-            self.sample()
-        except Exception as error:  # e.g. /proc unreadable for a moment, or a full disk
-            with contextlib.suppress(Exception):  # stderr may be the broken part
-                print(f"memory watch: a sample failed ({error!r})", file=sys.stderr)
+            read()
+        except Exception as error:
+            if not self.failed:
+                self.failed = True
+                with contextlib.suppress(Exception):  # stderr may be the broken part
+                    print(f"memory watch: a sample failed ({error!r})", file=sys.stderr)
 
     def _run(self) -> None:
         while True:
-            self._safe_sample()
+            self.sample()
             if self._stop.wait(self.interval):
                 return
 
@@ -140,4 +149,4 @@ class MemoryWatch:
         """Stop sampling, after a last sample."""
         self._stop.set()
         self.thread.join()
-        self._safe_sample()  # must not replace the stage's own result or exception
+        self.sample()  # guarded: must not replace the stage's own result or exception
