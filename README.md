@@ -97,7 +97,9 @@ A run directory that is a link to other storage is not supported.
 
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.
 The pipeline warns as soon as available memory falls below 10% of the total.
-A stage is refused when an earlier run with the same `pipeline.toml` shows it needs more than the available memory: its steps' peak plus the workers times the peak per worker.
+A stage is refused when the latest earlier run with the same `pipeline.toml` that measured the stage whole shows it needs more than the available memory: its steps' peak plus the workers times the peak per worker.
+The steps' peak is a conservative addition to the plan's formula, and stopped attempts are not used, so a stage once stopped for want of memory may run out again;
+without such an earlier run, the pipeline says the need cannot be estimated.
 This is a conservative check at the stage's start, not a guarantee against running out of memory.
 A forked worker's resident memory, on Linux, also counts the pages it shares with its parent, so a stage that would fit may be refused.
 The optimiser writes `timings_evaluation.csv`, one row per evaluation, and `timings_generation.csv`, one row per generation, beside `progress.csv`;

@@ -234,8 +234,9 @@ def earlier_run(
     (run_dir / pr.SAVED_CONFIG).write_text(config)
     line = {"stage": stage, "workers": workers, "parent_peak_mb": parent_peak_mb,
             "worker_peak_mb": worker_peak_mb}  # fmt: skip
-    if task5:
-        line["pipeline_peak_mb"] = 50.0
+    if task5:  # measured whole: the memory check may use it
+        line.update(pipeline_peak_mb=50.0, finished="2026-11-01T10:00:00+08:00", steps=1,
+                    steps_measured=1, partial=False)  # fmt: skip
     (run_dir / pr.RUN_LOG).write_text(json.dumps(line) + "\n")
     return run_dir
 
@@ -517,24 +518,8 @@ def test_a_stopped_stage_reports_its_sampled_step_peak(tmp_path, config):
     assert int(sampled) >= 199 * MIB / memory.MB
 
 
-def test_the_memory_check_uses_the_sampled_step_peak_when_none_was_measured(
-    tmp_path, config, monkeypatch
-):
-    """An earlier step without its measurement still counts, by its sampled RSS."""
-    run = tmp_path / "results" / "models" / "20261101-000000_aaaaaaa_phase-d"
-    run.mkdir(parents=True)
-    (run / pr.SAVED_CONFIG).write_text(pc.to_toml(config))
-    line = {"stage": "optimise", "workers": 2, "parent_peak_mb": None, "worker_peak_mb": 1000.0,
-            "pipeline_peak_mb": 50.0, "step_sampled_peak_mb": 7000.0}  # fmt: skip
-    (run / pr.RUN_LOG).write_text(json.dumps(line) + "\n")
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "2")
-    status, _ = run_pipeline(tmp_path, config, Recorder())
-    assert status == 1  # 7000 + 2 x 1000 > 8000
-
-
-def test_a_step_that_wrote_no_peak_still_counts_next_time(tmp_path, config, monkeypatch):
-    """A stage whose one step was killed before measuring finishes; its sampled RSS is checked."""
+def test_a_step_that_wrote_no_peak_makes_its_stage_unusable(tmp_path, config, monkeypatch):
+    """A step killed before measuring leaves its stage incomplete: no estimate next time."""
     code = (
         "import numpy as np, time, os; b = np.ones(200 * 1024**2 // 8); time.sleep(3.5); "
         "os._exit(0)"  # no atexit, so no measurement line, but a finished stage
@@ -547,70 +532,137 @@ def test_a_step_that_wrote_no_peak_still_counts_next_time(tmp_path, config, monk
             return super().__call__(args, output, append, env)
 
     _, first = run_pipeline(tmp_path, config, Unmeasured())
-    assert run_log(first)["optimise"]["worker_peak_mb"] is None
+    line = run_log(first)["optimise"]
+    assert (line["steps"], line["steps_measured"]) == (1, 0)  # the step, killed unmeasured
     second = first.parent / "20261116-090000_b30c141_phase-d"
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))  # 100 MB free
-    assert prun(config, second, execute=Recorder()) == 1
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))
+    assert prun(config, second, execute=Recorder()) == 0
     assert (
-        "stage optimise needs about" in (second / pr.PIPELINE_LOG).read_text()
-    )  # the ~210 MB step does not fit
-
-
-def test_a_stopped_stage_counts_next_time(tmp_path, config, monkeypatch):
-    """A stage killed for want of memory leaves its peaks for the next run's check."""
-    code = (
-        "import numpy as np, time, os; b = np.ones(200 * 1024**2 // 8); time.sleep(3.5); "
-        "os._exit(9)"
+        "stage optimise: no complete earlier measurement" in (second / pr.PIPELINE_LOG).read_text()
     )
 
-    class Killed(Recorder):
-        def __call__(self, args, output, append, env):
-            if str(args[1]) == "covsyn.calibration.firefly_optimizer":
-                pr.run_module(["-c", code], None, False, env)
-                return 1
-            return super().__call__(args, output, append, env)
 
-    status, first = run_pipeline(tmp_path, config, Killed())
+def test_a_stopped_stage_is_not_used_next_time(tmp_path, config, monkeypatch):
+    """Only finished stages are estimates; a stopped one is reported, not used."""
+    status, first = run_pipeline(
+        tmp_path, config, Measuring({"covsyn.calibration.firefly_optimizer": (9000.0, 9000.0)},
+                                    fail={"covsyn.calibration.firefly_optimizer"})
+    )  # fmt: skip
     assert status == 1
     second = first.parent / "20261116-090000_b30c141_phase-d"
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))
-    assert prun(config, second, execute=Recorder()) == 1
-    assert "stage optimise needs about" in (second / pr.PIPELINE_LOG).read_text()
+    assert prun(config, second, execute=Recorder()) == 0
 
 
-def _line(stage, parent, worker, sampled=None, **when):
-    return {"stage": stage, "parent_peak_mb": parent, "worker_peak_mb": worker,
-            "step_sampled_peak_mb": sampled, "pipeline_peak_mb": 50.0, **when}  # fmt: skip
+def test_run_log_says_whether_a_stage_was_measured_whole(tmp_path, config):
+    """Steps run, steps measured, whether it ran only the rest, and a time with its offset."""
+    peaks = {"covsyn.calibration.firefly_optimizer": (300.0, 900.0)}
+    _, run_dir = run_pipeline(tmp_path, config, Measuring(peaks))
+    line = run_log(run_dir)["optimise"]
+    assert (line["steps"], line["steps_measured"], line["partial"]) == (1, 1, False)
+    assert pr.complete(line)
+    assert pr.finished_at(line).utcoffset() is not None
 
 
-def _earlier(tmp_path, config, name, finished=(), stopped=()):
-    run = tmp_path / "results" / "models" / name
-    (run / "logs").mkdir(parents=True)
-    (run / pr.SAVED_CONFIG).write_text(pc.to_toml(config))
-    (run / pr.RUN_LOG).write_text("".join(json.dumps(x) + "\n" for x in finished))
-    (run / "logs" / pr.STOPPED_LOG).write_text("".join(json.dumps(x) + "\n" for x in stopped))
-    return run
+def test_a_resumed_optimiser_measured_only_the_rest(tmp_path, config, monkeypatch):
+    """Its line is partial, so a later run does not take it for the whole stage."""
+    peaks = {"covsyn.calibration.firefly_optimizer": (300.0, 900.0)}
+    status, run_dir = run_pipeline(
+        tmp_path, config, Measuring(peaks, fail={"covsyn.calibration.revalidation"})
+    )
+    assert status == 1
+    assert prun(None, run_dir, execute=Measuring(peaks), resume=True) == 0
+    assert run_log(run_dir)["optimise"]["partial"] is False  # finished before the resume
+    monkeypatch.setattr(pr, "finished_stages", lambda path: [])  # resume everything
+    other = tmp_path / "results" / "models" / "20261116-090000_b30c141_phase-d"
+    prun(config, other, execute=Measuring(peaks))
+    assert prun(None, other, execute=Measuring(peaks), resume=True) == 0
+    lines = [json.loads(t) for t in (other / pr.RUN_LOG).read_text().splitlines()]
+    resumed = [x for x in lines if x["stage"] == "optimise"][-1]
+    assert resumed["partial"] is True and not pr.complete(resumed)
 
 
-def test_a_stopped_attempt_only_raises_the_estimate(tmp_path, config, monkeypatch):
-    """An attempt that stopped early, for another reason, cannot lower a finished run's peaks."""
+@pytest.mark.parametrize("finished", [None, "unknown", "2026-13-40T99:00:00", 5])
+def test_a_line_without_a_valid_time_is_skipped_and_said(tmp_path, config, monkeypatch,
+                                                         finished):  # fmt: skip
+    """Not sorted as text, where "unknown" would come after every date."""
     _earlier(
         tmp_path,
         config,
         "20261101-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 7000.0, 1000.0, finished="2026-11-01T10:00:00")],
+        finished=[_line("optimise", 7000.0, 1000.0, finished)],
     )
     _earlier(
         tmp_path,
         config,
         "20261102-000000_aaaaaaa_phase-d",
-        stopped=[_line("optimise", None, None, 50.0, stopped="2026-11-02T10:00:00")],
+        finished=[_line("optimise", 100.0, 100.0, "2026-11-02T10:00:00")],
     )
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert status == 1  # 7000 + 2 x 1000 > 8000, as the finished run showed
-    assert "stage optimise needs about 9000 MB" in (run_dir / pr.PIPELINE_LOG).read_text()
+    assert status == 0  # the valid 100 + 2 x 100 decides
+    assert (
+        "20261101-000000_aaaaaaa_phase-d's optimise has no valid finished time"
+        in (run_dir / pr.PIPELINE_LOG).read_text()
+    )
+
+
+def test_equal_times_are_ordered_by_run_id(tmp_path, config, monkeypatch):
+    """The same second in two runs: the larger run id, the later run, decides."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 100.0, 100.0, "2026-11-02T10:00:00+08:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, 1000.0, "2026-11-02T10:00:00+08:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "run 20261102-000000_aaaaaaa_phase-d" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_times_in_other_zones_keep_their_order(tmp_path, config, monkeypatch):
+    """10:00 in Taipei came before 09:00 in London that day."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, 1000.0, "2026-11-02T09:00:00+00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 100.0, 100.0, "2026-11-02T10:00:00+08:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # London's, the later, decides
+
+
+def _line(stage, parent, worker, finished, steps=1, measured=1, partial=False):
+    """A run.log line of Task 5's format; whole, so usable, unless told otherwise."""
+    return {"stage": stage, "parent_peak_mb": parent, "worker_peak_mb": worker,
+            "pipeline_peak_mb": 50.0, "finished": finished, "steps": steps,
+            "steps_measured": measured, "partial": partial}  # fmt: skip
+
+
+def _earlier(tmp_path, config, name, finished=()):
+    """A run beside the next one on the same configuration, with these run.log lines."""
+    run = tmp_path / "results" / "models" / name
+    (run / "logs").mkdir(parents=True)
+    (run / pr.SAVED_CONFIG).write_text(pc.to_toml(config))
+    (run / pr.RUN_LOG).write_text("".join(json.dumps(x) + "\n" for x in finished))
+    return run
 
 
 def test_the_latest_finished_line_is_found_by_its_time_not_its_files(tmp_path, config, monkeypatch):
@@ -619,34 +671,19 @@ def test_the_latest_finished_line_is_found_by_its_time_not_its_files(tmp_path, c
         tmp_path,
         config,
         "20261101-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 100.0, 100.0, finished="2026-11-03T10:00:00")],
+        finished=[_line("optimise", 100.0, 100.0, "2026-11-03T10:00:00")],
     )
     old = _earlier(
         tmp_path,
         config,
         "20261102-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 7000.0, 1000.0, finished="2026-11-01T10:00:00")],
+        finished=[_line("optimise", 7000.0, 1000.0, "2026-11-01T10:00:00")],
     )
     (old / pr.RUN_LOG).touch()  # newest file, oldest line
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, _ = run_pipeline(tmp_path, config, Recorder())
     assert status == 0  # 100 + 2 x 100 fits; the 2026-11-03 line is the latest
-
-
-def test_a_resumed_run_checks_its_own_stopped_attempt(tmp_path, config, monkeypatch):
-    """--resume after a stage was killed for want of memory checks that stage again."""
-    status, run_dir = run_pipeline(
-        tmp_path, config, Recorder(fail={"covsyn.calibration.firefly_optimizer"})
-    )
-    assert status == 1
-    with open(run_dir / "logs" / pr.STOPPED_LOG, "a") as f:  # as a killed big step leaves it
-        f.write(json.dumps(_line("optimise", None, 5000.0, 7000.0, stopped="2099-01-01T00:00:00"))
-                + "\n")  # fmt: skip
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "2")
-    assert prun(None, run_dir, execute=Recorder(), resume=True) == 1
-    assert "stage optimise needs about" in (run_dir / pr.PIPELINE_LOG).read_text()
 
 
 def test_a_linked_run_or_config_is_not_looked_into(tmp_path, config, monkeypatch):
@@ -693,166 +730,49 @@ def test_a_linked_run_or_config_is_not_looked_into(tmp_path, config, monkeypatch
     assert status == 0 and followed == []
 
 
-def test_an_attempt_that_stopped_before_the_last_finished_one_is_superseded(
-    tmp_path, config, monkeypatch
-):
-    """A stage once killed by a since-fixed leak is not refused for ever."""
-    _earlier(
-        tmp_path,
-        config,
-        "20261101-000000_aaaaaaa_phase-d",
-        stopped=[_line("optimise", None, None, 7000.0, stopped="2026-11-01T10:00:00")],
-    )
-    _earlier(
-        tmp_path,
-        config,
-        "20261102-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 500.0, 100.0, finished="2026-11-02T10:00:00")],
-    )
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(1e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "2")
-    status, _ = run_pipeline(tmp_path, config, Recorder())
-    assert status == 0  # 500 + 2 x 100 fits; the older stopped attempt does not count
-
-
-def test_the_estimate_is_one_attempts_not_a_mix(tmp_path, config, monkeypatch):
-    """Step and worker peaks come from the same attempt: the largest need of any one of them."""
-    _earlier(
-        tmp_path,
-        config,
-        "20261101-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 7000.0, 100.0, finished="2026-11-01T10:00:00")],
-    )
-    _earlier(
-        tmp_path,
-        config,
-        "20261102-000000_aaaaaaa_phase-d",
-        stopped=[_line("optimise", 50.0, 3000.0, stopped="2026-11-02T10:00:00")],
-    )
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(13e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "4")
-    status, _ = run_pipeline(tmp_path, config, Recorder())
-    assert status == 0  # 7400 and 12050 fit in 13000; the mix 7000 + 4 x 3000 would not
-
-
-def test_a_finished_stage_without_a_worker_peak_does_not_drop_a_measured_one(
-    tmp_path, config, monkeypatch
-):
-    """It measured less, so a stopped attempt that measured its workers still counts."""
-    _earlier(
-        tmp_path,
-        config,
-        "20261101-000000_aaaaaaa_phase-d",
-        stopped=[_line("optimise", 500.0, 3000.0, stopped="2026-11-01T10:00:00")],
-    )
-    _earlier(
-        tmp_path,
-        config,
-        "20261102-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 600.0, None, finished="2026-11-02T10:00:00")],
-    )
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "4")
-    status, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert status == 1  # 500 + 4 x 3000
-    assert (
-        "a stopped attempt of 20261101-000000_aaaaaaa_phase-d"
-        in (run_dir / pr.PIPELINE_LOG).read_text()
-    )
-
-
-@pytest.mark.parametrize("stopped", [{}, {"stopped": "2026-11-02T10:00:00"}])
-def test_a_stopped_attempt_without_a_later_time_is_kept(tmp_path, config, monkeypatch, stopped):
-    """No time, or the finished stage's second: it may not have come before, so it counts."""
-    _earlier(
-        tmp_path,
-        config,
-        "20261101-000000_aaaaaaa_phase-d",
-        stopped=[_line("optimise", 9000.0, 0.0, **stopped)],
-    )
-    _earlier(
-        tmp_path,
-        config,
-        "20261102-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 100.0, 100.0, finished="2026-11-02T10:00:00")],
-    )
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "2")
-    status, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert status == 1
-    assert (
-        "a stopped attempt of 20261101-000000_aaaaaaa_phase-d"
-        in (run_dir / pr.PIPELINE_LOG).read_text()
-    )
-
-
 def test_a_later_finished_stage_without_its_measurement_does_not_drop_an_earlier_one(
     tmp_path, config, monkeypatch
 ):
-    """A finished stage whose step wrote no measurement does not supersede one that did."""
+    """A later stage not measured whole is skipped; the earlier whole one is used."""
     _earlier(
         tmp_path,
         config,
         "20261101-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 500.0, 3000.0, finished="2026-11-01T10:00:00")],
+        finished=[_line("optimise", 500.0, 3000.0, "2026-11-01T10:00:00")],
     )
     _earlier(
         tmp_path,
         config,
         "20261102-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", None, None, 600.0, finished="2026-11-02T10:00:00")],
+        # two steps ran, one measured: not whole, so not used
+        finished=[_line("optimise", 600.0, None, "2026-11-02T10:00:00", steps=2, measured=1)],
     )
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "4")
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1  # 500 + 4 x 3000, from the run that measured
     assert (
-        "a finished run, 20261101-000000_aaaaaaa_phase-d, on this"
+        "the peaks of run 20261101-000000_aaaaaaa_phase-d on this"
         in (run_dir / pr.PIPELINE_LOG).read_text()
     )
 
 
-def test_a_measured_stage_after_a_stopped_attempt_supersedes_it(tmp_path, config, monkeypatch):
-    """The finished stage that came after it, measured, decides, whatever came later still."""
-    _earlier(
-        tmp_path,
-        config,
-        "20261101-000000_aaaaaaa_phase-d",
-        stopped=[_line("optimise", 500.0, 3000.0, stopped="2026-11-01T10:00:00")],
-    )
-    _earlier(
-        tmp_path,
-        config,
-        "20261102-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 500.0, 100.0, finished="2026-11-02T10:00:00")],
-    )
-    _earlier(
-        tmp_path,
-        config,
-        "20261103-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", None, None, 600.0, finished="2026-11-03T10:00:00")],
-    )
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "4")
-    status, _ = run_pipeline(tmp_path, config, Recorder())
-    assert status == 0  # 500 + 4 x 100 and 600 fit; the stopped attempt came before both
-
-
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its mode")
 def test_another_runs_unreadable_log_stops_nothing(tmp_path, config, monkeypatch):
-    """A sibling's log that is a directory, or unreadable, is skipped, not fatal or followed.
+    """A sibling's run.log that is a directory, or unreadable, is skipped, not fatal.
 
-    The unreadable log would refuse the stage if it were read.
+    The unreadable one would refuse the stage if it were read.
     """
-    run = _earlier(
+    unreadable = _earlier(
         tmp_path,
         config,
         "20261101-000000_aaaaaaa_phase-d",
-        stopped=[_line("optimise", 9000.0, 0.0, stopped="2026-11-01T10:00:00")],
+        finished=[_line("optimise", 9000.0, 0.0, "2026-11-01T10:00:00")],
     )
-    (run / pr.RUN_LOG).unlink()
-    (run / pr.RUN_LOG).mkdir()
-    (run / "logs" / pr.STOPPED_LOG).chmod(0)
+    (unreadable / pr.RUN_LOG).chmod(0)
+    folder = _earlier(tmp_path, config, "20261102-000000_aaaaaaa_phase-d")
+    (folder / pr.RUN_LOG).unlink()
+    (folder / pr.RUN_LOG).mkdir()
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, _ = run_pipeline(tmp_path, config, Recorder())
@@ -866,7 +786,7 @@ def test_one_unreadable_configuration_skips_only_its_run(tmp_path, config, monke
         tmp_path,
         config,
         "20261101-000000_aaaaaaa_phase-d",
-        finished=[_line("optimise", 7000.0, 1000.0, finished="2026-11-01T10:00:00")],
+        finished=[_line("optimise", 7000.0, 1000.0, "2026-11-01T10:00:00")],
     )
     hidden = _earlier(tmp_path, config, "20261102-000000_aaaaaaa_phase-d")
     (hidden / pr.SAVED_CONFIG).chmod(0)

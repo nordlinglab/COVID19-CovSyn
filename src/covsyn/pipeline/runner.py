@@ -45,7 +45,6 @@ SAVED_CONFIG = "pipeline.toml"
 RUN_LOG = "run.log"
 PIPELINE_LOG = "pipeline.log"  # every progress line, warning and error, kept with the run
 LOCK = "pipeline.lock"
-STOPPED_LOG = "stopped_stage_memory.jsonl"  # in logs/: the peaks of stages that stopped (Task 5)
 Execute = Callable[[Sequence, Path | None, bool, Mapping[str, str]], int]
 
 
@@ -138,7 +137,10 @@ def _number(value: object) -> bool:
 
 
 def stage_memory(path: Path) -> dict:
-    """A stage's peaks from its steps' measurements: the largest over the steps, or None."""
+    """A stage's peaks from its steps' measurements: the largest over the steps, or None.
+
+    ``steps_measured`` is how many steps wrote their measurement.
+    """
     lines = json_lines(path)
 
     def largest(key):
@@ -148,11 +150,12 @@ def stage_memory(path: Path) -> dict:
     return {
         "parent_peak_mb": largest("parent_peak_mb"),
         "worker_peak_mb": largest("worker_peak_mb"),
+        "steps_measured": len(lines),
     }
 
 
 def stage_peaks(measurements: Path, watch: memory.MemoryWatch) -> dict:
-    """A stage's memory, as run.log and the stopped-stage log both record it."""
+    """A stage's memory, as run.log records it."""
     return {
         **stage_memory(measurements),
         "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),  # None: not read
@@ -162,50 +165,12 @@ def stage_peaks(measurements: Path, watch: memory.MemoryWatch) -> dict:
     }
 
 
-class Peaks(NamedTuple):
-    """One attempt's step and worker peaks in MB, and whether both were measured."""
+class Estimate(NamedTuple):
+    """An earlier run's peaks in MB for a stage, and which run they come from."""
 
     step: float
     worker: float
-    measured: bool
-
-
-class Attempt(NamedTuple):
-    """An attempt the memory check counts: its peaks in MB and where they come from."""
-
-    step: float
-    worker: float
-    source: str
-
-
-class _Seen(NamedTuple):
-    """A line the memory check has read: its time ("" when none), peaks, source, and kind."""
-
-    when: str
-    peaks: Peaks
-    source: str
-    finished: bool
-
-
-def _peaks_of(line: Mapping) -> Peaks | None:
-    """A line's peaks; None if it measured nothing.
-
-    A step's peak is the larger of its measured peak and its sampled RSS; a missing worker
-    peak, as a stage without a pool has, is taken as 0. ``measured``: the step wrote its
-    measurement and a worker peak, so the line can supersede earlier attempts. Only lines of
-    Task 5's format count: before it, worker_peak_mb was the largest over the run so far.
-    """
-    if "pipeline_peak_mb" not in line:
-        return None
-    measured_step, sampled, worker = (
-        line.get(k) for k in ("parent_peak_mb", "step_sampled_peak_mb", "worker_peak_mb")
-    )
-    if not any(_number(v) for v in (measured_step, sampled, worker)):
-        return None
-    step = max((v for v in (measured_step, sampled) if _number(v)), default=0.0)
-    return Peaks(
-        step, worker if _number(worker) else 0.0, _number(measured_step) and _number(worker)
-    )
+    run: str
 
 
 def _lines(run: Path, *parts: str) -> list[dict]:
@@ -261,79 +226,125 @@ def other_runs(run_dir: Path) -> list[Path]:
     return found
 
 
-def _time(line: Mapping, key: str) -> str:
-    """A line's ISO time, or "" when it has none; times are the run's machine's local times."""
-    value = line.get(key)
-    return value if isinstance(value, str) else ""
+def finished_at(line: Mapping) -> datetime | None:
+    """When a run.log line's stage finished, as an aware time; None if missing or invalid.
+
+    A time without an offset is taken as this machine's local time: the order of such times
+    from machines in other time zones cannot be recovered.
+    """
+    value = line.get("finished")
+    if not isinstance(value, str):
+        return None
+    try:
+        when = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return when.astimezone() if when.tzinfo is None else when
 
 
-def earlier_peaks(run_dir: Path, stage: str, others: Sequence[Path] | None = None) -> list[Attempt]:
-    """The attempts at the stage the memory check counts, from runs on this configuration.
+def complete(line: Mapping) -> bool:
+    """Whether a run.log line measured its whole stage, so the memory check may use it.
 
-    Every finished stage in another run's run.log and every stopped attempt, in
-    logs/stopped_stage_memory.jsonl of another run or of this one (a resume), that came no
-    earlier than the latest finished stage that measured its step and workers, or has no time
-    to compare: a later measured stage supersedes what came before it. An attempt may have
-    needed more than a later one, so all of these count, each with its own peaks, never a mix.
+    Every step the stage ran wrote its measurement (a step without a pool has no worker peak),
+    and the stage ran whole: a resumed optimiser continues from its checkpoint, so its line
+    measures only the rest.
+    """
+    steps = line.get("steps")
+    return bool(
+        _number(steps)
+        and steps > 0
+        and line.get("steps_measured") == steps
+        and _number(line.get("parent_peak_mb"))
+        and line.get("partial") is False
+    )
+
+
+def earlier_estimate(
+    run_dir: Path,
+    stage: str,
+    others: Sequence[Path] | None = None,
+    warn: Callable[[str], None] | None = None,
+) -> Estimate | None:
+    """The stage's peaks in the latest complete earlier measurement on this configuration.
+
+    The latest finished stage in another run's run.log, by its finished time, among the lines
+    that measured the whole stage (:func:`complete`): a later incomplete one is skipped and an
+    earlier complete one used. Stopped attempts are not used. The plan names "an earlier run on
+    the same configuration"; taking the latest complete one keeps the rule simple to check.
 
     Args:
-        run_dir: This run's directory.
+        run_dir: This run's directory, itself never used.
         stage: The stage to be checked.
         others: The other runs, as :func:`other_runs` lists them; listed here when None.
+        warn: Told of each complete line skipped for want of a valid finished time.
 
     Returns:
-        The attempts that count, each with its step and worker peaks and its source.
+        The step and worker peaks in MB and the run they come from, or None when no earlier
+        run on this configuration measured the stage whole.
     """
     others = other_runs(run_dir) if others is None else others
-    seen: list[_Seen] = []
+    found = []
     for other in others:
         for line in _lines(other, RUN_LOG):
-            if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
-                seen.append(
-                    _Seen(_time(line, "finished"), peaks, f"a finished run, {other.name},", True)
-                )
-    for run in (*others, run_dir):
-        source = (
-            "this run's stopped attempt" if run == run_dir else f"a stopped attempt of {run.name},"
-        )
-        for line in _lines(run, "logs", STOPPED_LOG):
-            if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
-                seen.append(_Seen(_time(line, "stopped"), peaks, source, False))
-    since = max((x.when for x in seen if x.finished and x.peaks.measured and x.when), default="")
-    return [
-        Attempt(x.peaks.step, x.peaks.worker, x.source)
-        for x in seen
-        if not x.when or x.when >= since
-    ]
+            if line.get("stage") != stage or not complete(line):
+                continue
+            when = finished_at(line)
+            if when is None:
+                if warn is not None:
+                    warn(f"WARNING: {other.name}'s {stage} has no valid finished time; not used")
+                continue
+            worker = line.get("worker_peak_mb")
+            estimate = Estimate(
+                line["parent_peak_mb"], worker if _number(worker) else 0.0, other.name
+            )
+            found.append((when, other.name, estimate))
+    return max(found)[2] if found else None  # equal times: the larger run id
 
 
 def memory_problem(
-    run_dir: Path, stage: str, workers: int, others: Sequence[Path] | None = None
+    run_dir: Path,
+    stage: str,
+    workers: int,
+    others: Sequence[Path] | None = None,
+    report: Callable[[str], None] | None = None,
 ) -> str | None:
     """Why the stage would not fit in the available memory, or None (Task 5).
 
-    A conservative check at the stage's start, not a guarantee: the need is estimated as the
-    step's own peak plus workers x the peak per worker of an earlier run, and data, code, start
-    method, worker count or other processes may change the next run's need. The step's peak,
-    which the plan leaves out, is the larger of its measured peak and its sampled RSS. On Linux,
-    a forked worker's RSS also counts pages it shares with its parent, which the estimate then
-    counts once per worker, so a stage that would fit may be refused; by how much the estimate
-    overstates a whole stage is not yet measured.
+    A conservative check at the stage's start, not a guarantee. The need is estimated from the
+    latest complete earlier measurement on this configuration (:func:`earlier_estimate`) as
+    the step's own peak plus this run's workers x the peak per worker. The step's peak is a
+    conservative addition to the plan's formula. The sum is not the peaks' simultaneous total,
+    and data, code, start method, worker count or other processes may change the next run's
+    need; stopped attempts are not used, so a stage once stopped for want of memory may run out
+    again. On Linux, a forked worker's RSS also counts pages it shares with its parent, which
+    the estimate then counts once per worker, so a stage that would fit may be refused.
+
+    Args:
+        run_dir: This run's directory.
+        stage: The stage about to start.
+        workers: This run's workers.
+        others: The other runs, as :func:`other_runs` lists them.
+        report: Told when no earlier measurement can be used, and of lines skipped.
+
+    Returns:
+        The reason to refuse the stage, or None when it fits or cannot be checked.
     """
-    attempts = earlier_peaks(run_dir, stage, others)
-    if not attempts:
+    estimate = earlier_estimate(run_dir, stage, others, warn=report)
+    if estimate is None:
+        if report is not None:
+            report(
+                f"memory check for stage {stage}: no complete earlier measurement on this "
+                "configuration, so its need cannot be estimated"
+            )
         return None
-    # The largest need of any one attempt, with this run's workers.
-    needed, parent, worker, source = max(
-        (a.step + workers * a.worker, a.step, a.worker, a.source) for a in attempts
-    )
+    needed = estimate.step + workers * estimate.worker
     available = memory.available_bytes() / memory.MB
     if needed <= available:
         return None
     return (
-        f"stage {stage} needs about {needed:.0f} MB ({parent:.0f} MB for its steps and "
-        f"{workers} workers x {worker:.0f} MB, the peaks of {source} on this "
-        f"configuration), but only {available:.0f} MB is available; free memory, or try "
+        f"stage {stage} needs about {needed:.0f} MB ({estimate.step:.0f} MB for its steps and "
+        f"{workers} workers x {estimate.worker:.0f} MB, the peaks of run {estimate.run} on "
+        f"this configuration), but only {available:.0f} MB is available; free memory, or try "
         "fewer workers, which need not save memory in proportion"
     )
 
@@ -356,7 +367,8 @@ def record_stage(
     peaks = peaks or {}
     line = {
         "stage": stage,
-        "finished": datetime.now().isoformat(timespec="seconds"),
+        # With its offset, so runs from machines in other time zones keep their order.
+        "finished": datetime.now().astimezone().isoformat(timespec="seconds"),
         "seconds": round(seconds, 3),
         "workers": workers,
         "parent_peak_mb": peaks.get("parent_peak_mb"),
@@ -364,6 +376,11 @@ def record_stage(
         "lowest_available_mb": peaks.get("lowest_available_mb"),
         "pipeline_peak_mb": peaks.get("pipeline_peak_mb"),
         "step_sampled_peak_mb": peaks.get("step_sampled_peak_mb"),
+        # Whether the memory check may use this line (complete): the steps the stage ran,
+        # how many wrote their measurement, and whether it ran only the rest of a stage.
+        "steps": peaks.get("steps"),
+        "steps_measured": peaks.get("steps_measured"),
+        "partial": peaks.get("partial", False),
         "warnings": list(warnings),
     }
     path = Path(run_dir) / RUN_LOG
@@ -507,7 +524,10 @@ def _run_stages(
     workers = hardware.resolve_workers(None, {**os.environ, **env}, None)
 
     def step(args, output=None, append=False, env=None):
+        steps_run[0] += 1  # the memory check uses a stage whose every step measured
         return execute(args, output, append, {**environment, **(env or {})})
+
+    steps_run = [0]
 
     environment = env
     layout = ps.Layout(run_dir)
@@ -528,6 +548,7 @@ def _run_stages(
         # stage counts only its own and a failed attempt's stay where pipeline.log says.
         measurements = layout.logs / f"memory_{name}_{datetime.now():%Y%m%d-%H%M%S-%f}.jsonl"
         environment = {**env, measure.ENV: str(measurements)}
+        steps_run[0] = 0
         ctx = ps.Context(config, layout, step)
         report(f"stage {name}")
         start = time.monotonic()
@@ -542,7 +563,7 @@ def _run_stages(
                 except OSError as error:  # the check goes without them, as a new run would
                     report(f"WARNING: could not list the other runs ({error!r})")
                     others = []
-            problem = memory_problem(run_dir, name, workers, others)
+            problem = memory_problem(run_dir, name, workers, others, report)
             if problem is not None:
                 raise ps.StageFailed(problem)
             with watch:
@@ -573,17 +594,12 @@ def _run_stages(
                     f"{memory.mb_text(watch.parent_peak_bytes)}, a step at most "
                     f"{memory.mb_text(watch.steps_peak_bytes)} (sampled once a second); {steps}"
                 )
-                # For the next memory check, a resume's too: this attempt's peaks, though it
-                # stopped.
-                with contextlib.suppress(OSError):
-                    line = {
-                        "stage": name,
-                        "stopped": datetime.now().isoformat(timespec="seconds"),
-                        **stage_peaks(measurements, watch),
-                    }
-                    with open(layout.logs / STOPPED_LOG, "a", encoding="utf-8") as f:
-                        f.write(json.dumps(line) + "\n")
-        peaks = stage_peaks(measurements, watch)
+        peaks = {
+            **stage_peaks(measurements, watch),
+            "steps": steps_run[0],
+            # A resumed optimiser continues from its checkpoint, so it measured only the rest.
+            "partial": name == "optimise" and resume,
+        }
         # The watch's warning for run.log, once, however often its report was tried, and even
         # if no report got through: the memory was low whatever the output did.
         warnings = [*ctx.warnings, *([] if watch.warning is None else [watch.warning])]
