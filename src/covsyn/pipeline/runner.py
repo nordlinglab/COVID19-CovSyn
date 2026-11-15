@@ -396,14 +396,7 @@ def _run_stages(
         start = time.monotonic()
         # The pipeline's own RSS and the available memory, once a second (Task 5). A warning is
         # reported at once: a stage killed for want of memory may never reach its end.
-        memory_warnings: list[str] = []
-
-        def warn(message, kept=memory_warnings):
-            if message not in kept:  # once for run.log, however often the report is tried
-                kept.append(message)
-            report(f"WARNING: {message}")
-
-        watch = memory.MemoryWatch(warn=warn)
+        watch = memory.MemoryWatch(warn=lambda message: report(f"WARNING: {message}"))
         finished = False
         try:
             problem = memory_problem(run_dir, name, workers)
@@ -444,7 +437,8 @@ def _run_stages(
             ),  # None: no reading succeeded
             "lowest_available_mb": memory.megabytes(watch.lowest_available),
         }
-        warnings = [*ctx.warnings, *memory_warnings]
+        # The watch's warning for run.log, once, however often its report was tried.
+        warnings = [*ctx.warnings, *([watch.warning] if watch.warning else [])]
         record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)
         measurements.unlink(missing_ok=True)  # in run.log now; a stopped attempt's stays
     report("ALL DONE")

@@ -442,6 +442,7 @@ def test_a_warning_whose_report_failed_is_still_in_run_log(tmp_path, config, mon
             raise RuntimeError("a custom stream")
 
     monkeypatch.setattr(pr.Reporter, "__call__", failing)
-    _, run_dir = run_pipeline(tmp_path, config, Recorder())
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0 and list(run_log(run_dir)) == STAGES
     for line in run_log(run_dir).values():
         assert sum("below 10%" in w for w in line["warnings"]) == 1

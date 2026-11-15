@@ -110,6 +110,7 @@ class MemoryWatch:
         self.parent_peak_bytes: int | None = None  # None until an RSS read succeeds
         self.lowest_available: int | None = None
         self.warned = False
+        self.warning: str | None = None  # the low-memory warning, once made
         self._pending: str | None = None  # a warning to send
         self._attempts = 0
         self.started = False
@@ -134,7 +135,7 @@ class MemoryWatch:
             self.lowest_available = available
         if not self.warned and is_low(available, total):
             self.warned = True
-            self._pending = low_memory_warning(available, total)
+            self.warning = self._pending = low_memory_warning(available, total)
 
     def _send_warning(self) -> None:
         # Tried again on the next samples if it fails, but not for ever: a warn that fails
