@@ -446,3 +446,20 @@ def test_a_warning_whose_report_failed_is_still_in_run_log(tmp_path, config, mon
     assert status == 0 and list(run_log(run_dir)) == STAGES
     for line in run_log(run_dir).values():
         assert sum("below 10%" in w for w in line["warnings"]) == 1
+
+
+def test_a_warning_whose_report_wrote_nothing_is_in_run_log_once(tmp_path, config, monkeypatch):
+    """The memory was low whatever the output did: run.log says so, once."""
+    monkeypatch.setattr(memory, "system_memory", lambda: (5, 100))
+    call = pr.Reporter.__call__
+
+    def failing(self, message):
+        if message.startswith("WARNING: only"):
+            raise RuntimeError("a closed stream")  # before writing anything
+        call(self, message)
+
+    monkeypatch.setattr(pr.Reporter, "__call__", failing)
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 0 and list(run_log(run_dir)) == STAGES
+    for line in run_log(run_dir).values():
+        assert sum("below 10%" in w for w in line["warnings"]) == 1

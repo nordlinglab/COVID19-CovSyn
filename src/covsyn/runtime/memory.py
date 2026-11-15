@@ -109,7 +109,6 @@ class MemoryWatch:
         self.process = psutil.Process()
         self.parent_peak_bytes: int | None = None  # None until an RSS read succeeds
         self.lowest_available: int | None = None
-        self.warned = False
         self.warning: str | None = None  # the low-memory warning, once made
         self._pending: str | None = None  # a warning to send
         self._attempts = 0
@@ -133,8 +132,7 @@ class MemoryWatch:
         available, total = self.system()
         if self.lowest_available is None or available < self.lowest_available:
             self.lowest_available = available
-        if not self.warned and is_low(available, total):
-            self.warned = True
+        if self.warning is None and is_low(available, total):  # once per watch
             self.warning = self._pending = low_memory_warning(available, total)
 
     def _send_warning(self) -> None:

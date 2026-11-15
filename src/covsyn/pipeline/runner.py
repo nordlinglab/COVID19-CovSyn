@@ -437,7 +437,8 @@ def _run_stages(
             ),  # None: no reading succeeded
             "lowest_available_mb": memory.megabytes(watch.lowest_available),
         }
-        # The watch's warning for run.log, once, however often its report was tried.
+        # The watch's warning for run.log, once, however often its report was tried, and even
+        # if no report got through: the memory was low whatever the output did.
         warnings = [*ctx.warnings, *([watch.warning] if watch.warning else [])]
         record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)
         measurements.unlink(missing_ok=True)  # in run.log now; a stopped attempt's stays
