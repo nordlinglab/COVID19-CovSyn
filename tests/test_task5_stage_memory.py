@@ -10,6 +10,7 @@ through ``covsyn.runtime.measure``; the pipeline keeps the largest of a stage's 
 from __future__ import annotations
 
 import json
+import re
 import textwrap
 
 import pytest
@@ -503,7 +504,9 @@ def test_a_stopped_stage_reports_its_sampled_step_peak(tmp_path, config):
     status, run_dir = run_pipeline(tmp_path, config, Killed())
     assert status == 1
     log = (run_dir / pr.PIPELINE_LOG).read_text()
-    assert "no step reported its peaks" in log and "a step at most 2" in log
+    assert "no step reported its peaks" in log
+    (sampled,) = re.findall(r"a step at most (\d+) MB", log)
+    assert int(sampled) >= 199 * MIB / memory.MB
 
 
 def test_the_memory_check_uses_the_sampled_step_peak_when_none_was_measured(
@@ -520,3 +523,44 @@ def test_the_memory_check_uses_the_sampled_step_peak_when_none_was_measured(
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, _ = run_pipeline(tmp_path, config, Recorder())
     assert status == 1  # 7000 + 2 x 1000 > 8000
+
+
+def test_a_step_that_wrote_no_peak_still_counts_next_time(tmp_path, config, monkeypatch):
+    """A stage whose one step was killed before measuring finishes; its sampled RSS is checked."""
+    code = (
+        "import numpy as np, time, os; b = np.ones(200 * 1024**2 // 8); time.sleep(3.5); "
+        "os._exit(0)"  # no atexit, so no measurement line, but a finished stage
+    )
+
+    class Unmeasured(Recorder):
+        def __call__(self, args, output, append, env):
+            if str(args[1]) == "covsyn.calibration.firefly_optimizer":
+                pr.run_module(["-c", code], None, False, env)
+            return super().__call__(args, output, append, env)
+
+    _, first = run_pipeline(tmp_path, config, Unmeasured())
+    assert run_log(first)["optimise"]["worker_peak_mb"] is None
+    second = first.parent / "20261116-090000_b30c141_phase-d"
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))  # 100 MB free
+    assert prun(config, second, execute=Recorder()) == 1  # the ~210 MB step does not fit
+
+
+def test_a_stopped_stage_counts_next_time(tmp_path, config, monkeypatch):
+    """A stage killed for want of memory leaves its peaks for the next run's check."""
+    code = (
+        "import numpy as np, time, os; b = np.ones(200 * 1024**2 // 8); time.sleep(3.5); "
+        "os._exit(9)"
+    )
+
+    class Killed(Recorder):
+        def __call__(self, args, output, append, env):
+            if str(args[1]) == "covsyn.calibration.firefly_optimizer":
+                pr.run_module(["-c", code], None, False, env)
+                return 1
+            return super().__call__(args, output, append, env)
+
+    status, first = run_pipeline(tmp_path, config, Killed())
+    assert status == 1
+    second = first.parent / "20261116-090000_b30c141_phase-d"
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(100e6))
+    assert prun(config, second, execute=Recorder()) == 1

@@ -44,6 +44,7 @@ SAVED_CONFIG = "pipeline.toml"
 RUN_LOG = "run.log"
 PIPELINE_LOG = "pipeline.log"  # every progress line, warning and error, kept with the run
 LOCK = "pipeline.lock"
+STOPPED_LOG = "stopped_stage_memory.jsonl"  # in logs/: the peaks of stages that stopped (Task 5)
 Execute = Callable[[Sequence, Path | None, bool, Mapping[str, str]], int]
 
 
@@ -152,27 +153,33 @@ def stage_memory(path: Path) -> dict:
 def earlier_peaks(run_dir: Path, stage: str) -> tuple[float, float] | None:
     """The stage's step and worker peaks, in MB, in the latest other run on this configuration.
 
-    Runs are compared by their saved pipeline.toml. Only run.log lines of Task 5's format count:
-    before it, worker_peak_mb was the largest over the run so far, not the stage's own.
+    Runs are compared by their saved pipeline.toml. A finished stage's peaks are in run.log, a
+    stopped one's in logs/stopped_stage_memory.jsonl, so a stage killed for want of memory
+    counts too.
+    Only lines of Task 5's format count: before it, worker_peak_mb was the largest over the run
+    so far, not the stage's own. A step's peak is the larger of its measured peak and its
+    sampled RSS; a stage without a pool has no worker peak, taken as 0.
     """
     saved = (run_dir / SAVED_CONFIG).read_text(encoding="utf-8")
     found = []
-    for log in run_dir.parent.glob(f"*/{RUN_LOG}"):
-        other = log.parent
-        if other == run_dir or not (other / SAVED_CONFIG).is_file():
+    # glob, not iterdir and stat: a link in results/models to a dead share must not stall the
+    # run (Task 4, test_other_runs_are_never_looked_at).
+    for config in run_dir.parent.glob(f"*/{SAVED_CONFIG}"):
+        other = config.parent
+        if other == run_dir:
             continue
-        if (other / SAVED_CONFIG).read_text(encoding="utf-8", errors="replace") != saved:
+        if config.read_text(encoding="utf-8", errors="replace") != saved:
             continue
-        for line in json_lines(log):
-            if (
-                line.get("stage") == stage
-                and "pipeline_peak_mb" in line
-                and _number(line.get("worker_peak_mb"))
-            ):
-                # The step's peak: its measured one, or, if it wrote none, its sampled RSS.
+        for log in (other / RUN_LOG, other / "logs" / STOPPED_LOG):
+            for line in json_lines(log):
+                if line.get("stage") != stage or "pipeline_peak_mb" not in line:
+                    continue
                 steps = [line.get(k) for k in ("parent_peak_mb", "step_sampled_peak_mb")]
+                worker = line.get("worker_peak_mb")
+                if not any(_number(v) for v in (*steps, worker)):
+                    continue  # nothing was measured
                 parent = max((v for v in steps if _number(v)), default=0.0)
-                found.append((log.stat().st_mtime, parent, line["worker_peak_mb"]))
+                found.append((log.stat().st_mtime, parent, worker if _number(worker) else 0.0))
     return max(found)[1:] if found else None
 
 
@@ -182,7 +189,7 @@ def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
     A conservative check at the stage's start, not a guarantee: the need is estimated as the
     step's own peak plus workers x the peak per worker of an earlier run, and data, code, start
     method, worker count or other processes may change the next run's need. The step's peak,
-    which the plan leaves out, is its measured peak or, without one, its sampled RSS. On Linux,
+    which the plan leaves out, is the larger of its measured peak and its sampled RSS. On Linux,
     a forked worker's RSS also counts pages it shares with its parent, which the estimate then
     counts once per worker, so a stage that would fit may be refused; by how much the estimate
     overstates a whole stage is not yet measured.
@@ -425,14 +432,23 @@ def _run_stages(
                     else "no step reported its peaks"
                 )
 
-                def mb(n):  # rounded once, from the bytes
-                    return "unknown" if n is None else f"{n / memory.MB:.0f} MB"
-
                 report(
-                    f"memory in stage {name}: lowest available {mb(watch.lowest_available)}, "
-                    f"this process at most {mb(watch.parent_peak_bytes)}, a step at most "
-                    f"{mb(watch.steps_peak_bytes)} (sampled once a second); {steps}"
+                    f"memory in stage {name}: lowest available "
+                    f"{memory.mb_text(watch.lowest_available)}, this process at most "
+                    f"{memory.mb_text(watch.parent_peak_bytes)}, a step at most "
+                    f"{memory.mb_text(watch.steps_peak_bytes)} (sampled once a second); {steps}"
                 )
+                # For the next run's memory check: this attempt's peaks, though it stopped.
+                with contextlib.suppress(OSError):
+                    line = {
+                        "stage": name,
+                        "stopped": datetime.now().isoformat(timespec="seconds"),
+                        **stage_memory(measurements),
+                        "step_sampled_peak_mb": memory.megabytes(watch.steps_peak_bytes),
+                        "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),
+                    }
+                    with open(layout.logs / STOPPED_LOG, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(line) + "\n")
         peaks = {
             **stage_memory(measurements),
             "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),  # None: not read
