@@ -79,6 +79,11 @@ def low_memory_warning(available: int, total: int) -> str:
     )
 
 
+def mb_text(n: float | None) -> str:
+    """Bytes as whole MB for a log line, rounded once; "unknown" for no reading."""
+    return "unknown" if n is None else f"{n / MB:.0f} MB"
+
+
 def system_memory() -> tuple[int, int]:
     """The available and the total memory, in bytes."""
     memory = psutil.virtual_memory()
@@ -118,7 +123,13 @@ class MemoryWatch:
         # The largest step's sampled RSS; None if no sample caught a step or every read failed
         # (said on stderr).
         self.steps_peak_bytes: int | None = None
-        self._steps: dict[int, psutil.Process] = {}  # pid -> handle, kept once known a step
+        # pid -> handle: children known to be steps, and children that ran something else.
+        self._steps: dict[int, psutil.Process] = {}
+        self._others: dict[int, psutil.Process] = {}
+        try:
+            self._own_cmdline = self.process.cmdline()  # a child just forked still shows it
+        except psutil.Error:
+            self._own_cmdline = None
         self.lowest_available: int | None = None
         self.warning: str | None = None  # the low-memory warning, once made
         self._pending: str | None = None  # a warning to send
@@ -141,15 +152,26 @@ class MemoryWatch:
         rss = rss_bytes(self.process)
         self.parent_peak_bytes = max(self.parent_peak_bytes or 0, rss)
 
+    def _kept(self, kept: dict[int, psutil.Process], pid: int) -> psutil.Process | None:
+        """A kept handle of a running child; one that ended is dropped, as its pid may return."""
+        handle = kept.get(pid)
+        if handle is not None and not handle.is_running():
+            del kept[pid]
+            return None
+        return handle
+
     def _sample_steps(self) -> None:
         denied = None
         for child in self.process.children():
             try:
-                # Not a step yet may be one soon: just forked, it has not run measure yet.
-                if child.pid not in self._steps and STEP_MODULE in child.cmdline():
-                    self._steps[child.pid] = child
-                step = self._steps.get(child.pid)
-                if step is not None and step.is_running():
+                step = self._kept(self._steps, child.pid)
+                if step is None and self._kept(self._others, child.pid) is None:
+                    command = child.cmdline()
+                    if STEP_MODULE in command:
+                        self._steps[child.pid] = step = child
+                    elif command != self._own_cmdline:  # exec'd into something else: never
+                        self._others[child.pid] = child  # a step, so not read again
+                if step is not None:
                     rss = rss_bytes(step)
                     self.steps_peak_bytes = max(self.steps_peak_bytes or 0, rss)
             except psutil.NoSuchProcess:  # ended while it was looked at

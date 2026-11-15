@@ -322,3 +322,27 @@ def test_a_watch_without_steps_has_no_step_peak():
     with memory.MemoryWatch(interval=0.01) as watch:
         pass
     assert watch.steps_peak_bytes is None
+
+
+def test_a_step_that_reuses_a_finished_steps_pid_is_sampled(monkeypatch):
+    """A kept handle of a step that ended does not hide a new step under the same pid."""
+
+    class Child:
+        def __init__(self, pid, cmdline, rss, running=True):
+            self.pid, self._cmdline, self._rss, self._running = pid, cmdline, rss, running
+
+        def cmdline(self):
+            return self._cmdline
+
+        def is_running(self):
+            return self._running
+
+    step = ["python", "-m", memory.STEP_MODULE, "-m", "x"]
+    old = Child(42, step, 100 * MIB, running=False)
+    new = Child(42, step, 300 * MIB)
+    watch = memory.MemoryWatch(steps=True, system=lambda: (50, 100))
+    watch._steps[42] = old
+    monkeypatch.setattr(watch.process, "children", lambda: [new])
+    monkeypatch.setattr(memory, "rss_bytes", lambda process=None: process._rss)
+    watch._sample_steps()
+    assert watch.steps_peak_bytes == 300 * MIB
