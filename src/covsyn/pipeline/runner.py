@@ -382,15 +382,23 @@ def memory_problem(
     available = memory.available_bytes() / memory.MB
     if needed <= available:
         return None
+    if estimate.pooled:
+        source = (
+            f"{estimate.step:.0f} MB for its steps and {workers} workers x "
+            f"{estimate.worker:.0f} MB, the peaks of run {estimate.run} on this configuration"
+        )
+    else:
+        source = f"its steps' peak with no pool, in run {estimate.run} on this configuration"
+    # Fewer workers can help only a pooled need, with workers to spare, and only if no serial
+    # need, which no worker count changes, is too large as well.
+    serial_fits = all(e.need(workers) <= available for e in estimates if not e.pooled)
+    if estimate.pooled and workers > 1 and serial_fits:
+        advice = "free memory, or try fewer workers, which need not save memory in proportion"
+    else:
+        advice = "free memory: fewer workers will not make it fit"
     return (
-        f"stage {stage} needs about {needed:.0f} MB ({estimate.step:.0f} MB for its steps and "
-        f"{workers} workers x {estimate.worker:.0f} MB, the peaks of run {estimate.run} on "
-        f"this configuration), but only {available:.0f} MB is available; free memory, or try "
-        "fewer workers, which need not save memory in proportion"
-        if estimate.pooled
-        else f"stage {stage} needs about {needed:.0f} MB (its steps' peak with no pool, in run "
-        f"{estimate.run} on this configuration), but only {available:.0f} MB is available; "
-        "free memory: fewer workers will not help a step that runs without a pool"
+        f"stage {stage} needs about {needed:.0f} MB ({source}), but only {available:.0f} MB "
+        f"is available; {advice}"
     )
 
 

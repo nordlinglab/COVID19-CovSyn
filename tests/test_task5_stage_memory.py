@@ -967,11 +967,13 @@ def test_select_turned_off_is_not_checked(tmp_path, config, monkeypatch):
         finished=[_line("select", 9e9, 9e9, "2026-11-01T10:00:00")],
     )
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
-    status, run_dir = run_pipeline(tmp_path, off, Recorder())
+    recorder = Recorder()
+    status, run_dir = run_pipeline(tmp_path, off, recorder)
     assert status == 0
     assert "stage select: no complete" not in (run_dir / pr.PIPELINE_LOG).read_text()
-    context = ps.Context(off, ps.Layout(run_dir), lambda *a, **k: 0)
-    assert context.candidate == run_dir / "revalidation"
+    synthesis = [c for c in recorder.calls if c[1] == "covsyn.model.data_synthesis_main"]
+    assert synthesis and all(str(run_dir / "revalidation") in " ".join(c) for c in synthesis)
+    assert not any("/selected" in " ".join(c) for c in recorder.calls)
 
 
 def test_an_older_serial_line_counts_beside_a_later_pooled_one(tmp_path, config, monkeypatch):
@@ -997,14 +999,15 @@ def test_an_older_serial_line_counts_beside_a_later_pooled_one(tmp_path, config,
 
 
 def test_two_lines_of_one_run_at_one_time_take_the_larger(tmp_path, config, monkeypatch):
-    """Same run, same second: the larger need, not the first line."""
+    """Same run, same second: the larger need with this run's workers, not the larger step."""
     _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d",
-             finished=[_line("optimise", 100.0, 100.0, "2026-11-01T10:00:00"),
-                       _line("optimise", 7000.0, 1000.0, "2026-11-01T10:00:00")])  # fmt: skip
-    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
-    monkeypatch.setenv("COVSYN_WORKERS", "2")
-    status, _ = run_pipeline(tmp_path, config, Recorder())
-    assert status == 1
+             finished=[_line("optimise", 7000.0, 100.0, "2026-11-01T10:00:00"),
+                       _line("optimise", 100.0, 5000.0, "2026-11-01T10:00:00")])  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(10e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # 100 + 8 x 5000, not 7000 + 8 x 100
+    assert "needs about 40100 MB" in (run_dir / pr.PIPELINE_LOG).read_text()
 
 
 def test_a_zero_worker_peak_is_no_pool(tmp_path, config, monkeypatch):
@@ -1032,3 +1035,40 @@ def test_a_step_run_by_may_can_be_partial(tmp_path, config):
     context = ps.Context(config, ps.Layout(tmp_path / "run"), lambda *a, **k: 0)
     context.may(["-m", "x"], "x", partial=True)
     assert context.partial is True and context.steps == ["-m x"]
+
+
+def test_fewer_workers_is_advised_only_where_it_could_help(tmp_path, config, monkeypatch):
+    """Not with one worker already, nor while a serial need alone does not fit."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, None, "2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 900.0, "2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(6e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # 500 + 8 x 900 decides, but the serial 7000 does not fit either
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "fewer workers will not make it fit" in log and "try fewer workers" not in log
+
+
+def test_one_worker_is_not_told_to_use_fewer(tmp_path, config, monkeypatch):
+    """With one worker there are no fewer to try."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, 2000.0, "2026-11-01T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "1")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "try fewer workers" not in (run_dir / pr.PIPELINE_LOG).read_text()
