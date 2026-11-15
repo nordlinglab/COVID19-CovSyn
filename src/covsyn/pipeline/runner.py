@@ -418,7 +418,11 @@ def _run_stages(
         peaks = {
             **stage_memory(measurements),
             "pipeline_peak_mb": round(watch.parent_peak_bytes / memory.MB, 1),
-            "lowest_available_mb": round(watch.lowest_available / memory.MB, 1),
+            "lowest_available_mb": (  # None when every reading failed
+                None
+                if watch.lowest_available is None
+                else round(watch.lowest_available / memory.MB, 1)
+            ),
         }
         warnings = [*ctx.warnings, *memory_warnings]
         record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)
