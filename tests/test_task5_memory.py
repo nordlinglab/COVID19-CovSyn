@@ -129,15 +129,26 @@ def test_watch_stops_its_thread():
 def _own_pid() -> tuple[int, int]:
     import os
 
-    return memory.this_process().pid, os.getpid()
+    from covsyn.calibration import fast_cost
+
+    return fast_cost._WORKER_PROCESS.pid, os.getpid()
 
 
 @pytest.mark.parametrize("method", ["fork", "spawn"])
-def test_a_worker_measures_itself_not_its_parent(method):
-    """The cached process handle is the worker's own, also after a fork."""
-    memory.rss_bytes()  # cache the parent's handle before forking
+def test_a_worker_measures_itself_not_its_parent(method, demographic_parameters):
+    """The handle a worker keeps for its memory reads is its own, also after a fork."""
+    from covsyn.calibration import fast_cost
+
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=1, mp_context=multiprocessing.get_context(method)
-    ) as pool:
-        cached, actual = pool.submit(_own_pid).result()
-    assert cached == actual
+        max_workers=1, mp_context=multiprocessing.get_context(method),
+        initializer=fast_cost.init_worker, initargs=(demographic_parameters, 1),
+    ) as pool:  # fmt: skip
+        kept, actual = pool.submit(_own_pid).result()
+    assert kept == actual
+
+
+def test_rss_of_a_given_process():
+    """A kept handle reads the same process."""
+    import psutil
+
+    assert 0 < memory.rss_bytes(psutil.Process()) <= memory.peak_rss_bytes()

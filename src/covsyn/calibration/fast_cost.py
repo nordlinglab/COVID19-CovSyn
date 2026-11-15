@@ -34,6 +34,7 @@ import time
 import traceback
 
 import numpy as np
+import psutil
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
@@ -60,6 +61,7 @@ _WORKER_DEMOGRAPHIC_PARAMETERS = None
 _WORKER_TAIWAN_MATRIX_COLUMNS = None
 _WORKER_STAGE_TIMING = False
 _WORKER_PROFILE = None
+_WORKER_PROCESS = None
 
 
 def init_worker(demographic_parameters, taiwan_matrix_columns, stage_timing=False,
@@ -70,10 +72,11 @@ def init_worker(demographic_parameters, taiwan_matrix_columns, stage_timing=Fals
     when given, makes the worker profile its tasks into profile_dir/worker_<pid>.prof.
     """
     global _WORKER_DEMOGRAPHIC_PARAMETERS, _WORKER_TAIWAN_MATRIX_COLUMNS, _WORKER_STAGE_TIMING
-    global _WORKER_PROFILE
+    global _WORKER_PROFILE, _WORKER_PROCESS
     _WORKER_DEMOGRAPHIC_PARAMETERS = demographic_parameters
     _WORKER_TAIWAN_MATRIX_COLUMNS = taiwan_matrix_columns
     _WORKER_STAGE_TIMING = stage_timing
+    _WORKER_PROCESS = psutil.Process()  # this worker, for its memory reads (Task 5)
     _WORKER_PROFILE = None if profile_dir is None else profiling.start_worker_profile(profile_dir)
 
 
@@ -206,7 +209,7 @@ def _run_batch(seeds, P, columns):
     adding this deepcopy did not move the discrepancy by a single bit. Keep it anyway -- the
     mutation is real -- but do not read it as the fix for that bug.
     """
-    clock = timings.TaskClock(_WORKER_STAGE_TIMING)  # Task 5: returned beside the results
+    clock = timings.TaskClock(_WORKER_STAGE_TIMING, _WORKER_PROCESS)  # Task 5: returned beside the results
     demographic_parameters = copy.deepcopy(_WORKER_DEMOGRAPHIC_PARAMETERS)
     out = []
     for seed in seeds:

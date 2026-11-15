@@ -80,12 +80,13 @@ def megabytes(n: float) -> float:
 class TaskClock:
     """One pool task's timing and memory, measured in the worker."""
 
-    def __init__(self, stage_timing: bool) -> None:
-        """Start the task: its PID, wall-clock start and RSS."""
+    def __init__(self, stage_timing: bool, process=None) -> None:
+        """Start the task: its PID, wall-clock start and RSS; ``process`` is this process."""
+        self.process = process
         self.pid = os.getpid()
         self.start = time.time()
         self.started = time.perf_counter_ns()
-        self.rss_before = memory.rss_bytes()
+        self.rss_before = memory.rss_bytes(process)
         self.run_covid_ns = 0
         self.reduction_ns = 0
         self.stage_ns: dict[str, int] | None = {} if stage_timing else None
@@ -102,7 +103,7 @@ class TaskClock:
             "reduction_ns": self.reduction_ns,
             "stage_ns": self.stage_ns,
             "rss_before": self.rss_before,
-            "rss_after": memory.rss_bytes(),
+            "rss_after": memory.rss_bytes(self.process),
             "peak": memory.peak_rss_bytes(),
         }
 
