@@ -838,24 +838,49 @@ def test_a_measured_stage_after_a_stopped_attempt_supersedes_it(tmp_path, config
     assert status == 0  # 500 + 4 x 100 and 600 fit; the stopped attempt came before both
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its mode")
 def test_another_runs_unreadable_log_stops_nothing(tmp_path, config, monkeypatch):
-    """A sibling's log that is a directory, or unreadable, is skipped, not fatal."""
-    run = _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d")
+    """A sibling's log that is a directory, or unreadable, is skipped, not fatal or followed.
+
+    The unreadable log would refuse the stage if it were read.
+    """
+    run = _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        stopped=[_line("optimise", 9000.0, 0.0, stopped="2026-11-01T10:00:00")],
+    )
     (run / pr.RUN_LOG).unlink()
     (run / pr.RUN_LOG).mkdir()
     (run / "logs" / pr.STOPPED_LOG).chmod(0)
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "2")
     status, _ = run_pipeline(tmp_path, config, Recorder())
     assert status == 0
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its mode")
+def test_one_unreadable_configuration_skips_only_its_run(tmp_path, config, monkeypatch):
+    """The other runs still count, so the check is not left without any."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 7000.0, 1000.0, finished="2026-11-01T10:00:00")],
+    )
+    hidden = _earlier(tmp_path, config, "20261102-000000_aaaaaaa_phase-d")
+    (hidden / pr.SAVED_CONFIG).chmod(0)
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "2")
+    status, _ = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1  # 7000 + 2 x 1000, from the readable run
 
 
 def test_a_finished_resume_lists_no_other_run(tmp_path, config, monkeypatch):
     """With every stage done, nothing beside the run is read."""
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 0
-
-    def refused(path):
-        raise PermissionError("not to be read")
-
-    monkeypatch.setattr(pr, "other_runs", refused)
+    calls = []
+    monkeypatch.setattr(pr, "other_runs", lambda path: calls.append(path) or [])
     assert prun(None, run_dir, execute=Recorder(), resume=True) == 0
+    assert calls == []

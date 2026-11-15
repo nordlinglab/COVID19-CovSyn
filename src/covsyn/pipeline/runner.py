@@ -178,6 +178,15 @@ class Attempt(NamedTuple):
     source: str
 
 
+class _Seen(NamedTuple):
+    """A line the memory check has read: its time ("" when none), peaks, source, and kind."""
+
+    when: str
+    peaks: Peaks
+    source: str
+    finished: bool
+
+
 def _peaks_of(line: Mapping) -> Peaks | None:
     """A line's peaks; None if it measured nothing.
 
@@ -223,6 +232,16 @@ def other_runs(run_dir: Path) -> list[Path]:
 
     Links are skipped without being followed, a run's linked pipeline.toml too, as is anything
     but a directory: a link in results/models to a dead share must not stall the run (Task 4).
+    A run whose configuration cannot be read is skipped alone, so the others still count.
+
+    Args:
+        run_dir: This run's directory, results/models/<run-id>.
+
+    Returns:
+        The other runs' directories whose pipeline.toml equals this run's.
+
+    Raises:
+        OSError: results/models or this run's own pipeline.toml cannot be read.
     """
     saved = (run_dir / SAVED_CONFIG).read_text(encoding="utf-8")
     found = []
@@ -232,10 +251,13 @@ def other_runs(run_dir: Path) -> list[Path]:
                 continue
             other = Path(entry.path)
             config = other / SAVED_CONFIG
-            if other.name == run_dir.name or config.is_symlink() or not config.is_file():
+            try:
+                if other.name == run_dir.name or config.is_symlink() or not config.is_file():
+                    continue
+                if config.read_text(encoding="utf-8", errors="replace") == saved:
+                    found.append(other)
+            except OSError:  # unreadable, or gone meanwhile: this run alone is skipped
                 continue
-            if config.read_text(encoding="utf-8", errors="replace") == saved:
-                found.append(other)
     return found
 
 
@@ -253,15 +275,22 @@ def earlier_peaks(run_dir: Path, stage: str, others: Sequence[Path] | None = Non
     earlier than the latest finished stage that measured its step and workers, or has no time
     to compare: a later measured stage supersedes what came before it. An attempt may have
     needed more than a later one, so all of these count, each with its own peaks, never a mix.
-    ``others``: the other runs, as :func:`other_runs` lists them.
+
+    Args:
+        run_dir: This run's directory.
+        stage: The stage to be checked.
+        others: The other runs, as :func:`other_runs` lists them; listed here when None.
+
+    Returns:
+        The attempts that count, each with its step and worker peaks and its source.
     """
     others = other_runs(run_dir) if others is None else others
-    seen = []  # (time, peaks, source, finished)
+    seen: list[_Seen] = []
     for other in others:
         for line in _lines(other, RUN_LOG):
             if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
                 seen.append(
-                    (_time(line, "finished"), peaks, f"a finished run, {other.name},", True)
+                    _Seen(_time(line, "finished"), peaks, f"a finished run, {other.name},", True)
                 )
     for run in (*others, run_dir):
         source = (
@@ -269,12 +298,12 @@ def earlier_peaks(run_dir: Path, stage: str, others: Sequence[Path] | None = Non
         )
         for line in _lines(run, "logs", STOPPED_LOG):
             if line.get("stage") == stage and (peaks := _peaks_of(line)) is not None:
-                seen.append((_time(line, "stopped"), peaks, source, False))
-    since = max((t for t, peaks, _, done in seen if done and peaks.measured and t), default="")
+                seen.append(_Seen(_time(line, "stopped"), peaks, source, False))
+    since = max((x.when for x in seen if x.finished and x.peaks.measured and x.when), default="")
     return [
-        Attempt(peaks.step, peaks.worker, source)
-        for when, peaks, source, _ in seen
-        if not when or when >= since
+        Attempt(x.peaks.step, x.peaks.worker, x.source)
+        for x in seen
+        if not x.when or x.when >= since
     ]
 
 
