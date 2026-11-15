@@ -1126,6 +1126,7 @@ def test_fewer_workers_is_not_advised_while_another_step_alone_does_not_fit(
     assert status == 1
     log = (run_dir / pr.PIPELINE_LOG).read_text()
     assert "needs about 16500 MB" in log and "try fewer workers" not in log
+    assert "fewer workers will not make it fit" in log
 
 
 @pytest.mark.parametrize("order", [1, -1])
@@ -1143,29 +1144,42 @@ def test_an_equal_need_gives_one_message_whatever_the_line_order(
     assert "3000 MB for its steps and 8 workers x 250 MB" in (run_dir / pr.PIPELINE_LOG).read_text()
 
 
-@pytest.mark.parametrize("names", [("a", "b"), ("b", "a")])
-def test_an_equal_need_across_runs_and_kinds_is_named_the_same(
-    tmp_path, config, monkeypatch, names
+@pytest.mark.parametrize("order", [1, -1])
+def test_an_equal_need_across_kinds_is_named_the_same_in_any_listing(
+    tmp_path, config, monkeypatch, order
 ):
-    """A serial 5000 MB and a pooled 1000 + 8 x 500: one is named, whatever the listing."""
-    first, second = (f"20261101-000000_{n * 7}_phase-d" for n in names)
-    _earlier(
-        tmp_path, config, first, finished=[_line("optimise", 5000.0, None, "2026-11-01T10:00:00")]
+    """A serial 5000 MB and a pooled 1000 + 8 x 500 tie: the serial one, whatever the order.
+
+    Across kinds a tie is always decided by the peaks, as the pooled line's step is smaller;
+    within a kind, several estimates come only from one run at one time, so the run and kind
+    in the key are never reached. The runs are listed in both orders.
+    """
+    serial = _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 5000.0, None, "2026-11-01T10:00:00")],
     )
-    _earlier(
-        tmp_path, config, second, finished=[_line("optimise", 1000.0, 500.0, "2026-11-01T10:00:00")]
+    pooled = _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_bbbbbbb_phase-d",
+        finished=[_line("optimise", 1000.0, 500.0, "2026-11-01T10:00:00")],
     )
+    monkeypatch.setattr(pr, "other_runs", lambda run_dir: [serial, pooled][::order])
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(4e9))
     monkeypatch.setenv("COVSYN_WORKERS", "8")
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1
     log = (run_dir / pr.PIPELINE_LOG).read_text()
-    winner = max((5000.0, 0.0, first, False), (1000.0, 500.0, second, True))  # the key's order
-    assert f"run {winner[2]}" in log
+    assert f"run {serial.name}" in log and f"run {pooled.name}" not in log
 
 
 def test_fewer_workers_is_advised_beside_a_serial_need_that_fits(tmp_path, config, monkeypatch):
-    """A serial 1000 MB fits; the pooled 500 + 8 x 900 does not, but would with one worker."""
+    """A serial need that fits does not block the advice: the rule is not too strict.
+
+    The serial 1000 MB fits; the pooled 500 + 8 x 900 does not, but would with one worker.
+    """
     _earlier(
         tmp_path,
         config,
