@@ -974,7 +974,8 @@ def test_select_turned_off_is_not_checked(tmp_path, config, monkeypatch):
     synthesis = [c for c in recorder.calls if c[1] == "covsyn.model.data_synthesis_main"]
     revalidation, selected = str(run_dir / "revalidation"), str(run_dir / "selected")
     assert synthesis and all(revalidation in c for c in synthesis)
-    assert not any(arg.startswith(selected) for c in recorder.calls for arg in c)
+    assert not any(selected in arg for c in recorder.calls for arg in c)  # also in options
+    assert not any(selected in str(v) for e in recorder.envs for v in e.values())
 
 
 def test_an_older_serial_line_counts_beside_a_later_pooled_one(tmp_path, config, monkeypatch):
@@ -1091,3 +1092,47 @@ def test_fewer_workers_is_not_advised_when_one_worker_would_not_fit(tmp_path, co
     assert status == 1
     log = (run_dir / pr.PIPELINE_LOG).read_text()
     assert "fewer workers will not make it fit" in log and "try fewer workers" not in log
+
+
+def test_fewer_workers_is_advised_where_one_worker_fits(tmp_path, config, monkeypatch):
+    """500 + 8 x 900 = 7700 MB does not fit in 6000, but 500 + 1 x 900 would."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 900.0, "2026-11-01T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(6e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "try fewer workers" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+def test_fewer_workers_is_not_advised_while_another_step_alone_does_not_fit(
+    tmp_path, config, monkeypatch
+):
+    """Two lines of one run at one time: the one whose step alone is too large rules it out."""
+    _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d",
+             finished=[_line("optimise", 500.0, 900.0, "2026-11-01T10:00:00"),
+                       _line("optimise", 9000.0, 10.0, "2026-11-01T10:00:00")])  # fmt: skip
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "try fewer workers" not in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+@pytest.mark.parametrize("order", [1, -1])
+def test_an_equal_need_gives_one_message_whatever_the_line_order(
+    tmp_path, config, monkeypatch, order
+):
+    """(1000, 500) and (3000, 250) need 5000 MB with 8 workers: the same one is named."""
+    lines = [_line("optimise", 1000.0, 500.0, "2026-11-01T10:00:00"),
+             _line("optimise", 3000.0, 250.0, "2026-11-01T10:00:00")][::order]  # fmt: skip
+    _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d", finished=lines)
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(4e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "3000 MB for its steps and 8 workers x 250 MB" in (run_dir / pr.PIPELINE_LOG).read_text()
