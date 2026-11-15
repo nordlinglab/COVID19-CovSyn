@@ -367,8 +367,15 @@ def _run_stages(
         ctx = ps.Context(config, layout, step)
         report(f"stage {name}")
         start = time.monotonic()
-        # The pipeline's own RSS and the available memory, once a second (Task 5).
-        watch = memory.MemoryWatch(warn=ctx.warnings.append)
+        # The pipeline's own RSS and the available memory, once a second (Task 5). A warning is
+        # reported at once: a stage killed for want of memory may never reach its end.
+        memory_warnings: list[str] = []
+
+        def warn(message, kept=memory_warnings):
+            kept.append(message)
+            report(f"WARNING: {message}")
+
+        watch = memory.MemoryWatch(warn=warn)
         try:
             problem = memory_problem(run_dir, name, workers)
             if problem is not None:
@@ -382,6 +389,13 @@ def _run_stages(
                 else ""
             )
             report(f"ERROR: {error}; stopping.{hint}")
+            if watch.lowest_available is not None:
+                report(
+                    f"memory in stage {name}: lowest available "
+                    f"{watch.lowest_available / memory.MB:.0f} MB, this process at most "
+                    f"{watch.parent_peak_bytes / memory.MB:.0f} MB; the steps' peaks are in "
+                    f"{measurements}"
+                )
             return 1
         finally:
             for warning in ctx.warnings:
@@ -391,7 +405,8 @@ def _run_stages(
             "pipeline_peak_mb": round(watch.parent_peak_bytes / memory.MB, 1),
             "lowest_available_mb": round(watch.lowest_available / memory.MB, 1),
         }
-        record_stage(run_dir, name, time.monotonic() - start, workers, ctx.warnings, peaks)
+        warnings = [*ctx.warnings, *memory_warnings]
+        record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)
     report("ALL DONE")
     return 0
 

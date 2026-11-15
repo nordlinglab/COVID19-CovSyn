@@ -159,6 +159,37 @@ def test_low_memory_during_a_stage_is_a_warning_of_it(tmp_path, config, monkeypa
     assert "below 10%" in (run_dir / pr.PIPELINE_LOG).read_text()
 
 
+def test_low_memory_is_reported_while_the_stage_runs(tmp_path, config, monkeypatch):
+    """Live, once per stage: a stage killed for want of memory may never reach its end."""
+    import time
+
+    monkeypatch.setattr(memory, "system_memory", lambda: (5, 100))
+    seen = []
+
+    class Watching(Recorder):
+        def __call__(self, args, output, append, env):
+            time.sleep(0.2)  # the watch samples as the stage starts
+            run_dir = tmp_path / "results" / "models" / "20261115-090000_b30c141_phase-d"
+            seen.append("below 10%" in (run_dir / pr.PIPELINE_LOG).read_text())
+            return super().__call__(args, output, append, env)
+
+    _, run_dir = run_pipeline(tmp_path, config, Watching())
+    assert seen and all(seen)
+    assert (run_dir / pr.PIPELINE_LOG).read_text().count("below 10%") == len(STAGES)
+
+
+def test_a_failed_stage_leaves_its_memory_readings(tmp_path, config):
+    """The least available memory and where the steps' peaks are, for a stage that stopped."""
+    status, run_dir = run_pipeline(
+        tmp_path, config, Recorder(fail={"covsyn.model.data_synthesis_main"})
+    )
+    assert status == 1
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert (
+        "memory in stage synthesise: lowest available" in log and "memory_synthesise.jsonl" in log
+    )
+
+
 def earlier_run(
     tmp_path, config, name, stage, worker_peak_mb, workers, parent_peak_mb=100.0, task5=True
 ):
