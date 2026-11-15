@@ -7,10 +7,11 @@ then appends one JSON line to the file named by ``COVSYN_MEASURE``: the step's o
 its largest worker's. ``-c <code>`` and a script path work too.
 
 A step is a fresh process with a fresh pool, so its ``ru_maxrss`` covers that step alone, and
-``RUSAGE_CHILDREN`` its largest worker. The line is written at exit, after the pools' workers
-have been joined, so the largest worker is known; the step's exit status is kept. The step runs
-no thread of its own, as one would make every fork of its pool workers unsafe; the pipeline
-samples the available memory instead.
+``RUSAGE_CHILDREN`` the largest peak of its children that ended and were waited for: its pool
+workers, but also any other child it ran, and the largest one alone, not the children's peak
+together. The line is written at exit, after the pools' workers have been joined; the step's
+exit status is kept. The step runs no thread of its own, as one would make every fork of its
+pool workers unsafe; the pipeline samples the available memory instead.
 """
 
 from __future__ import annotations

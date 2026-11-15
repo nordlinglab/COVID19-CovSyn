@@ -183,10 +183,12 @@ def earlier_peaks(run_dir: Path, stage: str) -> tuple[float, float] | None:
 def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
     """Why the stage would not fit in the available memory, or None (Task 5).
 
-    The need is the step's own peak plus workers x the peak per worker. A forked worker's RSS
-    counts the pages it shares with its parent, so on Linux the need is overstated: in the
-    optimiser, a forked worker's RSS is 153 MB of which 7 MB is its own; refusing a stage that
-    would fit is the safer error than running one out of memory.
+    A conservative check at the stage's start, not a guarantee: the need is estimated as the
+    step's own peak plus workers x the peak per worker of an earlier run, and data, code, start
+    method, worker count or other processes may change the next run's need. The step's peak is
+    added to the plan's workers x peak. A forked worker's RSS also counts pages it shares with
+    its parent, which the estimate then counts once per worker, so a stage that would fit may be
+    refused; by how much the estimate overstates a whole stage is not yet measured.
     """
     peaks = earlier_peaks(run_dir, stage)
     if peaks is None:
@@ -199,8 +201,8 @@ def memory_problem(run_dir: Path, stage: str, workers: int) -> str | None:
     return (
         f"stage {stage} needs about {needed:.0f} MB ({parent:.0f} MB for its steps and "
         f"{workers} workers x {worker:.0f} MB, the peaks of an earlier run on this "
-        f"configuration), but only {available:.0f} MB is available; free memory or set "
-        "fewer workers"
+        f"configuration), but only {available:.0f} MB is available; free memory, or try "
+        "fewer workers, which need not save memory in proportion"
     )
 
 

@@ -98,7 +98,8 @@ A run directory that is a link to other storage is not supported.
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, and the least available memory.
 The pipeline warns as soon as available memory falls below 10% of the total.
 A stage is refused when an earlier run with the same `pipeline.toml` shows it needs more than the available memory: its steps' peak plus the workers times the peak per worker.
-On Linux this overstates the need, as a forked worker's resident memory counts the pages it shares with its parent.
+This is a conservative check at the stage's start, not a guarantee against running out of memory.
+A forked worker's resident memory, on Linux, also counts the pages it shares with its parent, so a stage that would fit may be refused.
 The optimiser writes `timings_evaluation.csv`, one row per evaluation, and `timings_generation.csv`, one row per generation, beside `progress.csv`;
 `--stage-timings` adds the time `run_covid` spends in each stage, and a resumed run keeps the setting it started with.
 
