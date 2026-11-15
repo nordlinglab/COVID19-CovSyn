@@ -273,61 +273,52 @@ def earlier_estimate(
     others: Sequence[Path] | None = None,
     warn: Callable[[str], None] | None = None,
     history: Mapping[Path, list[dict]] | None = None,
-) -> Estimate | None:
+) -> list[Estimate]:
     """The stage's peaks in the latest complete earlier measurement on this configuration.
 
     The latest finished stage in another run's run.log, by its finished time, among the lines
     that measured the whole stage (:func:`complete`): a later incomplete one is skipped and an
-    earlier complete one used. Stopped attempts are not used. A line without a worker peak, a
-    stage that spawned no pool, is used only if no complete line of the stage has one: a run
-    whose steps ran serially, under a memory cap say, says nothing of one with a pool, so an
-    older pooled line may decide where a later one ran with fewer workers: the more
-    conservative outcome. The plan
-    names "an earlier run on the same configuration"; the latest complete one keeps the rule
-    simple to check.
+    earlier complete one used. Stopped attempts are not used. If that line measured no worker
+    peak (its steps spawned no pool, run serially under a memory cap say) while an earlier
+    complete line did, the latest such pooled line counts too, as this run may spawn a pool:
+    the larger need of the two decides. The plan names "an earlier run on the same
+    configuration"; the latest complete one keeps the rule simple to check.
 
     Args:
         run_dir: This run's directory, itself never used.
         stage: The stage to be checked.
         others: The other runs, as :func:`other_runs` lists them; listed here when None.
-        warn: Told of each complete line skipped, and why.
+        warn: Told of each complete line skipped for want of a valid finished time.
         history: Each other run's run.log lines (:func:`histories`); read here when None.
 
     Returns:
-        The step and worker peaks in MB and the run they come from, or None when no earlier
-        run on this configuration measured the stage whole.
+        The latest complete line's peaks, and the latest pooled one's when that differs, each
+        with the run it comes from; empty when no earlier run measured the stage whole.
     """
     others = other_runs(run_dir) if others is None else others
     history = histories(others) if history is None else history
-    lines = [
-        (other, line)
-        for other in others
-        for line in history.get(other, [])
-        if line.get("stage") == stage and complete(line)
-    ]
     timed = []
-    for other, line in lines:
-        when = finished_at(line)
-        if when is None:
-            if warn is not None:
-                warn(f"WARNING: {other.name}'s {stage} has no valid finished time; not used")
-            continue
-        timed.append((when, other.name, line))
-    pooled = any(_number(line.get("worker_peak_mb")) for _, _, line in timed)
-    found, pool_less = [], []
-    for when, name, line in timed:
-        worker = line.get("worker_peak_mb")
-        if pooled and not _number(worker):
-            pool_less.append((when, name))
-            continue
-        estimate = Estimate(line["parent_peak_mb"], worker if _number(worker) else 0.0, name)
-        found.append((when, name, estimate))
-    chosen = max(found) if found else None
-    later = [n for when, n in pool_less if chosen is None or (when, n) > chosen[:2]]
-    if later and warn is not None:  # only a skip that could have changed the choice
-        warn(f"WARNING: stage {stage}: {len(later)} later line(s) measured no worker peak, "
-             f"where an earlier run did, so not used ({', '.join(sorted(later))})")  # fmt: skip
-    return chosen[2] if chosen else None  # equal times: the larger run id
+    for other in others:
+        for line in history.get(other, []):
+            if line.get("stage") != stage or not complete(line):
+                continue
+            when = finished_at(line)
+            if when is None:
+                if warn is not None:
+                    warn(f"WARNING: {other.name}'s {stage} has no valid finished time; not used")
+                continue
+            worker = line.get("worker_peak_mb")
+            estimate = Estimate(
+                line["parent_peak_mb"], worker if _number(worker) else 0.0, other.name
+            )
+            timed.append((when, other.name, _number(worker), estimate))
+    if not timed:
+        return []
+    latest = max(timed, key=lambda t: t[:2])  # equal times: the larger run id
+    pooled = [t for t in timed if t[2]]
+    if latest[2] or not pooled:
+        return [latest[3]]
+    return [latest[3], max(pooled, key=lambda t: t[:2])[3]]
 
 
 def memory_problem(
@@ -354,7 +345,8 @@ def memory_problem(
         stage: The stage about to start.
         workers: This run's workers.
         others: The other runs, as :func:`other_runs` lists them.
-        report: Told when no earlier measurement can be used, and of lines skipped.
+        report: Told when no earlier measurement can be used, and of lines skipped for want
+            of a valid finished time.
         history: Each other run's run.log lines, read once (:func:`histories`).
 
     Returns:
@@ -362,15 +354,15 @@ def memory_problem(
     """
     others = other_runs(run_dir) if others is None else others
     history = histories(others) if history is None else history
-    estimate = earlier_estimate(run_dir, stage, others, report, history)
-    if estimate is None:
+    estimates = earlier_estimate(run_dir, stage, others, report, history)
+    if not estimates:
         if report is not None:
             report(
                 f"memory check for stage {stage}: no complete earlier measurement on this "
                 "configuration, so its need cannot be estimated"
             )
         return None
-    needed = estimate.step + workers * estimate.worker
+    needed, estimate = max((e.step + workers * e.worker, e) for e in estimates)
     available = memory.available_bytes() / memory.MB
     if needed <= available:
         return None

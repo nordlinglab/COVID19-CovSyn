@@ -80,8 +80,13 @@ class Context:
         self.steps: list[str] = []
         self.partial = False
 
-    def step(self, args: list, **options) -> int:
-        """Run one step and return its status."""
+    def step(self, args: list, partial: bool = False, **options) -> int:
+        """Run one step and return its status.
+
+        ``partial``: the step does only the rest of the stage's work, so the stage's memory
+        measurement is not of the whole stage (Task 5); must() and may() pass it on.
+        """
+        self.partial = self.partial or partial
         args = [str(a) for a in args]
         self.steps.append(measure.step_name(args))
         return self._run_step(args, **options)
@@ -89,23 +94,18 @@ class Context:
     @property
     def candidate(self) -> Path:
         """The directory whose best vector every stage after the selection reads."""
-        if self.config.revalidate and self.config.select:
+        if not turned_off("select", self.config):
             return self.layout.run / "selected"
-        if self.config.revalidate:
+        if not turned_off("revalidate", self.config):
             return self.layout.run / "revalidation"
         return self.layout.run
 
-    def must(
-        self, args: list, what: str, resuming: bool = False, partial: bool = False, **options
-    ) -> None:
+    def must(self, args: list, what: str, resuming: bool = False, **options) -> None:
         """Run a step the chain stopped on.
 
         ``resuming``: the optimiser continuing a run, whose status runs.NOT_RESUMABLE means
         retrying cannot help; from any other step, that status is an ordinary failure.
-        ``partial``: the step does only the rest of the stage's work, so the stage's memory
-        measurement is not of the whole stage (Task 5).
         """
-        self.partial = self.partial or partial
         status = self.step(args, **options)
         if resuming and status == runs.NOT_RESUMABLE:
             log = options.get("output")
