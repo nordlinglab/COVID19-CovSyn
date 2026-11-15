@@ -86,6 +86,8 @@ RUN_OUTPUTS = (
     "bound.txt",
     "firefly_result_first_initial_guess.txt",
     "progress.csv",  # here only for a run directory outside results/models, see progress_path
+    "timings_evaluation.csv",  # Task 5, beside progress.csv
+    "timings_generation.csv",
     "firefly_archive.txt",
     "firefly_result.txt",
     "firefly_best.txt",

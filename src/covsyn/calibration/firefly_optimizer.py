@@ -17,7 +17,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.runtime import hardware, runs
+from covsyn.runtime import hardware, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
                                             health_care_contact_floor)
@@ -1527,15 +1527,38 @@ class Firefly:
             initargs=(demographic_parameters, _columns))
         intensities = np.empty(self.pop_size)
         cost_parts = [{} for _ in range(self.pop_size)]
+        # Task 5: one row per evaluation and per generation, beside progress.csv.
+        tables = runs.progress_path(result_path).parent
+        evaluation_table = tables / timings.EVALUATION_TABLE
+        generation_table = tables / timings.GENERATION_TABLE
+        clock = timings.GenerationClock(-1, max_workers)
+
+        def evaluate(k, vector, offset):
+            """Score one firefly, recording its row and adding it to the generation's."""
+            timings.LAST.clear()
+            start = time.time()
+            value = function(vector, demographic_parameters, executor, Cheng_contact_array,
+                             Cheng_attack_rate, norm_weights, seed_offset=offset)
+            row = {'generation': clock.generation, 'candidate': k, 'start_unix_s': round(start, 6),
+                   'end_unix_s': round(time.time(), 6), **timings.LAST}
+            timings.append_row(evaluation_table, timings.EVALUATION_COLUMNS, row)
+            clock.add_evaluation(timings.LAST)
+            return value
+
+        def finish_generation(state):
+            """Checkpoint the generation, then write its timing row."""
+            started = time.perf_counter_ns()
+            save_checkpoint(result_path, clock.generation, state)
+            clock.checkpoint_ns += time.perf_counter_ns() - started
+            timings.append_row(generation_table, timings.GENERATION_COLUMNS, clock.row())
+
         if checkpoint is not None:
             print(f'resuming after generation {int(checkpoint["generation"])}', flush=True)
         else:
             print(f'evaluating initial population: {self.pop_size} fireflies '
                   f'({SIMULATIONS_PER_EVALUATION} simulations each)...', flush=True)
         for k in range(self.pop_size if checkpoint is None else 0):
-            intensities[k] = function(
-                fireflies[k], demographic_parameters, executor, Cheng_contact_array,
-                Cheng_attack_rate, norm_weights, seed_offset=0)
+            intensities[k] = evaluate(k, fireflies[k], 0)
             cost_parts[k] = dict(LAST_COST_PARTS)
             print(f'  initial firefly {k+1}/{self.pop_size}: cost={intensities[k]:.4f}', flush=True)
         print(f'initial population evaluated: best_cost={np.min(intensities):.4f}', flush=True)
@@ -1556,7 +1579,7 @@ class Firefly:
             result = np.hstack((fireflies, np.matrix(intensities).T))
             np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
                        result, fmt='%.7f')
-            save_checkpoint(result_path, -1, self._state(
+            finish_generation(self._state(
                 normalized_fireflies, fireflies, intensities, cost_parts, archive,
                 worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
         else:
@@ -1571,18 +1594,18 @@ class Firefly:
             evaluations = int(checkpoint['evaluations'])
             new_alpha = float(checkpoint['alpha'])
             start = int(checkpoint['generation']) + 1
-            drop_progress_after(runs.progress_path(result_path), start - 1)
+            for table in (runs.progress_path(result_path), evaluation_table, generation_table):
+                drop_progress_after(table, start - 1)
         # search_range = ub - lb
 
         for generation in tqdm(range(start, max_generations)):
             # B81: this generation's block, and every firefly re-scored on it -- the brightest
             # included, since its score came from another block and cannot be compared here.
             offset = generation_seed_offset(generation)
+            clock = timings.GenerationClock(generation, max_workers)
             if generation > 0:   # generation 0's block is the initial one, already scored (F7)
                 for k in range(self.pop_size):
-                    intensities[k] = function(
-                        fireflies[k], demographic_parameters, executor, Cheng_contact_array,
-                        Cheng_attack_rate, norm_weights, seed_offset=offset)
+                    intensities[k] = evaluate(k, fireflies[k], offset)
                     cost_parts[k] = dict(LAST_COST_PARTS)
                     evaluations += 1
             new_alpha *= 0.97
@@ -1601,6 +1624,7 @@ class Firefly:
                 for j in range(self.pop_size):
                     # print('i, j: ', i, j)
                     if intensities[i] >= intensities[j]:
+                        moving = time.perf_counter_ns()
                         r = np.sum(
                             np.square(normalized_fireflies[i] - normalized_fireflies[j]), axis=-1)
                         beta = self.betamin * np.exp(-self.gamma * r)
@@ -1614,10 +1638,9 @@ class Firefly:
                         normalized_fireflies[i] = np.clip(
                             normalized_fireflies[i], 0, 1)
                         fireflies[i] = normalized_fireflies[i]*(ub-lb) + lb
+                        clock.moves_ns += time.perf_counter_ns() - moving
                         # print(fireflies[i])
-                        intensities[i] = function(
-                            fireflies[i], demographic_parameters, executor, Cheng_contact_array,
-                            Cheng_attack_rate, norm_weights, seed_offset=offset)
+                        intensities[i] = evaluate(i, fireflies[i], offset)
                         evaluations += 1
                         # (per-evaluation print removed; see per-generation summary below)
                         cost_parts[i] = dict(LAST_COST_PARTS)
@@ -1649,7 +1672,9 @@ class Firefly:
                     writer.writeheader()
                 writer.writerow(row)
             # Task 4: after the progress row, so a resumed run drops a row written past it.
-            save_checkpoint(result_path, generation, self._state(
+            # Task 5: the timing row follows the checkpoint, whose time it records; a kill
+            # between the two leaves that generation without one.
+            finish_generation(self._state(
                 normalized_fireflies, fireflies, intensities, cost_parts, archive,
                 worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha, dim))
 

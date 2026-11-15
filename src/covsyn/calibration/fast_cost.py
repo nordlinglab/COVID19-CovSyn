@@ -30,6 +30,7 @@ firefly_optimizer.cost_function() on real parameter vectors; adopt this only if 
 identical output.
 """
 import copy
+import time
 import traceback
 
 import numpy as np
@@ -43,6 +44,7 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_p
                                            largest_spreader_percentile, offspring_dispersion,
                                            one_day_counts, one_day_shape)
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
+from covsyn.runtime import timings
 
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix')
@@ -56,13 +58,18 @@ CHENG_GROUPS = (('Household', ('Household',)),
 
 _WORKER_DEMOGRAPHIC_PARAMETERS = None
 _WORKER_TAIWAN_MATRIX_COLUMNS = None
+_WORKER_STAGE_TIMING = False
 
 
-def init_worker(demographic_parameters, taiwan_matrix_columns):
-    """Give each worker the read-only data once, instead of once per task."""
-    global _WORKER_DEMOGRAPHIC_PARAMETERS, _WORKER_TAIWAN_MATRIX_COLUMNS
+def init_worker(demographic_parameters, taiwan_matrix_columns, stage_timing=False):
+    """Give each worker the read-only data once, instead of once per task.
+
+    stage_timing (Task 5): time run_covid's stages in every task of this worker.
+    """
+    global _WORKER_DEMOGRAPHIC_PARAMETERS, _WORKER_TAIWAN_MATRIX_COLUMNS, _WORKER_STAGE_TIMING
     _WORKER_DEMOGRAPHIC_PARAMETERS = demographic_parameters
     _WORKER_TAIWAN_MATRIX_COLUMNS = taiwan_matrix_columns
+    _WORKER_STAGE_TIMING = stage_timing
 
 
 class _OneCase:
@@ -183,11 +190,15 @@ def run_batch(seeds, P, columns):
     adding this deepcopy did not move the discrepancy by a single bit. Keep it anyway -- the
     mutation is real -- but do not read it as the fix for that bug.
     """
+    clock = timings.TaskClock(_WORKER_STAGE_TIMING)  # Task 5: returned beside the results
     demographic_parameters = copy.deepcopy(_WORKER_DEMOGRAPHIC_PARAMETERS)
     out = []
     for seed in seeds:
+        started = time.perf_counter_ns()
         demographic_list, social_list, course_list, contact_list = run_covid(
-            seed, P, demographic_parameters, save_file=False)
+            seed, P, demographic_parameters, save_file=False, stage_times=clock.stage_ns)
+        simulated = time.perf_counter_ns()
+        clock.run_covid_ns += simulated - started
         cases = []
         for j, (course, contact) in enumerate(zip(course_list, contact_list)):
             cases.append((_case_cheng_bins(course, contact),
@@ -197,7 +208,9 @@ def run_batch(seeds, P, columns):
                                      social_list[0] if social_list else None)
                  if course_list and contact_list else None)
         out.append((index, cases))
-    return out
+        clock.reduction_ns += time.perf_counter_ns() - simulated
+        clock.simulations += 1
+    return out, clock.record()
 
 
 def reduce_outcomes(scalars):
@@ -312,6 +325,7 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
     seed_offset shifts the simulation seeds; 0, the default, is the objective the optimizer
     uses. revalidation.py scores candidates on other offsets (E87).
     """
+    timings.LAST.clear()  # Task 5: this evaluation's timings, for the optimiser's table
     try:
         return _cost_function(P, demographic_parameters, executor, Cheng_contact_array,
                               Cheng_attack_rate, norm_weights, seed_offset)
@@ -340,14 +354,22 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     P_copy = copy.deepcopy(P)
     batches = [seeds[i:i + fo.SIMULATIONS_PER_TASK]
                for i in range(0, len(seeds), fo.SIMULATIONS_PER_TASK)]
+    dispatch_start = time.perf_counter_ns()
     futures = [executor.submit(run_batch, batch, P_copy, columns) for batch in batches]
+    dispatch_ns = time.perf_counter_ns() - dispatch_start
 
     index_scalars = []
     bins = np.zeros((len(CHENG_GROUPS), 2, 6))
     rows = []
     symptomatic_cases = 0
+    tasks = []
+    wait_ns = 0
     for future in futures:
-        for index, cases in future.result():
+        waited = time.perf_counter_ns()
+        results, task = future.result()
+        wait_ns += time.perf_counter_ns() - waited
+        tasks.append(task)
+        for index, cases in results:
             if index is not None:
                 index_scalars.append(index)
             for case_bins, case_row, symptomatic in cases:
@@ -415,4 +437,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         cost_contact_healthcare=float(contact_costs[1]),
         cost_contact_others=float(contact_costs[2]),
         **{f'measured_{k}': float(v) for k, v in measured.items()})
+    # Task 5: the cost reduction is the parent's time after dispatching that was not spent
+    # waiting for a task: the pooling of the tasks' counts and rows, then the cost itself.
+    timings.LAST.update(
+        timings.summarise_tasks(tasks),
+        dispatch_s=timings.seconds(dispatch_ns), wait_s=timings.seconds(wait_ns),
+        cost_reduction_s=timings.seconds(
+            time.perf_counter_ns() - dispatch_start - dispatch_ns - wait_ns))
     return total_cost

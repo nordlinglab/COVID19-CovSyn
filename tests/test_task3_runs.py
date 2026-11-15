@@ -301,6 +301,9 @@ def test_run_outputs_name_every_file_the_optimiser_writes():
     # Single or double quotes, f-strings included: a name with {} then fails the comparison.
     written = set(re.findall(r"result_path\s*/\s*f?['\"]([^'\"]+)['\"]", source))
     written |= {"config.json", "progress.csv"}  # written by name, not as result_path / '...'
+    from covsyn.runtime import timings
+
+    written |= {timings.EVALUATION_TABLE, timings.GENERATION_TABLE}  # beside progress.csv
     files = {name for name in runs.RUN_OUTPUTS if "." in name}
     assert written == files, (written - files, files - written)
 
