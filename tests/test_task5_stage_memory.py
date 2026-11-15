@@ -972,8 +972,9 @@ def test_select_turned_off_is_not_checked(tmp_path, config, monkeypatch):
     assert status == 0
     assert "stage select: no complete" not in (run_dir / pr.PIPELINE_LOG).read_text()
     synthesis = [c for c in recorder.calls if c[1] == "covsyn.model.data_synthesis_main"]
-    assert synthesis and all(str(run_dir / "revalidation") in " ".join(c) for c in synthesis)
-    assert not any("/selected" in " ".join(c) for c in recorder.calls)
+    revalidation, selected = str(run_dir / "revalidation"), str(run_dir / "selected")
+    assert synthesis and all(revalidation in c for c in synthesis)
+    assert not any(arg.startswith(selected) for c in recorder.calls for arg in c)
 
 
 def test_an_older_serial_line_counts_beside_a_later_pooled_one(tmp_path, config, monkeypatch):
