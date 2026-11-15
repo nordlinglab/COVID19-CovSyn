@@ -389,10 +389,9 @@ def memory_problem(
         )
     else:
         source = f"its steps' peak with no pool, in run {estimate.run} on this configuration"
-    # Fewer workers can help only a pooled need, with workers to spare, and only if no serial
-    # need, which no worker count changes, is too large as well.
-    serial_fits = all(e.need(workers) <= available for e in estimates if not e.pooled)
-    if estimate.pooled and workers > 1 and serial_fits:
+    # Fewer workers can help only with workers to spare, and only if every estimate would fit
+    # with one: a serial need, and a step's own peak, do not shrink with the worker count.
+    if workers > 1 and all(e.need(1) <= available for e in estimates):
         advice = "free memory, or try fewer workers, which need not save memory in proportion"
     else:
         advice = "free memory: fewer workers will not make it fit"

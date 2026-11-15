@@ -1071,4 +1071,22 @@ def test_one_worker_is_not_told_to_use_fewer(tmp_path, config, monkeypatch):
     monkeypatch.setenv("COVSYN_WORKERS", "1")
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1
-    assert "try fewer workers" not in (run_dir / pr.PIPELINE_LOG).read_text()
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "stage optimise needs about 9000 MB" in log  # refused by the memory check
+    assert "fewer workers will not make it fit" in log and "try fewer workers" not in log
+
+
+def test_fewer_workers_is_not_advised_when_one_worker_would_not_fit(tmp_path, config, monkeypatch):
+    """A pooled step of 9000 MB does not fit in 8000 with any worker count."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 9000.0, 100.0, "2026-11-01T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "fewer workers will not make it fit" in log and "try fewer workers" not in log
