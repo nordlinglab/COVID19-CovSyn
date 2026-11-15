@@ -297,3 +297,45 @@ def test_a_run_that_fails_closes_its_tables(tmp_path, monkeypatch):
     with pytest.raises(Killed):
         optimise(path, killed_after(POP + 3))
     assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])
+
+
+def test_a_run_that_fails_shuts_its_pool_down(tmp_path, monkeypatch):
+    """No pool of workers is left running behind a failed run."""
+    import concurrent.futures
+
+    shut = []
+    shutdown = concurrent.futures.ProcessPoolExecutor.shutdown
+
+    def recording(self, *args, **kwargs):
+        shut.append(self)
+        return shutdown(self, *args, **kwargs)
+
+    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "shutdown", recording)
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(POP + 3))
+    assert shut
+
+
+def test_a_table_that_fails_to_close_neither_hides_the_error_nor_leaves_others_open(
+    tmp_path, monkeypatch
+):
+    """Every table is closed, and the run's own exception is the one raised."""
+    closed = []
+    close = timings.Table.close
+
+    def failing(self):
+        closed.append(self.path.name)
+        close(self)
+        if self.path.name == "progress.csv":
+            raise OSError("No space left on device")
+
+    monkeypatch.setattr(timings.Table, "close", failing)
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(POP + 3))
+    assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])

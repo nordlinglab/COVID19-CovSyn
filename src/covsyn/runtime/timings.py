@@ -207,6 +207,22 @@ class Table:
             self.writer = None
 
 
+def close_tables(tables: Iterable[Table], failing: bool = False) -> None:
+    """Close every table, even when one fails to close.
+
+    After a run that failed (``failing``), a close error is left out, so the run's own error is
+    the one raised; otherwise the first close error is raised once all are closed.
+    """
+    first = None
+    for table in tables:
+        try:
+            table.close()
+        except OSError as error:
+            first = first or error
+    if first is not None and not failing:
+        raise first
+
+
 class GenerationClock:
     """A generation's times and memory, collected in the optimiser."""
 
