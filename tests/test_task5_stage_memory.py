@@ -1112,15 +1112,20 @@ def test_fewer_workers_is_advised_where_one_worker_fits(tmp_path, config, monkey
 def test_fewer_workers_is_not_advised_while_another_step_alone_does_not_fit(
     tmp_path, config, monkeypatch
 ):
-    """Two lines of one run at one time: the one whose step alone is too large rules it out."""
+    """The chosen line fits with one worker; another, whose step alone does not, rules it out.
+
+    (500, 2000) needs 16500 MB with 8 workers and decides, and would need 2500 with one; the
+    other line of that run and time, (9000, 10), needs 9010 with one.
+    """
     _earlier(tmp_path, config, "20261101-000000_aaaaaaa_phase-d",
-             finished=[_line("optimise", 500.0, 900.0, "2026-11-01T10:00:00"),
+             finished=[_line("optimise", 500.0, 2000.0, "2026-11-01T10:00:00"),
                        _line("optimise", 9000.0, 10.0, "2026-11-01T10:00:00")])  # fmt: skip
     monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(8e9))
     monkeypatch.setenv("COVSYN_WORKERS", "8")
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1
-    assert "try fewer workers" not in (run_dir / pr.PIPELINE_LOG).read_text()
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    assert "needs about 16500 MB" in log and "try fewer workers" not in log
 
 
 @pytest.mark.parametrize("order", [1, -1])
@@ -1136,3 +1141,45 @@ def test_an_equal_need_gives_one_message_whatever_the_line_order(
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 1
     assert "3000 MB for its steps and 8 workers x 250 MB" in (run_dir / pr.PIPELINE_LOG).read_text()
+
+
+@pytest.mark.parametrize("names", [("a", "b"), ("b", "a")])
+def test_an_equal_need_across_runs_and_kinds_is_named_the_same(
+    tmp_path, config, monkeypatch, names
+):
+    """A serial 5000 MB and a pooled 1000 + 8 x 500: one is named, whatever the listing."""
+    first, second = (f"20261101-000000_{n * 7}_phase-d" for n in names)
+    _earlier(
+        tmp_path, config, first, finished=[_line("optimise", 5000.0, None, "2026-11-01T10:00:00")]
+    )
+    _earlier(
+        tmp_path, config, second, finished=[_line("optimise", 1000.0, 500.0, "2026-11-01T10:00:00")]
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(4e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    log = (run_dir / pr.PIPELINE_LOG).read_text()
+    winner = max((5000.0, 0.0, first, False), (1000.0, 500.0, second, True))  # the key's order
+    assert f"run {winner[2]}" in log
+
+
+def test_fewer_workers_is_advised_beside_a_serial_need_that_fits(tmp_path, config, monkeypatch):
+    """A serial 1000 MB fits; the pooled 500 + 8 x 900 does not, but would with one worker."""
+    _earlier(
+        tmp_path,
+        config,
+        "20261101-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 1000.0, None, "2026-11-01T10:00:00")],
+    )
+    _earlier(
+        tmp_path,
+        config,
+        "20261102-000000_aaaaaaa_phase-d",
+        finished=[_line("optimise", 500.0, 900.0, "2026-11-02T10:00:00")],
+    )
+    monkeypatch.setattr(pr.memory, "available_bytes", lambda: int(6e9))
+    monkeypatch.setenv("COVSYN_WORKERS", "8")
+    status, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert status == 1
+    assert "try fewer workers" in (run_dir / pr.PIPELINE_LOG).read_text()

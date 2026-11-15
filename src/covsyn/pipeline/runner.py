@@ -377,7 +377,7 @@ def memory_problem(
                 "configuration, so its need cannot be estimated"
             )
         return None
-    # The larger need decides; at an equal need, the estimate itself (its peaks, run and kind),
+    # The largest need decides; at an equal need, the estimate itself (its peaks, run and kind),
     # so the message does not depend on the order the runs or their lines are listed in.
     estimate = max(estimates, key=lambda e: (e.need(workers), e))
     needed = estimate.need(workers)
