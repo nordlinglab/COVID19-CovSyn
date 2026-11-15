@@ -389,3 +389,37 @@ def test_a_second_close_error_is_said(tmp_path, capsys):
     with pytest.raises(OSError):
         timings.close_tables([Bad(), Bad()])
     assert capsys.readouterr().err.count("could not close bad.csv") == 1
+
+
+def test_a_second_interrupt_during_the_shutdown_keeps_the_runs_error(tmp_path, monkeypatch):
+    """Ctrl-C again while a failed run waits for its workers: the run's own error is raised."""
+    import concurrent.futures
+
+    shutdown = concurrent.futures.ProcessPoolExecutor.shutdown
+
+    def interrupted(self, *args, **kwargs):
+        shutdown(self, wait=False, cancel_futures=True)
+        if kwargs.get("cancel_futures"):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "shutdown", interrupted)
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(POP + 3))
+
+
+def test_after_a_failure_every_close_error_is_said_and_none_raised(capsys):
+    """The run's own error stays the one raised; each table that failed to close is named."""
+
+    class Bad:
+        def __init__(self, name):
+            self.path = name
+
+        def close(self):
+            raise OSError("No space left on device")
+
+    timings.close_tables([Bad("a.csv"), Bad("b.csv")], failing=True)
+    err = capsys.readouterr().err
+    assert "could not close a.csv" in err and "could not close b.csv" in err
