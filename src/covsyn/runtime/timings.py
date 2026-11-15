@@ -86,7 +86,8 @@ class TaskClock:
         """Start the task: its PID, wall-clock start and RSS.
 
         ``process`` is a handle on this process that the worker keeps; without one, the task
-        makes its own, once.
+        makes its own for its two reads. Every pool that runs fast_cost's tasks gives one, as
+        init_worker, which the tasks need anyway, makes it.
         """
         self.process = process or psutil.Process()
         self.pid = os.getpid()
