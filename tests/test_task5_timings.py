@@ -448,10 +448,10 @@ def _sleep_after_starting(flag, seconds):
     return "finished"
 
 
-def _ended(pid):
-    try:
-        return psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
-    except psutil.NoSuchProcess:  # gone, or gone between listing and asking
+def _ended(process):
+    try:  # is_running compares the start time too, so a reused pid is not taken for it
+        return not process.is_running() or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:  # gone between the two questions
         return True
 
 
@@ -472,7 +472,9 @@ def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, 
                 future.result()  # a worker that failed to start says why
             assert time.monotonic() < deadline, "the task never started"
             time.sleep(0.01)
-        seen["workers"] = list(executor._processes)  # the pool's own, not other children
+        # The pool's own workers, not other children; copied in one step, as its manager thread
+        # may change the dict. With fork (Python 3.13) all of them exist once a task runs.
+        seen["workers"] = [psutil.Process(pid) for pid in executor._processes.copy()]
         raise Killed
 
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
@@ -481,4 +483,4 @@ def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, 
     with pytest.raises(Killed):
         optimise(path, failing)
     assert seen["future"].done() and seen["future"].result() == "finished"
-    assert seen["workers"] and all(_ended(pid) for pid in seen["workers"])
+    assert seen["workers"] and all(_ended(process) for process in seen["workers"])
