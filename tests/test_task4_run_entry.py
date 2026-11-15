@@ -122,7 +122,8 @@ def test_other_runs_are_never_looked_at(results, tmp_path, monkeypatch):
     real = os.stat
 
     def watching(path, *args, **kwargs):
-        if "old" in str(path):
+        # A whole component: macOS's temporary directory is /private/var/folders/...
+        if "old" in Path(str(path)).parts:
             looked.append(str(path))
         return real(path, *args, **kwargs)
 
