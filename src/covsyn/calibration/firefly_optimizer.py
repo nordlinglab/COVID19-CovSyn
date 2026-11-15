@@ -1170,11 +1170,17 @@ def check_progress_table(run_dir: Path) -> None:
 
 
 def drop_progress_after(path: Path, generation: int) -> None:
-    """Keep the progress rows up to generation; later ones were written after its checkpoint."""
+    """Keep the table's rows up to generation; later ones were written after its checkpoint.
+
+    Also drops a last row a kill cut off, which lacks its newline (Task 5): its generation
+    could read as an earlier one, or as no number at all.
+    """
     if not path.exists():
         return
-    with open(path, newline='') as f:
-        rows = list(csv.DictReader(f))
+    text = path.read_text(newline='')
+    if text and not text.endswith('\n'):
+        text = text[:text.rfind('\n') + 1]
+    rows = list(csv.DictReader(text.splitlines(keepends=True)))
     with open(path, 'w', newline='') as f:
         if rows:
             writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

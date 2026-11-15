@@ -161,3 +161,20 @@ def test_the_real_objective_fills_the_worker_columns(
         assert sum(stage_values) <= last["run_covid_s"]
     else:
         assert all(v is None for v in stage_values)
+
+
+@pytest.mark.parametrize("cut_off", ["0", "-", "0,3,17"])  # "-" is "-1" cut off
+def test_a_row_cut_off_by_a_kill_is_dropped_on_resume(tmp_path, run, cut_off):
+    """A kill while writing leaves a row without its newline; resuming drops it, whatever it is."""
+    path = tmp_path / "killed"
+    path.mkdir()
+    with pytest.raises(Killed):
+        optimise(path, killed_after(3 * POP + 5))
+    evaluation_table = runs.progress_path(path).parent / timings.EVALUATION_TABLE
+    with open(evaluation_table, "a", newline="") as f:
+        f.write(cut_off)
+    optimise(path, objective, resume=True)
+    keys = ("generation", "candidate")
+    got = [tuple(r[k] for k in keys) for r in table(path, timings.EVALUATION_TABLE)]
+    want = [tuple(r[k] for k in keys) for r in table(run, timings.EVALUATION_TABLE)]
+    assert got == want
