@@ -37,11 +37,17 @@ def start_worker_profile(profile_dir: Path) -> cProfile.Profile:
 
     A pool worker leaves through threading's shutdown, not through atexit, so the dump is
     registered there (``threading._register_atexit``, which concurrent.futures itself uses).
-    The caller enables the profile around each task only, so waiting for work is not counted.
+    The caller enables the profile around each task only, so waiting for work is not counted;
+    a worker that ran no task writes nothing, as pstats cannot read an empty profile.
     """
     profile = cProfile.Profile()
     path = Path(profile_dir) / f"worker_{os.getpid()}.prof"
-    threading._register_atexit(profile.dump_stats, str(path))
+
+    def dump() -> None:
+        if profile.getstats():
+            profile.dump_stats(str(path))
+
+    threading._register_atexit(dump)
     return profile
 
 

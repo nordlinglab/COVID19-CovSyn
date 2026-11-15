@@ -111,6 +111,24 @@ def test_each_worker_writes_its_own_profile(
     assert profiling.share(tmp_path / profiling.MERGED, "run_covid") > 0.5
 
 
+def test_a_worker_without_tasks_writes_no_profile(
+    tmp_path, run10_vector, demographic_parameters, cheng_data
+):
+    """10 simulations are one task, so one of 2 workers runs none; the merge still works."""
+    columns = np.load(REPO_ROOT / "variable" / "Taiwan_data_matrix.npy").shape[1]
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=2,
+        initializer=fast_cost.init_worker,
+        initargs=(demographic_parameters, columns, False, tmp_path),
+    ) as pool:
+        list(pool.map(abs, [1, 2]))  # both workers start
+        fast_cost.cost_function(
+            run10_vector, demographic_parameters, pool, *cheng_data, simulations=10
+        )
+    assert len(list(tmp_path.glob("worker_*.prof"))) == 1
+    profiling.merge_profiles(tmp_path, tmp_path)
+
+
 def test_a_profile_run_cannot_be_resumed(tmp_path):
     """Its population is the worker count; a profile is run again, not continued."""
     (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": {"mode": "profile"}}))
