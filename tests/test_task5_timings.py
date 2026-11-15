@@ -10,6 +10,7 @@ is checked on its own with the real objective.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import csv
 import time
 
@@ -449,10 +450,16 @@ def _sleep_after_starting(flag, seconds):
 
 
 def _ended(process):
-    try:  # is_running compares the start time too, so a reused pid is not taken for it
-        return not process.is_running() or process.status() == psutil.STATUS_ZOMBIE
-    except psutil.NoSuchProcess:  # gone between the two questions
-        return True
+    """Gone and reaped: a zombie, a worker not joined, counts as still there."""
+    return not process.is_running()  # compares the start time, so a reused pid is not it
+
+
+def _snapshot(pids):
+    processes = []
+    for pid in pids:
+        with contextlib.suppress(psutil.NoSuchProcess):  # ended already: nothing to check
+            processes.append(psutil.Process(pid))
+    return processes
 
 
 def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, monkeypatch):
@@ -473,8 +480,9 @@ def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, 
             assert time.monotonic() < deadline, "the task never started"
             time.sleep(0.01)
         # The pool's own workers, not other children; copied in one step, as its manager thread
-        # may change the dict. With fork (Python 3.13) all of them exist once a task runs.
-        seen["workers"] = [psutil.Process(pid) for pid in executor._processes.copy()]
+        # may change the dict. They exist once submit has returned, with fork (Linux) and spawn
+        # (macOS) alike: submit starts the workers it needs before returning.
+        seen["workers"] = _snapshot(executor._processes.copy())
         raise Killed
 
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
