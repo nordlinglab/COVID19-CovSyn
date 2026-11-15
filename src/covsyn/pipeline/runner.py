@@ -302,12 +302,13 @@ def earlier_estimate(
         history: Each other run's run.log lines (:func:`histories`); read here when None.
 
     Returns:
-        The latest complete measurement of each kind, at most two; empty when no earlier run
-        measured the stage whole.
+        The latest complete measurements of each kind (more than one only where one run
+        finished the stage twice at one time); empty when no earlier run measured the stage
+        whole.
     """
     others = other_runs(run_dir) if others is None else others
     history = histories(others) if history is None else history
-    latest: dict[bool, tuple] = {}
+    latest: dict[bool, tuple] = {}  # kind -> ((time, run), the estimates at that time)
     for other in others:
         for line in history.get(other, []):
             if line.get("stage") != stage or not complete(line):
@@ -322,11 +323,14 @@ def earlier_estimate(
             estimate = Estimate(
                 line["parent_peak_mb"], worker if pooled else 0.0, other.name, pooled
             )
-            # The latest, by time then run id; at one time in one run, the larger need.
-            key = (when, other.name, estimate.step, estimate.worker)
+            # The latest, by time then run id; lines of one run at one time all count, as which
+            # needs more depends on this run's workers.
+            key = (when, other.name)
             if pooled not in latest or key > latest[pooled][0]:
-                latest[pooled] = (key, estimate)
-    return [estimate for _, estimate in latest.values()]
+                latest[pooled] = (key, [estimate])
+            elif key == latest[pooled][0]:
+                latest[pooled][1].append(estimate)
+    return [estimate for _, estimates in latest.values() for estimate in estimates]
 
 
 def memory_problem(
@@ -371,7 +375,9 @@ def memory_problem(
                 "configuration, so its need cannot be estimated"
             )
         return None
-    estimate = max(estimates, key=lambda e: e.need(workers))  # the larger need decides
+    # The larger need decides; at an equal need, the run id, then the kind, so the advice does
+    # not depend on the order the other runs are listed in.
+    estimate = max(estimates, key=lambda e: (e.need(workers), e.run, e.pooled))
     needed = estimate.need(workers)
     available = memory.available_bytes() / memory.MB
     if needed <= available:
