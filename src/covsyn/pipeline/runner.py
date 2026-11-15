@@ -421,6 +421,7 @@ def _run_stages(
         }
         warnings = [*ctx.warnings, *memory_warnings]
         record_stage(run_dir, name, time.monotonic() - start, workers, warnings, peaks)
+        measurements.unlink(missing_ok=True)  # in run.log now; a stopped attempt's stays
     report("ALL DONE")
     return 0
 

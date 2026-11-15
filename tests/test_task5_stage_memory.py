@@ -329,3 +329,18 @@ def test_a_resumed_stage_starts_its_measurements_afresh(tmp_path, config):
     peaks = {"covsyn.model.data_synthesis_main": (400.0, 1000.0)}
     assert prun(None, run_dir, execute=Measuring(peaks), resume=True) == 0
     assert run_log(run_dir)["synthesise"]["worker_peak_mb"] == 1000.0
+
+
+def test_only_stopped_attempts_leave_their_measurements(tmp_path, config):
+    """A finished stage's peaks are in run.log; its file goes. A stopped attempt's stays."""
+    peaks = {"covsyn.model.data_synthesis_main": (500.0, 9000.0),
+             "covsyn.calibration.firefly_optimizer": (300.0, 900.0)}  # fmt: skip
+    status, run_dir = run_pipeline(
+        tmp_path, config, Measuring(peaks, fail={"covsyn.model.data_synthesis_main"})
+    )
+    assert status == 1
+    left = sorted(p.name.split("_")[1] for p in (run_dir / "logs").glob("memory_*.jsonl"))
+    assert left == ["synthesise"]
+    assert prun(None, run_dir, execute=Measuring(peaks), resume=True) == 0
+    left = sorted(p.name.split("_")[1] for p in (run_dir / "logs").glob("memory_*.jsonl"))
+    assert left == ["synthesise"]  # the stopped attempt's, not the finished one's
