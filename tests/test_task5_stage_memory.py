@@ -464,3 +464,25 @@ def test_a_warning_whose_report_wrote_nothing_is_in_run_log_once(tmp_path, confi
     assert "below 10%" not in (run_dir / pr.PIPELINE_LOG).read_text()  # no report got through
     for line in run_log(run_dir).values():
         assert sum("below 10%" in w for w in line["warnings"]) == 1
+
+
+def test_run_log_has_the_steps_rss_sampled_once_a_second(tmp_path, config):
+    """The plan's sampled parent RSS: the pipeline samples each step, the pool's owner.
+
+    The step holds its memory for 3.5 s, so the once-a-second samples catch it at least twice,
+    however long a loaded machine takes to import numpy.
+    """
+    code = "import numpy as np, time; b = np.ones(200 * 1024**2 // 8); time.sleep(3.5)"
+
+    class Running(Recorder):
+        def __call__(self, args, output, append, env):
+            if str(args[1]) == "covsyn.calibration.firefly_optimizer":
+                pr.run_module(["-c", code], None, False, {})
+            return super().__call__(args, output, append, env)
+
+    _, run_dir = run_pipeline(tmp_path, config, Running())
+    lines = run_log(run_dir)
+    assert lines["optimise"]["parent_sampled_peak_mb"] >= 199 * MIB / memory.MB
+    # No step process ran in figures; other children of the test process may (a pool helper).
+    figures = lines["figures"]["parent_sampled_peak_mb"]
+    assert figures is None or figures < 199 * MIB / memory.MB

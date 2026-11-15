@@ -96,10 +96,13 @@ class MemoryWatch:
         interval: float = 1.0,
         warn: Callable[[str], None] | None = None,
         system: Callable[[], tuple[int, int]] | None = None,
+        children: bool = False,
     ) -> None:
         """Sample every ``interval`` seconds; ``warn`` prints to stderr by default.
 
         ``system`` gives the available and total memory; system_memory by default.
+        ``children``: also sample the RSS of this process's direct children, the pipeline's
+        steps, from outside, as a thread inside a step would make its forks unsafe.
         """
         self.interval = interval
         self.warn = warn or (
@@ -108,6 +111,8 @@ class MemoryWatch:
         self.system = system or system_memory
         self.process = psutil.Process()
         self.parent_peak_bytes: int | None = None  # None until an RSS read succeeds
+        self.children = children
+        self.children_peak_bytes: int | None = None  # the largest direct child's, sampled
         self.lowest_available: int | None = None
         self.warning: str | None = None  # the low-memory warning, once made
         self._pending: str | None = None  # a warning to send
@@ -120,6 +125,8 @@ class MemoryWatch:
     def sample(self) -> None:
         """Take one sample; the RSS, the available memory and the warning fail separately."""
         self._guarded(self._sample_rss)
+        if self.children:
+            self._guarded(self._sample_children)
         self._guarded(self._sample_available)
         if self._pending is not None:
             self._guarded(self._send_warning)
@@ -127,6 +134,12 @@ class MemoryWatch:
     def _sample_rss(self) -> None:
         rss = rss_bytes(self.process)
         self.parent_peak_bytes = max(self.parent_peak_bytes or 0, rss)
+
+    def _sample_children(self) -> None:
+        for child in self.process.children():
+            with contextlib.suppress(psutil.NoSuchProcess):  # one that just ended
+                rss = rss_bytes(child)
+                self.children_peak_bytes = max(self.children_peak_bytes or 0, rss)
 
     def _sample_available(self) -> None:
         available, total = self.system()

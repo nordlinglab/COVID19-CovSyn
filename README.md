@@ -95,7 +95,7 @@ A run directory that is a link to other storage is not supported.
 `src/covsyn/pipeline/default.toml` holds the settings, such as the warm start (default: run 10) and the previous run's `checks.json` to compare with;
 `--config` also takes another TOML file.
 
-Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, and the least available memory.
+Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.
 The pipeline warns as soon as available memory falls below 10% of the total.
 A stage is refused when an earlier run with the same `pipeline.toml` shows it needs more than the available memory: its steps' peak plus the workers times the peak per worker.
 This is a conservative check at the stage's start, not a guarantee against running out of memory.

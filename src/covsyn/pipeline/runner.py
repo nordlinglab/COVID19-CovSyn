@@ -230,6 +230,7 @@ def record_stage(
         "worker_peak_mb": peaks.get("worker_peak_mb"),
         "lowest_available_mb": peaks.get("lowest_available_mb"),
         "pipeline_peak_mb": peaks.get("pipeline_peak_mb"),
+        "parent_sampled_peak_mb": peaks.get("parent_sampled_peak_mb"),
         "warnings": list(warnings),
     }
     path = Path(run_dir) / RUN_LOG
@@ -398,7 +399,9 @@ def _run_stages(
         start = time.monotonic()
         # The pipeline's own RSS and the available memory, once a second (Task 5). A warning is
         # reported at once: a stage killed for want of memory may never reach its end.
-        watch = memory.MemoryWatch(warn=lambda message: report(f"WARNING: {message}"))
+        watch = memory.MemoryWatch(
+            warn=lambda message: report(f"WARNING: {message}"), children=True
+        )
         finished = False
         try:
             problem = memory_problem(run_dir, name, workers)
@@ -434,9 +437,9 @@ def _run_stages(
                 )
         peaks = {
             **stage_memory(measurements),
-            "pipeline_peak_mb": memory.megabytes(
-                watch.parent_peak_bytes
-            ),  # None: no reading succeeded
+            "pipeline_peak_mb": memory.megabytes(watch.parent_peak_bytes),  # None: not read
+            # The plan's once-a-second RSS of the step, the process that owns the pool.
+            "parent_sampled_peak_mb": memory.megabytes(watch.children_peak_bytes),
             "lowest_available_mb": memory.megabytes(watch.lowest_available),
         }
         # The watch's warning for run.log, once, however often its report was tried, and even

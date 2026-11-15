@@ -296,3 +296,22 @@ def test_a_warning_that_keeps_failing_is_not_sent_every_second():
     for _ in range(10):  # samples taken by hand: no thread, no timing
         watch.sample()
     assert len(calls) == memory.WARNING_ATTEMPTS
+
+
+def test_the_watch_samples_its_child_processes_from_outside():
+    """The plan's once-a-second RSS of a step, taken by the pipeline, not by a thread in it."""
+    import subprocess
+    import sys
+
+    code = "import numpy as np, time; b = np.ones(200 * 1024**2 // 8); time.sleep(1.5)"
+    with memory.MemoryWatch(interval=0.1, children=True) as watch:
+        step = subprocess.Popen([sys.executable, "-c", code])
+        step.wait()
+    assert watch.children_peak_bytes >= 199 * MIB
+
+
+def test_a_watch_without_children_has_no_child_peak():
+    """Off by default: nothing is read and nothing is reported."""
+    with memory.MemoryWatch(interval=0.01) as watch:
+        pass
+    assert watch.children_peak_bytes is None
