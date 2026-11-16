@@ -124,7 +124,8 @@ def test_one_spawned_task_scores_a_whole_evaluation_as_cost_function_does(
 
 
 # The seeds below 3,000 on which each run's best vector gives more than one case, the rare
-# branch where a secondary case runs its own course; measured over 3,000 seeds (Task 6).
+# branch where a secondary case runs its own course; measured over 3,000 seeds (Task 6). They
+# move only if run_covid's draws change, which the regression tests forbid as well.
 MULTI_CASE_SEEDS = {
     "phaseD_run10": (26, 129, 1226, 1250, 1375),
     "phaseD_run19": (307, 841, 979, 1032, 1179, 1281, 1375, 1830, 2003),
@@ -150,9 +151,13 @@ def test_simulations_leave_the_demographic_parameters_unchanged(run, demographic
     vector = best_vector(REPO_ROOT / "results" / "models" / run / "firefly_best.txt")
     given = vector.copy()
     stage_ns = dict.fromkeys(STAGES, 0)
-    sizes = [len(run_covid(seed, vector, shared, save_file=False, stage_times=stage_ns)[2])
-             for seed in (*range(300), *MULTI_CASE_SEEDS[run])]  # fmt: skip
-    assert sum(size > 1 for size in sizes) >= len(MULTI_CASE_SEEDS[run])  # the branch ran
+    sizes = {seed: len(run_covid(seed, vector, shared, save_file=False, stage_times=stage_ns)[2])
+             for seed in sorted({*range(300), *MULTI_CASE_SEEDS[run]})}  # fmt: skip
+    single = [seed for seed in MULTI_CASE_SEEDS[run] if sizes[seed] < 2]
+    assert not single, (
+        f"{run}: seeds {single} no longer give a secondary case, so the branch "
+        f"went unchecked; the draws changed, so measure MULTI_CASE_SEEDS again"
+    )
     assert pickle.dumps(shared) == before
     assert vector.tobytes() == given.tobytes()
     assert sum(stage_ns.values()) > 0

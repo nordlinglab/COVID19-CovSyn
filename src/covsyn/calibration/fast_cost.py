@@ -208,10 +208,11 @@ def _run_batch(seeds, P, columns):
 
     The deepcopy guards against run_covid() mutating demographic_parameters, which is why
     _cost_function() deepcopied it for every evaluation and why each task then got its own
-    unpickled copy. Measured in Task 6, run_covid changed none of it over 3,000 seeds each of
-    runs 10, 18 and 19's best vectors, of which 18 gave more than one case; test_task6_candidate
-    keeps that checked. Sending it once through the pool initializer instead would make the
-    worker's copy persist across tasks AND across evaluations, letting mutations accumulate;
+    unpickled copy. Measured in Task 6, run_covid changed none of it in 9,000 simulations,
+    3,000 seeds each of runs 10, 18 and 19's best vectors, 18 of them with more than one case;
+    test_task6_candidate keeps runs 10 and 19 checked. Sending it once through the pool
+    initializer instead would make the worker's copy persist across tasks AND across
+    evaluations, letting mutations accumulate;
     copying from the pristine global per task restores exactly the original semantics -- every
     task in every evaluation starts from the same untouched state -- while still shipping the
     0.21 MB object to each worker once rather than once per task.
