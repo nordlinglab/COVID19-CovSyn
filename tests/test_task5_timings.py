@@ -84,8 +84,8 @@ def _objective_with_worker_fields(*args, **kwargs):
     return objective(*args, **kwargs)
 
 
-def test_a_run_says_nothing_about_columns_left_out(tmp_path, monkeypatch, capsys):
-    """worker_rss in timings.LAST is for the generation row, not an evaluation column."""
+def test_a_run_fills_the_worker_columns_and_leaves_none_out(tmp_path, monkeypatch, capsys):
+    """Every row has its worker columns; worker_rss in timings.LAST is not one, so is not said."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "whole"
     path.mkdir()

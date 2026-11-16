@@ -121,7 +121,7 @@ def _pid_after(barrier):
 
 
 # The platform's default and spawn (macOS's default); fork is unsafe on macOS.
-START_METHODS = list(dict.fromkeys([multiprocessing.get_all_start_methods()[0], "spawn"]))
+START_METHODS = list(dict.fromkeys([multiprocessing.get_start_method(), "spawn"]))
 
 
 @pytest.mark.parametrize("method", START_METHODS)
@@ -132,7 +132,7 @@ def test_a_worker_without_tasks_writes_no_profile(
     columns = np.load(REPO_ROOT / "variable" / "Taiwan_data_matrix.npy").shape[1]
     # The manager outlives the pool, whose workers hold proxies of its barrier.
     with (
-        multiprocessing.Manager() as manager,
+        multiprocessing.get_context(method).Manager() as manager,
         concurrent.futures.ProcessPoolExecutor(
             max_workers=2,
             mp_context=multiprocessing.get_context(method),
