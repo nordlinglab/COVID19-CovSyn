@@ -125,7 +125,8 @@ def test_one_spawned_task_scores_a_whole_evaluation_as_cost_function_does(
 
 # The seeds below 3,000 on which each run's best vector gives more than one case, the rare
 # branch where a secondary case runs its own course; measured over 3,000 seeds (Task 6). They
-# move only if run_covid's draws change, which the regression tests forbid as well.
+# move if run_covid's draws change, which the regression tests forbid as well, or if the run's
+# firefly_best.txt or the demographic inputs do.
 MULTI_CASE_SEEDS = {
     "phaseD_run10": (26, 129, 1226, 1250, 1375),
     "phaseD_run19": (307, 841, 979, 1032, 1179, 1281, 1375, 1830, 2003),
@@ -136,9 +137,9 @@ MULTI_CASE_SEEDS = {
 def test_simulations_leave_the_demographic_parameters_unchanged(run, demographic_parameters):
     """A candidate's S simulations share one copy, so none may change it for the next (Task 6).
 
-    run_covid runs as _simulate calls it, on one shared copy with stage timing, over seeds 0 to 299
-    and the seeds with more than one case. Over 3,000 seeds each of runs 10, 18 and 19 it
-    changed nothing; this keeps that checked in CI.
+    run_covid runs as _simulate calls it, on one shared copy with stage timing, over seeds 0 to
+    299 and the seeds with more than one case. Over 3,000 seeds each of runs 10, 18 and 19 it
+    changed nothing; this keeps runs 10 and 19 checked in CI.
     """
     import copy
     import pickle
@@ -153,14 +154,14 @@ def test_simulations_leave_the_demographic_parameters_unchanged(run, demographic
     stage_ns = dict.fromkeys(STAGES, 0)
     sizes = {seed: len(run_covid(seed, vector, shared, save_file=False, stage_times=stage_ns)[2])
              for seed in sorted({*range(300), *MULTI_CASE_SEEDS[run]})}  # fmt: skip
-    single = [seed for seed in MULTI_CASE_SEEDS[run] if sizes[seed] < 2]
-    assert not single, (
-        f"{run}: seeds {single} no longer give a secondary case, so the branch "
-        f"went unchecked; the draws changed, so measure MULTI_CASE_SEEDS again"
-    )
-    assert pickle.dumps(shared) == before
+    assert pickle.dumps(shared) == before  # what the test guards, so checked first
     assert vector.tobytes() == given.tobytes()
     assert sum(stage_ns.values()) > 0
+    single = [seed for seed in MULTI_CASE_SEEDS[run] if sizes[seed] < 2]
+    assert not single, (
+        f"{run}: seeds {single} no longer give a secondary case, so that branch went unchecked; "
+        f"run_covid's draws or the inputs changed, so measure MULTI_CASE_SEEDS again"
+    )
 
 
 def test_a_worker_reads_the_taiwan_matrix_once_not_per_candidate(
