@@ -89,13 +89,25 @@ def test_a_run_fills_the_worker_columns_and_leaves_none_out(tmp_path, monkeypatc
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "whole"
     path.mkdir()
+    written, write = [], timings.Table.write
+
+    def recording(self, row):
+        """Keep each row given to the evaluation table, then write it as usual."""
+        if self.path.name == timings.EVALUATION_TABLE:
+            written.append(dict(row))
+        write(self, row)
+
+    monkeypatch.setattr(timings.Table, "write", recording)
     optimise(path, _objective_with_worker_fields)
-    err = capsys.readouterr().err
-    assert "left out" not in err and "worker_rss'" not in err
+    assert written and all("worker_rss" not in row for row in written)
+    assert "left out" not in capsys.readouterr().err
     worker_columns = ("worker_rss_before_mb", "worker_rss_after_mb", "worker_peak_mb")
-    for r in table(path, timings.EVALUATION_TABLE):
+    evaluations = table(path, timings.EVALUATION_TABLE)
+    generations = table(path, timings.GENERATION_TABLE)
+    assert evaluations and generations
+    for r in evaluations:
         assert r["worker_pids"] and all(float(r[c]) > 0 for c in worker_columns)
-    assert all(float(r["worker_rss_max_mb"]) > 0 for r in table(path, timings.GENERATION_TABLE))
+    assert all(float(r["worker_rss_max_mb"]) > 0 for r in generations)
 
 
 def test_a_resumed_run_keeps_one_row_per_evaluation_and_generation(tmp_path, run):
