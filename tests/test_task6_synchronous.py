@@ -235,11 +235,51 @@ def _test_mode_run(tmp_path, workers):
 
 
 @pytest.mark.slow
-def test_1_3_and_8_workers_give_the_same_progress_table(tmp_path):
-    """The acceptance criterion, on the real objective; progress.csv has no timing column."""
+def test_the_command_gives_the_same_progress_table_on_1_and_3_workers(tmp_path):
+    """covsyn-optimise --mode test, on the real objective at S = 300, as a user runs it."""
     one, evaluations = _test_mode_run(tmp_path, 1)
     assert one.count(b"\n") > 1
     assert all(len(r["worker_pids"].split(";")) == 1 for r in evaluations)
     assert all(int(r["simulations"]) == fo.SIMULATIONS_PER_EVALUATION for r in evaluations)
-    for workers in (3, 8):
-        assert _test_mode_run(tmp_path, workers)[0] == one, workers
+    assert _test_mode_run(tmp_path, 3)[0] == one
+
+
+WIDE = 9  # more fireflies than the 8 workers, so every worker has a candidate
+
+
+def _real_run(path, workers, run10_vector, demographic_parameters, cheng_data):
+    """WIDE fireflies around run 10's vector on the real objective at S = 20."""
+    from covsyn.calibration.fast_cost import evaluate_candidate
+
+    fo.result_path = path
+    engine = fo.Firefly(pop_size=WIDE, alpha=0.2, betamin=1, gamma=0.03, seed=SEED)
+    engine.simulations = 20
+    engine.firefly(function=evaluate_candidate, dim=len(run10_vector),
+                   lb=run10_vector * 0.95, ub=run10_vector * 1.05,
+                   demographic_parameters=demographic_parameters, max_generations=3,
+                   max_workers=workers, Cheng_contact_array=cheng_data[0],
+                   Cheng_attack_rate=cheng_data[1], norm_weights=cheng_data[2])  # fmt: skip
+    return runs.progress_path(path).read_bytes(), table(path, timings.EVALUATION_TABLE)
+
+
+@pytest.mark.slow
+def test_1_3_and_8_workers_give_the_same_progress_table(
+    tmp_path, monkeypatch, run10_vector, demographic_parameters, cheng_data
+):
+    """The acceptance criterion, on the real objective; progress.csv has no timing column."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    tables = {}
+    for workers in (1, 3, 8):
+        path = tmp_path / f"workers_{workers}"
+        path.mkdir()
+        tables[workers], evaluations = _real_run(path, workers, run10_vector,
+                                                 demographic_parameters, cheng_data)  # fmt: skip
+        used = len({r["worker_pids"] for r in evaluations})
+        # A spawned worker takes about 10 s to import on WSL and a task 50 ms, so how many
+        # workers get one depends on how soon each is up; with 8, 6 did on WSL, and more than
+        # 3 shows the run went beyond the 3-worker case.
+        assert used == 1 if workers == 1 else used <= workers
+        if workers == 8:
+            assert used > 3
+    assert tables[1].count(b"\n") == 4  # the header and 3 generations
+    assert tables[3] == tables[1] and tables[8] == tables[1]
