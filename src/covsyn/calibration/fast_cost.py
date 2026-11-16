@@ -62,20 +62,26 @@ _WORKER_TAIWAN_MATRIX_COLUMNS = None
 _WORKER_STAGE_TIMING = False
 _WORKER_PROFILE = None
 _WORKER_PROCESS = None
+_WORKER_CHENG = None
+_WORKER_SIMULATIONS = None
 
 
 def init_worker(demographic_parameters, taiwan_matrix_columns, stage_timing=False,
-                profile_dir=None):
+                profile_dir=None, cheng=None, simulations=None):
     """Give each worker the read-only data once, instead of once per task.
 
     Task 5: stage_timing times run_covid's stages in every task of this worker; profile_dir,
     when given, makes the worker profile its tasks into profile_dir/worker_<pid>.prof.
+    Task 6: cheng, the Cheng et al. (2020) contact counts, attack rates and bin weights, and
+    simulations, S (default fo.SIMULATIONS_PER_EVALUATION), are what evaluate_candidate needs.
     """
     global _WORKER_DEMOGRAPHIC_PARAMETERS, _WORKER_TAIWAN_MATRIX_COLUMNS, _WORKER_STAGE_TIMING
-    global _WORKER_PROFILE, _WORKER_PROCESS
+    global _WORKER_PROFILE, _WORKER_PROCESS, _WORKER_CHENG, _WORKER_SIMULATIONS
     _WORKER_DEMOGRAPHIC_PARAMETERS = demographic_parameters
     _WORKER_TAIWAN_MATRIX_COLUMNS = taiwan_matrix_columns
     _WORKER_STAGE_TIMING = stage_timing
+    _WORKER_CHENG = cheng
+    _WORKER_SIMULATIONS = simulations
     _WORKER_PROCESS = psutil.Process()  # this worker, for its memory reads (Task 5)
     _WORKER_PROFILE = None if profile_dir is None else profiling.start_worker_profile(profile_dir)
 
@@ -210,6 +216,11 @@ def _run_batch(seeds, P, columns):
     mutation is real -- but do not read it as the fix for that bug.
     """
     clock = timings.TaskClock(_WORKER_STAGE_TIMING, _WORKER_PROCESS)  # Task 5: returned beside the results
+    return _simulate(seeds, P, columns, clock), clock.record()
+
+
+def _simulate(seeds, P, columns, clock):
+    """The simulations of _run_batch, timed on clock; see _run_batch for the deepcopy."""
     demographic_parameters = copy.deepcopy(_WORKER_DEMOGRAPHIC_PARAMETERS)
     out = []
     for seed in seeds:
@@ -229,7 +240,7 @@ def _run_batch(seeds, P, columns):
         out.append((index, cases))
         clock.reduction_ns += time.perf_counter_ns() - simulated
         clock.simulations += 1
-    return out, clock.record()
+    return out
 
 
 def reduce_outcomes(scalars):
@@ -354,12 +365,70 @@ def cost_function(P, demographic_parameters, executor, Cheng_contact_array, Chen
         print('fast_cost: simulation failed for this parameter vector, charging '
               f'{fo.FAILED_EVALUATION_COST:g}', flush=True)
         LAST_COST_PARTS.clear()
-        LAST_COST_PARTS.update(
-            cost_contact=np.nan, cost_attack_rate=np.nan, cost_energy=np.nan,
-            cost_penalty=np.nan, cost_outcome=np.nan, cost_contact_household=np.nan,
-            cost_contact_healthcare=np.nan, cost_contact_others=np.nan,
-            **{f'measured_{k}': np.nan for k in fo.OUTCOME_TARGETS})
+        LAST_COST_PARTS.update(_failed_parts())
         return fo.FAILED_EVALUATION_COST
+
+
+def evaluate_candidate(P, seed_offset):
+    """One pool task that scores one candidate on its S seeds from seed_offset (Task 6).
+
+    The worker runs all S simulations, pools them and computes the cost exactly as
+    cost_function does across its tasks, from the inputs init_worker gave it: S is the
+    worker's simulations, by default fo.SIMULATIONS_PER_EVALUATION. A simulation that raises
+    charges fo.FAILED_EVALUATION_COST with NaN parts, as cost_function does (E31).
+
+    Returns:
+        The cost, its parts (cost_parts.LAST's keys) and the task's timing fields for
+        timings_evaluation.csv, cost_reduction_s included; the parent adds its dispatch and
+        wait.
+
+    Raises:
+        RuntimeError: The worker was not initialised with the objective's inputs.
+    """
+    if _WORKER_CHENG is None:
+        raise RuntimeError('evaluate_candidate needs a worker initialised by init_worker '
+                           'with cheng= (Task 6)')
+    if _WORKER_PROFILE is None:
+        return _evaluate_candidate(P, seed_offset)
+    _WORKER_PROFILE.enable()  # Task 5: the task only, not the wait for the next one
+    try:
+        return _evaluate_candidate(P, seed_offset)
+    finally:
+        _WORKER_PROFILE.disable()
+
+
+def _evaluate_candidate(P, seed_offset):
+    """evaluate_candidate's work, profiled or not."""
+    clock = timings.TaskClock(_WORKER_STAGE_TIMING, _WORKER_PROCESS)
+    case_limit = (fo.SIMULATIONS_PER_EVALUATION if _WORKER_SIMULATIONS is None
+                  else _WORKER_SIMULATIONS)
+    reduction_ns = 0
+    try:
+        taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
+        seeds = list(range(seed_offset, seed_offset + case_limit))
+        # The simulations get their own copy, as cost_function's tasks get theirs by pickling,
+        # so the penalty reads the vector as given.
+        results = _simulate(seeds, copy.deepcopy(P), _WORKER_TAIWAN_MATRIX_COLUMNS, clock)
+        reducing = time.perf_counter_ns()
+        cost, parts = _cost(P, _pool([results], case_limit), case_limit, taiwan_data_matrix,
+                            *_WORKER_CHENG)
+        reduction_ns = time.perf_counter_ns() - reducing
+    except Exception:
+        traceback.print_exc()
+        print('fast_cost: simulation failed for this parameter vector, charging '
+              f'{fo.FAILED_EVALUATION_COST:g}', flush=True)
+        cost, parts = fo.FAILED_EVALUATION_COST, _failed_parts()
+    timing = timings.summarise_tasks([clock.record()])
+    timing['cost_reduction_s'] = timings.seconds(reduction_ns)
+    return cost, parts, timing
+
+
+def _failed_parts():
+    """The cost parts of an evaluation whose simulation failed: all NaN (E31)."""
+    return dict(cost_contact=np.nan, cost_attack_rate=np.nan, cost_energy=np.nan,
+                cost_penalty=np.nan, cost_outcome=np.nan, cost_contact_household=np.nan,
+                cost_contact_healthcare=np.nan, cost_contact_others=np.nan,
+                **{f'measured_{k}': np.nan for k in fo.OUTCOME_TARGETS})
 
 
 def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Cheng_attack_rate,
@@ -378,17 +447,45 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     futures = [executor.submit(run_batch, batch, P_copy, columns) for batch in batches]
     dispatch_ns = time.perf_counter_ns() - dispatch_start
 
+    tasks = []
+    wait_ns = 0
+
+    def results_in_task_order():
+        """Each task's results as it comes back, timing the wait for it."""
+        nonlocal wait_ns
+        for future in futures:
+            waited = time.perf_counter_ns()
+            results, task = future.result()
+            wait_ns += time.perf_counter_ns() - waited
+            tasks.append(task)
+            yield results
+
+    pooled = _pool(results_in_task_order(), case_limit)
+    total_cost, parts = _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array,
+                              Cheng_attack_rate, norm_weights)
+    LAST_COST_PARTS.clear()
+    LAST_COST_PARTS.update(parts)
+    # Task 5: the cost reduction is the parent's time after dispatching that was not spent
+    # waiting for a task: the pooling of the tasks' counts and rows, then the cost itself.
+    timings.LAST.update(
+        timings.summarise_tasks(tasks),
+        dispatch_s=timings.seconds(dispatch_ns), wait_s=timings.seconds(wait_ns),
+        cost_reduction_s=timings.seconds(
+            time.perf_counter_ns() - dispatch_start - dispatch_ns - wait_ns))
+    return total_cost
+
+
+def _pool(task_results, case_limit):
+    """Pool the per-case results of the tasks, in task order, as the original code did.
+
+    Returns the index cases' scalars, the three groups' six-bin counts, the test-matrix rows
+    and the number of symptomatic cases among the pooled ones.
+    """
     index_scalars = []
     bins = np.zeros((len(CHENG_GROUPS), 2, 6))
     rows = []
     symptomatic_cases = 0
-    tasks = []
-    wait_ns = 0
-    for future in futures:
-        waited = time.perf_counter_ns()
-        results, task = future.result()
-        wait_ns += time.perf_counter_ns() - waited
-        tasks.append(task)
+    for results in task_results:
         for index, cases in results:
             if index is not None:
                 index_scalars.append(index)
@@ -401,6 +498,14 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
                 bins += case_bins
                 rows.append(case_row)
                 symptomatic_cases += symptomatic
+    return index_scalars, bins, rows, symptomatic_cases
+
+
+def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_attack_rate,
+          norm_weights):
+    """The total cost and its parts from the pooled results; the same in a worker (Task 6)."""
+    index_scalars, bins, rows, symptomatic_cases = pooled
+    columns = taiwan_data_matrix.shape[1]
 
     max_Cheng_contact = np.max(Cheng_contact_array)
     norm_Cheng_contact_array = Cheng_contact_array / max_Cheng_contact
@@ -448,8 +553,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     outcome = fo.outcome_penalty(measured)
     total_cost = contact_cost + attack_cost + energy_weight * energy_cost + penalty + outcome
 
-    LAST_COST_PARTS.clear()
-    LAST_COST_PARTS.update(
+    parts = dict(
         cost_contact=float(contact_cost), cost_attack_rate=float(attack_cost),
         cost_energy=float(energy_weight * energy_cost), cost_penalty=float(penalty),
         cost_outcome=float(outcome),
@@ -457,11 +561,4 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
         cost_contact_healthcare=float(contact_costs[1]),
         cost_contact_others=float(contact_costs[2]),
         **{f'measured_{k}': float(v) for k, v in measured.items()})
-    # Task 5: the cost reduction is the parent's time after dispatching that was not spent
-    # waiting for a task: the pooling of the tasks' counts and rows, then the cost itself.
-    timings.LAST.update(
-        timings.summarise_tasks(tasks),
-        dispatch_s=timings.seconds(dispatch_ns), wait_s=timings.seconds(wait_ns),
-        cost_reduction_s=timings.seconds(
-            time.perf_counter_ns() - dispatch_start - dispatch_ns - wait_ns))
-    return total_cost
+    return total_cost, parts

@@ -4,6 +4,9 @@ fast_cost moves the Cheng binning, the test matrix and the per-case half of meas
 into the worker processes. Nothing about that is allowed to change a number, so this evaluates
 the same parameter vectors through both and compares the total cost and all 31+ cost parts.
 
+Task 6: the optimiser scores each candidate in one task, fast_cost.evaluate_candidate, in a
+spawned worker. It is compared with fast_cost.cost_function the same way.
+
 Run with a small --workers while another job owns the machine: correctness does not need speed.
 Timing is only meaningful on an idle machine, so it is reported but flagged.
 
@@ -12,6 +15,7 @@ Usage: uv run python scripts/gates/verify_fast_cost.py RUN_DIR [--workers N] [--
 import os
 import argparse
 import concurrent.futures
+import multiprocessing
 import pickle
 import sys
 import time
@@ -44,6 +48,21 @@ def load_vectors(count, directory):
     return [(i, res[i, 1:-1]) for i in rows]
 
 
+def compare(label, cost_a, parts_a, cost_b, parts_b):
+    """Every difference between two costs and their parts, NaN equal to NaN."""
+    diffs = []
+    if cost_a != cost_b:
+        diffs.append(f'{label}TOTAL {cost_a:.17g} != {cost_b:.17g}  '
+                     f'(delta {cost_b - cost_a:.3g})')
+    for key in sorted(set(parts_a) | set(parts_b)):
+        a, b = parts_a.get(key), parts_b.get(key)
+        if a is None or b is None:
+            diffs.append(f'{label}{key} missing on one side ({a!r} / {b!r})')
+        elif not (a == b or (a != a and b != b)):
+            diffs.append(f'{label}{key} {a:.17g} != {b:.17g}  (delta {b - a:.3g})')
+    return diffs
+
+
 def main():
     parser = argparse.ArgumentParser()
     hardware.add_workers_argument(parser)  # Task 2 (D3)
@@ -67,9 +86,14 @@ def main():
     fast_pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=args.workers, initializer=fast_cost.init_worker,
         initargs=(demo, columns))
-    # Warm both pools so the first vector is not paying for process startup.
+    # Task 6: one candidate per task, in a spawned worker as the optimiser makes them.
+    candidate_pool = concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context('spawn'),
+        initializer=fast_cost.init_worker, initargs=(demo, columns, False, None, cheng))
+    # Warm the pools so the first vector is not paying for process startup.
     fo.cost_function(vectors[0][1], demo, slow_pool, *cheng)
     fast_cost.cost_function(vectors[0][1], demo, fast_pool, *cheng)
+    candidate_pool.submit(fast_cost.evaluate_candidate, vectors[0][1], 0).result()
 
     all_ok = True
     for row, P in vectors:
@@ -85,25 +109,26 @@ def main():
         t_fast = time.perf_counter() - t0
         fast_parts = dict(fo.LAST_COST_PARTS)
 
-        diffs = []
-        if slow != fast:
-            diffs.append('TOTAL %.17g != %.17g  (delta %.3g)' % (slow, fast, fast - slow))
-        for key in sorted(set(slow_parts) | set(fast_parts)):
-            a, b = slow_parts.get(key), fast_parts.get(key)
-            if a is None or b is None:
-                diffs.append('%s missing on one side (%r / %r)' % (key, a, b))
-            elif not (a == b or (a != a and b != b)):
-                diffs.append('%s %.17g != %.17g  (delta %.3g)' % (key, a, b, b - a))
+        np.random.seed(12345)
+        t0 = time.perf_counter()
+        candidate, candidate_parts, _ = candidate_pool.submit(
+            fast_cost.evaluate_candidate, P, 0).result()
+        t_candidate = time.perf_counter() - t0
+
+        diffs = compare('', slow, slow_parts, fast, fast_parts)
+        diffs += compare('one task: ', fast, fast_parts, candidate, candidate_parts)
         all_ok = all_ok and not diffs
         print('row %-4d cost %.12f  parts %d  %s'
               % (row, slow, len(slow_parts), 'IDENTICAL' if not diffs else 'MISMATCH'))
         print('         time  slow %.4f s   fast %.4f s   ratio %.2fx  (timing only valid on an idle machine)'
               % (t_slow, t_fast, t_slow / t_fast if t_fast else float('nan')))
+        print('         one task  %.4f s on 1 worker' % t_candidate)
         for d in diffs[:12]:
             print('         ' + d)
 
     slow_pool.shutdown()
     fast_pool.shutdown()
+    candidate_pool.shutdown()
     print('\nRESULT: %s' % ('identical on every vector -- safe to adopt for run 7'
                             if all_ok else 'OUTPUT DIFFERS -- do not adopt'))
     return 0 if all_ok else 1
