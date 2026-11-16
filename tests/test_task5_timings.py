@@ -86,22 +86,26 @@ def _objective_with_worker_fields(*args, **kwargs):
 
 
 def test_a_run_fills_the_worker_columns_and_leaves_none_out(tmp_path, monkeypatch, capsys):
-    """Every row has its worker columns; no evaluation row carries worker_rss; none left out."""
+    """Every row has its worker columns, and no row given to the evaluation table has worker_rss.
+
+    No table leaves out a column missing from its header, so stderr does not say so.
+    """
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "whole"
     path.mkdir()
-    written, write = [], timings.Table.write
+    rows_given_to_write, write = [], timings.Table.write
 
     def recording(self, row):
         """Keep each row given to the evaluation table, then write it as usual."""
         if self.path.name == timings.EVALUATION_TABLE:
-            written.append(dict(row))
+            rows_given_to_write.append(dict(row))
         write(self, row)
 
     monkeypatch.setattr(timings.Table, "write", recording)
     optimise(path, _objective_with_worker_fields)
-    assert written and all("worker_rss" not in row for row in written)
-    assert "left out" not in capsys.readouterr().err
+    assert rows_given_to_write
+    assert all("worker_rss" not in row for row in rows_given_to_write)
+    assert "left out" not in capsys.readouterr().err  # no column dropped from a header
     worker_columns = ("worker_rss_before_mb", "worker_rss_after_mb", "worker_peak_mb")
     evaluation_rows = table(path, timings.EVALUATION_TABLE)
     generation_rows = table(path, timings.GENERATION_TABLE)
