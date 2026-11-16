@@ -24,7 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from covsyn.pipeline.config import PipelineConfig
-from covsyn.runtime import runs
+from covsyn.runtime import measure, runs
 
 SPREAD_MODE = "spread_Taiwan_weight"
 FIRST_MODE = "taiwan_first_outbreak"
@@ -72,15 +72,31 @@ class Context:
         """Hold ``config`` and ``layout``; ``step`` runs one module and returns its status."""
         self.config = config
         self.layout = layout
-        self.step = step
+        self._run_step = step
         self.warnings: list[str] = []
+        # Task 5: each step this stage ran, as its measurement names it ("-m <module>"), so the
+        # memory check can tell a stage whose every step measured; and whether the stage ran
+        # only the rest of its work (an optimiser continued from a checkpoint).
+        self.steps: list[str] = []
+        self.partial = False
+
+    def step(self, args: list, partial: bool = False, **options) -> int:
+        """Run one step and return its status.
+
+        ``partial``: the step does only the rest of the stage's work, so the stage's memory
+        measurement is not of the whole stage (Task 5); must() and may() pass it on.
+        """
+        self.partial = self.partial or partial
+        args = [str(a) for a in args]
+        self.steps.append(measure.step_name(args))
+        return self._run_step(args, **options)
 
     @property
     def candidate(self) -> Path:
         """The directory whose best vector every stage after the selection reads."""
-        if self.config.revalidate and self.config.select:
+        if not turned_off("select", self.config):
             return self.layout.run / "selected"
-        if self.config.revalidate:
+        if not turned_off("revalidate", self.config):
             return self.layout.run / "revalidation"
         return self.layout.run
 
@@ -114,7 +130,8 @@ def optimise(ctx: Context, resume: bool) -> None:
         if problem is not None:  # the optimiser would refuse too; resuming cannot help
             raise StageFailed(problem, resumable=False)
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
-        ctx.must(args, "the optimiser", resuming=True, output=log, append=True)
+        # It runs only the generations left, so its memory is not the whole stage's.
+        ctx.must(args, "the optimiser", resuming=True, partial=True, output=log, append=True)
         return
     if resume:
         # Killed before its first checkpoint (while scoring the initial population): nothing
@@ -153,14 +170,25 @@ def discard_optimiser_output(run: Path) -> None:
             shutil.rmtree(path)
         elif path.exists() or path.is_symlink():
             path.unlink()
-    table = runs.progress_path(run)
-    if table.exists():
-        table.unlink()
+    # In results/tables/<run-id>/: progress.csv and the timing tables (Task 5).
+    progress = runs.progress_path(run)
+    for table in (progress, *(progress.parent / name for name in runs.TIMING_TABLES)):
+        if table.exists():
+            table.unlink()
+
+
+def turned_off(stage: str, config: PipelineConfig) -> bool:
+    """Whether the configuration turns the stage off, so it runs no step."""
+    if stage == "revalidate":
+        return not config.revalidate
+    if stage == "select":
+        return not (config.revalidate and config.select)
+    return False
 
 
 def revalidate(ctx: Context) -> None:
     """Re-score the candidates on unseen seed blocks (B56, E87), starting afresh."""
-    if not ctx.config.revalidate:
+    if turned_off("revalidate", ctx.config):
         return
     out = ctx.layout.run / "revalidation"
     shutil.rmtree(out, ignore_errors=True)
@@ -179,7 +207,7 @@ def revalidate(ctx: Context) -> None:
 
 def select(ctx: Context) -> None:
     """Run the checklist for the best revalidated candidates and keep the best (B60)."""
-    if not (ctx.config.revalidate and ctx.config.select):
+    if turned_off("select", ctx.config):
         return
     ctx.must(
         [

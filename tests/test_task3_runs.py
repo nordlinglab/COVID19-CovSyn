@@ -301,8 +301,14 @@ def test_run_outputs_name_every_file_the_optimiser_writes():
     # Single or double quotes, f-strings included: a name with {} then fails the comparison.
     written = set(re.findall(r"result_path\s*/\s*f?['\"]([^'\"]+)['\"]", source))
     written |= {"config.json", "progress.csv"}  # written by name, not as result_path / '...'
+    from covsyn.runtime import timings
+
+    written |= {timings.EVALUATION_TABLE, timings.GENERATION_TABLE}  # beside progress.csv
     files = {name for name in runs.RUN_OUTPUTS if "." in name}
-    assert written == files, (written - files, files - written)
+    # Every name written is listed, and every listed file is written; the listed directories
+    # are written by other code too (checkpoints, revalidation, selected), profile here.
+    assert written <= set(runs.RUN_OUTPUTS), written - set(runs.RUN_OUTPUTS)
+    assert files <= written, files - written
 
 
 def test_a_dangling_link_counts_as_a_run_output(tmp_path):

@@ -152,7 +152,7 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
 
     (tmp_path / "config.json").write_text(json.dumps({"seed": 123,
                                                       "settings": {"mode": "test"}}))
-    assert fo.resumed_settings(tmp_path) == (123, "test")
+    assert fo.resumed_settings(tmp_path) == (123, "test", False)
 
 
 @pytest.mark.parametrize("config", [None, '{"claimed": true}', '{"seed": null}', "not json",
@@ -210,11 +210,26 @@ def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
 
 @pytest.mark.parametrize("given", [{"mode": "train"}, {"warm_start": ["a.txt"]}, {"seed": 3},
                                    {"run_dir": "x"}, {"seed": 0}, {"warm_start": []},
-                                   {"mode": ""}])
+                                   {"mode": ""}, {"simulations": 10},
+                                   {"stage_timings": True}])
 def test_an_option_that_would_change_a_resumed_run_is_refused(tmp_path, given):
     """Refused, not silently ignored."""
     with pytest.raises(SystemExit, match="--resume takes"):
         fo.resume_arguments(_args(resume=tmp_path, **given))
+
+
+@pytest.mark.parametrize("recorded", [True, False, None])
+def test_a_resumed_run_times_its_stages_as_it_started(tmp_path, recorded):
+    """The stage timing recorded in config.json, so the timing table's columns stay filled."""
+    import json
+
+    settings = {"mode": "test"} if recorded is None else {"mode": "test", "stage_timing": recorded}
+    (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": settings}))
+    (tmp_path / "checkpoints").mkdir()
+    (tmp_path / "checkpoints" / "initial.npz").write_text("x")
+    args = _args(resume=tmp_path, stage_timings=False)
+    fo.resume_arguments(args)
+    assert args.stage_timings is bool(recorded)
 
 
 def test_one_rule_finds_the_last_checkpoint(tmp_path):

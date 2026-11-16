@@ -80,17 +80,21 @@ def resume_problem(run_dir: Path) -> str | None:
     return None
 
 
+# The optimiser's timing tables, beside progress.csv (Task 5).
+TIMING_TABLES = ("timings_evaluation.csv", "timings_generation.csv")
 # What an optimiser run writes; a directory holding any of them already holds a run.
 RUN_OUTPUTS = (
     "config.json",
     "bound.txt",
     "firefly_result_first_initial_guess.txt",
     "progress.csv",  # here only for a run directory outside results/models, see progress_path
+    *TIMING_TABLES,
     "firefly_archive.txt",
     "firefly_result.txt",
     "firefly_best.txt",
     "firefly_worst.txt",
     "checkpoints",  # one per generation (Task 4)
+    "profile",  # the workers' profiles in profile mode (Task 5)
     "revalidation",  # written into the run directory by the chain
     "selected",
 )

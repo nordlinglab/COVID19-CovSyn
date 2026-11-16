@@ -275,9 +275,14 @@ def apply_contact_weight(input_P, contact_weight):
         input_P[199] = min(input_P[199]*contact_weight, 1)
 
 
+# Task 5: the stages run_covid times when given a stage_times dictionary.
+STAGES = ('demographic', 'social', 'course_of_disease', 'contact_draw', 'queue')
+
+
 def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.',
               mode='result', contact_weight=1.0, quarantine_breach='with_unclear',
-              imported_isolation='imported_delay', imported_factor=IMPORTED_FACTOR, seed_file=None):
+              imported_isolation='imported_delay', imported_factor=IMPORTED_FACTOR, seed_file=None,
+              stage_times=None):
     """Simulate one Monte-Carlo run of the given mode.
 
     Args:
@@ -297,6 +302,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
             the community (B78 option C); 1.0 leaves them unchanged.
         seed_file: First-wave modes: seed table to use instead of the mode's own, such as one
             with copied seeds (B79, build_first_wave_seeds.write_copied_seeds).
+        stage_times: Task 5: a dictionary to add each of STAGES' time to, in nanoseconds of
+            time.perf_counter_ns; None, the default, times nothing. Queue handling is taking a
+            case off the queue and putting its infections on it.
 
     Returns:
         The demographic, social, course-of-disease and contact data of every case.
@@ -527,9 +535,17 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
             infection_queue.put((source_case_id, infection_day,
                                 previously_infected_index, age, contact_type))
 
+    # Task 5: timing costs a clock read per stage and case, and nothing when off.
+    timing = stage_times is not None
+    if timing:
+        for stage in STAGES:
+            stage_times.setdefault(stage, 0)
+        clock = time.perf_counter_ns
     # Simulation
     try:  # Stop if empty queue
         while True:
+            if timing:
+                lap = clock()
             source_case_id, infection_day, previously_infected_index, age, contact_type = infection_queue.get(
                 block=False)
             if infection_day <= time_limit:
@@ -539,6 +555,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 seed_case = (first_wave_seeds[int(contact_type[5:])]
                              if isinstance(contact_type, str) and contact_type.startswith('seed:')
                              else None)
+                if timing:
+                    now = clock()
+                    stage_times['queue'] += now - lap
+                    lap = now
                 # Preciously infected or not
                 if np.isnan(previously_infected_index):  # Not previously infected
                     # Draw demographic data
@@ -555,6 +575,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                     demographic_tmp = get_saveable_data(
                         demographic_data, 'demographic')
                     demographic_data_list.append(demographic_tmp)
+                if timing:
+                    now = clock()
+                    stage_times['demographic'] += now - lap
+                    lap = now
 
                 # Draw social data
                 social_data = Draw_social_data(municipality_data, family_size_dict, school_p, workplace_p, demographic_data,
@@ -586,6 +610,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 group_of.append(case_groups)
                 social_data_tmp = get_saveable_data(social_data, 'social')
                 social_data_list.append(social_data_tmp)
+                if timing:
+                    now = clock()
+                    stage_times['social'] += now - lap
+                    lap = now
 
                 # Draw course of disease data
                 # course_of_disease_data = False
@@ -625,6 +653,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 course_of_disease_data_tmp = get_saveable_data(
                     course_of_disease_data, 'course_of_disease')
                 course_of_disease_data_list.append(course_of_disease_data_tmp)
+                if timing:
+                    now = clock()
+                    stage_times['course_of_disease'] += now - lap
+                    lap = now
 
                 # Append the case to the previously-infected set (B32, finding E5).
                 # This used to require a recovery date, so a case that died was never added.
@@ -666,6 +698,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                         np.nansum(getattr(contact_data, f'{layer}_effective_contacts') or [0]))
                 contact_data_tmp = get_saveable_data(contact_data, 'contact')
                 contact_data_list.append(contact_data_tmp)
+                if timing:
+                    now = clock()
+                    stage_times['contact_draw'] += now - lap
+                    lap = now
 
                 # Append infection queue
                 # Household
@@ -745,6 +781,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                     confirmed_count_per_day[confirmed_day] += 1
                 else:
                     confirmed_count_per_day[confirmed_day] = 1
+                if timing:
+                    stage_times['queue'] += clock() - lap
 
                 # Check if total confrimed cases exceed threshold
                 daily_confirmed_threshold = 1000
@@ -755,7 +793,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                     break
             else:
                 # Drop the case
-                pass
+                if timing:
+                    stage_times['queue'] += clock() - lap
     except queue.Empty:
         # The loop ends when the queue runs dry. This used to be a bare `except:`, which
         # also swallowed real errors and returned a silently empty simulation -- exactly how
