@@ -230,8 +230,10 @@ def test_profile_mode_writes_the_profiles_and_run_covid_dominates(profile_run):
 
 @pytest.mark.slow
 @pytest.mark.xfail(
-    reason="not met before Task 6: 8 evaluations of 3,000 simulations took 177 s on 2 WSL "
-    "workers, cProfile making each simulation about 4x slower; Task 6 cuts them to 5",
+    reason="not met on WSL: after Task 6, 5 evaluations of 3,000 simulations took 113 s on 2 "
+    "workers (b764d6a), 21 s of it starting the spawned workers from /mnt/c and about 9 ms per "
+    "simulation under cProfile; 43 s on a Mac Studio before Task 6. Faster simulations come "
+    "after Task 6",
     strict=False,
 )
 def test_profile_mode_finishes_in_under_60_s(profile_run):
