@@ -3,17 +3,15 @@
 """Task 5, items 1, 3 and 4: the evaluation and generation timing tables.
 
 The optimiser runs with the deterministic stand-in objective of the Task 4 tests, which fills
-only the optimiser's own columns, except where a test fills timings.LAST as fast_cost does;
-fast_cost.cost_function, which fills the workers' columns, is checked on its own with the real
-objective.
+only the optimiser's own columns, except where a stand-in returns the timing fields fast_cost's
+task does; fast_cost.cost_function and evaluate_candidate, which fill the workers' columns, are
+checked on their own with the real objective.
 """
 
 from __future__ import annotations
 
 import concurrent.futures
-import contextlib
 import csv
-import time
 
 import numpy as np
 import psutil
@@ -23,8 +21,18 @@ from covsyn.calibration import fast_cost
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.model.data_synthesis_main import STAGES
 from covsyn.runtime import runs, timings
+from tests import firefly_standins as standins
 from tests.conftest import REPO_ROOT
-from tests.test_task4_resume import GENERATIONS, POP, Killed, killed_after, objective, optimise
+from tests.test_task4_resume import (
+    DIM,
+    GENERATIONS,
+    POP,
+    SEED,
+    Killed,
+    killed_in,
+    objective,
+    optimise,
+)
 
 
 def table(path, name):
@@ -79,12 +87,6 @@ def test_one_row_per_generation(run):
     assert all(float(r["checkpoint_s"]) > 0 for r in rows)
 
 
-def _objective_with_worker_fields(*args, **kwargs):
-    """The stand-in objective, filling timings.LAST as fast_cost does from one task."""
-    timings.LAST.update(timings.summarise_tasks([timings.TaskClock(False).record()]))
-    return objective(*args, **kwargs)
-
-
 def test_a_run_fills_the_worker_columns_and_drops_no_row_key(tmp_path, monkeypatch):
     """Every row has its worker columns, and no row given to the evaluation table has worker_rss.
 
@@ -103,7 +105,7 @@ def test_a_run_fills_the_worker_columns_and_drops_no_row_key(tmp_path, monkeypat
         dropped_keys.update(self.left_out)
 
     monkeypatch.setattr(timings.Table, "write", recording)
-    optimise(path, _objective_with_worker_fields)
+    optimise(path, standins.with_worker_fields)
     assert rows_given_to_write
     assert all("worker_rss" not in row for row in rows_given_to_write)
     assert not dropped_keys
@@ -121,7 +123,7 @@ def test_a_resumed_run_keeps_one_row_per_evaluation_and_generation(tmp_path, run
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(3 * POP + 5))
+        optimise(path, killed_in(2))
     optimise(path, objective, resume=True)
     for name, keys in (
         (timings.EVALUATION_TABLE, ("generation", "candidate")),
@@ -210,7 +212,7 @@ def test_a_row_cut_off_by_a_kill_is_dropped_on_resume(tmp_path, run, cut_off):
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(3 * POP + 5))
+        optimise(path, killed_in(2))
     evaluation_table = runs.progress_path(path).parent / timings.EVALUATION_TABLE
     with open(evaluation_table, "a", newline="") as f:
         f.write(cut_off)
@@ -246,7 +248,7 @@ def test_a_progress_table_left_empty_gets_its_header_again(tmp_path, monkeypatch
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(3 * POP + 5))
+        optimise(path, killed_in(2))
     runs.progress_path(path).write_text("genera")  # the header, cut off
     optimise(path, objective, resume=True)
     with open(runs.progress_path(path), newline="") as f:
@@ -300,7 +302,7 @@ def test_a_header_cut_off_by_a_kill_is_written_again_on_resume(tmp_path, run):
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(3 * POP + 5))
+        optimise(path, killed_in(2))
     generation_table = runs.progress_path(path).parent / timings.GENERATION_TABLE
     generation_table.write_text("generation,start_un")  # the header, cut off
     optimise(path, objective, resume=True)
@@ -336,7 +338,7 @@ def test_a_run_that_fails_closes_its_tables(tmp_path, monkeypatch):
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(POP + 3))
+        optimise(path, killed_in(1))
     assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])
 
 
@@ -356,7 +358,7 @@ def test_a_run_that_fails_shuts_its_pool_down(tmp_path, monkeypatch):
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(POP + 3))
+        optimise(path, killed_in(1))
     assert shut and shut[-1][1] == {"wait": True, "cancel_futures": True}
 
 
@@ -378,7 +380,7 @@ def test_a_table_that_fails_to_close_neither_hides_the_error_nor_leaves_others_o
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(POP + 3))
+        optimise(path, killed_in(1))
     assert sorted(closed) == sorted(["progress.csv", *runs.TIMING_TABLES])
 
 
@@ -462,7 +464,7 @@ def test_a_second_interrupt_after_the_shutdown_keeps_the_runs_error(tmp_path, mo
     path = tmp_path / "killed"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(POP + 3))
+        optimise(path, killed_in(1))
     assert interrupts == [(True, True)]  # it was raised, and kept out
 
 
@@ -481,53 +483,38 @@ def test_after_a_failure_every_close_error_is_said_and_none_raised(capsys):
     assert "could not close a.csv" in err and "could not close b.csv" in err
 
 
-def _sleep_after_starting(flag, seconds):
-    flag.write_text("started")
-    time.sleep(seconds)
-    return "finished"
-
-
-def _ended(process):
-    """Gone and reaped: a zombie, a worker not joined, counts as still there."""
-    return not process.is_running()  # compares the start time, so a reused pid is not it
-
-
-def _snapshot(pids):
-    processes = []
-    for pid in pids:
-        with contextlib.suppress(psutil.NoSuchProcess):  # ended already: nothing to check
-            processes.append(psutil.Process(pid))
-    return processes
+def _gone(pid):
+    """Ended and reaped: a zombie, a worker not joined, counts as still there."""
+    try:
+        return not psutil.Process(pid).is_running()
+    except psutil.NoSuchProcess:
+        return True
 
 
 def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, monkeypatch):
     """A task running when the run fails is finished, and every worker the pool started ends.
 
-    The task outlasts the run's cleanup by far (2 s), so a shutdown that did not wait would
-    return before it finished, on a slow drive too.
+    Candidate 0 fails once another candidate's task runs; that task outlasts the run's cleanup
+    by far (2 s), so a shutdown that did not wait would return before it finished, on a slow
+    drive too.
     """
-    started = tmp_path / "started"
-    seen = {}
+    import functools
 
-    def failing(P, demo, executor, *args, **kwargs):
-        seen["future"] = future = executor.submit(_sleep_after_starting, started, 2.0)
-        deadline = time.monotonic() + 30
-        while not started.exists():  # until the task runs
-            if future.done():
-                future.result()  # a worker that failed to start says why
-            assert time.monotonic() < deadline, "the task never started"
-            time.sleep(0.01)
-        # The pool's own workers, not other children; copied at once, as its manager thread may
-        # change the dict. Every worker the pool has started is in it once submit has returned:
-        # all of them under fork (Linux, Python 3.13), the one this task needs under spawn
-        # (macOS) or forkserver (Linux from Python 3.14), which start workers as tasks come.
-        seen["workers"] = _snapshot(executor._processes.copy())
-        raise Killed
-
+    flags = tmp_path / "flags"
+    flags.mkdir()
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "killed"
     path.mkdir()
+    # Candidate 0 of the initial population, which optimise draws on [0, 1] from SEED.
+    first = float(fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03,
+                             seed=SEED).rng.uniform(0, 1, (POP, DIM))[0, 0])  # fmt: skip
+    failing = functools.partial(standins.fails_while_another_runs, failing_first_value=first,
+                                flags=str(flags))  # fmt: skip
     with pytest.raises(Killed):
         optimise(path, failing)
-    assert seen["future"].done() and seen["future"].result() == "finished"
-    assert seen["workers"] and all(_ended(process) for process in seen["workers"])
+    ran = {p.name.removeprefix("started_") for p in flags.glob("started_*")}
+    assert ran and ran == {p.name.removeprefix("finished_") for p in flags.glob("finished_*")}
+    workers = {int(p.read_text()) for pattern in ("started_*", "failed_*")
+               for p in flags.glob(pattern)}  # fmt: skip
+    assert len(workers) == 2  # the failing task's worker and another
+    assert all(_gone(pid) for pid in workers)

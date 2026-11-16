@@ -10,42 +10,55 @@ the comparisons that steer it use only that generation's scores.
 
 from __future__ import annotations
 
+import csv
+import json
+from collections import Counter
+
 import numpy as np
 import pytest
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.revalidation import load_candidates
+from covsyn.runtime import runs, timings
+from tests import firefly_standins as standins
 
 DIM = 208
 POP = 4
 GENERATIONS = 6
 
 
-class _Recorder:
-    """Stands in for the objective: a deterministic cost, and every call recorded."""
+def scored(path):
+    """Per state (-1 the initial population, then each generation), each firefly's block.
 
-    def __init__(self):
-        # each vector by its bytes, so two different vectors can never be taken for one
-        self.calls: list[tuple[bytes, int]] = []
+    Task 6: the stand-in runs in the optimiser's workers and returns the block it scored on
+    among the cost parts, which every checkpoint keeps by firefly.
+    """
+    blocks = {}
+    for generation in range(-1, GENERATIONS):
+        name = "initial" if generation < 0 else f"generation_{generation:04d}"
+        with np.load(path / fo.CHECKPOINTS / f"{name}.npz") as saved:
+            parts = json.loads(str(saved["cost_parts"]))
+        blocks[generation] = [int(p["scored_offset"]) for p in parts]
+    return blocks
 
-    def __call__(self, P, demo, executor, contacts, attack, weights, seed_offset=0):
-        self.calls.append((np.asarray(P, dtype=float).tobytes(), int(seed_offset)))
-        # the offset shifts the cost, so a stale score from another generation is visible
-        return float(np.sum(P)) % 1.0 + seed_offset / 1e9
+
+def evaluations_per_generation(path):
+    """The evaluation table's rows counted by generation."""
+    with open(runs.progress_path(path).parent / timings.EVALUATION_TABLE, newline="") as f:
+        return Counter(int(r["generation"]) for r in csv.DictReader(f))
 
 
 @pytest.fixture
 def run(monkeypatch, tmp_path):
-    """Run the optimizer on the stub objective and return (recorder, results)."""
+    """Run the optimizer on the recording stand-in and return (None, results, directory)."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    recorder = _Recorder()
     lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
     engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
-    out = engine.firefly(function=recorder, dim=DIM, lb=lb, ub=ub,
+    out = engine.firefly(function=standins.recording, dim=DIM, lb=lb, ub=ub,
                          demographic_parameters=None, max_generations=GENERATIONS,
                          max_workers=2, Cheng_contact_array=None, Cheng_attack_rate=None,
                          norm_weights=None)
-    return recorder, out, tmp_path
+    return None, out, tmp_path
 
 
 def test_offset_of_each_generation_is_its_own_block():
@@ -66,30 +79,22 @@ def test_training_seeds_never_reach_the_validation_blocks():
 
 
 def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):
-    recorder, _, _ = run
-    initial = recorder.calls[:POP]
-    assert {offset for _, offset in initial} == {0}
-    seen = [offset for _, offset in recorder.calls[POP:]]
-    expected = {fo.generation_seed_offset(g) for g in range(GENERATIONS)}
-    assert set(seen) == expected
-    # the offsets arrive in generation order and never come back
-    assert seen == sorted(seen)
+    _, _, path = run
+    for generation, blocks in scored(path).items():
+        assert set(blocks) == {fo.generation_seed_offset(max(generation, 0))}, generation
 
 
 def test_generation_0_starts_from_the_initial_scores_without_rescoring(run):
     """The initial population is scored on block 0, generation 0's block, once only (F7).
 
-    Generation 0 evaluates only moved fireflies, on block 0: the first call after the initial
-    population is a move on block 0 (it was a re-score on block 300), and no initial vector is
-    evaluated on block 0 a second time.
+    Task 6: generation 0 scores every firefly but the elite, which keeps its block-0 cost.
     """
-    from collections import Counter
-
-    recorder, _, _ = run
-    initial = [P for P, _ in recorder.calls[:POP]]
-    assert recorder.calls[POP][1] == 0
-    on_block_0 = Counter(P for P, o in recorder.calls if o == 0)
-    assert all(on_block_0[P] == initial.count(P) for P in initial)
+    _, _, path = run
+    assert evaluations_per_generation(path)[0] == POP - 1
+    with np.load(path / fo.CHECKPOINTS / "initial.npz") as initial, \
+            np.load(path / fo.CHECKPOINTS / "generation_0000.npz") as first:  # fmt: skip
+        elite = int(np.argmin(initial["intensities"]))
+        assert first["intensities"][elite] == initial["intensities"][elite]
 
 
 def test_the_whole_population_is_rescored_when_the_block_changes(run):
@@ -97,11 +102,9 @@ def test_the_whole_population_is_rescored_when_the_block_changes(run):
 
     From generation 1 on; generation 0 shares the initial population's block (F7).
     """
-    recorder, _, _ = run
-    for g in range(1, GENERATIONS):
-        offset = fo.generation_seed_offset(g)
-        rescored = [P for P, o in recorder.calls if o == offset]
-        assert len(rescored) >= POP
+    _, _, path = run
+    counts = evaluations_per_generation(path)
+    assert all(counts[g] == POP for g in range(1, GENERATIONS))
 
 
 def test_the_returned_best_rows_are_the_final_population(run):
@@ -195,13 +198,10 @@ def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, t
     """Task 3: a run whose first evaluation fails still leaves its config.json."""
     import json
 
-    def fails(*args, **kwargs):
-        raise RuntimeError("worker crashed")
-
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
     with pytest.raises(RuntimeError):
-        engine.firefly(function=fails, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
+        engine.firefly(function=standins.crashes, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
                        demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,
                        Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)
     assert json.loads((tmp_path / "config.json").read_text())["seed"] == 7
