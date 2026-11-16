@@ -37,14 +37,16 @@ def _baseline(vector, demographic_parameters, cheng_data, pool, offset, simulati
     return cost, dict(LAST_COST_PARTS)
 
 
-def _in_this_process(monkeypatch, demographic_parameters, cheng_data, simulations):
+def _in_this_process(
+    monkeypatch, demographic_parameters, cheng_data, simulations, taiwan_matrix=TAIWAN
+):
     """Initialise this process as a worker, undone after the test."""
     for name in ("_WORKER_DEMOGRAPHIC_PARAMETERS", "_WORKER_TAIWAN_MATRIX_COLUMNS",
                  "_WORKER_STAGE_TIMING", "_WORKER_PROFILE", "_WORKER_PROCESS",
                  "_WORKER_CHENG", "_WORKER_SIMULATIONS", "_WORKER_TAIWAN_MATRIX"):  # fmt: skip
         monkeypatch.setattr(fast_cost, name, getattr(fast_cost, name, None), raising=False)
     fast_cost.init_worker(demographic_parameters, COLUMNS, cheng=cheng_data,
-                          simulations=simulations, taiwan_matrix=TAIWAN)  # fmt: skip
+                          simulations=simulations, taiwan_matrix=taiwan_matrix)  # fmt: skip
 
 
 def test_a_candidate_scores_as_cost_function_does(
@@ -155,3 +157,14 @@ def test_a_worker_reads_the_taiwan_matrix_once_not_per_candidate(
     monkeypatch.setattr(fast_cost.np, "load", refusing)
     cost, _, _ = fast_cost.evaluate_candidate(run10_vector, 0)
     assert cost != fo.FAILED_EVALUATION_COST
+
+
+def test_a_worker_without_the_matrix_reads_it_from_the_file(
+    monkeypatch, run10_vector, demographic_parameters, cheng_data
+):
+    """The fallback gives the cost the matrix passed in gives, to the bit."""
+    _in_this_process(monkeypatch, demographic_parameters, cheng_data, 3)
+    given = fast_cost.evaluate_candidate(run10_vector, 0)[0]
+    _in_this_process(monkeypatch, demographic_parameters, cheng_data, 3, taiwan_matrix=None)
+    assert fast_cost._WORKER_TAIWAN_MATRIX is None
+    assert fast_cost.evaluate_candidate(run10_vector, 0)[0] == given != fo.FAILED_EVALUATION_COST
