@@ -123,27 +123,36 @@ def test_one_spawned_task_scores_a_whole_evaluation_as_cost_function_does(
     assert len(timing["worker_pids"].split(";")) == 1
 
 
-@pytest.mark.parametrize("row", ["best", 0])  # two of run 10's final fireflies
-def test_simulations_leave_the_demographic_parameters_unchanged(row, demographic_parameters):
+# The seeds below 3,000 on which each run's best vector gives more than one case, the rare
+# branch where a secondary case runs its own course; measured over 3,000 seeds (Task 6).
+MULTI_CASE_SEEDS = {
+    "phaseD_run10": (26, 129, 1226, 1250, 1375),
+    "phaseD_run19": (307, 841, 979, 1032, 1179, 1281, 1375, 1830, 2003),
+}
+
+
+@pytest.mark.parametrize("run", sorted(MULTI_CASE_SEEDS))
+def test_simulations_leave_the_demographic_parameters_unchanged(run, demographic_parameters):
     """A candidate's S simulations share one copy, so none may change it for the next (Task 6).
 
-    Run as _simulate runs them, stage timing included, over 300 seeds.
+    run_covid runs as _simulate calls it, on one shared copy with stage timing, over seeds 0 to 299
+    and the seeds with more than one case. Over 3,000 seeds each of runs 10, 18 and 19 it
+    changed nothing; this keeps that checked in CI.
     """
     import copy
     import pickle
 
     from covsyn.model.data_synthesis_main import STAGES, run_covid
+    from tests.conftest import best_vector
 
     shared = copy.deepcopy(demographic_parameters)
     before = pickle.dumps(shared)
-    from tests.conftest import RUN10_BEST
-
-    fireflies = np.atleast_2d(np.loadtxt(RUN10_BEST))
-    vector = fireflies[int(np.argmin(fireflies[:, -1])) if row == "best" else row, 1:-1].copy()
+    vector = best_vector(REPO_ROOT / "results" / "models" / run / "firefly_best.txt")
     given = vector.copy()
     stage_ns = dict.fromkeys(STAGES, 0)
-    for seed in range(300):
-        run_covid(seed, vector, shared, save_file=False, stage_times=stage_ns)
+    sizes = [len(run_covid(seed, vector, shared, save_file=False, stage_times=stage_ns)[2])
+             for seed in (*range(300), *MULTI_CASE_SEEDS[run])]  # fmt: skip
+    assert sum(size > 1 for size in sizes) >= len(MULTI_CASE_SEEDS[run])  # the branch ran
     assert pickle.dumps(shared) == before
     assert vector.tobytes() == given.tobytes()
     assert sum(stage_ns.values()) > 0
