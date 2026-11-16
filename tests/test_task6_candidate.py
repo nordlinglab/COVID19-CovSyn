@@ -125,8 +125,8 @@ def test_one_spawned_task_scores_a_whole_evaluation_as_cost_function_does(
 
 # The seeds below 3,000 on which each run's best vector gives more than one case, the rare
 # branch where a secondary case runs its own course; measured over 3,000 seeds (Task 6). They
-# move if run_covid's draws change, which the regression tests forbid as well, or if the run's
-# firefly_best.txt or the demographic inputs do.
+# move if run_covid's draws change (the regression tests forbid that) or if the run's
+# firefly_best.txt or the demographic inputs change.
 MULTI_CASE_SEEDS = {
     "phaseD_run10": (26, 129, 1226, 1250, 1375),
     "phaseD_run19": (307, 841, 979, 1032, 1179, 1281, 1375, 1830, 2003),
