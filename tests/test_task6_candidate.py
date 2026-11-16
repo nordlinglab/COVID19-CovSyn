@@ -123,23 +123,30 @@ def test_one_spawned_task_scores_a_whole_evaluation_as_cost_function_does(
     assert len(timing["worker_pids"].split(";")) == 1
 
 
-@pytest.mark.slow
-def test_simulations_leave_the_demographic_parameters_unchanged(
-    run10_vector, demographic_parameters
-):
-    """A candidate's S simulations share one copy, so none may change it for the next (Task 6)."""
+@pytest.mark.parametrize("row", ["best", 0])  # two of run 10's final fireflies
+def test_simulations_leave_the_demographic_parameters_unchanged(row, demographic_parameters):
+    """A candidate's S simulations share one copy, so none may change it for the next (Task 6).
+
+    Run as _simulate runs them, stage timing included, over 300 seeds.
+    """
     import copy
     import pickle
 
-    from covsyn.model.data_synthesis_main import run_covid
+    from covsyn.model.data_synthesis_main import STAGES, run_covid
 
     shared = copy.deepcopy(demographic_parameters)
     before = pickle.dumps(shared)
-    vector = run10_vector.copy()
-    for seed in range(100):
-        run_covid(seed, vector, shared, save_file=False)
+    from tests.conftest import RUN10_BEST
+
+    fireflies = np.atleast_2d(np.loadtxt(RUN10_BEST))
+    vector = fireflies[int(np.argmin(fireflies[:, -1])) if row == "best" else row, 1:-1].copy()
+    given = vector.copy()
+    stage_ns = dict.fromkeys(STAGES, 0)
+    for seed in range(300):
+        run_covid(seed, vector, shared, save_file=False, stage_times=stage_ns)
     assert pickle.dumps(shared) == before
-    assert vector.tobytes() == run10_vector.tobytes()
+    assert vector.tobytes() == given.tobytes()
+    assert sum(stage_ns.values()) > 0
 
 
 def test_a_worker_reads_the_taiwan_matrix_once_not_per_candidate(

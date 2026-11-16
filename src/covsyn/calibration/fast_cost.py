@@ -206,9 +206,10 @@ def _run_batch(seeds, P, columns):
     test-matrix row. The parent concatenates these in task order, which reproduces the pooled
     order the original code built with np.append.
 
-    The deepcopy matters. run_covid() mutates demographic_parameters, which is why
+    The deepcopy guards against run_covid() mutating demographic_parameters, which is why
     _cost_function() deepcopied it for every evaluation and why each task then got its own
-    unpickled copy. Sending it once through the pool initializer instead would make the
+    unpickled copy; measured in Task 6, run_covid changed none of it over 300 seeds of two
+    vectors, which test_task6_candidate guards. Sending it once through the pool initializer instead would make the
     worker's copy persist across tasks AND across evaluations, letting mutations accumulate;
     copying from the pristine global per task restores exactly the original semantics -- every
     task in every evaluation starts from the same untouched state -- while still shipping the
@@ -216,8 +217,8 @@ def _run_batch(seeds, P, columns):
 
     It is NOT what caused the first version of this module to differ from the parent-side code.
     That was a missing per-group term (the Health care bin weights, see _cost_function below);
-    adding this deepcopy did not move the discrepancy by a single bit. Keep it anyway -- the
-    mutation is real -- but do not read it as the fix for that bug.
+    adding this deepcopy did not move the discrepancy by a single bit. Keep it anyway -- a
+    mutation would spread through the worker -- but do not read it as the fix for that bug.
     """
     clock = timings.TaskClock(_WORKER_STAGE_TIMING, _WORKER_PROCESS)  # Task 5: returned beside the results
     return _simulate(seeds, P, columns, clock), clock.record()
@@ -227,8 +228,8 @@ def _simulate(seeds, P, columns, clock):
     """The simulations of _run_batch, timed on clock; see _run_batch for the deepcopy.
 
     One copy serves the call: a task of cost_function's, or, since Task 6, a candidate's S
-    simulations. Over 300 seeds of run 10's vector run_covid changed none of it, which
-    test_task6_candidate guards; a copy per simulation took 19% of a profile's time.
+    simulations. run_covid changes none of it, which test_task6_candidate checks over 300
+    seeds of two vectors; a copy per simulation took 19% of a profile's time.
     """
     demographic_parameters = copy.deepcopy(_WORKER_DEMOGRAPHIC_PARAMETERS)
     out = []
@@ -416,8 +417,8 @@ def _evaluate_candidate(P, seed_offset):
         taiwan_data_matrix = (np.load('./variable/Taiwan_data_matrix.npy')
                               if _WORKER_TAIWAN_MATRIX is None else _WORKER_TAIWAN_MATRIX)
         seeds = list(range(seed_offset, seed_offset + case_limit))
-        # The simulations get their own copy, as cost_function's tasks get theirs by pickling,
-        # so the penalty reads the vector as given.
+        # The candidate's simulations share one copy of the vector, as each of cost_function's
+        # tasks gets one by pickling, so the penalty reads the vector as given.
         results = _simulate(seeds, copy.deepcopy(P), _WORKER_TAIWAN_MATRIX_COLUMNS, clock)
         reducing = time.perf_counter_ns()
         cost, parts = _cost(P, _pool([results], case_limit), case_limit, taiwan_data_matrix,
