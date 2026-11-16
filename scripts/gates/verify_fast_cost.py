@@ -77,7 +77,8 @@ def main():
     with open('./variable/processed_contact_tracing_data.pkl', 'rb') as f:
         ct = pickle.load(f)
     cheng = (ct['Cheng_contact_array'], ct['Cheng_attack_rate'], ct['norm_weights'])
-    columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
+    taiwan = np.load('./variable/Taiwan_data_matrix.npy')
+    columns = taiwan.shape[1]
 
     vectors = load_vectors(args.vectors, args.run_dir)
     print(f'{fo.SIMULATIONS_PER_EVALUATION} simulations per evaluation, '
@@ -90,7 +91,8 @@ def main():
     # Task 6: one candidate per task, in a spawned worker as the optimiser makes them.
     candidate_pool = concurrent.futures.ProcessPoolExecutor(
         max_workers=1, mp_context=multiprocessing.get_context('spawn'),
-        initializer=fast_cost.init_worker, initargs=(demo, columns, False, None, cheng))
+        initializer=fast_cost.init_worker,
+        initargs=(demo, columns, False, None, cheng, None, taiwan))  # as the optimiser does
     # Warm the pools so the first vector is not paying for process startup.
     fo.cost_function(vectors[0][1], demo, slow_pool, *cheng)
     fast_cost.cost_function(vectors[0][1], demo, fast_pool, *cheng)
