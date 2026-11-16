@@ -5,7 +5,8 @@ into the worker processes. Nothing about that is allowed to change a number, so 
 the same parameter vectors through both and compares the total cost and all 31+ cost parts.
 
 Task 6: the optimiser scores each candidate in one task, fast_cost.evaluate_candidate, in a
-spawned worker. It is compared with fast_cost.cost_function the same way.
+spawned worker. It is compared with fast_cost.cost_function the same way, on block 0 and on
+generation 1's block.
 
 Run with a small --workers while another job owns the machine: correctness does not need speed.
 Timing is only meaningful on an idle machine, so it is reported but flagged.
@@ -109,14 +110,21 @@ def main():
         t_fast = time.perf_counter() - t0
         fast_parts = dict(fo.LAST_COST_PARTS)
 
-        np.random.seed(12345)
         t0 = time.perf_counter()
         candidate, candidate_parts, _ = candidate_pool.submit(
             fast_cost.evaluate_candidate, P, 0).result()
         t_candidate = time.perf_counter() - t0
+        # Generation 1's block too, as the optimiser scores every generation after 0 there.
+        offset = fo.generation_seed_offset(1)
+        fast_1 = fast_cost.cost_function(P, demo, fast_pool, *cheng, seed_offset=offset)
+        fast_1_parts = dict(fo.LAST_COST_PARTS)
+        candidate_1, candidate_1_parts, _ = candidate_pool.submit(
+            fast_cost.evaluate_candidate, P, offset).result()
 
         diffs = compare('', slow, slow_parts, fast, fast_parts)
         diffs += compare('one task: ', fast, fast_parts, candidate, candidate_parts)
+        diffs += compare(f'one task, seeds from {offset}: ', fast_1, fast_1_parts, candidate_1,
+                         candidate_1_parts)
         all_ok = all_ok and not diffs
         print('row %-4d cost %.12f  parts %d  %s'
               % (row, slow, len(slow_parts), 'IDENTICAL' if not diffs else 'MISMATCH'))
