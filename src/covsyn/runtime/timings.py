@@ -10,7 +10,8 @@ and its worker memory the largest over its workers.
 
 ``LAST`` is the dict fast_cost.cost_function fills for the last evaluation. It lives here, in a
 module imported under one name only, for the reason cost_parts.LAST does (finding E71): mutate
-it in place, never rebind it.
+it in place, never rebind it. Its ``worker_rss`` (each worker's RSS by PID) is for
+GenerationClock, not a column: leave it out of any row written from ``LAST``.
 """
 
 from __future__ import annotations

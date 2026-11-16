@@ -90,7 +90,11 @@ def test_a_run_says_nothing_about_columns_left_out(tmp_path, monkeypatch, capsys
     path = tmp_path / "whole"
     path.mkdir()
     optimise(path, _objective_with_worker_fields)
-    assert "left out" not in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "left out" not in err and "worker_rss'" not in err
+    worker_columns = ("worker_rss_before_mb", "worker_rss_after_mb", "worker_peak_mb")
+    for r in table(path, timings.EVALUATION_TABLE):
+        assert r["worker_pids"] and all(float(r[c]) > 0 for c in worker_columns)
     assert all(float(r["worker_rss_max_mb"]) > 0 for r in table(path, timings.GENERATION_TABLE))
 
 
