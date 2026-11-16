@@ -21,6 +21,7 @@ from __future__ import annotations
 import concurrent.futures
 import csv
 import functools
+import itertools
 import json
 import subprocess
 import sys
@@ -191,6 +192,51 @@ def test_the_pool_starts_its_workers_by_spawn(tmp_path, monkeypatch):
     assert [c.get_start_method() for c in contexts] == ["spawn"]
 
 
+_POOL = concurrent.futures.ProcessPoolExecutor  # the real one, which the tests below replace
+
+
+class _Spy:
+    """A ProcessPoolExecutor that records its worker count, submissions and collections."""
+
+    events: list = []
+    workers: list = []
+
+    def __init__(self, *args, **kwargs):
+        self.pool = _POOL(*args, **kwargs)
+        _Spy.workers.append(kwargs.get("max_workers", args[0] if args else None))
+
+    def submit(self, *args, **kwargs):
+        _Spy.events.append("submit")
+        return _Collected(self.pool.submit(*args, **kwargs))
+
+    def shutdown(self, *args, **kwargs):
+        return self.pool.shutdown(*args, **kwargs)
+
+
+class _Collected:
+    """A future whose collection is recorded."""
+
+    def __init__(self, future):
+        self.future = future
+
+    def result(self, *args, **kwargs):
+        _Spy.events.append("result")
+        return self.future.result(*args, **kwargs)
+
+
+def test_a_generation_s_candidates_are_all_in_flight_before_any_is_collected(tmp_path, monkeypatch):
+    """One task per candidate, submitted together to a pool of the workers asked for."""
+    monkeypatch.setattr(_Spy, "events", [])
+    monkeypatch.setattr(_Spy, "workers", [])
+    monkeypatch.setattr(fo.concurrent.futures, "ProcessPoolExecutor", _Spy)
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    optimise(tmp_path, standins.objective, workers=3)
+    assert _Spy.workers == [3]
+    runs_of = [len(list(group)) for _, group in itertools.groupby(_Spy.events)]
+    # initial population, generation 0 without its elite, then every generation
+    assert runs_of == [POP, POP, POP - 1, POP - 1] + [POP, POP] * (GENERATIONS - 1)
+
+
 # -- a resumed run ---------------------------------------------------------------------------
 
 
@@ -262,7 +308,7 @@ def test_the_command_gives_the_same_progress_table_on_1_and_3_workers(tmp_path):
     assert _test_mode_run(tmp_path, 3)[0] == one
 
 
-WIDE = 9  # more fireflies than the 8 workers, so every worker has a candidate
+WIDE = 9  # more fireflies than the 8 workers, so all 8 can hold a candidate at once
 
 
 def _real_run(path, workers, run10_vector, demographic_parameters, cheng_data):
