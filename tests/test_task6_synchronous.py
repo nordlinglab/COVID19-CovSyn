@@ -225,7 +225,11 @@ class _Collected:
 
 
 def test_a_generation_s_candidates_are_all_in_flight_before_any_is_collected(tmp_path, monkeypatch):
-    """One task per candidate, submitted together to a pool of the workers asked for."""
+    """A generation's tasks all go out before any result is collected.
+
+    They go to a pool built for the workers asked for; which candidates they score,
+    test_costs_are_stored_by_candidate_not_by_completion checks.
+    """
     monkeypatch.setattr(_Spy, "events", [])
     monkeypatch.setattr(_Spy, "workers", [])
     monkeypatch.setattr(fo.concurrent.futures, "ProcessPoolExecutor", _Spy)

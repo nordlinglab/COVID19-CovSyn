@@ -164,7 +164,7 @@ def test_a_worker_without_the_matrix_reads_it_from_the_file(
 ):
     """The fallback gives the cost the matrix passed in gives, to the bit.
 
-    That the matrix passed in is the one used, the test above shows: it refuses the file.
+    That a worker given the matrix reads no file for a candidate, the test above shows.
     """
     _in_this_process(monkeypatch, demographic_parameters, cheng_data, 3)
     given = fast_cost.evaluate_candidate(run10_vector, 0)[0]
