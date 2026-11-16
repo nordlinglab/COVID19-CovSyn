@@ -3,8 +3,9 @@
 """Task 5, items 1, 3 and 4: the evaluation and generation timing tables.
 
 The optimiser runs with the deterministic stand-in objective of the Task 4 tests, which fills
-only the optimiser's own columns; fast_cost.cost_function, which fills the workers' columns,
-is checked on its own with the real objective.
+only the optimiser's own columns, except where a test fills timings.LAST as fast_cost does;
+fast_cost.cost_function, which fills the workers' columns, is checked on its own with the real
+objective.
 """
 
 from __future__ import annotations
@@ -85,7 +86,7 @@ def _objective_with_worker_fields(*args, **kwargs):
 
 
 def test_a_run_fills_the_worker_columns_and_leaves_none_out(tmp_path, monkeypatch, capsys):
-    """Every row has its worker columns; worker_rss in timings.LAST is not one, so is not said."""
+    """Every row has its worker columns; no evaluation row carries worker_rss; none left out."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "whole"
     path.mkdir()
@@ -102,12 +103,12 @@ def test_a_run_fills_the_worker_columns_and_leaves_none_out(tmp_path, monkeypatc
     assert written and all("worker_rss" not in row for row in written)
     assert "left out" not in capsys.readouterr().err
     worker_columns = ("worker_rss_before_mb", "worker_rss_after_mb", "worker_peak_mb")
-    evaluations = table(path, timings.EVALUATION_TABLE)
-    generations = table(path, timings.GENERATION_TABLE)
-    assert evaluations and generations
-    for r in evaluations:
+    evaluation_rows = table(path, timings.EVALUATION_TABLE)
+    generation_rows = table(path, timings.GENERATION_TABLE)
+    assert evaluation_rows and generation_rows
+    for r in evaluation_rows:
         assert r["worker_pids"] and all(float(r[c]) > 0 for c in worker_columns)
-    assert all(float(r["worker_rss_max_mb"]) > 0 for r in generations)
+    assert all(float(r["worker_rss_max_mb"]) > 0 for r in generation_rows)
 
 
 def test_a_resumed_run_keeps_one_row_per_evaluation_and_generation(tmp_path, run):
