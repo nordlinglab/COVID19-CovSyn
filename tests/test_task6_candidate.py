@@ -21,7 +21,8 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
 from tests.conftest import REPO_ROOT
 
-COLUMNS = np.load(REPO_ROOT / "variable" / "Taiwan_data_matrix.npy").shape[1]
+TAIWAN = np.load(REPO_ROOT / "variable" / "Taiwan_data_matrix.npy")
+COLUMNS = TAIWAN.shape[1]
 
 
 def _same(a: float, b: float) -> bool:
@@ -40,10 +41,10 @@ def _in_this_process(monkeypatch, demographic_parameters, cheng_data, simulation
     """Initialise this process as a worker, undone after the test."""
     for name in ("_WORKER_DEMOGRAPHIC_PARAMETERS", "_WORKER_TAIWAN_MATRIX_COLUMNS",
                  "_WORKER_STAGE_TIMING", "_WORKER_PROFILE", "_WORKER_PROCESS",
-                 "_WORKER_CHENG", "_WORKER_SIMULATIONS"):  # fmt: skip
+                 "_WORKER_CHENG", "_WORKER_SIMULATIONS", "_WORKER_TAIWAN_MATRIX"):  # fmt: skip
         monkeypatch.setattr(fast_cost, name, getattr(fast_cost, name, None), raising=False)
     fast_cost.init_worker(demographic_parameters, COLUMNS, cheng=cheng_data,
-                          simulations=simulations)  # fmt: skip
+                          simulations=simulations, taiwan_matrix=TAIWAN)  # fmt: skip
 
 
 def test_a_candidate_scores_as_cost_function_does(
@@ -137,3 +138,20 @@ def test_simulations_leave_the_demographic_parameters_unchanged(
         run_covid(seed, vector, shared, save_file=False)
     assert pickle.dumps(shared) == before
     assert vector.tobytes() == run10_vector.tobytes()
+
+
+def test_a_worker_reads_the_taiwan_matrix_once_not_per_candidate(
+    monkeypatch, run10_vector, demographic_parameters, cheng_data
+):
+    """The matrix comes with the worker's inputs, so a candidate reads no file for it."""
+    _in_this_process(monkeypatch, demographic_parameters, cheng_data, 3)
+    load = np.load
+
+    def refusing(path, *args, **kwargs):
+        if "Taiwan_data_matrix" in str(path):
+            raise AssertionError("read again for a candidate")
+        return load(path, *args, **kwargs)
+
+    monkeypatch.setattr(fast_cost.np, "load", refusing)
+    cost, _, _ = fast_cost.evaluate_candidate(run10_vector, 0)
+    assert cost != fo.FAILED_EVALUATION_COST

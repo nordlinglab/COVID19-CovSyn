@@ -64,24 +64,28 @@ _WORKER_PROFILE = None
 _WORKER_PROCESS = None
 _WORKER_CHENG = None
 _WORKER_SIMULATIONS = None
+_WORKER_TAIWAN_MATRIX = None
 
 
 def init_worker(demographic_parameters, taiwan_matrix_columns, stage_timing=False,
-                profile_dir=None, cheng=None, simulations=None):
+                profile_dir=None, cheng=None, simulations=None, taiwan_matrix=None):
     """Give each worker the read-only data once, instead of once per task.
 
     Task 5: stage_timing times run_covid's stages in every task of this worker; profile_dir,
     when given, makes the worker profile its tasks into profile_dir/worker_<pid>.prof.
     Task 6: cheng, the Cheng et al. (2020) contact counts, attack rates and bin weights, and
-    simulations, S (default fo.SIMULATIONS_PER_EVALUATION), are what evaluate_candidate needs.
+    simulations, S (default fo.SIMULATIONS_PER_EVALUATION), are what evaluate_candidate needs;
+    taiwan_matrix, the energy test's Taiwan data, spares it reading the file for every candidate.
     """
     global _WORKER_DEMOGRAPHIC_PARAMETERS, _WORKER_TAIWAN_MATRIX_COLUMNS, _WORKER_STAGE_TIMING
     global _WORKER_PROFILE, _WORKER_PROCESS, _WORKER_CHENG, _WORKER_SIMULATIONS
+    global _WORKER_TAIWAN_MATRIX
     _WORKER_DEMOGRAPHIC_PARAMETERS = demographic_parameters
     _WORKER_TAIWAN_MATRIX_COLUMNS = taiwan_matrix_columns
     _WORKER_STAGE_TIMING = stage_timing
     _WORKER_CHENG = cheng
     _WORKER_SIMULATIONS = simulations
+    _WORKER_TAIWAN_MATRIX = taiwan_matrix
     _WORKER_PROCESS = psutil.Process()  # this worker, for its memory reads (Task 5)
     _WORKER_PROFILE = None if profile_dir is None else profiling.start_worker_profile(profile_dir)
 
@@ -409,7 +413,8 @@ def _evaluate_candidate(P, seed_offset):
                   else _WORKER_SIMULATIONS)
     reduction_ns = 0
     try:
-        taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
+        taiwan_data_matrix = (np.load('./variable/Taiwan_data_matrix.npy')
+                              if _WORKER_TAIWAN_MATRIX is None else _WORKER_TAIWAN_MATRIX)
         seeds = list(range(seed_offset, seed_offset + case_limit))
         # The simulations get their own copy, as cost_function's tasks get theirs by pickling,
         # so the penalty reads the vector as given.

@@ -1577,7 +1577,7 @@ class Firefly:
         # init_worker has given the read-only inputs once. The workers start by spawn on every
         # system, so macOS and Linux behave the same.
         from covsyn.calibration.fast_cost import init_worker as _init_reduction_worker
-        _columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
+        _taiwan = np.load('./variable/Taiwan_data_matrix.npy')
         if self.profile_dir is not None:
             Path(self.profile_dir).mkdir(parents=True, exist_ok=True)
         intensities = np.empty(self.pop_size)
@@ -1592,8 +1592,9 @@ class Firefly:
         executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=max_workers, mp_context=multiprocessing.get_context('spawn'),
             initializer=_init_reduction_worker,
-            initargs=(demographic_parameters, _columns, self.stage_timing, self.profile_dir,
-                      (Cheng_contact_array, Cheng_attack_rate, norm_weights), self.simulations))
+            initargs=(demographic_parameters, _taiwan.shape[1], self.stage_timing,
+                      self.profile_dir, (Cheng_contact_array, Cheng_attack_rate, norm_weights),
+                      self.simulations, _taiwan))
         failed = False
         try:  # the pool and the tables are closed however the run ends
             clock = timings.GenerationClock(-1, max_workers)
