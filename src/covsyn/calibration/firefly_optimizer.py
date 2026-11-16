@@ -1616,9 +1616,12 @@ class Firefly:
                     waiting = time.perf_counter_ns()
                     intensities[k], parts, timing = future.result()
                     cost_parts[k] = dict(parts)
-                    timing = {'start_unix_s': round(start, 6), 'end_unix_s': round(time.time(), 6),
-                              **timing, 'dispatch_s': dispatch_s,
+                    timing = {**timing, 'dispatch_s': dispatch_s,
                               'wait_s': timings.seconds(time.perf_counter_ns() - waiting)}
+                    # The task's own start and end, as the worker measured them; an objective
+                    # that gives none gets the submission and the collection of its result.
+                    timing.setdefault('start_unix_s', round(start, 6))
+                    timing.setdefault('end_unix_s', round(time.time(), 6))
                     row = {'generation': clock.generation, 'candidate': k, **timing}
                     row.pop('worker_rss', None)  # per-PID RSS for the generation row, not a column
                     evaluation_table.write(row)
