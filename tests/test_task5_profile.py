@@ -13,6 +13,7 @@ import concurrent.futures
 import cProfile
 import csv
 import json
+import multiprocessing
 import pstats
 import subprocess
 import sys
@@ -111,25 +112,28 @@ def test_each_worker_writes_its_own_profile(
     assert profiling.share(tmp_path / profiling.MERGED, "run_covid") > 0.5
 
 
-def _pid_after(seconds):
+def _pid_after(barrier):
+    """This worker's PID, once another worker has also reached the barrier."""
     import os
 
-    time.sleep(seconds)
+    barrier.wait(timeout=120)  # a single worker breaks the barrier rather than hanging
     return os.getpid()
 
 
+@pytest.mark.parametrize("method", ["fork", "spawn"])  # macOS starts workers by spawn
 def test_a_worker_without_tasks_writes_no_profile(
-    tmp_path, run10_vector, demographic_parameters, cheng_data
+    method, tmp_path, run10_vector, demographic_parameters, cheng_data
 ):
     """10 simulations are one task, so one of 2 workers runs none; the merge still works."""
     columns = np.load(REPO_ROOT / "variable" / "Taiwan_data_matrix.npy").shape[1]
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=2,
+        max_workers=2, mp_context=multiprocessing.get_context(method),
         initializer=fast_cost.init_worker,
         initargs=(demographic_parameters, columns, False, tmp_path),
-    ) as pool:
-        # Two tasks that wait, so the pool starts both workers rather than reusing one.
-        assert len(set(pool.map(_pid_after, [0.5, 0.5]))) == 2
+    ) as pool, multiprocessing.Manager() as manager:
+        # Two tasks that wait for each other, so both workers start however slowly they spawn.
+        barrier = manager.Barrier(2)
+        assert len(set(pool.map(_pid_after, [barrier, barrier]))) == 2
         fast_cost.cost_function(
             run10_vector, demographic_parameters, pool, *cheng_data, simulations=10
         )
