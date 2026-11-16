@@ -66,7 +66,9 @@ uv run python scripts/gates/verify_fast_cost.py results/models/phaseD_run10 --wo
 uv run python scripts/gates/smoke_test.py
 ```
 
-The first reproduces Phase D run 10 exactly; the second checks that the fast objective equals the reference one; the third evaluates the seed vector once.
+The first reproduces Phase D run 10 exactly;
+the second checks that the fast objective equals the reference one, and that one worker task per candidate, as the optimiser runs it, equals the fast objective;
+the third evaluates the seed vector once.
 
 ### 3. Parameter optimisation
 
@@ -80,6 +82,11 @@ On macOS, prefix the command with `caffeinate -is` so the machine does not sleep
 `tmux` and `screen` remain optional.
 
 The pipeline runs the stages in order: optimise, revalidate, select, synthesise, check, report, figures.
+The optimiser uses the synchronous firefly algorithm (Yang, 2010).
+In each generation every firefly moves towards each brighter one from the positions and costs the generation starts with, and then all are scored at once, one worker task per firefly, on the generation's own block of seeds.
+The brightest firefly does not move, and in generation 0, which shares the initial population's block, it keeps its initial cost.
+The workers start by spawn on macOS and Linux, and the results do not depend on the number of workers.
+A run started before this algorithm cannot be resumed.
 A run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`, with `config.json` recording the optimiser's settings, seed, workers, machine and versions, and `pipeline.toml` the pipeline's;
 its tables go into `results/tables/<run-id>/` and its figures into `results/figures/<run-id>/`.
 Each finished stage adds a line to `run.log`, and the optimiser saves a checkpoint after every generation, so
