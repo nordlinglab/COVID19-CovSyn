@@ -85,27 +85,28 @@ def _objective_with_worker_fields(*args, **kwargs):
     return objective(*args, **kwargs)
 
 
-def test_a_run_fills_the_worker_columns_and_leaves_none_out(tmp_path, monkeypatch, capsys):
+def test_a_run_fills_the_worker_columns_and_drops_no_row_key(tmp_path, monkeypatch):
     """Every row has its worker columns, and no row given to the evaluation table has worker_rss.
 
-    No table leaves out a column missing from its header, so stderr does not say so.
+    No table drops a key of a row for want of a column in its header.
     """
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     path = tmp_path / "whole"
     path.mkdir()
-    rows_given_to_write, write = [], timings.Table.write
+    rows_given_to_write, dropped_keys, write = [], set(), timings.Table.write
 
     def recording(self, row):
-        """Keep each row given to the evaluation table, then write it as usual."""
+        """Keep each row given to the evaluation table, write it, and keep any key dropped."""
         if self.path.name == timings.EVALUATION_TABLE:
             rows_given_to_write.append(dict(row))
         write(self, row)
+        dropped_keys.update(self.left_out)
 
     monkeypatch.setattr(timings.Table, "write", recording)
     optimise(path, _objective_with_worker_fields)
     assert rows_given_to_write
     assert all("worker_rss" not in row for row in rows_given_to_write)
-    assert "left out" not in capsys.readouterr().err  # no column dropped from a header
+    assert not dropped_keys
     worker_columns = ("worker_rss_before_mb", "worker_rss_after_mb", "worker_peak_mb")
     evaluation_rows = table(path, timings.EVALUATION_TABLE)
     generation_rows = table(path, timings.GENERATION_TABLE)
