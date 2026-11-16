@@ -211,6 +211,24 @@ def test_a_run_records_its_moves(tmp_path, monkeypatch):
     assert settings["moves"] == fo.MOVES
 
 
+def test_no_other_setting_can_change_the_recorded_moves(tmp_path, monkeypatch):
+    """The moves config.json records are the algorithm's, whatever the run's own settings say."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    monkeypatch.setattr(fo.Firefly, "__init__", _with_settings(fo.Firefly.__init__))
+    optimise(tmp_path, standins.objective)
+    assert json.loads((tmp_path / "config.json").read_text())["settings"]["moves"] == fo.MOVES
+
+
+def _with_settings(init):
+    """Firefly.__init__, then run settings that name moves."""
+
+    def wrapped(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        self.run_settings = {"moves": "sequential"}
+
+    return wrapped
+
+
 def test_a_kill_during_an_evaluation_ends_the_run_with_its_error(tmp_path, monkeypatch):
     """A task that raises stops the run, and the generation is left without a checkpoint."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)

@@ -1565,7 +1565,7 @@ class Firefly:
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
                     'simulations': self.simulations, 'stage_timing': self.stage_timing,
-                    'moves': MOVES, **self.run_settings}
+                    **self.run_settings, 'moves': MOVES}  # Task 6: last, so nothing overrides it
         if checkpoint is None:
             runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
                               initial_population=fireflies)
