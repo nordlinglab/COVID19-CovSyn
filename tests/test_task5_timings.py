@@ -78,6 +78,22 @@ def test_one_row_per_generation(run):
     assert all(float(r["checkpoint_s"]) > 0 for r in rows)
 
 
+def _objective_with_worker_fields(*args, **kwargs):
+    """The stand-in objective, filling timings.LAST as fast_cost does from one task."""
+    timings.LAST.update(timings.summarise_tasks([timings.TaskClock(False).record()]))
+    return objective(*args, **kwargs)
+
+
+def test_a_run_says_nothing_about_columns_left_out(tmp_path, monkeypatch, capsys):
+    """worker_rss in timings.LAST is for the generation row, not an evaluation column."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    path = tmp_path / "whole"
+    path.mkdir()
+    optimise(path, _objective_with_worker_fields)
+    assert "left out" not in capsys.readouterr().err
+    assert all(float(r["worker_rss_max_mb"]) > 0 for r in table(path, timings.GENERATION_TABLE))
+
+
 def test_a_resumed_run_keeps_one_row_per_evaluation_and_generation(tmp_path, run):
     """Rows written after the last checkpoint are dropped, so none is counted twice."""
     path = tmp_path / "killed"

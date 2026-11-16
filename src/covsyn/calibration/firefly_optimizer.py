@@ -1575,6 +1575,7 @@ class Firefly:
                 row = {'generation': clock.generation, 'candidate': k,
                        'start_unix_s': round(start, 6),
                        'end_unix_s': round(time.time(), 6), **timings.LAST}
+                row.pop('worker_rss', None)  # per-PID RSS for the generation row, not a column
                 evaluation_table.write(row)
                 clock.add_evaluation(timings.LAST)
                 return value
