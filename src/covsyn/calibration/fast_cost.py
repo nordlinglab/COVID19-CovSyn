@@ -379,8 +379,8 @@ def evaluate_candidate(P, seed_offset):
 
     Returns:
         The cost, its parts (cost_parts.LAST's keys) and the task's timing fields for
-        timings_evaluation.csv, cost_reduction_s included; the parent adds its dispatch and
-        wait.
+        timings_evaluation.csv, its start and end and cost_reduction_s included; the parent
+        adds its dispatch and wait.
 
     Raises:
         RuntimeError: The worker was not initialised with the objective's inputs.
@@ -419,7 +419,8 @@ def _evaluate_candidate(P, seed_offset):
               f'{fo.FAILED_EVALUATION_COST:g}', flush=True)
         cost, parts = fo.FAILED_EVALUATION_COST, _failed_parts()
     timing = timings.summarise_tasks([clock.record()])
-    timing['cost_reduction_s'] = timings.seconds(reduction_ns)
+    timing.update(start_unix_s=round(clock.start, 6), end_unix_s=round(time.time(), 6),
+                  cost_reduction_s=timings.seconds(reduction_ns))
     return cost, parts, timing
 
 

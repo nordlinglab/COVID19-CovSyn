@@ -6,11 +6,15 @@ The acceptance criterion of the rework plan (doc/plan_Nordling2026_CovSynFirefly
 Task 4): killing the run during the optimiser and resuming it gives the same progress table,
 apart from timing columns, as an uninterrupted run. The objective is a deterministic stand-in,
 so the comparison is exact.
+
+Task 6: the stand-in runs in the optimiser's spawned workers, one task per candidate, so a kill
+is either a task raising on a generation's block or the parent stopping at a generation's start.
 """
 
 from __future__ import annotations
 
 import csv
+import functools
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +22,9 @@ import pytest
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.runtime import runs
+from tests.firefly_standins import Killed, killed_on, objective
+
+RESUMABLE = {"moves": fo.MOVES}  # what a Task 6 run records in its settings
 
 DIM = 208
 POP = 4
@@ -25,26 +32,29 @@ GENERATIONS = 5
 SEED = 11
 
 
-class Killed(Exception):
-    """Stands in for the process being killed."""
+def killed_in(generation):
+    """The objective, raising Killed while it scores generation's block.
+
+    Generation 0 shares block 0 with the initial population, so it is stopped with
+    killed_at_start instead.
+    """
+    assert generation > 0
+    return functools.partial(killed_on, block_offset=fo.generation_seed_offset(generation))
 
 
-def objective(P, demo, executor, contacts, attack, weights, seed_offset=0):
-    """Deterministic in the vector and the seed block, like the real objective on fixed seeds."""
-    return float(np.sum(np.asarray(P) * np.arange(1, len(P) + 1)) % 1.0) + seed_offset / 1e9
+ALWAYS_KILLED = functools.partial(killed_on, block_offset=None)  # any evaluation raises
 
 
-def killed_after(calls):
-    """The objective, raising once ``calls`` evaluations have run."""
-    count = {"n": 0}
+def killed_at_start(monkeypatch, generation):
+    """Stop the run as generation starts, before any of its moves or evaluations."""
+    draw = fo.generation_rng
 
-    def function(*args, **kwargs):
-        count["n"] += 1
-        if count["n"] > calls:
+    def stopping(seed, g):
+        if g == generation:
             raise Killed
-        return objective(*args, **kwargs)
+        return draw(seed, g)
 
-    return function
+    monkeypatch.setattr(fo, "generation_rng", stopping)
 
 
 def optimise(path, function, resume=False):
@@ -72,15 +82,22 @@ def uninterrupted(tmp_path, monkeypatch):
     return optimise(path, objective), path
 
 
-# The initial population is POP evaluations, then each generation re-scores POP and moves some.
-@pytest.mark.parametrize("calls", [POP + 3, 3 * POP + 5, 5 * POP + 1])
-def test_a_killed_and_resumed_run_equals_an_uninterrupted_one(tmp_path, uninterrupted, calls):
+@pytest.mark.parametrize("kill", [("start", 0), ("evaluation", 2), ("start", 3),
+                                  ("evaluation", GENERATIONS - 1)])
+def test_a_killed_and_resumed_run_equals_an_uninterrupted_one(tmp_path, monkeypatch,
+                                                              uninterrupted, kill):
     """The acceptance criterion: same progress table and same final population."""
     whole, whole_path = uninterrupted
     path = tmp_path / "killed"
     path.mkdir()
+    how, generation = kill
     with pytest.raises(Killed):
-        optimise(path, killed_after(calls))
+        if how == "start":
+            with monkeypatch.context() as patch:
+                killed_at_start(patch, generation)
+                optimise(path, objective)
+        else:
+            optimise(path, killed_in(generation))
     resumed = optimise(path, objective, resume=True)
     assert progress(path) == progress(whole_path)
     for got, want in zip(resumed, whole, strict=True):
@@ -99,7 +116,7 @@ def test_every_generation_leaves_a_checkpoint(uninterrupted):
 def test_a_finished_run_resumes_to_the_same_result(uninterrupted):
     """Resuming after the last generation evaluates nothing and returns the same population."""
     whole, path = uninterrupted
-    again = optimise(path, killed_after(0), resume=True)  # any evaluation would raise
+    again = optimise(path, ALWAYS_KILLED, resume=True)
     for got, want in zip(again, whole, strict=True):
         np.testing.assert_array_equal(np.asarray(got), np.asarray(want))
 
@@ -119,7 +136,7 @@ def test_progress_rows_after_the_checkpoint_are_dropped(tmp_path, uninterrupted)
     path = tmp_path / "between"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(3 * POP + 5))
+        optimise(path, killed_in(2))
     rows = progress(path)
     last = max(int(p.stem.split("_")[1]) for p in (path / "checkpoints").glob("generation_*"))
     with open(runs.progress_path(path), "a", newline="") as f:  # a row past the checkpoint
@@ -151,7 +168,7 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
     import json
 
     (tmp_path / "config.json").write_text(json.dumps({"seed": 123,
-                                                      "settings": {"mode": "test"}}))
+                                                      "settings": {"mode": "test", **RESUMABLE}}))
     assert fo.resumed_settings(tmp_path) == (123, "test", False)
 
 
@@ -198,7 +215,8 @@ def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
     """main() runs the mode config.json recorded: it sets the population the checkpoint holds."""
     import json
 
-    (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": {"mode": "test"}}))
+    (tmp_path / "config.json").write_text(json.dumps({"seed": 5,
+                                                      "settings": {"mode": "test", **RESUMABLE}}))
     (tmp_path / "checkpoints").mkdir()
     (tmp_path / "checkpoints" / "initial.npz").write_text("x")  # something to continue
     args = _args(resume=tmp_path)
@@ -223,7 +241,9 @@ def test_a_resumed_run_times_its_stages_as_it_started(tmp_path, recorded):
     """The stage timing recorded in config.json, so the timing table's columns stay filled."""
     import json
 
-    settings = {"mode": "test"} if recorded is None else {"mode": "test", "stage_timing": recorded}
+    settings = {"mode": "test", **RESUMABLE}
+    if recorded is not None:
+        settings["stage_timing"] = recorded
     (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": settings}))
     (tmp_path / "checkpoints").mkdir()
     (tmp_path / "checkpoints" / "initial.npz").write_text("x")
@@ -262,7 +282,7 @@ def test_a_missing_progress_table_stops_a_resume(tmp_path, uninterrupted):
     path = tmp_path / "lost"
     path.mkdir()
     with pytest.raises(Killed):
-        optimise(path, killed_after(3 * POP + 5))
+        optimise(path, killed_in(2))
     runs.progress_path(path).unlink()
     with pytest.raises(SystemExit) as stop:
         optimise(path, objective, resume=True)
@@ -270,13 +290,15 @@ def test_a_missing_progress_table_stops_a_resume(tmp_path, uninterrupted):
     assert not runs.progress_path(path).exists()  # not rebuilt
 
 
-def test_a_run_killed_before_any_generation_resumes_without_a_table(tmp_path, uninterrupted):
+def test_a_run_killed_before_any_generation_resumes_without_a_table(tmp_path, monkeypatch,
+                                                                    uninterrupted):
     """Only the initial population was scored, so no progress row exists yet: that is fine."""
     whole, whole_path = uninterrupted
     path = tmp_path / "early"
     path.mkdir()
-    with pytest.raises(Killed):
-        optimise(path, killed_after(POP + 3))  # killed in generation 0
+    with pytest.raises(Killed), monkeypatch.context() as patch:
+        killed_at_start(patch, 0)
+        optimise(path, objective)
     assert not runs.progress_path(path).exists()
     optimise(path, objective, resume=True)
     assert progress(path) == progress(whole_path)
@@ -288,7 +310,7 @@ def test_a_missing_table_in_the_results_layout_stops_before_the_pool(tmp_path, m
     run = tmp_path / "results" / "models" / "r"
     run.mkdir(parents=True)
     with pytest.raises(Killed):
-        optimise(run, killed_after(3 * POP + 5))
+        optimise(run, killed_in(2))
     table = runs.progress_path(run)
     assert table == tmp_path / "results" / "tables" / "r" / "progress.csv" and table.exists()
     table.unlink()

@@ -60,6 +60,7 @@ def test_a_candidate_scores_as_cost_function_does(
         k for k in want_parts if not _same(parts[k], want_parts[k])]  # fmt: skip
     assert timing["simulations"] == 10
     assert timing["cost_reduction_s"] > 0 and timing["run_covid_s"] > 0
+    assert 0 < timing["start_unix_s"] <= timing["end_unix_s"]
     assert timing["busy_s"] >= timing["run_covid_s"] + timing["case_reduction_s"]
 
 

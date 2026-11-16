@@ -4,14 +4,17 @@
 
 ``results/tables/<run-id>/timings_evaluation.csv`` has one row per evaluation and
 ``timings_generation.csv`` one per generation, the initial population as generation -1, as
-its checkpoint is. Until Task 6 gives each evaluation one worker, an evaluation's simulations
-are spread over the pool in tasks of SIMULATIONS_PER_TASK, so its times are sums over its tasks
-and its worker memory the largest over its workers.
+its checkpoint is. Since Task 6 an evaluation is one task in one worker,
+fast_cost.evaluate_candidate, whose timing fields summarise_tasks makes from that task; the
+optimiser adds its dispatch and its wait for the result. fast_cost.cost_function, which the
+revalidation still uses, spreads an evaluation over tasks of SIMULATIONS_PER_TASK, so there its
+times are sums over its tasks and its worker memory the largest over its workers.
 
 ``LAST`` is the dict fast_cost.cost_function fills for the last evaluation. It lives here, in a
 module imported under one name only, for the reason cost_parts.LAST does (finding E71): mutate
-it in place, never rebind it. Its ``worker_rss`` (each worker's RSS by PID) is for
-GenerationClock, not a column: leave it out of any row written from ``LAST``.
+it in place, never rebind it. Its ``worker_rss`` (each worker's RSS by PID), which
+evaluate_candidate's timing fields carry too, is for GenerationClock, not a column: leave it out
+of any row written from them.
 """
 
 from __future__ import annotations
