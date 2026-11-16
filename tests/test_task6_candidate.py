@@ -118,3 +118,22 @@ def test_one_spawned_task_scores_a_whole_evaluation_as_cost_function_does(
     assert all(_same(parts[k], want_parts[k]) for k in want_parts)
     assert timing["simulations"] == fo.SIMULATIONS_PER_EVALUATION
     assert len(timing["worker_pids"].split(";")) == 1
+
+
+@pytest.mark.slow
+def test_simulations_leave_the_demographic_parameters_unchanged(
+    run10_vector, demographic_parameters
+):
+    """A candidate's S simulations share one copy, so none may change it for the next (Task 6)."""
+    import copy
+    import pickle
+
+    from covsyn.model.data_synthesis_main import run_covid
+
+    shared = copy.deepcopy(demographic_parameters)
+    before = pickle.dumps(shared)
+    vector = run10_vector.copy()
+    for seed in range(100):
+        run_covid(seed, vector, shared, save_file=False)
+    assert pickle.dumps(shared) == before
+    assert vector.tobytes() == run10_vector.tobytes()

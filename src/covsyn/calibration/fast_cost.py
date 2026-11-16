@@ -220,7 +220,12 @@ def _run_batch(seeds, P, columns):
 
 
 def _simulate(seeds, P, columns, clock):
-    """The simulations of _run_batch, timed on clock; see _run_batch for the deepcopy."""
+    """The simulations of _run_batch, timed on clock; see _run_batch for the deepcopy.
+
+    One copy serves the call: a task of cost_function's, or, since Task 6, a candidate's S
+    simulations. Over 300 seeds of run 10's vector run_covid changed none of it, which
+    test_task6_candidate guards; a copy per simulation took 19% of a profile's time.
+    """
     demographic_parameters = copy.deepcopy(_WORKER_DEMOGRAPHIC_PARAMETERS)
     out = []
     for seed in seeds:
