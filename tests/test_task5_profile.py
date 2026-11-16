@@ -116,21 +116,30 @@ def _pid_after(barrier):
     """This worker's PID, once another worker has also reached the barrier."""
     import os
 
-    barrier.wait(timeout=120)  # a single worker breaks the barrier rather than hanging
+    barrier.wait(timeout=60)  # a single worker breaks the barrier rather than hanging
     return os.getpid()
 
 
-@pytest.mark.parametrize("method", ["fork", "spawn"])  # macOS starts workers by spawn
+# The platform's default and spawn (macOS's default); fork is unsafe on macOS.
+START_METHODS = list(dict.fromkeys([multiprocessing.get_all_start_methods()[0], "spawn"]))
+
+
+@pytest.mark.parametrize("method", START_METHODS)
 def test_a_worker_without_tasks_writes_no_profile(
     method, tmp_path, run10_vector, demographic_parameters, cheng_data
 ):
     """10 simulations are one task, so one of 2 workers runs none; the merge still works."""
     columns = np.load(REPO_ROOT / "variable" / "Taiwan_data_matrix.npy").shape[1]
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=2, mp_context=multiprocessing.get_context(method),
-        initializer=fast_cost.init_worker,
-        initargs=(demographic_parameters, columns, False, tmp_path),
-    ) as pool, multiprocessing.Manager() as manager:
+    # The manager outlives the pool, whose workers hold proxies of its barrier.
+    with (
+        multiprocessing.Manager() as manager,
+        concurrent.futures.ProcessPoolExecutor(
+            max_workers=2,
+            mp_context=multiprocessing.get_context(method),
+            initializer=fast_cost.init_worker,
+            initargs=(demographic_parameters, columns, False, tmp_path),
+        ) as pool,
+    ):
         # Two tasks that wait for each other, so both workers start however slowly they spawn.
         barrier = manager.Barrier(2)
         assert len(set(pool.map(_pid_after, [barrier, barrier]))) == 2
