@@ -162,7 +162,10 @@ def test_a_worker_reads_the_taiwan_matrix_once_not_per_candidate(
 def test_a_worker_without_the_matrix_reads_it_from_the_file(
     monkeypatch, run10_vector, demographic_parameters, cheng_data
 ):
-    """The fallback gives the cost the matrix passed in gives, to the bit."""
+    """The fallback gives the cost the matrix passed in gives, to the bit.
+
+    That the matrix passed in is the one used, the test above shows: it refuses the file.
+    """
     _in_this_process(monkeypatch, demographic_parameters, cheng_data, 3)
     given = fast_cost.evaluate_candidate(run10_vector, 0)[0]
     _in_this_process(monkeypatch, demographic_parameters, cheng_data, 3, taiwan_matrix=None)
