@@ -4,8 +4,9 @@
 
 Block b of stream s covers s x 10^7 + b x S to s x 10^7 + (b + 1) x S - 1, so streams are
 disjoint for S up to 10,000 and up to 1,000 blocks each, and a use that takes its own stream
-never meets another's seeds. The reserved streams follow the rework plan
-(doc/plan_Nordling2026_CovSynFireflyNordlingLab.md in covid19-research, Task 7):
+never meets another stream's seeds; the two uses on 300, and the two on 301, share theirs.
+The reserved streams follow the rework plan (doc/plan_Nordling2026_CovSynFireflyNordlingLab.md
+in covid19-research, Task 7):
 
 ====== =========================================================================
 0      the seeds of every earlier run (the objective's 0..299 and later
@@ -16,7 +17,8 @@ never meets another's seeds. The reserved streams follow the rework plan
 100    the stopping rule's monitoring blocks (Task 9)
 200-299 validation, one stream per use
 300    the reporting checklist and report, on seeds the candidate was not chosen
-       on (E97): the synthesis's block 0 and the age risk ratio's first seeds
+       on (E97): the synthesis's block 0 and the age risk ratio's first seeds,
+       which overlap from its first seed
 301    the synthesis the candidate is chosen on and its age risk ratio, the
        same two uses of the stream, which overlap from its first seed
 ====== =========================================================================

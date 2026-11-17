@@ -671,7 +671,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                        'for the size of the composition effect (E70)')
     else:
         check('B14', 'high-N age risk ratio measurement', None,
-              'measure_age_rr.py has not run, or failed',
+              'no measurement at AGE_RR_FILE: measure_age_rr.py has not run, failed, or wrote '
+              'elsewhere',
               note='B14 is accepted on that measurement since E68; without it only the '
                    'informational rows above are available')
 
