@@ -18,7 +18,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration import initial_population, parameter_space
+from covsyn.calibration import initial_population, parameter_space, seed_streams
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1111,8 +1111,9 @@ SIMULATIONS_PER_EVALUATION = 300
 # moves on those scores. Before the code review of 2026-11-09 (F7) generation 0 scored the same
 # population again on block 300 and discarded the block-0 scores: one population of evaluations
 # for a different noise draw, not a better search. Runs from then on therefore take other paths
-# than runs 20-22. 120 generations end at 35,999, clear of revalidation's blocks from 100,000
-# (E87).
+# than runs 20-22. 120 generations ended at 35,999, clear of revalidation's blocks from 100,000
+# (E87); since Task 7 each run scores on its own optimisation stream, which no validation
+# stream meets (seed_streams).
 # Costs from different blocks are NOT comparable, so nothing keeps a running minimum across
 # generations: the attraction, the elite and the progress row all use this generation's scores,
 # and the candidates are re-scored on one common set of blocks afterwards.
@@ -1236,11 +1237,13 @@ def _whole_row(row: dict) -> bool:
     return True
 
 
-def generation_seed_offset(generation, simulations=SIMULATIONS_PER_EVALUATION):
+def generation_seed_offset(generation, simulations=SIMULATIONS_PER_EVALUATION,
+                           stream=seed_streams.DEFAULT_OPTIMISATION_STREAM):
     """First simulation seed of a generation's own block (B81); generation 0 shares block 0
     with the initial population, whose scores it starts from (F7). A block is one evaluation's
-    simulations, which only profile mode changes (Task 5)."""
-    return simulations * generation
+    simulations, which only profile mode changes (Task 5). Task 7: block g of the run's
+    optimisation stream, s x 10^7 + g x S, so no run meets another use's seeds."""
+    return seed_streams.block_start(stream, generation, simulations)
 
 # E86: the objective summed the contact bins of all 300 simulated cases and compared them
 # with Cheng et al. 2020's totals for 100 cases (the original 100 cases x 3 repeats lost its
@@ -1525,6 +1528,8 @@ class Firefly:
         self.simulations = SIMULATIONS_PER_EVALUATION
         self.stage_timing = False
         self.profile_dir = None
+        # Task 7: the run's optimisation stream, whose block g generation g is scored on.
+        self.stream = seed_streams.DEFAULT_OPTIMISATION_STREAM
 
     @staticmethod
     def _state(normalized, fireflies, intensities, cost_parts, archive, worst_fireflies,
@@ -1563,7 +1568,8 @@ class Firefly:
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
                     'simulations': self.simulations, 'stage_timing': self.stage_timing,
-                    **self.run_settings, 'moves': MOVES}  # Task 6: last, so nothing overrides it
+                    **self.run_settings, 'moves': MOVES,  # Task 6: last, so nothing overrides it
+                    'stream': self.stream}
         if checkpoint is None:
             runs.write_config(result_path, settings, rng_seed=self.seed, workers=max_workers,
                               initial_population=fireflies)
@@ -1637,7 +1643,8 @@ class Firefly:
             else:
                 print(f'evaluating initial population: {self.pop_size} fireflies '
                       f'({self.simulations} simulations each)...', flush=True)
-                evaluate(range(self.pop_size), fireflies, 0)
+                evaluate(range(self.pop_size), fireflies,
+                         generation_seed_offset(0, self.simulations, self.stream))
                 for k in range(self.pop_size):
                     print(f'  initial firefly {k+1}/{self.pop_size}: cost={intensities[k]:.4f}',
                           flush=True)
@@ -1681,7 +1688,7 @@ class Firefly:
             for generation in tqdm(range(start, max_generations)):
                 # B81: this generation's block, and every firefly scored on it -- the brightest
                 # included, since its score came from another block and cannot be compared here.
-                offset = generation_seed_offset(generation, self.simulations)
+                offset = generation_seed_offset(generation, self.simulations, self.stream)
                 clock = timings.GenerationClock(generation, max_workers)
                 new_alpha *= 0.97
                 # Task 6: every firefly moves on the positions and costs the generation starts
@@ -1828,6 +1835,35 @@ def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
     return seed, mode, stage_timing
 
 
+def recorded_stream(run_dir: Path) -> int:
+    """The optimisation stream a run recorded in its config.json, to resume it on (Task 7).
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when it is missing or not an optimisation stream.
+    """
+    try:
+        stream = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
+            'settings']['stream']
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        not_resumable(f'{run_dir} cannot be resumed: no stream in its config.json ({error!r})')
+    if isinstance(stream, bool) or stream not in seed_streams.OPTIMISATION_STREAMS:
+        not_resumable(f'{run_dir} cannot be resumed: its config.json stream is {stream!r}')
+    return stream
+
+
+def optimisation_stream(text: str) -> int:
+    """--stream: one of the optimisation streams, 1 to 99 (Task 7)."""
+    try:
+        stream = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'{text!r} is not a whole number') from None
+    if stream not in seed_streams.OPTIMISATION_STREAMS:
+        raise argparse.ArgumentTypeError(
+            f'{stream} is not an optimisation stream ({seed_streams.OPTIMISATION_STREAMS.start} '
+            f'to {seed_streams.OPTIMISATION_STREAMS.stop - 1})')
+    return stream
+
+
 def resume_arguments(args: argparse.Namespace) -> str:
     """The mode to run in; with --resume, the run's recorded seed and mode (Task 4).
 
@@ -1835,19 +1871,20 @@ def resume_arguments(args: argparse.Namespace) -> str:
     than ignored.
 
     Raises:
-        SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations or
-            --stage-timings.
+        SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations,
+            --stream or --stage-timings.
     """
     if args.resume is None:
         return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
     given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
                                       ('--mode', args.mode), ('--warm_start', args.warm_start),
                                       ('--simulations', getattr(args, 'simulations', None)),
+                                      ('--stream', getattr(args, 'stream', None)),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
     if given:  # a mistake in the command, reported before anything is read
-        sys.exit(f'--resume takes the directory, seed, mode and warm start from the run; '
+        sys.exit(f'--resume takes the directory, seed, mode and stream from the run; '
                  f'remove {", ".join(given)}')
     # Then the checkpoints: a run killed before any has nothing to continue, whatever its
     # config.json holds, and that is the reason to report.
@@ -1855,6 +1892,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
     if problem is not None:
         not_resumable(problem)
     args.seed, mode, args.stage_timings = resumed_settings(args.resume)
+    args.stream = recorded_stream(args.resume)
     return mode
 
 
@@ -1897,6 +1935,9 @@ def main() -> None:
     parser.add_argument('--simulations', type=int, default=None,
                         help=f'profile mode: simulations per evaluation, S '
                              f'(default {PROFILE_SIMULATIONS})')
+    parser.add_argument('--stream', type=optimisation_stream, default=None,
+                        help='optimisation stream, 1 to 99, whose block g scores generation g '
+                             f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
     parser.add_argument('--stage-timings', action='store_true',
                         help="time run_covid's stages into timings_evaluation.csv")
     args = parser.parse_args()
@@ -1933,6 +1974,8 @@ def main() -> None:
     fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
+    fa.stream = (seed_streams.DEFAULT_OPTIMISATION_STREAM if args.stream is None
+                 else args.stream)
 
     # Task 7: the bounds come from one place, which the initial population is made from too.
     space = parameter_space.load()

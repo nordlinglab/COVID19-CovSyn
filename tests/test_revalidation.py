@@ -23,8 +23,7 @@ def test_seed_blocks_do_not_overlap_the_objective_or_each_other() -> None:
     """Seed blocks do not overlap the objective or each other."""
     blocks = rv.validation_seed_blocks(4, simulations=300)
     starts = [b.start for b in blocks]
-    assert all(b.start >= rv.VALIDATION_SEED_START for b in blocks)
-    assert rv.VALIDATION_SEED_START >= 300
+    assert all(b.start >= 200 * 10**7 for b in blocks)  # stream 200 (Task 7)
     assert all(len(b) == 300 for b in blocks)
     assert len({s for b in blocks for s in b}) == 1200
     assert starts == sorted(starts)
@@ -105,7 +104,7 @@ def test_default_seed_offset_is_the_objective_and_others_differ(
         demographic_parameters,
         cost_pool,
         *cheng_data,
-        seed_offset=rv.VALIDATION_SEED_START,
+        seed_offset=rv.validation_seed_blocks(1, 300)[0].start,
     )
     assert default == zero
     assert moved != default

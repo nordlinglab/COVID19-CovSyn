@@ -24,7 +24,8 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.runtime import runs
 from tests.firefly_standins import Killed, killed_on, objective
 
-RESUMABLE = {"moves": fo.MOVES, "initial_population": {"version": 1, "sha256": "x"}}
+RESUMABLE = {"moves": fo.MOVES, "initial_population": {"version": 1, "sha256": "x"},
+             "stream": 1}
 # what a Task 7 run records in its settings
 
 DIM = 208

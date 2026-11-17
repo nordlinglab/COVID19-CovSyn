@@ -62,20 +62,26 @@ def run(monkeypatch, tmp_path):
 
 
 def test_offset_of_each_generation_is_its_own_block():
-    """Generation g scores on its own 300 seeds; generation 0 shares 0..299 with the initial
-    population (F7)."""
-    assert fo.generation_seed_offset(0) == 0
-    assert fo.generation_seed_offset(5) == 5 * fo.SIMULATIONS_PER_EVALUATION
+    """Generation g scores on its own 300 seeds; generation 0 shares block 0 with the initial
+    population (F7). Task 7: blocks of the run's stream, from 10^7 on stream 1."""
+    first = fo.generation_seed_offset(0)
+    assert first == 10**7
+    assert fo.generation_seed_offset(5) == first + 5 * fo.SIMULATIONS_PER_EVALUATION
     offsets = {fo.generation_seed_offset(g) for g in range(120)}
     assert len(offsets) == 120
 
 
 def test_training_seeds_never_reach_the_validation_blocks():
-    """B60 re-scores candidates from 100000; a training block there would leak (E87)."""
-    from covsyn.calibration.revalidation import VALIDATION_SEED_START
+    """B60 re-scores candidates on unseen blocks; a training block there would leak (E87).
 
-    last = fo.generation_seed_offset(119) + fo.SIMULATIONS_PER_EVALUATION
-    assert last <= VALIDATION_SEED_START
+    Task 7: the optimisation and validation streams are disjoint by construction.
+    """
+    from covsyn.calibration.revalidation import validation_seed_blocks
+
+    training = {s for g in range(120) for s in range(fo.generation_seed_offset(g),
+                fo.generation_seed_offset(g) + fo.SIMULATIONS_PER_EVALUATION)}  # fmt: skip
+    validation = validation_seed_blocks(10, fo.SIMULATIONS_PER_EVALUATION)
+    assert not any(seed in training for block in validation for seed in block)
 
 
 def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):

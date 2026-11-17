@@ -1,0 +1,94 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Task 7, item 4: every use takes its seeds from its own stream.
+
+Optimisation scores generation g on block g of its stream (1-99, default 1), the initial
+population and generation 0 on block 0; revalidation scores block b of its validation stream
+(200-299, default 200); the pipeline's synthesis chooses the candidate on stream 301 and
+reports on stream 300 (decision of 2026-11-17: the report keeps E97's independent seeds). The
+constants VALIDATION_SEED_START and --seed_start are replaced.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+
+import numpy as np
+import pytest
+
+from covsyn.calibration import firefly_optimizer as fo
+from covsyn.calibration import revalidation as rv
+from covsyn.calibration import seed_streams as ss
+from covsyn.model import data_synthesis_main as dsm
+from covsyn.pipeline import config as pc
+from tests import firefly_standins as standins
+from tests.test_task7_optimiser import started  # noqa: F401 (a fixture)
+
+S = fo.SIMULATIONS_PER_EVALUATION
+
+
+def test_a_generation_is_scored_on_its_block_of_its_stream():
+    """Generation g: block g of the run's stream; the default stream is 1."""
+    assert fo.generation_seed_offset(0) == ss.block_start(1, 0, S) == 10**7
+    assert fo.generation_seed_offset(5, S, 7) == ss.block_start(7, 5, S)
+    assert fo.generation_seed_offset(3, 3000) == ss.block_start(1, 3, 3000)
+
+
+def test_a_run_scores_on_its_stream_and_records_it(tmp_path, monkeypatch):
+    """Every candidate, the initial population's too, on the run's stream; config.json says so."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    engine = fo.Firefly(pop_size=3, alpha=1, betamin=1, gamma=0.03, seed=2)
+    engine.stream = 4
+    engine.firefly(function=standins.recording, dim=208, lb=np.zeros(208), ub=np.ones(208),
+                   demographic_parameters=None, max_generations=2, max_workers=2,
+                   Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)  # fmt: skip
+    for name, block in (("initial", 0), ("generation_0000", 0), ("generation_0001", 1)):
+        with np.load(tmp_path / fo.CHECKPOINTS / f"{name}.npz") as saved:
+            offsets = {p["scored_offset"] for p in json.loads(str(saved["cost_parts"]))}
+        assert offsets == {ss.block_start(4, block, S)}, name
+    assert json.loads((tmp_path / "config.json").read_text())["settings"]["stream"] == 4
+
+
+def test_the_command_takes_the_stream(started):  # noqa: F811
+    """--stream sets it; without it, stream 1."""
+    assert started("--mode", "test")["engine"].stream == ss.DEFAULT_OPTIMISATION_STREAM
+
+
+@pytest.mark.parametrize("stream", ["0", "100", "200", "x"])
+def test_only_an_optimisation_stream_is_taken(monkeypatch, tmp_path, stream):
+    """1 to 99: the others are reserved for monitoring, validation and reporting."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--stream", stream,
+                                      "--run-dir", str(tmp_path / "r")])  # fmt: skip
+    with pytest.raises(SystemExit):
+        fo.main()
+    assert not (tmp_path / "r").exists()
+
+
+def test_revalidation_scores_blocks_of_its_validation_stream():
+    """Block b of stream 200 by default, of another validation stream when given."""
+    assert rv.validation_seed_blocks(3, S) == [ss.block_seeds(200, b, S) for b in range(3)]
+    assert rv.validation_seed_blocks(2, S, 205) == [ss.block_seeds(205, b, S) for b in range(2)]
+    assert not hasattr(rv, "VALIDATION_SEED_START")
+    with pytest.raises(ValueError):
+        rv.validation_seed_blocks(2, S, 1)  # an optimisation stream
+
+
+def test_synthesis_takes_a_stream_not_a_seed_start():
+    """Its Monte-Carlo seeds are block 0 of the stream, at the run's count."""
+    parser_args = dsm.synthesis_seeds(301, 1000)
+    assert parser_args == ss.block_seeds(301, 0, 1000)
+    with pytest.raises(ValueError):
+        dsm.synthesis_seeds(1, 1000)  # not a reporting or selection stream
+
+
+def test_the_pipeline_streams():
+    """Optimise on stream 1 and revalidate on 200 by default; the seed start is gone."""
+    config = pc.load("default")
+    assert (config.stream, config.validation_stream) == (1, 200)
+    assert "independent_seed_start" not in {f.name for f in pc.dataclasses.fields(config)}
+    with pytest.raises(ValueError, match="stream"):
+        pc.parse("[synthesise]\nindependent_seed_start = 500000\n", "test.toml")
+    for bad in ("[optimise]\nstream = 100\n", "[revalidate]\nstream = 1\n"):
+        with pytest.raises(ValueError):
+            pc.parse(bad, "test.toml")

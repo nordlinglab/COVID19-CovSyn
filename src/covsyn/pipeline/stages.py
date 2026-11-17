@@ -8,7 +8,7 @@ the chain's; what differs is where it goes. The chain wrote into the working dir
 run overwrote the last; here a run writes only into its own directories (Task 3):
 
 - ``results/models/<run-id>/``: the optimiser's files, revalidation/, selected/, and the
-  simulations under synthetic/ (seeds 0..999) and independent/ (seeds from 500000);
+  simulations under synthetic/ (stream 301) and independent/ (stream 300, Task 7);
 - ``results/tables/<run-id>/``: the age risk ratio, both checklists and the run report;
 - ``results/figures/<run-id>/``: the validation, todolist923 and Wu 2025 figures.
 
@@ -23,6 +23,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from covsyn.calibration import seed_streams
 from covsyn.pipeline.config import PipelineConfig
 from covsyn.runtime import measure, runs
 
@@ -57,7 +58,7 @@ class Layout:
         self.logs = self.run / "logs"
 
     def synthetic(self, mode: str) -> Path:
-        """The simulations of seeds 0..999, on which the candidate is chosen."""
+        """The simulations of stream 301, on which the candidate is chosen (Task 7)."""
         return self.run / "synthetic" / mode
 
     def independent(self, mode: str) -> Path:
@@ -145,6 +146,8 @@ def optimise(ctx: Context, resume: bool) -> None:
         ctx.config.mode,
         "--run-dir",
         run,
+        "--stream",
+        str(ctx.config.stream),
     ]
     ctx.must(args, "the optimiser", output=log)
 
@@ -197,6 +200,8 @@ def revalidate(ctx: Context) -> None:
             ctx.layout.run,
             out,
             str(ctx.config.revalidation_blocks),
+            "--stream",
+            str(ctx.config.validation_stream),
         ],
         "revalidation",
         output=ctx.layout.logs / "revalidate.log",
@@ -220,7 +225,7 @@ def select(ctx: Context) -> None:
     )
 
 
-def _synthesis(ctx: Context, mode: str, out: Path, seed_start: int | None) -> None:
+def _synthesis(ctx: Context, mode: str, out: Path, stream: int) -> None:
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)  # data_synthesis_main does not create its result path
     args = [
@@ -235,8 +240,7 @@ def _synthesis(ctx: Context, mode: str, out: Path, seed_start: int | None) -> No
         "--parameter_path",
         ctx.candidate,
     ]
-    if seed_start is not None:
-        args += ["--seed_start", str(seed_start)]
+    args += ["--stream", str(stream)]  # Task 7
     ctx.must(
         args,
         f"data synthesis of {out.relative_to(ctx.layout.run)}",
@@ -246,12 +250,14 @@ def _synthesis(ctx: Context, mode: str, out: Path, seed_start: int | None) -> No
 
 
 def synthesise(ctx: Context) -> None:
-    """Both modes on seeds 0..999, again on the independent seeds, and Cheng 2020 for Fig 6."""
+    """Both modes on streams 301 and 300, and Cheng 2020 for Fig 6 on 300 (Task 7).
+
+    The candidate is chosen on stream 301 and reported from stream 300 (E97).
+    """
     for mode in (SPREAD_MODE, FIRST_MODE):
-        _synthesis(ctx, mode, ctx.layout.synthetic(mode), None)
-    start = ctx.config.independent_seed_start
+        _synthesis(ctx, mode, ctx.layout.synthetic(mode), seed_streams.SELECTION_STREAM)
     for mode in (SPREAD_MODE, FIRST_MODE, CHENG_MODE):
-        _synthesis(ctx, mode, ctx.layout.independent(mode), start)
+        _synthesis(ctx, mode, ctx.layout.independent(mode), seed_streams.REPORTING_STREAM)
     # A synthesis can report success and write no simulation (chain step 5).
     for mode in (SPREAD_MODE, FIRST_MODE):
         if not list(ctx.layout.independent(mode).glob("social_data_*.npy")):

@@ -92,7 +92,8 @@ def test_the_default_configuration_matches_the_chains_defaults(config):
     """The chain's defaults: revalidation on 10 blocks (E95), the best 5 checked (B60), ..."""
     assert (config.revalidate, config.revalidation_blocks) == (True, 10)
     assert (config.select, config.select_top) == (True, 5)
-    assert (config.monte_carlo, config.independent_seed_start) == (1000, 500000)
+    assert config.monte_carlo == 1000
+    assert (config.stream, config.validation_stream) == (1, 200)  # Task 7
     assert config.age_rr_cases == 20000
     assert config.mode == "train" and config.workers is None
 
@@ -159,6 +160,7 @@ def test_the_optimiser_writes_into_the_run_directory(tmp_path, config):
     assert args[args.index("--run-dir") + 1] == str(run_dir)
     assert args[args.index("--mode") + 1] == "train"
     assert "--warm_start" not in args  # the warm starts are rows of the initial population
+    assert args[args.index("--stream") + 1] == "1"  # Task 7: the run's optimisation stream
 
 
 def test_revalidation_and_selection_stay_in_the_run_directory(tmp_path, config):
@@ -166,7 +168,8 @@ def test_revalidation_and_selection_stay_in_the_run_directory(tmp_path, config):
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     revalidation = recorder.calls[1]
-    assert revalidation[2:] == [str(run_dir), str(run_dir / "revalidation"), "10"]
+    assert revalidation[2:] == [str(run_dir), str(run_dir / "revalidation"), "10",
+                                "--stream", "200"]  # fmt: skip
     select = recorder.calls[2]
     assert select[2:] == [str(run_dir / "revalidation"), str(run_dir / "selected"), "5"]
 
@@ -207,7 +210,7 @@ def test_without_selection_the_revalidated_vector_is_used(tmp_path, config):
 
 
 def test_the_synthesis_runs_both_modes_and_the_independent_seeds(tmp_path, config):
-    """Seeds 0..999 for choosing, 500000.. for reporting (B60, E97), and Cheng 2020 for Fig 6."""
+    """Stream 301 for choosing, 300 for reporting (B60, E97; Task 7), and Cheng 2020 for Fig 6."""
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     syntheses = [a for a in recorder.calls if a[1] == "covsyn.model.data_synthesis_main"]
@@ -215,16 +218,16 @@ def test_the_synthesis_runs_both_modes_and_the_independent_seeds(tmp_path, confi
         (
             a[a.index("--mode") + 1],
             Path(a[a.index("--result_path") + 1]).relative_to(run_dir),
-            a[a.index("--seed_start") + 1] if "--seed_start" in a else None,
+            a[a.index("--stream") + 1],
         )
         for a in syntheses
     ]
     assert plan == [
-        ("spread_Taiwan_weight", Path("synthetic/spread_Taiwan_weight"), None),
-        ("taiwan_first_outbreak", Path("synthetic/taiwan_first_outbreak"), None),
-        ("spread_Taiwan_weight", Path("independent/spread_Taiwan_weight"), "500000"),
-        ("taiwan_first_outbreak", Path("independent/taiwan_first_outbreak"), "500000"),
-        ("cheng2020", Path("independent/cheng2020"), "500000"),
+        ("spread_Taiwan_weight", Path("synthetic/spread_Taiwan_weight"), "301"),
+        ("taiwan_first_outbreak", Path("synthetic/taiwan_first_outbreak"), "301"),
+        ("spread_Taiwan_weight", Path("independent/spread_Taiwan_weight"), "300"),
+        ("taiwan_first_outbreak", Path("independent/taiwan_first_outbreak"), "300"),
+        ("cheng2020", Path("independent/cheng2020"), "300"),
     ]
     assert all(a[a.index("--monte_carlo_number") + 1] == "1000" for a in syntheses)
 

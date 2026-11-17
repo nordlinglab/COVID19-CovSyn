@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from covsyn.calibration import seed_streams
+
 PACKAGED = Path(__file__).resolve().parent
 
 
@@ -24,12 +26,13 @@ class PipelineConfig:
 
     mode: str = "train"
     config_name: str = "phase-d"
+    stream: int = seed_streams.DEFAULT_OPTIMISATION_STREAM  # Task 7
     revalidate: bool = True
     revalidation_blocks: int = 10
+    validation_stream: int = seed_streams.DEFAULT_VALIDATION_STREAM  # Task 7
     select: bool = True
     select_top: int = 5
     monte_carlo: int = 1000
-    independent_seed_start: int = 500000
     age_rr_cases: int = 20000
     previous_checks: str = ""
     workers: int | None = None  # None: each step's own default
@@ -39,6 +42,14 @@ class PipelineConfig:
 REMOVED = {
     ("optimise", "warm_start"): "the warm starts are rows of the initial population since "
     "Task 7; make a new version with covsyn-initial-population to change them",
+    ("synthesise", "independent_seed_start"): "since Task 7 the reported synthesis takes its "
+    "seeds from stream 300 and the chosen one from stream 301",
+}
+
+# Task 7: settings that name a stream, and the streams each may name.
+STREAMS = {
+    "stream": seed_streams.OPTIMISATION_STREAMS,
+    "validation_stream": seed_streams.VALIDATION_STREAMS,
 }
 
 # TOML section and key -> field, with the check each value must pass.
@@ -46,15 +57,16 @@ SCHEMA: dict[str, dict[str, tuple[str, type, Any]]] = {
     "optimise": {
         "mode": ("mode", str, None),
         "config_name": ("config_name", str, None),
+        "stream": ("stream", int, None),
     },
     "revalidate": {
         "enabled": ("revalidate", bool, None),
         "blocks": ("revalidation_blocks", int, 1),
+        "stream": ("validation_stream", int, None),
     },
     "select": {"enabled": ("select", bool, None), "top": ("select_top", int, 1)},
     "synthesise": {
         "monte_carlo": ("monte_carlo", int, 1),
-        "independent_seed_start": ("independent_seed_start", int, 0),
     },
     "check": {
         "age_rr_cases": ("age_rr_cases", int, 1),
@@ -71,6 +83,10 @@ def _value(section: str, key: str, raw: Any) -> tuple[str, Any]:
         raise ValueError(f"[{section}] {key} must be {kind.__name__}, got {raw!r}")
     if minimum is not None and raw < minimum:
         raise ValueError(f"[{section}] {key} must be at least {minimum}, got {raw!r}")
+    if field in STREAMS and raw not in STREAMS[field]:
+        allowed = STREAMS[field]
+        raise ValueError(f"[{section}] {key} must be a stream of {allowed.start} to "
+                         f"{allowed.stop - 1}, got {raw!r}")  # fmt: skip
     if field == "workers":
         return field, raw or None
     return field, raw

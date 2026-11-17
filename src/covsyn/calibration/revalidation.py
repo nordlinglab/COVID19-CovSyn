@@ -29,10 +29,9 @@ from typing import Any
 
 import numpy as np
 
+from covsyn.calibration import seed_streams
 from covsyn.runtime import hardware
 
-# Far above the objective's seeds 0..299 and the chain's Monte-Carlo seeds 0..999.
-VALIDATION_SEED_START = 100000
 REPORTED_OUTCOMES = (
     "community_tail_ratio",
     "community_median",
@@ -48,22 +47,28 @@ REPORTED_OUTCOMES = (
 )
 
 
-def validation_seed_blocks(blocks: int, simulations: int) -> list[range]:
-    """Disjoint seed blocks of one objective evaluation each, starting at VALIDATION_SEED_START.
+def validation_seed_blocks(
+    blocks: int, simulations: int, stream: int = seed_streams.DEFAULT_VALIDATION_STREAM
+) -> list[range]:
+    """Blocks 0 to blocks - 1 of a validation stream, one objective evaluation each (Task 7).
+
+    Until Task 7 they started at seed 100,000; each use now takes its own stream of 200-299,
+    so every use gets fresh blocks and none meets the optimisation's.
 
     Args:
         blocks: Number of blocks.
         simulations: Simulations per objective evaluation.
+        stream: The validation stream, 200 to 299.
 
     Returns:
         One range of seeds per block.
+
+    Raises:
+        ValueError: The stream is not a validation stream, or a block falls outside it.
     """
-    return [
-        range(
-            VALIDATION_SEED_START + b * simulations, VALIDATION_SEED_START + (b + 1) * simulations
-        )
-        for b in range(blocks)
-    ]
+    if isinstance(stream, bool) or stream not in seed_streams.VALIDATION_STREAMS:
+        raise ValueError(f"stream {stream!r} is not a validation stream (200 to 299)")
+    return [seed_streams.block_seeds(stream, b, simulations) for b in range(blocks)]
 
 
 def load_candidates(firefly_dir: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -160,6 +165,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("firefly_dir", type=Path)
     parser.add_argument("out_dir", type=Path)
     parser.add_argument("blocks", type=int, nargs="?", default=10)  # E95: 4 left it noisy
+    parser.add_argument(
+        "--stream",
+        type=int,
+        default=seed_streams.DEFAULT_VALIDATION_STREAM,
+        help="validation stream, 200 to 299, whose blocks 0.. score the candidates (Task 7)",
+    )
     hardware.add_workers_argument(parser)  # Task 2: was 32 workers (D3)
     args = parser.parse_args(argv)
     firefly_dir, out_dir, blocks = args.firefly_dir, args.out_dir, args.blocks
@@ -175,11 +186,14 @@ def main(argv: list[str] | None = None) -> None:
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
     vectors, train = load_candidates(firefly_dir)
-    seed_blocks = validation_seed_blocks(blocks, fo.SIMULATIONS_PER_EVALUATION)
+    try:
+        seed_blocks = validation_seed_blocks(blocks, fo.SIMULATIONS_PER_EVALUATION, args.stream)
+    except ValueError as error:
+        parser.error(str(error))
     print(
         f"commit {commit or '(not a git checkout)'}; {len(vectors)} candidates from "
-        f"{firefly_dir}; {blocks} blocks of {fo.SIMULATIONS_PER_EVALUATION} seeds from "
-        f"{VALIDATION_SEED_START}",
+        f"{firefly_dir}; {blocks} blocks of {fo.SIMULATIONS_PER_EVALUATION} seeds of stream "
+        f"{args.stream}, from {seed_blocks[0].start if seed_blocks else '-'}",
         flush=True,
     )
 
