@@ -117,9 +117,13 @@ def test_a_profile_of_more_simulations_than_a_block_holds_is_refused(monkeypatch
 @pytest.mark.parametrize("text", ['[optimise]\nwarm_start = ["a.txt"]\n',
                                   "[synthesise]\nindependent_seed_start = 500000\n"])  # fmt: skip
 def test_a_removed_setting_says_a_run_from_before_task_7_cannot_resume(text):
-    """Its saved pipeline.toml still sets one; the refusal says why that run cannot continue."""
-    with pytest.raises(ValueError, match="before Task 7 cannot be resumed"):
+    """A new file is told to drop it; a saved run that sets it cannot be resumed.
+
+    A saved pipeline.toml that still sets one belongs to a run started before Task 7.
+    """
+    with pytest.raises(ValueError, match="remove it") as error:
         pc.parse(text, "pipeline.toml")
+    assert "pipeline.toml that sets it belongs to a run started before Task 7" in str(error.value)
 
 
 def test_the_synthesis_modes_take_their_seeds_from_the_stream():

@@ -93,3 +93,6 @@ def test_one_check_says_which_streams_a_use_may_take():
     for bad in (True, 7.0, "7", None):
         with pytest.raises(ValueError):
             ss.require(bad, ss.OPTIMISATION_STREAMS, "optimisation")
+    with pytest.raises(ValueError, match="one of the optimisation streams") as error:
+        ss.require(100, ss.OPTIMISATION_STREAMS, "optimisation")
+    assert "a optimisation" not in str(error.value)

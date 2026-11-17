@@ -60,9 +60,9 @@ def require(stream, allowed, use: str) -> int:
     Raises:
         ValueError: It is not a whole number, or not one of them; the message names the use.
     """
-    stream = _whole(stream, f"a {use} stream")
+    stream = _whole(stream, f"the {use} stream")
     if stream not in allowed:
-        raise ValueError(f"{stream} is not a {use} stream ({_described(allowed)})")
+        raise ValueError(f"{stream} is not one of the {use} streams ({_described(allowed)})")
     return stream
 
 
