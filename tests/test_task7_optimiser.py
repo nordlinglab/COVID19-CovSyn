@@ -231,20 +231,23 @@ def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
     assert (run / "bound.txt").read_bytes() == before  # the run's own, not rewritten
 
 
-@pytest.mark.parametrize("shift", [1e-9, None])  # other bounds, or no record of them
-def test_a_run_resumed_under_other_bounds_is_refused(monkeypatch, tmp_path, shift):
+@pytest.mark.parametrize("case, said", [("other", "other bounds"), ("missing", "no bound.txt"),
+                                        ("broken", "cannot be read")])  # fmt: skip
+def test_a_run_resumed_under_other_bounds_is_refused(monkeypatch, tmp_path, case, said):
     """The checkpoint's positions belong to the bounds the run started with (bound.txt)."""
-    run = _resumable(tmp_path, upper_shift=shift or 0.0)
-    if shift is None:
+    run = _resumable(tmp_path, upper_shift=1e-9 if case == "other" else 0.0)
+    if case == "missing":
         (run / "bound.txt").unlink()
+    elif case == "broken":
+        (run / "bound.txt").write_text("1 2 3\n4 5\n")
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
-    said = []
+    messages = []
 
     def refusing(message):
-        said.append(message)
+        messages.append(message)
         raise SystemExit(runs.NOT_RESUMABLE)
 
     monkeypatch.setattr(fo, "not_resumable", refusing)
     with pytest.raises(SystemExit) as stop:
         fo.main()
-    assert stop.value.code == runs.NOT_RESUMABLE and "bounds" in said[-1]
+    assert stop.value.code == runs.NOT_RESUMABLE and said in messages[-1]

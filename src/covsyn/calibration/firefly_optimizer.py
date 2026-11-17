@@ -1821,10 +1821,14 @@ def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) ->
     Raises:
         SystemExit: runs.NOT_RESUMABLE when bound.txt is missing, unreadable or different.
     """
+    path = Path(run_dir) / 'bound.txt'
+    if not path.is_file():
+        not_resumable(f'{run_dir} cannot be resumed: no bound.txt records the bounds it '
+                      f'started with')
     try:
-        recorded = np.loadtxt(Path(run_dir) / 'bound.txt')
+        recorded = np.loadtxt(path)
     except (OSError, ValueError) as error:
-        not_resumable(f'{run_dir} cannot be resumed: no bounds it started with ({error!r})')
+        not_resumable(f'{run_dir} cannot be resumed: its bound.txt cannot be read ({error!r})')
     if recorded.shape != (2, len(lower)) or not (np.array_equal(recorded[0], lower)
                                                   and np.array_equal(recorded[1], upper)):
         not_resumable(f'{run_dir} started with other bounds or another dimension than '
