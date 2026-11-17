@@ -19,6 +19,8 @@ from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration import initial_population, parameter_space, seed_streams
+# Task 7: kept here under their names for the callers; they live with the bounds.
+from covsyn.calibration.parameter_space import clip_warm_start, pad_pre_b54_vector  # noqa: F401
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -29,9 +31,7 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_p
                                            one_day_counts, one_day_shape)
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
-from covsyn.model.data_synthesize import (COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX,
-                                          COMMUNITY_POWER_LAW_INDEX,
-                                          WORK_GROUP_SATURATION_INDEX)
+from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 # from sklearn.metrics.pairwise import nan_euclidean_distances
@@ -1471,44 +1471,6 @@ def decode_metrics(P):
     m['municipality_contacts_lambda'] = P[28]
     m['municipality_healthy_p'] = P[30]
     return {k: float(v) for k, v in m.items()}
-
-
-def clip_warm_start(vector: np.ndarray, lb: np.ndarray, ub: np.ndarray, label: str) -> np.ndarray:
-    """Clip a starting vector to the search bounds and say which values moved.
-
-    Rebuilt bounds can exclude an earlier best vector (B75: run 18's attack rates fall outside the
-    bounds rebuilt for the work calendar in 17 places), and the firefly then starts somewhere
-    other than the vector and cost the run log names.
-    """
-    clipped = np.clip(vector, lb, ub)
-    moved = np.flatnonzero(clipped != vector)
-    if len(moved):
-        print(f'warm start: {label}: {len(moved)} of {len(vector)} values clipped to the bounds '
-              f'({", ".join(f"P[{i}]" for i in moved)})', flush=True)
-    return clipped
-
-
-def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarray:
-    """Extend a pre-B54 warm-start vector with the seed values of the appended parameters.
-
-    Args:
-        vector: A best vector read from an earlier run.
-        seed_vector: The literature seed vector of this run.
-
-    Returns:
-        The vector with the seed values of the missing tail appended when it has exactly the
-        199 values of run 10 and earlier, the 204 values of runs 11-16 (before B62's
-        P[204]) or the 205 values of run 17 (before B64's P[205]); otherwise the vector
-        unchanged, so a misaligned vector of any other length still fails the caller's shape
-        check instead of being padded into a plausible-looking start.
-    """
-    # B62: a vector of run 11-16 ends before P[204] and is padded the same way; B64: so does
-    # a run-17 vector, which ends before P[205].
-    if (vector.size in (COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX,
-                        WORK_GROUP_SATURATION_INDEX)
-            and vector.size < seed_vector.size):
-        return np.concatenate([vector, seed_vector[vector.size:]])
-    return vector
 
 
 class Firefly:

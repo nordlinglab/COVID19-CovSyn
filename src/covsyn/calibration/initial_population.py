@@ -52,10 +52,10 @@ def normalise(vector: np.ndarray, lower: np.ndarray, upper: np.ndarray, label: s
 
     A parameter whose bounds coincide has span 1, so its coordinate is 0.
     """
-    from covsyn.calibration.firefly_optimizer import clip_warm_start
-
     span = np.where(upper > lower, upper - lower, 1.0)
-    return np.clip((clip_warm_start(vector, lower, upper, label) - lower) / span, 0, 1)
+    return np.clip(
+        (parameter_space.clip_warm_start(vector, lower, upper, label) - lower) / span, 0, 1
+    )
 
 
 def best_of(path: Path) -> np.ndarray:
@@ -70,12 +70,10 @@ def build(space: parameter_space.ParameterSpace, root: Path = Path(".")) -> np.n
     Raises:
         SystemExit: A warm start does not have the bounds' dimension once padded (B54).
     """
-    from covsyn.calibration.firefly_optimizer import pad_pre_b54_vector
-
     lower, upper = space.lower, space.upper
     rows = [normalise(space.literature, lower, upper, "literature vector")]
     for source in WARM_STARTS:
-        vector = pad_pre_b54_vector(best_of(root / source), space.literature)
+        vector = parameter_space.pad_pre_b54_vector(best_of(root / source), space.literature)
         if vector.shape != lower.shape:
             raise SystemExit(f"warm start {source}: {vector.size} parameters, "
                              f"expected {lower.size}")  # fmt: skip

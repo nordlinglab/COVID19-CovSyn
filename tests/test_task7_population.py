@@ -157,3 +157,18 @@ def test_version_1_is_committed_and_matches_the_generator(written):
     committed = REPO_ROOT / "variable" / "initial_population_v1.npz"
     with np.load(committed) as a, np.load(written) as b:
         assert str(a["sha256"]) == str(b["sha256"])
+
+
+def test_making_a_population_does_not_load_the_optimiser():
+    """The population needs the bounds and two helpers, not the optimiser: no import cycle."""
+    import subprocess
+    import sys
+
+    code = ("import sys, numpy as np, covsyn.calibration.initial_population as ip; "
+            "ip.normalise(np.ones(2), np.zeros(2), np.full(2, 2.0), 'x'); "
+            "print('covsyn.calibration.firefly_optimizer' in sys.modules)")  # fmt: skip
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         cwd=REPO_ROOT, check=True).stdout.strip()  # fmt: skip
+    assert out == "False"
+    assert fo.clip_warm_start is parameter_space.clip_warm_start
+    assert fo.pad_pre_b54_vector is parameter_space.pad_pre_b54_vector

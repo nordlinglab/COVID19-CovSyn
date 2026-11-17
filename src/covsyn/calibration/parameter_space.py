@@ -14,6 +14,12 @@ from pathlib import Path
 
 import numpy as np
 
+from covsyn.model.data_synthesize import (
+    COMMUNITY_EVENT_FIRST_INDEX,
+    COMMUNITY_POWER_LAW_INDEX,
+    WORK_GROUP_SATURATION_INDEX,
+)
+
 # The contact blocks in the order run_covid reads P, before the course of disease.
 CONTACT_BLOCKS = ("household", "school", "workplace", "health_care", "municipality",
                   "overdispersion")  # fmt: skip
@@ -45,3 +51,46 @@ def load(variable: Path = Path("./variable")) -> ParameterSpace:
     n = len(contact_lower)
     literature = np.hstack(((lower[:n] + upper[:n]) / 2, course))
     return ParameterSpace(lower, upper, literature)
+
+
+def clip_warm_start(vector: np.ndarray, lb: np.ndarray, ub: np.ndarray, label: str) -> np.ndarray:
+    """Clip a starting vector to the search bounds and say which values moved.
+
+    Rebuilt bounds can exclude an earlier best vector (B75: run 18's attack rates fall outside the
+    bounds rebuilt for the work calendar in 17 places), and the firefly then starts somewhere
+    other than the vector and cost the run log names.
+    """
+    clipped = np.clip(vector, lb, ub)
+    moved = np.flatnonzero(clipped != vector)
+    if len(moved):
+        print(
+            f"warm start: {label}: {len(moved)} of {len(vector)} values clipped to the bounds "
+            f"({', '.join(f'P[{i}]' for i in moved)})",
+            flush=True,
+        )
+    return clipped
+
+
+def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarray:
+    """Extend a pre-B54 warm-start vector with the seed values of the appended parameters.
+
+    Args:
+        vector: A best vector read from an earlier run.
+        seed_vector: The literature seed vector of this run.
+
+    Returns:
+        The vector with the seed values of the missing tail appended when it has exactly the
+        199 values of run 10 and earlier, the 204 values of runs 11-16 (before B62's
+        P[204]) or the 205 values of run 17 (before B64's P[205]); otherwise the vector
+        unchanged, so a misaligned vector of any other length still fails the caller's shape
+        check instead of being padded into a plausible-looking start.
+    """
+    # B62: a vector of run 11-16 ends before P[204] and is padded the same way; B64: so does
+    # a run-17 vector, which ends before P[205].
+    if (
+        vector.size
+        in (COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX, WORK_GROUP_SATURATION_INDEX)
+        and vector.size < seed_vector.size
+    ):
+        return np.concatenate([vector, seed_vector[vector.size :]])
+    return vector
