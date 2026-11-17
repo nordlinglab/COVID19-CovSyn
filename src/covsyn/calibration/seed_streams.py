@@ -87,6 +87,21 @@ def block_seeds(stream: int, block: int, simulations: int) -> range:
     return range(start, start + simulations)
 
 
+def first_seeds(stream: int, count: int) -> range:
+    """The first ``count`` seeds of a stream, for a use larger than one block of 10,000.
+
+    The age risk ratio measures 20,000 index cases on the stream of its checklist (Task 7).
+
+    Raises:
+        ValueError: The stream is not one of 0 to 301, or the count not 1 to 10^7.
+    """
+    stream = require(stream, range(EARLIER_STREAM, SELECTION_STREAM + 1), "reserved")
+    count = _whole(count, "the count")
+    if not 1 <= count <= STREAM_SPAN:
+        raise ValueError(f"{count} seeds is not 1 to {STREAM_SPAN}, what a stream holds")
+    return range(stream * STREAM_SPAN, stream * STREAM_SPAN + count)
+
+
 def block_start(stream: int, block: int, simulations: int) -> int:
     """The first seed of block ``block`` of ``stream``; see block_seeds."""
     return block_seeds(stream, block, simulations).start

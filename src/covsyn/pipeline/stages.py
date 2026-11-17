@@ -272,11 +272,9 @@ def repository_path(setting: str) -> Path | None:
     return path if path.is_absolute() else runs.REPO_ROOT / path
 
 
-def check(ctx: Context) -> None:
-    """The age risk ratio, then the checklist on both seed sets, and the previous run's."""
-    tables = ctx.layout.tables
-    age_rr = tables / "age_rr.json"
-    # B14 is judged on 20000 index cases, not the spread output (E68); before the checklist.
+def _age_rr(ctx: Context, stream: int, name: str, what: str) -> Path:
+    """Measure the age risk ratio on a stream into tables/<name>.json; its path."""
+    out = ctx.layout.tables / f"{name}.json"
     ctx.may(
         [
             "-m",
@@ -284,11 +282,26 @@ def check(ctx: Context) -> None:
             ctx.candidate,
             str(ctx.config.age_rr_cases),
             "--out",
-            age_rr,
+            out,
+            "--stream",
+            str(stream),
         ],
-        "the age risk ratio measurement",
-        output=tables / "age_rr.txt",
+        what,
+        output=ctx.layout.tables / f"{name}.txt",
     )
+    return out
+
+
+def check(ctx: Context) -> None:
+    """The age risk ratio, then the checklist on both seed sets, and the previous run's."""
+    tables = ctx.layout.tables
+    # B14 is judged on 20000 index cases, not the spread output (E68); before the checklist.
+    # Task 7 (decision of 2026-11-17): each checklist on its own stream, 301 for the chosen
+    # seeds and 300 for the independent ones, so the reported B14 is not on the chosen seeds.
+    age_rr = _age_rr(ctx, seed_streams.SELECTION_STREAM, "age_rr",
+                     "the age risk ratio measurement")  # fmt: skip
+    independent_age_rr = _age_rr(ctx, seed_streams.REPORTING_STREAM, "age_rr_independent",
+                                 "the independent age risk ratio measurement")  # fmt: skip
     env = {"AGE_RR_FILE": str(age_rr)}
     ctx.may(
         [
@@ -312,7 +325,7 @@ def check(ctx: Context) -> None:
         ],
         "the independent checklist",
         output=tables / "checks_independent.txt",
-        env=env,
+        env={"AGE_RR_FILE": str(independent_age_rr)},
     )
     previous = repository_path(ctx.config.previous_checks)
     if previous is not None and previous.is_file():

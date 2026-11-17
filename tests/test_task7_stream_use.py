@@ -151,3 +151,23 @@ def test_the_selection_synthesis_names_its_stream(tmp_path, monkeypatch):
         sel.evaluate_candidate(np.zeros(3), 1.0, tmp_path, {})
     syntheses = [a for a in calls if "covsyn.model.data_synthesis_main" in a]
     assert syntheses and all(a[a.index("--stream") + 1] == "301" for a in syntheses)
+    ages = [a for a in calls if "covsyn.validation.measure_age_rr" in a]
+    assert ages and all(a[a.index("--stream") + 1] == "301" for a in ages)
+
+
+def test_the_age_risk_ratio_takes_its_seeds_from_a_stream():
+    """The first n seeds of stream 301 by default, or of 300, split into the pool's batches."""
+    from covsyn.validation import measure_age_rr as mar
+
+    assert mar.parse_arguments(["run"]).stream == ss.SELECTION_STREAM
+    batches = mar.seed_batches(300, 20_000, workers=4)
+    assert [s for b in batches for s in b] == list(ss.first_seeds(300, 20_000))
+    for stream in ("1", "200"):
+        with pytest.raises(SystemExit):
+            mar.parse_arguments(["run", "--stream", stream])
+
+
+def test_the_pipeline_refuses_more_age_cases_than_a_stream_holds():
+    """age_rr_cases seeds come from one stream, at most 10^7."""
+    with pytest.raises(ValueError, match="at most"):
+        pc.parse("[check]\nage_rr_cases = 10000001\n", "test.toml")

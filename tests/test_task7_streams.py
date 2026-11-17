@@ -96,3 +96,11 @@ def test_one_check_says_which_streams_a_use_may_take():
     with pytest.raises(ValueError, match="one of the optimisation streams") as error:
         ss.require(100, ss.OPTIMISATION_STREAMS, "optimisation")
     assert "a optimisation" not in str(error.value)
+
+
+def test_the_first_seeds_of_a_stream():
+    """A count of seeds from a stream's start, beyond one block's 10,000 but within its 10^7."""
+    assert ss.first_seeds(301, 20_000) == range(301 * 10**7, 301 * 10**7 + 20_000)
+    for stream, count in ((301, 0), (301, 10**7 + 1), (302, 10), (True, 10)):
+        with pytest.raises(ValueError):
+            ss.first_seeds(stream, count)

@@ -51,6 +51,7 @@ REMOVED = {
 MAXIMA = {
     "monte_carlo": seed_streams.MAX_SIMULATIONS,
     "revalidation_blocks": seed_streams.MAX_BLOCKS,
+    "age_rr_cases": seed_streams.STREAM_SPAN,
 }
 
 # Task 7: settings that name a stream, and the streams each may name.

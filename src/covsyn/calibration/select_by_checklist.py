@@ -101,6 +101,8 @@ def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, env: dict
                 str(AGE_RR_CASES),
                 "--out",
                 str(age_rr),
+                "--stream",
+                str(seed_streams.SELECTION_STREAM),
             ],
             log,
             env=env,

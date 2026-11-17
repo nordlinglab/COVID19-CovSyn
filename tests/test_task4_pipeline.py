@@ -233,23 +233,29 @@ def test_the_synthesis_runs_both_modes_and_the_independent_seeds(tmp_path, confi
 
 
 def test_the_checklists_score_this_runs_age_risk_ratio(tmp_path, config):
-    """AGE_RR_FILE names this run's age_rr.json, never validation_reference's."""
+    """AGE_RR_FILE names this run's measurements, never validation_reference's.
+
+    Task 7 (decision of 2026-11-17): the checklist on the chosen seeds scores the age risk
+    ratio measured on stream 301, the independent one that measured on stream 300 (E97).
+    """
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     tables = ps.Layout(run_dir).tables
-    age = next(a for a in recorder.calls if a[1] == "covsyn.validation.measure_age_rr")
-    assert age[2:4] == [str(run_dir / "selected"), "20000"]
-    assert age[age.index("--out") + 1] == str(tables / "age_rr.json")
+    ages = [a for a in recorder.calls if a[1] == "covsyn.validation.measure_age_rr"]
+    assert [a[2:4] for a in ages] == [[str(run_dir / "selected"), "20000"]] * 2
+    assert [(a[a.index("--stream") + 1], a[a.index("--out") + 1]) for a in ages] == [
+        ("301", str(tables / "age_rr.json")),
+        ("300", str(tables / "age_rr_independent.json")),
+    ]
     checks = [
         (a, e)
         for a, e in zip(recorder.calls, recorder.envs, strict=True)
         if a[1] == "covsyn.validation.verify_phase_d"
     ]
-    assert [a[4] for a, _ in checks] == [
-        str(tables / "checks.json"),
-        str(tables / "checks_independent.json"),
+    assert [(a[4], e["AGE_RR_FILE"]) for a, e in checks] == [
+        (str(tables / "checks.json"), str(tables / "age_rr.json")),
+        (str(tables / "checks_independent.json"), str(tables / "age_rr_independent.json")),
     ]
-    assert all(e["AGE_RR_FILE"] == str(tables / "age_rr.json") for _, e in checks)
 
 
 def test_outputs_go_into_the_runs_tables_and_figures(tmp_path, config):
