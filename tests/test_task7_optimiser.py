@@ -233,7 +233,9 @@ def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("case, said", [("other", "other bounds"), ("missing", "no bound.txt"),
                                         ("broken", "cannot be read"),
-                                        ("one row", "cannot be read"),
+                                        ("one row", "a lower and an upper row"),
+                                        ("three rows", "a lower and an upper row"),
+                                        ("one value a row", "another dimension"),
                                         ("empty", "cannot be read")])  # fmt: skip
 def test_a_run_without_its_own_bounds_is_refused(monkeypatch, tmp_path, case, said):
     """The checkpoint's positions belong to the bounds the run started with (bound.txt).
@@ -250,6 +252,11 @@ def test_a_run_without_its_own_bounds_is_refused(monkeypatch, tmp_path, case, sa
         (run / "bound.txt").write_text("")
     elif case == "one row":  # the lower bounds only
         np.savetxt(run / "bound.txt", parameter_space.load().lower[None, :])
+    elif case == "three rows":
+        space = parameter_space.load()
+        np.savetxt(run / "bound.txt", np.vstack((space.lower, space.upper, space.upper)))
+    elif case == "one value a row":  # a run of dimension 1
+        np.savetxt(run / "bound.txt", [[0.0], [1.0]])
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
     messages = []
 
