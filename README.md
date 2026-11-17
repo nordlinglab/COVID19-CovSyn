@@ -94,7 +94,8 @@ The moves are drawn from `rng_seed` (`--seed`, default 1), so two runs of one co
 Each use takes its simulation seeds from its own stream: block b of stream s holds the seeds s × 10^7 + b × S to s × 10^7 + (b + 1) × S − 1.
 The optimiser takes streams 1 to 99 (`--stream`, default 1), revalidation 200 to 299 (default 200), the synthesis the candidate is chosen on stream 301, and the reported synthesis stream 300.
 The age risk ratio is measured on each checklist's stream, 301 for `checks.json` and 300 for `checks_independent.json`, into `age_rr.json` and `age_rr_independent.json`.
-Stream 0 holds the seeds of earlier runs, which the regression tests re-make, so a run's checklist differs from one made before these streams partly because its seeds differ.
+Stream 0 holds the seeds of earlier runs, which the regression tests re-make;
+a run draws from streams 300 and 301 instead, so its checklist differs from one made before these streams partly because its seeds differ.
 A run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`, with `config.json` recording the optimiser's settings, stream, initial population, `rng_seed`, workers, machine and versions, and `pipeline.toml` the pipeline's;
 its tables go into `results/tables/<run-id>/` and its figures into `results/figures/<run-id>/`.
 Each finished stage adds a line to `run.log`, and the optimiser saves a checkpoint after every generation, so

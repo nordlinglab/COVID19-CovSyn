@@ -8,15 +8,17 @@ never meets another's seeds. The reserved streams follow the rework plan
 (doc/plan_Nordling2026_CovSynFireflyNordlingLab.md in covid19-research, Task 7):
 
 ====== =========================================================================
-0      no new use: it holds the seeds of every earlier run (the objective's
-       0..299 and later blocks, the chain's 0..999, revalidation from 100,000,
-       reporting from 500,000), which the regression pipeline re-makes
+0      the seeds of every earlier run (the objective's 0..299 and later
+       blocks, the chain's 0..999, revalidation from 100,000, reporting from
+       500,000), taken only to re-make earlier output, as the regression
+       pipeline does
 1-99   optimisation, one stream per run
 100    the stopping rule's monitoring blocks (Task 9)
 200-299 validation, one stream per use
 300    the reporting checklist and report, on seeds the candidate was not chosen
-       on (E97)
-301    the synthesis the candidate is chosen on
+       on (E97): the synthesis's block 0 and the age risk ratio's first seeds
+301    the synthesis the candidate is chosen on and its age risk ratio, the
+       same two uses of the stream, which overlap from its first seed
 ====== =========================================================================
 
 The plan lists the run report under 301; the report stays on 300, as E97 decided, and the
