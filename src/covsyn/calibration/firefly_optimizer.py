@@ -1962,8 +1962,9 @@ def main() -> None:
     if mode == 'profile':
         pop_size = max_workers
         simulations = PROFILE_SIMULATIONS if args.simulations is None else args.simulations
-        if simulations < 1:
-            sys.exit(f'--simulations must be at least 1, not {simulations}')
+        if not 1 <= simulations <= seed_streams.MAX_SIMULATIONS:  # Task 7: one block's seeds
+            sys.exit(f'--simulations must be 1 to {seed_streams.MAX_SIMULATIONS}, '
+                     f'not {simulations}')
     elif args.simulations is not None:
         sys.exit('--simulations changes the objective, so it is for --mode profile only')
     else:

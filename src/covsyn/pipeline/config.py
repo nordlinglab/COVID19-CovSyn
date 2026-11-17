@@ -46,6 +46,13 @@ REMOVED = {
     "seeds from stream 300 and the chosen one from stream 301",
 }
 
+# Task 7: counts a stream bounds -- a block holds at most 10,000 seeds and a stream 1,000
+# blocks -- checked when the file is read rather than when the stage starts.
+MAXIMA = {
+    "monte_carlo": seed_streams.MAX_SIMULATIONS,
+    "revalidation_blocks": seed_streams.MAX_BLOCKS,
+}
+
 # Task 7: settings that name a stream, and the streams each may name.
 STREAMS = {
     "stream": seed_streams.OPTIMISATION_STREAMS,
@@ -83,6 +90,8 @@ def _value(section: str, key: str, raw: Any) -> tuple[str, Any]:
         raise ValueError(f"[{section}] {key} must be {kind.__name__}, got {raw!r}")
     if minimum is not None and raw < minimum:
         raise ValueError(f"[{section}] {key} must be at least {minimum}, got {raw!r}")
+    if field in MAXIMA and raw > MAXIMA[field]:
+        raise ValueError(f"[{section}] {key} must be at most {MAXIMA[field]}, got {raw!r}")
     if field in STREAMS and raw not in STREAMS[field]:
         allowed = STREAMS[field]
         raise ValueError(f"[{section}] {key} must be a stream of {allowed.start} to "

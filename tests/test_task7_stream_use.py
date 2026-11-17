@@ -92,3 +92,23 @@ def test_the_pipeline_streams():
     for bad in ("[optimise]\nstream = 100\n", "[revalidate]\nstream = 1\n"):
         with pytest.raises(ValueError):
             pc.parse(bad, "test.toml")
+
+
+@pytest.mark.parametrize("text", ["[synthesise]\nmonte_carlo = 10001\n",
+                                  "[revalidate]\nblocks = 1001\n"])  # fmt: skip
+def test_the_pipeline_refuses_more_than_a_stream_holds_at_once(text):
+    """A block holds at most 10,000 seeds and a stream 1,000 blocks: said at startup.
+
+    Not hours later, when the stage starts.
+    """
+    with pytest.raises(ValueError, match="at most"):
+        pc.parse(text, "test.toml")
+
+
+def test_a_profile_of_more_simulations_than_a_block_holds_is_refused(monkeypatch, tmp_path):
+    """--simulations is S, at most 10,000 per block: refused before the run is claimed."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "profile", "--simulations",
+                                      "10001", "--run-dir", str(tmp_path / "r")])  # fmt: skip
+    with pytest.raises(SystemExit, match="10000|10,000"):
+        fo.main()
+    assert not (tmp_path / "r").exists()
