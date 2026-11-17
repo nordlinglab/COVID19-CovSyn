@@ -273,8 +273,13 @@ def repository_path(setting: str) -> Path | None:
 
 
 def _age_rr(ctx: Context, stream: int, name: str, what: str) -> Path:
-    """Measure the age risk ratio on a stream into tables/<name>.json; its path."""
+    """Measure the age risk ratio on a stream into tables/<name>.json; its path.
+
+    An earlier attempt's file goes first, so a measurement that fails leaves none for the
+    checklist to score.
+    """
     out = ctx.layout.tables / f"{name}.json"
+    out.unlink(missing_ok=True)
     ctx.may(
         [
             "-m",
