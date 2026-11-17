@@ -240,8 +240,9 @@ def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
 def test_a_run_without_its_own_bounds_is_refused(monkeypatch, tmp_path, case, said):
     """The checkpoint's positions belong to the bounds the run started with (bound.txt).
 
-    Today's bounds must equal them; a bound.txt that is missing, cut short or empty is said
-    to be so, not taken for other bounds.
+    Today's bounds must equal them. A bound.txt that is missing, cut short, empty, or without
+    exactly a lower and an upper row is said to be so, not taken for other bounds; two rows of
+    another length are another dimension.
     """
     run = _resumable(tmp_path, upper_shift=1e-9 if case == "other" else 0.0)
     if case == "missing":

@@ -1834,7 +1834,7 @@ def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) ->
         not_resumable(f'{run_dir} cannot be resumed: its bound.txt cannot be read ({error!r})')
     if len(recorded) != 2:
         not_resumable(f'{run_dir} cannot be resumed: its bound.txt does not hold a lower and an '
-                      f'upper row ({len(recorded)} rows)')
+                      f'upper row (it holds {len(recorded)})')
     if recorded.shape != (2, len(lower)) or not (np.array_equal(recorded[0], lower)
                                                   and np.array_equal(recorded[1], upper)):
         not_resumable(f'{run_dir} started with other bounds or another dimension than '
