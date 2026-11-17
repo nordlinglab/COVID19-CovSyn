@@ -193,8 +193,8 @@ def test_two_runs_of_one_configuration_are_byte_identical(tmp_path):
         np.testing.assert_array_equal(initial["normalized"], pop["normalized"][:3])
 
 
-def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
-    """Its checkpoint holds the positions; a later population version must not stop it."""
+def _resumable(tmp_path, upper_shift=0.0):
+    """A run directory resume accepts, with bound.txt as written at its start, upper shifted."""
     import json
 
     run = tmp_path / "r"
@@ -203,6 +203,15 @@ def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
     settings = {"mode": "test", "moves": fo.MOVES, "stream": 1,
                 "initial_population": {"version": 1, "sha256": "x"}}  # fmt: skip
     (run / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": settings}))
+    space = parameter_space.load()
+    np.savetxt(run / "bound.txt", np.vstack((space.lower, space.upper + upper_shift)))
+    return run
+
+
+def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
+    """Its checkpoint holds the positions; a later population version must not stop it."""
+    run = _resumable(tmp_path)
+    before = (run / "bound.txt").read_bytes()
 
     def refusing(*args, **kwargs):
         raise AssertionError("the population was read for a resumed run")
@@ -219,3 +228,23 @@ def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
     with pytest.raises(_Started):
         fo.main()
     assert seen["resume"] is True and seen["initial_population"] is None
+    assert (run / "bound.txt").read_bytes() == before  # the run's own, not rewritten
+
+
+@pytest.mark.parametrize("shift", [1e-9, None])  # other bounds, or no record of them
+def test_a_run_resumed_under_other_bounds_is_refused(monkeypatch, tmp_path, shift):
+    """The checkpoint's positions belong to the bounds the run started with (bound.txt)."""
+    run = _resumable(tmp_path, upper_shift=shift or 0.0)
+    if shift is None:
+        (run / "bound.txt").unlink()
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
+    said = []
+
+    def refusing(message):
+        said.append(message)
+        raise SystemExit(runs.NOT_RESUMABLE)
+
+    monkeypatch.setattr(fo, "not_resumable", refusing)
+    with pytest.raises(SystemExit) as stop:
+        fo.main()
+    assert stop.value.code == runs.NOT_RESUMABLE and "bounds" in said[-1]

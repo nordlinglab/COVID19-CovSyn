@@ -1814,6 +1814,25 @@ def recorded_stream(run_dir: Path) -> int:
         not_resumable(f'{run_dir} cannot be resumed: its config.json stream: {error}')
 
 
+def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) -> None:
+    """Refuse to resume a run under bounds other than those it started with (Task 7).
+
+    Its checkpoints hold positions within the bounds in its bound.txt, which savetxt writes
+    exactly; resuming under others would move them in another box.
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when bound.txt is missing, unreadable or different.
+    """
+    try:
+        recorded = np.loadtxt(Path(run_dir) / 'bound.txt')
+    except (OSError, ValueError) as error:
+        not_resumable(f'{run_dir} cannot be resumed: no bounds it started with ({error!r})')
+    if recorded.shape != (2, len(lower)) or not (np.array_equal(recorded[0], lower)
+                                                  and np.array_equal(recorded[1], upper)):
+        not_resumable(f'{run_dir} started with other bounds or another dimension than '
+                      f'./variable now gives; it cannot be resumed under them')
+
+
 def optimisation_stream(text: str) -> int:
     """--stream: one of the optimisation streams, 1 to 99 (Task 7)."""
     try:
@@ -1943,7 +1962,9 @@ def main() -> None:
     # the bounds or the dimension differ from those it was made with. A resumed run continues
     # from its checkpoint and keeps the config.json that names its population.
     population = None
-    if args.resume is None:
+    if args.resume is not None:
+        check_resumed_bounds(args.resume, lower_bound, upper_bound)
+    else:
         population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
         population = initial_population.load(population_file, pop_size, lower_bound, upper_bound)
         fa.run_settings['initial_population'] = initial_population.describe(population_file)
@@ -1969,8 +1990,9 @@ def main() -> None:
     # Optimization
     if mode == 'profile':  # Task 5: the workers profile their tasks into the run directory
         fa.profile_dir = result_path / 'profile'
-    np.savetxt(result_path/'bound.txt',
-               np.vstack((lower_bound, upper_bound)))
+    if args.resume is None:  # a resumed run keeps the bounds it started with (Task 7)
+        np.savetxt(result_path/'bound.txt',
+                   np.vstack((lower_bound, upper_bound)))
     # E65: fast_cost.cost_function reduces inside the workers -- 1.63x on the steady-state
     # benchmark, on top of the 2.46x the batching gave (run 5 0.1284 s -> run 6 0.0523 s
     # per evaluation). It is verified bit-identical to cost_function() below on nine
