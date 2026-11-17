@@ -112,3 +112,11 @@ def test_a_profile_of_more_simulations_than_a_block_holds_is_refused(monkeypatch
     with pytest.raises(SystemExit, match="10000|10,000"):
         fo.main()
     assert not (tmp_path / "r").exists()
+
+
+@pytest.mark.parametrize("text", ['[optimise]\nwarm_start = ["a.txt"]\n',
+                                  "[synthesise]\nindependent_seed_start = 500000\n"])  # fmt: skip
+def test_a_removed_setting_says_a_run_from_before_task_7_cannot_resume(text):
+    """Its saved pipeline.toml still sets one; the refusal says why that run cannot continue."""
+    with pytest.raises(ValueError, match="before Task 7 cannot be resumed"):
+        pc.parse(text, "pipeline.toml")

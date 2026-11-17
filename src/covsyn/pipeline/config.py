@@ -117,7 +117,8 @@ def parse(text: str, source: str) -> PipelineConfig:
             raise ValueError(f"{source}: unknown section [{section}]")
         for key, raw in keys.items():
             if (section, key) in REMOVED:
-                raise ValueError(f"{source}: [{section}] {key} is gone: {REMOVED[section, key]}")
+                raise ValueError(f"{source}: [{section}] {key} is gone: {REMOVED[section, key]}; "
+                                 f"a run started before Task 7 cannot be resumed")  # fmt: skip
             if key not in SCHEMA[section]:
                 raise ValueError(f"{source}: unknown setting {key!r} in [{section}]")
             field, value = _value(section, key, raw)
