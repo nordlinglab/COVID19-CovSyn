@@ -18,7 +18,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration import parameter_space
+from covsyn.calibration import initial_population, parameter_space
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1537,27 +1537,21 @@ class Firefly:
                 'worst_iteration': np.asarray(worst_iteration, dtype=float),
                 'evaluations': evaluations, 'alpha': alpha}
 
-    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None, warm_start_vectors=(), resume=False):
-        normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
-        # fireflies = self.rng.uniform(lb, ub, (self.pop_size, dim))
+    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, initial_population=None, resume=False):
+        # Task 7: a run starts from the first pop_size rows of the committed initial population,
+        # in normalised coordinates, which main() reads and checks against the bounds: the
+        # literature vector (firefly 0), the warm starts (B49, E75: run 8 finished at 3.80
+        # while run 7's best vector scores 2.75 on run 8's own objective), then a Latin
+        # hypercube. Without one, as in the tests, the population is drawn from the seed.
+        if initial_population is None:
+            normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
+        else:
+            normalized_fireflies = np.array(initial_population, dtype=float)
+            if normalized_fireflies.shape != (self.pop_size, dim):
+                raise ValueError(f'initial population of shape {normalized_fireflies.shape}, '
+                                 f'expected {(self.pop_size, dim)}')
         # inverse of min-max normalization
         fireflies = normalized_fireflies*(ub-lb) + lb
-        # Seed firefly 0 at the literature central estimate instead of leaving the whole
-        # population random, so the run always contains the documented starting point.
-        if seed_vector is not None:
-            span = np.where((ub - lb) > 0, ub - lb, 1.0)
-            normalized_fireflies[0] = np.clip((clip_warm_start(seed_vector, lb, ub, 'seed vector') - lb) / span, 0, 1)
-            fireflies[0] = normalized_fireflies[0]*(ub-lb) + lb
-        # B49 (E75): fireflies 1.. start at the best vectors of earlier runs. Every run used to
-        # restart from the literature seed, and run 8 finished at 3.80 while run 7's best vector
-        # scores 2.75 on run 8's own objective -- a known better point the search never found.
-        span = np.where((ub - lb) > 0, ub - lb, 1.0)
-        for k, vector in enumerate(warm_start_vectors, start=1):
-            if k >= self.pop_size:
-                break
-            normalized_fireflies[k] = np.clip((clip_warm_start(vector, lb, ub, f'firefly {k}') - lb) / span, 0, 1)
-            fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
-            print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
         # Task 4: a resumed run continues from its last checkpoint; its config.json stands.
         if resume:
             check_progress_table(result_path)  # a checkpoint, and its table: else NOT_RESUMABLE
@@ -1878,8 +1872,10 @@ def main() -> None:
                         help='train (default), test or profile; a resumed run keeps its own')
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
-    # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
-    parser.add_argument('--warm_start', type=str, nargs='*', default=None)
+    # B49: firefly_best.txt files of earlier runs seeded fireflies 1..; since Task 7 the warm
+    # starts are rows of the initial population, and the option is refused with that reason.
+    parser.add_argument('--warm_start', type=str, nargs='*', default=None,
+                        help=argparse.SUPPRESS)
     # Task 3: the run writes into results/models/<run-id>/; covsyn-pipeline names it with
     # covsyn.runtime.runs and passes it here, so the chain knows where to read.
     parser.add_argument('--run-dir', type=Path, default=None,
@@ -1898,6 +1894,9 @@ def main() -> None:
     parser.add_argument('--stage-timings', action='store_true',
                         help="time run_covid's stages into timings_evaluation.csv")
     args = parser.parse_args()
+    if args.warm_start is not None and args.resume is None:
+        sys.exit('--warm_start is gone (Task 7): the warm starts are rows of the initial '
+                 'population; make a new version with covsyn-initial-population to change them')
 
     cores = hardware.performance_core_count()
     max_workers = hardware.resolve_workers(args.workers, os.environ, None, cores=cores.count)
@@ -1925,26 +1924,18 @@ def main() -> None:
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
-    fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start or [])}
+    fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
 
-    # Task 7: the bounds and the literature vector, which firefly 0 starts at, come from one
-    # place, which the initial population is made from too.
+    # Task 7: the bounds come from one place, which the initial population is made from too.
     space = parameter_space.load()
-    lower_bound, upper_bound, seed_vector = space.lower, space.upper, space.literature
-
-    warm_start_vectors = []
-    for path in args.warm_start or []:
-        earlier = np.atleast_2d(np.loadtxt(path))
-        vector = earlier[int(np.argmin(earlier[:, -1])), 1:-1]
-        padded = pad_pre_b54_vector(vector, seed_vector)
-        if padded.shape != lower_bound.shape:
-            sys.exit(f'warm start {path}: {vector.size} parameters, expected {lower_bound.size}')
-        warm_start_vectors.append(padded)
-        print(f'warm start from {path}: recorded cost {earlier[:, -1].min():.4f}'
-              + (f' for its {vector.size} parameters; P[{vector.size}:] from the seed vector'
-                 if padded.size != vector.size else ''), flush=True)
+    lower_bound, upper_bound = space.lower, space.upper
+    # Task 7: the first pop_size rows of the committed population, refused, not clipped, when
+    # the bounds or the dimension differ from those it was made with.
+    population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
+    population = initial_population.load(population_file, pop_size, lower_bound, upper_bound)
+    fa.run_settings['initial_population'] = initial_population.describe(population_file)
 
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
@@ -1984,7 +1975,7 @@ def main() -> None:
             function=evaluate_candidate, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
             demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=max_workers, Cheng_contact_array=Cheng_contact_array,
             Cheng_attack_rate=Cheng_attack_rate, norm_weights=norm_weights,
-            seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
+            initial_population=population,
             resume=args.resume is not None)
     fireflies_result = np.hstack((fireflies, np.matrix(intensities).T))
     best_result = np.hstack(

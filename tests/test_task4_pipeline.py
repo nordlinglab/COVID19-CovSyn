@@ -94,7 +94,6 @@ def test_the_default_configuration_matches_the_chains_defaults(config):
     assert (config.select, config.select_top) == (True, 5)
     assert (config.monte_carlo, config.independent_seed_start) == (1000, 500000)
     assert config.age_rr_cases == 20000
-    assert config.warm_start == ("results/models/phaseD_run10/firefly_best.txt",)
     assert config.mode == "train" and config.workers is None
 
 
@@ -152,14 +151,14 @@ def test_the_stages_run_in_the_chains_order(tmp_path, config):
     )  # the checklist reads its JSON (B14, E68)
 
 
-def test_the_optimiser_writes_into_the_run_directory_with_the_warm_start(tmp_path, config):
-    """Like launch_phase_d.sh: --mode train, the run directory, and the warm-start files."""
+def test_the_optimiser_writes_into_the_run_directory(tmp_path, config):
+    """Like launch_phase_d.sh: --mode train and the run directory; no warm start (Task 7)."""
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     args = recorder.calls[0]
     assert args[args.index("--run-dir") + 1] == str(run_dir)
     assert args[args.index("--mode") + 1] == "train"
-    assert args[args.index("--warm_start") + 1 :] == list(config.warm_start)
+    assert "--warm_start" not in args  # the warm starts are rows of the initial population
 
 
 def test_revalidation_and_selection_stay_in_the_run_directory(tmp_path, config):

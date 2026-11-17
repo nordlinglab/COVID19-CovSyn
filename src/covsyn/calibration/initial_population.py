@@ -31,6 +31,7 @@ LHS_SEED = 20261109
 WARM_STARTS = ("results/models/phaseD_run10/firefly_best.txt",
                "results/models/phaseD_run19/firefly_best.txt")  # fmt: skip
 VARIABLE = Path("./variable")
+CURRENT_VERSION = 1  # the population every run starts from
 
 
 def population_path(version: int, directory: Path = VARIABLE) -> Path:
@@ -120,6 +121,12 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray) -> np.ndarray
         raise SystemExit(f"{path} was made for other bounds (P[{', '.join(map(str, moved))}] "
                          f"differ); make a new version rather than clip")  # fmt: skip
     return normalized[:n].copy()
+
+
+def describe(path: Path) -> dict:
+    """The version and SHA-256 config.json records for the population at ``path``."""
+    with np.load(path) as saved:
+        return {"version": int(saved["version"]), "sha256": str(saved["sha256"])}
 
 
 def main(argv: list[str] | None = None) -> Path:

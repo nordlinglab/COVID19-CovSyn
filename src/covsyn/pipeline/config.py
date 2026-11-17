@@ -24,7 +24,6 @@ class PipelineConfig:
 
     mode: str = "train"
     config_name: str = "phase-d"
-    warm_start: tuple[str, ...] = ()
     revalidate: bool = True
     revalidation_blocks: int = 10
     select: bool = True
@@ -36,12 +35,17 @@ class PipelineConfig:
     workers: int | None = None  # None: each step's own default
 
 
+# Settings that existed and are gone, with the reason a file that still sets one is given.
+REMOVED = {
+    ("optimise", "warm_start"): "the warm starts are rows of the initial population since "
+    "Task 7; make a new version with covsyn-initial-population to change them",
+}
+
 # TOML section and key -> field, with the check each value must pass.
 SCHEMA: dict[str, dict[str, tuple[str, type, Any]]] = {
     "optimise": {
         "mode": ("mode", str, None),
         "config_name": ("config_name", str, None),
-        "warm_start": ("warm_start", list, None),
     },
     "revalidate": {
         "enabled": ("revalidate", bool, None),
@@ -67,10 +71,6 @@ def _value(section: str, key: str, raw: Any) -> tuple[str, Any]:
         raise ValueError(f"[{section}] {key} must be {kind.__name__}, got {raw!r}")
     if minimum is not None and raw < minimum:
         raise ValueError(f"[{section}] {key} must be at least {minimum}, got {raw!r}")
-    if field == "warm_start":
-        if not all(isinstance(path, str) for path in raw):
-            raise ValueError(f"[{section}] {key} must list file paths, got {raw!r}")
-        return field, tuple(raw)
     if field == "workers":
         return field, raw or None
     return field, raw
@@ -91,6 +91,8 @@ def parse(text: str, source: str) -> PipelineConfig:
         if section not in SCHEMA or not isinstance(keys, dict):
             raise ValueError(f"{source}: unknown section [{section}]")
         for key, raw in keys.items():
+            if (section, key) in REMOVED:
+                raise ValueError(f"{source}: [{section}] {key} is gone: {REMOVED[section, key]}")
             if key not in SCHEMA[section]:
                 raise ValueError(f"{source}: unknown setting {key!r} in [{section}]")
             field, value = _value(section, key, raw)

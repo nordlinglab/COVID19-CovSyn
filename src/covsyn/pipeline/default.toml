@@ -4,8 +4,8 @@
 [optimise]
 mode = "train"
 config_name = "phase-d"   # the name in a new run id
-# B49: firefly_best.txt files whose best vectors seed the initial population (WARM_START).
-warm_start = ["results/models/phaseD_run10/firefly_best.txt"]
+# B49's warm starts (run 10, and run 19) are rows of variable/initial_population_v1.npz since
+# Task 7; the warm_start setting is gone.
 
 [revalidate]
 enabled = true   # B56, E87 (REVALIDATE)

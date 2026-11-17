@@ -146,8 +146,6 @@ def optimise(ctx: Context, resume: bool) -> None:
         "--run-dir",
         run,
     ]
-    if ctx.config.warm_start:
-        args += ["--warm_start", *ctx.config.warm_start]
     ctx.must(args, "the optimiser", output=log)
 
 
