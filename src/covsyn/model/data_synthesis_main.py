@@ -854,10 +854,11 @@ def synthesis_seeds(stream: int, monte_carlo_number: int) -> range:
 DEVELOPER_MODES = ('test', 'profile')  # they run seeds from 0 of their own
 
 
-def seed_start_for(mode: str, stream: int | None, monte_carlo_number: int) -> int | None:
-    """The first Monte-Carlo seed of a synthesis: block 0 of its stream, 301 by default.
+def seed_start_for(mode: str, stream: int | None,
+                   monte_carlo_number: int) -> tuple[int | None, int | None]:
+    """The stream and first seed of a synthesis: block 0 of its stream, 301 by default.
 
-    The test and profile modes run their own seeds from 0 and take no stream (None).
+    The test and profile modes run their own seeds from 0 and take no stream: (None, None).
 
     Raises:
         ValueError: A stream given to test or profile, or one synthesis_seeds refuses.
@@ -865,9 +866,9 @@ def seed_start_for(mode: str, stream: int | None, monte_carlo_number: int) -> in
     if mode in DEVELOPER_MODES:
         if stream is not None:
             raise ValueError(f'--mode {mode} runs its own seeds from 0 and takes no --stream')
-        return None
+        return None, None
     stream = seed_streams.SELECTION_STREAM if stream is None else stream
-    return synthesis_seeds(stream, monte_carlo_number).start
+    return stream, synthesis_seeds(stream, monte_carlo_number).start
 
 
 def main() -> None:
@@ -908,8 +909,8 @@ def main() -> None:
     parameter_path = Path(args.parameter_path)
     mc_number = args.monte_carlo_number
     cpu_cores = hardware.resolve_workers(args.workers, os.environ, None)
-    try:
-        seed_start = seed_start_for(mode, args.stream, mc_number)
+    try:  # Task 7: before anything loads
+        stream, seed_start = seed_start_for(mode, args.stream, mc_number)
     except ValueError as error:
         parser.error(str(error))
     contact_weight = args.contact_weight
@@ -1001,8 +1002,7 @@ def main() -> None:
         write_run_metadata(result_path, mode=mode, contact_weight=contact_weight,
                            quarantine_breach=(quarantine_breach if mode in FIRST_WAVE_SEED_FILES
                                               else None),
-                           **options, stream=args.stream or seed_streams.SELECTION_STREAM,
-                           seed_start=seed_start,
+                           **options, stream=stream, seed_start=seed_start,
                            monte_carlo_number=mc_number,
                            parameter_path=str(parameter_path))
         print("--- Done %s seconds ---" % (time.time() - start_time))

@@ -127,15 +127,16 @@ def test_a_removed_setting_says_a_run_from_before_task_7_cannot_resume(text):
 
 
 def test_the_synthesis_modes_take_their_seeds_from_the_stream():
-    """A pipeline mode takes block 0 of its stream, 301 when none is given."""
-    assert dsm.seed_start_for("spread_Taiwan_weight", None, 1000) == ss.block_start(301, 0, 1000)
-    assert dsm.seed_start_for("cheng2020", 300, 1000) == ss.block_start(300, 0, 1000)
+    """A pipeline mode takes block 0 of its stream, 301 when none is given, and says which."""
+    assert dsm.seed_start_for("spread_Taiwan_weight", None, 1000) == (
+        301, ss.block_start(301, 0, 1000))
+    assert dsm.seed_start_for("cheng2020", 300, 1000) == (300, ss.block_start(300, 0, 1000))
 
 
 @pytest.mark.parametrize("mode", ["test", "profile"])
 def test_the_developer_modes_keep_their_seeds_and_refuse_a_stream(mode):
     """The test and profile modes run their own seeds from 0, so a stream is refused."""
-    assert dsm.seed_start_for(mode, None, 20_000) is None
+    assert dsm.seed_start_for(mode, None, 20_000) == (None, None)
     with pytest.raises(ValueError, match="own seeds"):
         dsm.seed_start_for(mode, 300, 1000)
 
