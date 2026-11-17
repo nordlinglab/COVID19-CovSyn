@@ -232,14 +232,21 @@ def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("case, said", [("other", "other bounds"), ("missing", "no bound.txt"),
-                                        ("broken", "cannot be read")])  # fmt: skip
-def test_a_run_resumed_under_other_bounds_is_refused(monkeypatch, tmp_path, case, said):
-    """The checkpoint's positions belong to the bounds the run started with (bound.txt)."""
+                                        ("broken", "cannot be read"),
+                                        ("empty", "cannot be read")])  # fmt: skip
+def test_a_run_without_its_own_bounds_is_refused(monkeypatch, tmp_path, case, said):
+    """The checkpoint's positions belong to the bounds the run started with (bound.txt).
+
+    Today's bounds must equal them; a bound.txt that is missing, cut short or empty is said
+    to be so, not taken for other bounds.
+    """
     run = _resumable(tmp_path, upper_shift=1e-9 if case == "other" else 0.0)
     if case == "missing":
         (run / "bound.txt").unlink()
     elif case == "broken":
         (run / "bound.txt").write_text("1 2 3\n4 5\n")
+    elif case == "empty":
+        (run / "bound.txt").write_text("")
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
     messages = []
 

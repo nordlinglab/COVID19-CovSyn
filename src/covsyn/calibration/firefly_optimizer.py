@@ -11,6 +11,7 @@ import pickle
 import sys
 import time
 import traceback
+import warnings
 import os
 from pathlib import Path
 from numpy.random import default_rng
@@ -1826,8 +1827,10 @@ def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) ->
         not_resumable(f'{run_dir} cannot be resumed: no bound.txt records the bounds it '
                       f'started with')
     try:
-        recorded = np.loadtxt(path)
-    except (OSError, ValueError) as error:
+        with warnings.catch_warnings():  # an empty file only warns, and reads as no values
+            warnings.simplefilter('error')
+            recorded = np.loadtxt(path)
+    except (OSError, ValueError, UserWarning) as error:
         not_resumable(f'{run_dir} cannot be resumed: its bound.txt cannot be read ({error!r})')
     if recorded.shape != (2, len(lower)) or not (np.array_equal(recorded[0], lower)
                                                   and np.array_equal(recorded[1], upper)):
