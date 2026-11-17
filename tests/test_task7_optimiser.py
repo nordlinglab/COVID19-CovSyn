@@ -154,3 +154,40 @@ def test_a_run_from_before_task_7_cannot_be_resumed(tmp_path, config):
     with pytest.raises(SystemExit) as stop:
         fo.resumed_settings(tmp_path)
     assert stop.value.code == runs.NOT_RESUMABLE
+
+
+# -- acceptance ------------------------------------------------------------------------------
+
+
+def _test_mode_run(run):
+    """covsyn-optimise --mode test into ``run``, with no seed, stream or population given."""
+    import subprocess
+
+    subprocess.run([sys.executable, "-m", "covsyn.calibration.firefly_optimizer", "--mode",
+                    "test", "--workers", "2", "--run-dir", str(run)],
+                   cwd=REPO_ROOT, check=True, timeout=1800)  # fmt: skip
+
+
+@pytest.mark.slow
+def test_two_runs_of_one_configuration_are_byte_identical(tmp_path):
+    """The plan's acceptance: the same populations, costs and selected vectors.
+
+    The candidates the pipeline selects from are the optimiser's final population and
+    archive, so those are compared; every checkpoint holds a generation's population and costs.
+    """
+    first, second = tmp_path / "first", tmp_path / "second"
+    _test_mode_run(first)
+    _test_mode_run(second)
+    names = sorted(p.name for p in (first / fo.CHECKPOINTS).iterdir())
+    assert names == sorted(p.name for p in (second / fo.CHECKPOINTS).iterdir())
+    assert len(names) == 11  # the initial population and 10 generations
+    for name in names:
+        with np.load(first / fo.CHECKPOINTS / name) as a, \
+                np.load(second / fo.CHECKPOINTS / name) as b:  # fmt: skip
+            for key in ("normalized", "fireflies", "intensities", "cost_parts"):
+                assert a[key].tobytes() == b[key].tobytes(), (name, key)
+    for result in ("firefly_best.txt", "firefly_archive.txt", "firefly_result.txt"):
+        assert (first / result).read_bytes() == (second / result).read_bytes(), result
+    assert runs.progress_path(first).read_bytes() == runs.progress_path(second).read_bytes()
+    with np.load(first / fo.CHECKPOINTS / "initial.npz") as initial, np.load(POPULATION) as pop:
+        np.testing.assert_array_equal(initial["normalized"], pop["normalized"][:3])
