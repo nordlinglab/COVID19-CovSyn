@@ -134,3 +134,15 @@ def test_the_developer_modes_keep_their_seeds_and_refuse_a_stream(mode):
     assert dsm.seed_start_for(mode, None, 20_000) is None
     with pytest.raises(ValueError, match="own seeds"):
         dsm.seed_start_for(mode, 300, 1000)
+
+
+def test_the_selection_synthesis_names_its_stream(tmp_path, monkeypatch):
+    """select_by_checklist chooses on stream 301, named, not left to the synthesis's default."""
+    from covsyn.calibration import select_by_checklist as sel
+
+    calls = []
+    monkeypatch.setattr(sel, "_run", lambda args, log, env=None: calls.append(list(args)))
+    with pytest.raises(FileNotFoundError):  # the checks.json it then reads was never written
+        sel.evaluate_candidate(np.zeros(3), 1.0, tmp_path, {})
+    syntheses = [a for a in calls if "covsyn.model.data_synthesis_main" in a]
+    assert syntheses and all(a[a.index("--stream") + 1] == "301" for a in syntheses)
