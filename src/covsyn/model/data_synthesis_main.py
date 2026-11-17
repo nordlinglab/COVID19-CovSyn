@@ -835,14 +835,18 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     return (demographic_data_list, social_data_list, course_of_disease_data_list, contact_data_list)
 
 
-SYNTHESIS_STREAMS = (seed_streams.SELECTION_STREAM, seed_streams.REPORTING_STREAM)
+# Stream 0 re-makes output recorded on the seeds from 0 of before Task 7, as the regression
+# pipeline does.
+SYNTHESIS_STREAMS = (seed_streams.SELECTION_STREAM, seed_streams.REPORTING_STREAM,
+                     seed_streams.EARLIER_STREAM)
 
 
 def synthesis_seeds(stream: int, monte_carlo_number: int) -> range:
     """The Monte-Carlo seeds of a synthesis: block 0 of its stream (Task 7).
 
     Stream 301 is the synthesis the candidate is chosen on, 300 the one reported from (E97).
-    They replace the seed starts 0 and 500,000 of before Task 7.
+    They replace the seed starts 0 and 500,000 of before Task 7; stream 0 re-makes output of
+    the seeds from 0.
 
     Raises:
         ValueError: The stream is neither, or the count is outside 1 to 10,000.

@@ -123,7 +123,8 @@ def wilson(successes, trials, z=1.959963984540054):
 
 
 # Task 7: the streams a checklist is scored on (E97): the chosen seeds and the reported ones.
-AGE_RR_STREAMS = (seed_streams.SELECTION_STREAM, seed_streams.REPORTING_STREAM)
+AGE_RR_STREAMS = (seed_streams.SELECTION_STREAM, seed_streams.REPORTING_STREAM,
+                  seed_streams.EARLIER_STREAM)  # 0: the seeds from 0 of before, as recorded
 
 
 def parse_arguments(argv=None):
@@ -164,8 +165,8 @@ def main():
         demo = pickle.load(f)
     columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
 
-    print('age risk ratio on %d index cases of stream %d, parameters from %s'
-          % (args.n, args.stream, directory))
+    # The printed report is a regression fixture; the stream goes into the JSON (Task 7).
+    print('age risk ratio on %d index cases, parameters from %s' % (args.n, directory))
     start = time.perf_counter()
     executor = concurrent.futures.ProcessPoolExecutor(
         max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns))

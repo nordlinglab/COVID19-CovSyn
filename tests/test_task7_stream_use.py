@@ -23,6 +23,7 @@ from covsyn.calibration import seed_streams as ss
 from covsyn.model import data_synthesis_main as dsm
 from covsyn.pipeline import config as pc
 from tests import firefly_standins as standins
+from tests.conftest import REPO_ROOT
 from tests.test_task7_optimiser import started  # noqa: F401 (a fixture)
 
 S = fo.SIMULATIONS_PER_EVALUATION
@@ -171,3 +172,22 @@ def test_the_pipeline_refuses_more_age_cases_than_a_stream_holds():
     """age_rr_cases seeds come from one stream, at most 10^7."""
     with pytest.raises(ValueError, match="at most"):
         pc.parse("[check]\nage_rr_cases = 10000001\n", "test.toml")
+
+
+def test_stream_0_reproduces_the_earlier_seeds():
+    """The regression pipeline re-makes output recorded on seeds 0.., stream 0 (Task 7)."""
+    from covsyn.validation import measure_age_rr as mar
+
+    assert dsm.seed_start_for("spread_Taiwan_weight", 0, 20) == (0, 0)
+    assert mar.parse_arguments(["run", "400", "--stream", "0"]).stream == 0
+    assert mar.seed_batches(0, 400, workers=4)[0][0] == 0
+
+
+def test_the_regression_pipeline_runs_on_stream_0():
+    """Its fixtures were recorded on seeds 0..; any other stream would change every file."""
+    from tests import pipeline_runner
+
+    steps = pipeline_runner.report_steps(REPO_ROOT)
+    age = steps["measure_age_rr"]
+    assert age[age.index("--stream") + 1] == "0"
+    assert pipeline_runner.SYNTHESIS_STREAM == ["--stream", "0"]
