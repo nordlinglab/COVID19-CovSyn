@@ -1119,6 +1119,9 @@ SIMULATIONS_PER_EVALUATION = 300
 ARCHIVE_EVERY = 5
 
 
+# Task 7: the move generator's seed when none is given.
+DEFAULT_RNG_SEED = 1
+
 # Task 6: the synchronous firefly algorithm (Yang, 2010). config.json records it, and a run
 # that does not, started before Task 6 with its sequential moves, is not resumed with these.
 MOVES = 'synchronous'
@@ -1511,9 +1514,9 @@ class Firefly:
         self.alpha = alpha
         self.betamin = betamin
         self.gamma = gamma
-        # Task 3: an unseeded run draws its seed here, so config.json can record it and the
-        # initial population can be drawn again from it.
-        self.seed = int(np.random.SeedSequence().entropy) if seed is None else seed
+        # Task 7: the seed of the moves, config.json's rng_seed; without one, the fixed default,
+        # so two runs of one configuration make the same moves (decision of 2026-11-17).
+        self.seed = DEFAULT_RNG_SEED if seed is None else seed
         self.rng = default_rng(self.seed)
         # Task 3: recorded in config.json with the settings above; main() adds its own.
         self.run_settings = {}
@@ -1562,7 +1565,7 @@ class Firefly:
                     'simulations': self.simulations, 'stage_timing': self.stage_timing,
                     **self.run_settings, 'moves': MOVES}  # Task 6: last, so nothing overrides it
         if checkpoint is None:
-            runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
+            runs.write_config(result_path, settings, rng_seed=self.seed, workers=max_workers,
                               initial_population=fireflies)
         # Create ONE persistent process pool reused for every evaluation in this run.
         # (Previously each evaluation created and tore down its own pool, re-spawning
@@ -1796,26 +1799,29 @@ def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
 
     Raises:
         SystemExit: With code runs.NOT_RESUMABLE when retrying cannot help: config.json is
-            missing, not a file, unreadable as JSON, or lacks a seed of at least 0 or a mode
+            missing, not a file, unreadable as JSON, or lacks an rng_seed of at least 0 or a mode
             of OPTIMISER_MODES. With a message (status 1) for any other read error, which may
             pass.
     """
     try:
         config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
-        seed, mode = config['seed'], config['settings']['mode']
+        seed, mode = config['rng_seed'], config['settings']['mode']
         stage_timing = config['settings'].get('stage_timing') is True
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
             TypeError) as error:  # what retrying cannot change
-        not_resumable(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
+        not_resumable(f'{run_dir} cannot be resumed: no rng_seed and mode in its config.json '
                       f'({error!r})')
     except OSError as error:  # a disk that may come back: retrying can help, so not that code
         raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})')
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
-        not_resumable(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
+        not_resumable(f'{run_dir} cannot be resumed: its config.json rng_seed is {seed!r}')
     if not isinstance(mode, str) or mode not in OPTIMISER_MODES:  # a list would not hash
         not_resumable(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
     if mode == 'profile':  # Task 5: its population is the worker count of that run
         not_resumable(f'{run_dir} is a profile, which is run again rather than resumed')
+    if 'initial_population' not in config['settings']:  # Task 7
+        not_resumable(f'{run_dir} was started before the committed initial population; its '
+                      f'generations cannot be continued from it')
     if config['settings'].get('moves') != MOVES:  # Task 6
         not_resumable(f'{run_dir} was started with the moves of before Task 6; its generations '
                       f'cannot be continued with the synchronous ones')
@@ -1885,8 +1891,8 @@ def main() -> None:
     parser.add_argument('--resume', type=Path, default=None,
                         help='run directory to continue from its last checkpoint (Task 4)')
     parser.add_argument('--seed', type=runs.non_negative_int, default=None,
-                        help='seed of the initial population, as config.json records it '
-                             '(default: drawn and recorded)')
+                        help="seed of the moves, config.json's rng_seed "
+                             f'(default {DEFAULT_RNG_SEED})')
     # Task 5
     parser.add_argument('--simulations', type=int, default=None,
                         help=f'profile mode: simulations per evaluation, S '

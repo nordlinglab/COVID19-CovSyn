@@ -174,7 +174,7 @@ def test_the_run_directory_holds_the_configuration(run):
 
     _, _, path = run
     config = json.loads((path / "config.json").read_text())
-    assert (config["seed"], config["workers"]) == (7, 2)
+    assert (config["rng_seed"], config["workers"]) == (7, 2)
     assert config["settings"]["pop_size"] == POP
     assert config["settings"]["max_generations"] == GENERATIONS
     digest = config["initial_population_sha256"]
@@ -187,7 +187,7 @@ def test_the_run_directory_holds_the_configuration(run):
 
 
 def test_an_unseeded_run_records_a_seed_that_redraws_it():
-    """Task 3: without a seed the optimiser draws one, so config.json is never seed null."""
+    """Without a seed the run takes the fixed default (Task 7), so rng_seed is never null."""
     first = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03)
     again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=first.seed)
     assert isinstance(first.seed, int)
@@ -204,7 +204,7 @@ def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, t
         engine.firefly(function=standins.crashes, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
                        demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,
                        Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)
-    assert json.loads((tmp_path / "config.json").read_text())["seed"] == 7
+    assert json.loads((tmp_path / "config.json").read_text())["rng_seed"] == 7
 
 
 def test_every_file_the_optimiser_writes_marks_its_directory(run):

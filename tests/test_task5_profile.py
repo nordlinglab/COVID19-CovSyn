@@ -167,7 +167,7 @@ def test_a_profile_that_could_not_start_is_not_written(tmp_path):
 
 def test_a_profile_run_cannot_be_resumed(tmp_path):
     """Its population is the worker count; a profile is run again, not continued."""
-    (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": {"mode": "profile"}}))
+    (tmp_path / "config.json").write_text(json.dumps({"rng_seed": 5, "settings": {"mode": "profile"}}))
     with pytest.raises(SystemExit) as stop:
         fo.resumed_settings(tmp_path)
     assert stop.value.code == runs.NOT_RESUMABLE

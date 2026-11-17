@@ -113,3 +113,44 @@ def test_the_pipeline_no_longer_takes_a_warm_start():
         pc.parse('[optimise]\nwarm_start = ["a.txt"]\n', "test.toml")
     lines = (pc.PACKAGED / "default.toml").read_text().splitlines()
     assert not [line for line in lines if line.strip().startswith("warm_start")]
+
+
+# -- item 4: the move generator's seed -------------------------------------------------------
+
+
+def test_the_move_seed_is_recorded_as_rng_seed(tmp_path, monkeypatch):
+    """config.json holds rng_seed, the seed of the moves (the population is the file's)."""
+    import json
+
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    engine = fo.Firefly(pop_size=2, alpha=1, betamin=1, gamma=0.03, seed=9)
+    engine.firefly(function=standins.objective, dim=208, lb=np.zeros(208), ub=np.ones(208),
+                   demographic_parameters=None, max_generations=1, max_workers=1,
+                   Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)  # fmt: skip
+    config = json.loads((tmp_path / "config.json").read_text())
+    assert config["rng_seed"] == 9 and "seed" not in config
+
+
+def test_without_a_seed_the_moves_use_the_fixed_default():
+    """Two runs of one configuration make the same moves without naming a seed (decision)."""
+    assert fo.Firefly(pop_size=2, alpha=1, betamin=1, gamma=0.03).seed == fo.DEFAULT_RNG_SEED
+    assert fo.DEFAULT_RNG_SEED == 1
+
+
+def test_the_command_records_the_default_seed(started):
+    """No --seed: the run's rng_seed is the default, not a drawn one."""
+    assert started("--mode", "test")["engine"].seed == fo.DEFAULT_RNG_SEED
+
+
+@pytest.mark.parametrize("config", [
+    {"seed": 5, "settings": {"mode": "train", "moves": "synchronous"}},
+    {"rng_seed": 5, "settings": {"mode": "train", "moves": "synchronous"}},
+])  # fmt: skip
+def test_a_run_from_before_task_7_cannot_be_resumed(tmp_path, config):
+    """Without rng_seed and the population it started from, it began from another population."""
+    import json
+
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    with pytest.raises(SystemExit) as stop:
+        fo.resumed_settings(tmp_path)
+    assert stop.value.code == runs.NOT_RESUMABLE

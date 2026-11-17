@@ -330,16 +330,17 @@ def _package_versions() -> dict[str, str]:
 def write_config(
     run_dir: Path,
     settings: Mapping[str, Any],
-    seed: int | None,
+    rng_seed: int | None,
     workers: int,
     initial_population: np.ndarray | None,
     lock: Path = REPO_ROOT / "uv.lock",
 ) -> Path:
     """Write ``run_dir/config.json`` with what it takes to reproduce the run.
 
-    That is every setting, the random seed and the worker count; the CPU model and the detected
-    cores; the Python and package versions; and the SHA-256 of ``uv.lock`` and of the initial
-    population (float64, C order), None where either does not exist.
+    That is every setting, the move generator's seed (rng_seed, Task 7) and the worker count;
+    the CPU model and the detected cores; the Python and package versions; and the SHA-256 of
+    ``uv.lock`` and of the initial population (float64, C order), None where either does not
+    exist.
 
     Raises:
         TypeError: A setting JSON cannot hold.
@@ -352,7 +353,7 @@ def write_config(
     )
     config = {
         "settings": dict(settings),
-        "seed": seed,
+        "rng_seed": rng_seed,
         "workers": workers,
         "machine": {
             "cpu_model": _cpu_model(),

@@ -109,7 +109,7 @@ def test_config_records_what_reproduces_the_run(tmp_path):
     path = runs.write_config(
         tmp_path,
         {"pop_size": 2, "gamma": 0.03},
-        seed=7,
+        rng_seed=7,
         workers=4,
         initial_population=population,
         lock=lock,
@@ -117,7 +117,7 @@ def test_config_records_what_reproduces_the_run(tmp_path):
     config = json.loads(path.read_text())
     assert path == tmp_path / "config.json"
     assert config["settings"] == {"pop_size": 2, "gamma": 0.03}
-    assert (config["seed"], config["workers"]) == (7, 4)
+    assert (config["rng_seed"], config["workers"]) == (7, 4)
     assert config["uv_lock_sha256"] == hashlib.sha256(b"version = 1\n").hexdigest()
     expected = hashlib.sha256(np.ascontiguousarray(population, dtype=float).tobytes()).hexdigest()
     assert config["initial_population_sha256"] == expected
@@ -130,7 +130,7 @@ def test_config_records_what_reproduces_the_run(tmp_path):
 def test_config_without_a_lock_or_population_records_none(tmp_path):
     """An installed copy without uv.lock, or a run that draws its population later."""
     path = runs.write_config(
-        tmp_path, {}, seed=None, workers=1, initial_population=None, lock=tmp_path / "missing.lock"
+        tmp_path, {}, rng_seed=None, workers=1, initial_population=None, lock=tmp_path / "missing.lock"
     )
     config = json.loads(path.read_text())
     assert config["uv_lock_sha256"] is None and config["initial_population_sha256"] is None
@@ -142,7 +142,7 @@ def test_config_refuses_settings_json_cannot_hold(tmp_path):
         runs.write_config(
             tmp_path,
             {"path": object()},
-            seed=0,
+            rng_seed=0,
             workers=1,
             initial_population=None,
             lock=tmp_path / "uv.lock",
@@ -209,7 +209,7 @@ def test_versions_are_recorded_without_an_installed_covsyn(monkeypatch, tmp_path
 
     monkeypatch.setattr(runs.metadata, "requires", missing)
     path = runs.write_config(
-        tmp_path, {}, seed=1, workers=1, initial_population=None, lock=tmp_path / "uv.lock"
+        tmp_path, {}, rng_seed=1, workers=1, initial_population=None, lock=tmp_path / "uv.lock"
     )
     assert json.loads(path.read_text())["versions"]["packages"]["numpy"] == np.__version__
 
