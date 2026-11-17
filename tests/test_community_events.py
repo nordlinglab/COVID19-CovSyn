@@ -252,8 +252,7 @@ def test_pre_b54_vector_saves_no_event_mask(
 
 def test_warm_start_pads_only_a_199_value_vector() -> None:
     """Warm start pads only a 199 value vector."""
-    pytest.importorskip("sklearn")  # firefly_optimizer imports it at module level
-    from covsyn.calibration.firefly_optimizer import pad_pre_b54_vector
+    from covsyn.calibration.parameter_space import pad_pre_b54_vector
 
     seed_vector = np.arange(204, dtype=float)
     padded = pad_pre_b54_vector(np.full(199, -1.0), seed_vector)

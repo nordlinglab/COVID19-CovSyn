@@ -19,8 +19,6 @@ from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration import initial_population, parameter_space, seed_streams
-# Task 7: kept here under their names for the callers; they live with the bounds.
-from covsyn.calibration.parameter_space import clip_warm_start, pad_pre_b54_vector  # noqa: F401
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,

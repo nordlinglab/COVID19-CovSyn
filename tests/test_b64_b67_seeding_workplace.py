@@ -162,11 +162,10 @@ def test_seed_rule_removes_days_before_arrival_and_layers_the_status_forbids():
 
 def test_warm_start_pads_a_run_17_vector():
     """A 205-value run-17 vector gets P[205..207] from the seed vector."""
-    pytest.importorskip("sklearn")
-    from covsyn.calibration import firefly_optimizer as fo
+    from covsyn.calibration import parameter_space as ps
 
     seed_vector = np.arange(208, dtype=float)
-    padded = fo.pad_pre_b54_vector(np.zeros(205), seed_vector)
+    padded = ps.pad_pre_b54_vector(np.zeros(205), seed_vector)
     assert padded.shape == (208,) and padded[205] == 205.0
 
 

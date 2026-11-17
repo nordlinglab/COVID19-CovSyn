@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from covsyn.calibration import firefly_optimizer as fo
+from covsyn.calibration import parameter_space
 from covsyn.model import data_synthesize as ds
 
 
@@ -72,10 +73,10 @@ def test_power_law_mode_draws_no_mass_event(
 def test_warm_start_pads_a_run16_vector() -> None:
     """A 204-value vector of runs 11-16 gets P[204] from the seed vector; others are left alone."""
     seed_vector = np.arange(205, dtype=float)
-    padded = fo.pad_pre_b54_vector(np.zeros(204), seed_vector)
+    padded = parameter_space.pad_pre_b54_vector(np.zeros(204), seed_vector)
     assert padded.shape == (205,) and padded[204] == 204.0
-    assert fo.pad_pre_b54_vector(np.zeros(199), seed_vector).shape == (205,)
-    assert fo.pad_pre_b54_vector(np.zeros(203), seed_vector).shape == (203,)
+    assert parameter_space.pad_pre_b54_vector(np.zeros(199), seed_vector).shape == (205,)
+    assert parameter_space.pad_pre_b54_vector(np.zeros(203), seed_vector).shape == (203,)
 
 
 def test_committed_bounds_carry_b62() -> None:

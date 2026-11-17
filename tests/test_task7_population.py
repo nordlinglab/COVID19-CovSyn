@@ -16,7 +16,6 @@ import numpy as np
 import pytest
 from scipy.stats import qmc
 
-from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration import initial_population as ip
 from covsyn.calibration import parameter_space
 from tests.conftest import REPO_ROOT, best_vector
@@ -66,7 +65,8 @@ def test_row_0_is_the_literature_vector_and_then_the_warm_starts(written, space)
     assert sources == list(ip.WARM_STARTS)
     np.testing.assert_array_equal(rows[0], _normalised(space.literature, space))
     for k, source in enumerate(ip.WARM_STARTS, start=1):
-        vector = fo.pad_pre_b54_vector(best_vector(REPO_ROOT / source), space.literature)
+        vector = parameter_space.pad_pre_b54_vector(best_vector(REPO_ROOT / source),
+                                                    space.literature)  # fmt: skip
         np.testing.assert_array_equal(rows[k], _normalised(vector, space))
 
 
@@ -170,5 +170,3 @@ def test_making_a_population_does_not_load_the_optimiser():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          cwd=REPO_ROOT, check=True).stdout.strip()  # fmt: skip
     assert out == "False"
-    assert fo.clip_warm_start is parameter_space.clip_warm_start
-    assert fo.pad_pre_b54_vector is parameter_space.pad_pre_b54_vector
