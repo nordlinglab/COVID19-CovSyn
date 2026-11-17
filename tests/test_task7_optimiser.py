@@ -191,3 +191,31 @@ def test_two_runs_of_one_configuration_are_byte_identical(tmp_path):
     assert runs.progress_path(first).read_bytes() == runs.progress_path(second).read_bytes()
     with np.load(first / fo.CHECKPOINTS / "initial.npz") as initial, np.load(POPULATION) as pop:
         np.testing.assert_array_equal(initial["normalized"], pop["normalized"][:3])
+
+
+def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
+    """Its checkpoint holds the positions; a later population version must not stop it."""
+    import json
+
+    run = tmp_path / "r"
+    (run / "checkpoints").mkdir(parents=True)
+    (run / "checkpoints" / "initial.npz").write_text("x")  # something to continue
+    settings = {"mode": "test", "moves": fo.MOVES, "stream": 1,
+                "initial_population": {"version": 1, "sha256": "x"}}  # fmt: skip
+    (run / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": settings}))
+
+    def refusing(*args, **kwargs):
+        raise AssertionError("the population was read for a resumed run")
+
+    monkeypatch.setattr(fo.initial_population, "load", refusing)
+    seen = {}
+
+    def firefly(self, **kwargs):
+        seen.update(kwargs)
+        raise _Started
+
+    monkeypatch.setattr(fo.Firefly, "firefly", firefly)
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
+    with pytest.raises(_Started):
+        fo.main()
+    assert seen["resume"] is True and seen["initial_population"] is None

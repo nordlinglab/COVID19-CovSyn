@@ -1982,10 +1982,13 @@ def main() -> None:
     space = parameter_space.load()
     lower_bound, upper_bound = space.lower, space.upper
     # Task 7: the first pop_size rows of the committed population, refused, not clipped, when
-    # the bounds or the dimension differ from those it was made with.
-    population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
-    population = initial_population.load(population_file, pop_size, lower_bound, upper_bound)
-    fa.run_settings['initial_population'] = initial_population.describe(population_file)
+    # the bounds or the dimension differ from those it was made with. A resumed run continues
+    # from its checkpoint and keeps the config.json that names its population.
+    population = None
+    if args.resume is None:
+        population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
+        population = initial_population.load(population_file, pop_size, lower_bound, upper_bound)
+        fa.run_settings['initial_population'] = initial_population.describe(population_file)
 
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
