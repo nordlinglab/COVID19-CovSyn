@@ -8,9 +8,9 @@ never meets another's seeds. The reserved streams follow the rework plan
 (doc/plan_Nordling2026_CovSynFireflyNordlingLab.md in covid19-research, Task 7):
 
 ====== =========================================================================
-0      none: it holds the seeds of every earlier run (the objective's 0..299 and
-       later blocks, the chain's 0..999, revalidation from 100,000, reporting
-       from 500,000)
+0      no new use: it holds the seeds of every earlier run (the objective's
+       0..299 and later blocks, the chain's 0..999, revalidation from 100,000,
+       reporting from 500,000), which the regression pipeline re-makes
 1-99   optimisation, one stream per run
 100    the stopping rule's monitoring blocks (Task 9)
 200-299 validation, one stream per use
@@ -95,7 +95,7 @@ def first_seeds(stream: int, count: int) -> range:
     Raises:
         ValueError: The stream is not one of 0 to 301, or the count not 1 to 10^7.
     """
-    stream = require(stream, range(EARLIER_STREAM, SELECTION_STREAM + 1), "reserved")
+    stream = require(stream, range(EARLIER_STREAM, SELECTION_STREAM + 1), "known")
     count = _whole(count, "the count")
     if not 1 <= count <= STREAM_SPAN:
         raise ValueError(f"{count} seeds is not 1 to {STREAM_SPAN}, what a stream holds")

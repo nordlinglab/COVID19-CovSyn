@@ -14,9 +14,13 @@ age gradient locked into its input comes out the other end.
 
 Writes validation_reference/age_rr.json, which verify_phaseD.py reads for B14.
 
+Task 7: the seeds are the first n of a stream: 301 by default, the seeds the candidate is
+chosen on, 300 for the independent checklist (E97), and 0 for the seeds from 0 earlier runs
+used, as the regression pipeline re-makes them.
+
 Usage:
     uv run python -m covsyn.validation.measure_age_rr \\
-        [firefly_result_dir] [n_index_cases] [--workers N]
+        [firefly_result_dir] [n_index_cases] [--workers N] [--stream 301|300|0]
 """
 import argparse
 import concurrent.futures
@@ -122,7 +126,8 @@ def wilson(successes, trials, z=1.959963984540054):
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
-# Task 7: the streams a checklist is scored on (E97): the chosen seeds and the reported ones.
+# Task 7: the streams a checklist is scored on (E97), the chosen seeds and the reported ones,
+# and stream 0 for the seeds from 0 earlier runs used.
 AGE_RR_STREAMS = (seed_streams.SELECTION_STREAM, seed_streams.REPORTING_STREAM,
                   seed_streams.EARLIER_STREAM)  # 0: the seeds from 0 of before, as recorded
 
@@ -136,7 +141,8 @@ def parse_arguments(argv=None):
     parser.add_argument('--out', default='validation_reference/age_rr.json')
     parser.add_argument('--stream', type=int, default=seed_streams.SELECTION_STREAM,
                         help='seed stream of the checklist it scores: 301, the chosen seeds '
-                             '(default), or 300, the reported ones (Task 7; seeds 0.. before)')
+                             '(default), 300, the reported ones, or 0, the seeds from 0 of '
+                             'before Task 7')
     args = parser.parse_args(argv)
     try:
         seed_streams.require(args.stream, AGE_RR_STREAMS, 'age risk ratio')

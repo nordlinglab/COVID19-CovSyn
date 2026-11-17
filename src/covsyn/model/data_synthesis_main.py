@@ -849,7 +849,7 @@ def synthesis_seeds(stream: int, monte_carlo_number: int) -> range:
     the seeds from 0.
 
     Raises:
-        ValueError: The stream is neither, or the count is outside 1 to 10,000.
+        ValueError: The stream is none of these, or the count is outside 1 to 10,000.
     """
     seed_streams.require(stream, SYNTHESIS_STREAMS, "synthesis")
     return seed_streams.block_seeds(stream, 0, monte_carlo_number)
@@ -904,9 +904,9 @@ def main() -> None:
     parser.add_argument('--seed_file', type=str, default=None,
                         help='first-wave modes: seed table replacing the mode\'s own (B79)')
     parser.add_argument('--stream', type=int, default=None,
-                        help='seed stream: 301, the candidate is chosen on it (default), or '
-                             '300, the reported one (Task 7; replaces --seed_start); not for '
-                             'the test and profile modes')
+                        help='seed stream: 301, the candidate is chosen on it (default), 300, '
+                             'the reported one, or 0, the seeds from 0 of before Task 7 '
+                             '(replaces --seed_start); not for the test and profile modes')
 
     args = parser.parse_args()
     mode = args.mode

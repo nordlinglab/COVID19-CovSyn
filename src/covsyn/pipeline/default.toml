@@ -23,7 +23,8 @@ monte_carlo = 1000              # A5: at least 1000; 100 was shown to be unrelia
 # is chosen on (0..999) stream 301; the independent_seed_start setting is gone.
 
 [check]
-age_rr_cases = 20000   # E68: about 4300 infections over the four age bands
+age_rr_cases = 20000   # E68: about 4300 infections over the four age bands; Task 7: measured
+                       # twice, on stream 301 for checks.json and 300 for checks_independent.json
 previous_checks = ""   # checks.json of the previous run, to compare with (PREVIOUS_CHECKS)
 
 [run]

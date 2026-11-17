@@ -46,8 +46,9 @@ REMOVED = {
     "seeds from stream 300 and the chosen one from stream 301",
 }
 
-# Task 7: counts a stream bounds -- a block holds at most 10,000 seeds and a stream 1,000
-# blocks -- checked when the file is read rather than when the stage starts.
+# Task 7: counts a stream bounds -- a block holds at most 10,000 seeds, a stream 1,000 blocks,
+# and the age risk ratio's seeds, the first of a stream, at most 10^7 -- checked when the file
+# is read rather than when the stage starts.
 MAXIMA = {
     "monte_carlo": seed_streams.MAX_SIMULATIONS,
     "revalidation_blocks": seed_streams.MAX_BLOCKS,
