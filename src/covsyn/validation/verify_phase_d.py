@@ -670,7 +670,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                   note='information: the same high-N measurement pooled over all five layers, '
                        'for the size of the composition effect (E70)')
     else:
-        check('B14', 'high-N age risk ratio measurement', None, 'measure_age_rr.py has not run',
+        check('B14', 'high-N age risk ratio measurement', None,
+              'measure_age_rr.py has not run, or failed',
               note='B14 is accepted on that measurement since E68; without it only the '
                    'informational rows above are available')
 
