@@ -18,6 +18,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.calibration import parameter_space
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1928,47 +1929,10 @@ def main() -> None:
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
 
-    with open('./variable/contact_parameters.pkl', 'rb') as f:
-        contact_parameters = pickle.load(f)
-    household_lower_bound = contact_parameters['household_lower_bound']
-    household_upper_bound = contact_parameters['household_upper_bound']
-    school_lower_bound = contact_parameters['school_lower_bound']
-    school_upper_bound = contact_parameters['school_upper_bound']
-    workplace_lower_bound = contact_parameters['workplace_lower_bound']
-    workplace_upper_bound = contact_parameters['workplace_upper_bound']
-    health_care_lower_bound = contact_parameters['health_care_lower_bound']
-    health_care_upper_bound = contact_parameters['health_care_upper_bound']
-    municipality_lower_bound = contact_parameters['municipality_lower_bound']
-    municipality_upper_bound = contact_parameters['municipality_upper_bound']
-    overdispersion_lower_bound = contact_parameters['overdispersion_lower_bound']
-    overdispersion_upper_bound = contact_parameters['overdispersion_upper_bound']
-
-    lower_bound = np.array(household_lower_bound + school_lower_bound +
-                           workplace_lower_bound + health_care_lower_bound + municipality_lower_bound +
-                           overdispersion_lower_bound)
-    upper_bound = np.array(household_upper_bound + school_upper_bound +
-                           workplace_upper_bound + health_care_upper_bound + municipality_upper_bound +
-                           overdispersion_upper_bound)
-
-    # Load course of disease data
-    course_parameters = np.load(
-        './variable/course_parameters.npy')
-    course_parameters_lb = np.load('./variable/course_parameters_lb.npy')
-    course_parameters_ub = np.load('./variable/course_parameters_ub.npy')
-    # Extend lb and hb to include the lower and upper bound of the course of disease
-    lower_bound = np.hstack(
-        (lower_bound, course_parameters_lb))
-    # lower_bound[lower_bound < 0] = 0
-    upper_bound = np.hstack(
-        (upper_bound, course_parameters_ub))
-    # upper_bound_tmp = upper_bound[65::]  # upper limit for probability
-    # upper_bound_tmp[upper_bound_tmp > 1] = 1
-    # upper_bound[65::] = upper_bound_tmp
-
-    # Literature central estimate for firefly 0: documented values for the course of
-    # disease block, midpoint of the bounds for the contact block (which has no central
-    # estimate stored).
-    seed_vector = np.hstack(((lower_bound[:37] + upper_bound[:37]) / 2, course_parameters))
+    # Task 7: the bounds and the literature vector, which firefly 0 starts at, come from one
+    # place, which the initial population is made from too.
+    space = parameter_space.load()
+    lower_bound, upper_bound, seed_vector = space.lower, space.upper, space.literature
 
     warm_start_vectors = []
     for path in args.warm_start or []:
