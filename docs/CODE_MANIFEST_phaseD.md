@@ -41,7 +41,7 @@ Entry points: `launch_run6.sh`, `phaseD_chain.sh`, `data_synthesis.sh`, the gate
 | Group | Files |
 |---|---|
 | Model | `Data_synthesize.py`, `Data_synthesis_main.py`, `R0_network.py`, `rw_data_processing.py`, `plot_results.py` (the Cheng binning lives here) |
-| Objective and optimizer | `firefly_optimizer.py`, `fast_cost.py`, `cost_parts.py`, `sar_anchors.py` |
+| Objective and optimizer | `firefly_optimizer.py`, `fast_cost.py`, `cost_parts.py`, `sar_anchors.py`, `parameter_space.py`, `initial_population.py` (Task 7), `seed_streams.py` (Task 7) |
 | Parameter setup | `apply_phaseD_parameters.py`, `rebuild_school_pmf.py` |
 | Run control | `launch_run6.sh`, `phaseD_chain.sh`, `data_synthesis.sh` |
 | Gates | `verify_fast_cost.py`, `smoke_run7.py` |
