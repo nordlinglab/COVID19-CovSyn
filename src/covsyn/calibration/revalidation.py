@@ -66,8 +66,7 @@ def validation_seed_blocks(
     Raises:
         ValueError: The stream is not a validation stream, or a block falls outside it.
     """
-    if isinstance(stream, bool) or stream not in seed_streams.VALIDATION_STREAMS:
-        raise ValueError(f"stream {stream!r} is not a validation stream (200 to 299)")
+    seed_streams.require(stream, seed_streams.VALIDATION_STREAMS, "validation")
     return [seed_streams.block_seeds(stream, b, simulations) for b in range(blocks)]
 
 

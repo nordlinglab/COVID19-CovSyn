@@ -55,8 +55,8 @@ MAXIMA = {
 
 # Task 7: settings that name a stream, and the streams each may name.
 STREAMS = {
-    "stream": seed_streams.OPTIMISATION_STREAMS,
-    "validation_stream": seed_streams.VALIDATION_STREAMS,
+    "stream": (seed_streams.OPTIMISATION_STREAMS, "optimisation"),
+    "validation_stream": (seed_streams.VALIDATION_STREAMS, "validation"),
 }
 
 # TOML section and key -> field, with the check each value must pass.
@@ -92,10 +92,11 @@ def _value(section: str, key: str, raw: Any) -> tuple[str, Any]:
         raise ValueError(f"[{section}] {key} must be at least {minimum}, got {raw!r}")
     if field in MAXIMA and raw > MAXIMA[field]:
         raise ValueError(f"[{section}] {key} must be at most {MAXIMA[field]}, got {raw!r}")
-    if field in STREAMS and raw not in STREAMS[field]:
-        allowed = STREAMS[field]
-        raise ValueError(f"[{section}] {key} must be a stream of {allowed.start} to "
-                         f"{allowed.stop - 1}, got {raw!r}")  # fmt: skip
+    if field in STREAMS:
+        try:
+            seed_streams.require(raw, *STREAMS[field])
+        except ValueError as error:
+            raise ValueError(f"[{section}] {key}: {error}") from None
     if field == "workers":
         return field, raw or None
     return field, raw

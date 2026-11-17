@@ -1808,22 +1808,18 @@ def recorded_stream(run_dir: Path) -> int:
             'settings']['stream']
     except (OSError, ValueError, KeyError, TypeError) as error:
         not_resumable(f'{run_dir} cannot be resumed: no stream in its config.json ({error!r})')
-    if isinstance(stream, bool) or stream not in seed_streams.OPTIMISATION_STREAMS:
-        not_resumable(f'{run_dir} cannot be resumed: its config.json stream is {stream!r}')
-    return stream
+    try:
+        return seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, 'optimisation')
+    except ValueError as error:
+        not_resumable(f'{run_dir} cannot be resumed: its config.json stream: {error}')
 
 
 def optimisation_stream(text: str) -> int:
     """--stream: one of the optimisation streams, 1 to 99 (Task 7)."""
     try:
-        stream = int(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f'{text!r} is not a whole number') from None
-    if stream not in seed_streams.OPTIMISATION_STREAMS:
-        raise argparse.ArgumentTypeError(
-            f'{stream} is not an optimisation stream ({seed_streams.OPTIMISATION_STREAMS.start} '
-            f'to {seed_streams.OPTIMISATION_STREAMS.stop - 1})')
-    return stream
+        return seed_streams.require(int(text), seed_streams.OPTIMISATION_STREAMS, 'optimisation')
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
 
 
 def resume_arguments(args: argparse.Namespace) -> str:

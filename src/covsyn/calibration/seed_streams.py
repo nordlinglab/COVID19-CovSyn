@@ -47,6 +47,25 @@ def _whole(value, name: str) -> int:
     return value
 
 
+def _described(allowed) -> str:
+    """A range as "a to b", any other collection as its members."""
+    if isinstance(allowed, range):
+        return f"{allowed.start} to {allowed.stop - 1}"
+    return ", ".join(str(stream) for stream in allowed)
+
+
+def require(stream, allowed, use: str) -> int:
+    """The stream, if it is one of ``allowed``, the streams of ``use``.
+
+    Raises:
+        ValueError: It is not a whole number, or not one of them; the message names the use.
+    """
+    stream = _whole(stream, f"a {use} stream")
+    if stream not in allowed:
+        raise ValueError(f"{stream} is not a {use} stream ({_described(allowed)})")
+    return stream
+
+
 def block_seeds(stream: int, block: int, simulations: int) -> range:
     """The seeds of block ``block`` of ``stream`` at ``simulations`` per block.
 

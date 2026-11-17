@@ -80,3 +80,16 @@ def test_stream_0_holds_the_earlier_runs():
     stream_0 = range(ss.block_start(0, 0, 1), ss.block_start(1, 0, 1))
     for seed in (0, 299, 999, 100_000, 500_000, 501_000):
         assert seed in stream_0
+
+
+def test_one_check_says_which_streams_a_use_may_take():
+    """Every use checks its stream the same way, naming the use and its streams."""
+    assert ss.require(7, ss.OPTIMISATION_STREAMS, "optimisation") == 7
+    assert ss.require(300, (ss.SELECTION_STREAM, ss.REPORTING_STREAM), "synthesis") == 300
+    with pytest.raises(ValueError, match=r"validation stream.*200 to 299"):
+        ss.require(1, ss.VALIDATION_STREAMS, "validation")
+    with pytest.raises(ValueError, match="synthesis stream.*301, 300"):
+        ss.require(1, (ss.SELECTION_STREAM, ss.REPORTING_STREAM), "synthesis")
+    for bad in (True, 7.0, "7", None):
+        with pytest.raises(ValueError):
+            ss.require(bad, ss.OPTIMISATION_STREAMS, "optimisation")

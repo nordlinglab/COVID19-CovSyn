@@ -847,8 +847,7 @@ def synthesis_seeds(stream: int, monte_carlo_number: int) -> range:
     Raises:
         ValueError: The stream is neither, or the count is outside 1 to 10,000.
     """
-    if isinstance(stream, bool) or stream not in SYNTHESIS_STREAMS:
-        raise ValueError(f"stream {stream!r} is not a synthesis stream {SYNTHESIS_STREAMS}")
+    seed_streams.require(stream, SYNTHESIS_STREAMS, "synthesis")
     return seed_streams.block_seeds(stream, 0, monte_carlo_number)
 
 
