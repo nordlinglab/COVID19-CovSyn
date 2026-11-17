@@ -1828,10 +1828,13 @@ def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) ->
                       f'started with')
     try:
         with warnings.catch_warnings():  # an empty file only warns, and reads as no values
-            warnings.simplefilter('error')
+            warnings.simplefilter('error', UserWarning)
             recorded = np.loadtxt(path)
     except (OSError, ValueError, UserWarning) as error:
         not_resumable(f'{run_dir} cannot be resumed: its bound.txt cannot be read ({error!r})')
+    if recorded.ndim != 2 or len(recorded) != 2:  # a lower and an upper row, or not the file
+        not_resumable(f'{run_dir} cannot be resumed: its bound.txt cannot be read (shape '
+                      f'{recorded.shape}, not 2 rows)')
     if recorded.shape != (2, len(lower)) or not (np.array_equal(recorded[0], lower)
                                                   and np.array_equal(recorded[1], upper)):
         not_resumable(f'{run_dir} started with other bounds or another dimension than '
