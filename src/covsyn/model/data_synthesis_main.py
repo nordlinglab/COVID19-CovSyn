@@ -852,6 +852,25 @@ def synthesis_seeds(stream: int, monte_carlo_number: int) -> range:
     return seed_streams.block_seeds(stream, 0, monte_carlo_number)
 
 
+DEVELOPER_MODES = ('test', 'profile')  # they run seeds from 0 of their own
+
+
+def seed_start_for(mode: str, stream: int | None, monte_carlo_number: int) -> int | None:
+    """The first Monte-Carlo seed of a synthesis: block 0 of its stream, 301 by default.
+
+    The test and profile modes run their own seeds from 0 and take no stream (None).
+
+    Raises:
+        ValueError: A stream given to test or profile, or one synthesis_seeds refuses.
+    """
+    if mode in DEVELOPER_MODES:
+        if stream is not None:
+            raise ValueError(f'--mode {mode} runs its own seeds from 0 and takes no --stream')
+        return None
+    stream = seed_streams.SELECTION_STREAM if stream is None else stream
+    return synthesis_seeds(stream, monte_carlo_number).start
+
+
 def main() -> None:
     """Synthesise data from the command line (``covsyn-data-synthesis``)."""
     start_time = time.time()
@@ -880,9 +899,10 @@ def main() -> None:
                              'community (1 = off)')
     parser.add_argument('--seed_file', type=str, default=None,
                         help='first-wave modes: seed table replacing the mode\'s own (B79)')
-    parser.add_argument('--stream', type=int, default=seed_streams.SELECTION_STREAM,
+    parser.add_argument('--stream', type=int, default=None,
                         help='seed stream: 301, the candidate is chosen on it (default), or '
-                             '300, the reported one (Task 7; replaces --seed_start)')
+                             '300, the reported one (Task 7; replaces --seed_start); not for '
+                             'the test and profile modes')
 
     args = parser.parse_args()
     mode = args.mode
@@ -890,7 +910,7 @@ def main() -> None:
     mc_number = args.monte_carlo_number
     cpu_cores = hardware.resolve_workers(args.workers, os.environ, None)
     try:
-        seed_start = synthesis_seeds(args.stream, mc_number).start
+        seed_start = seed_start_for(mode, args.stream, mc_number)
     except ValueError as error:
         parser.error(str(error))
     contact_weight = args.contact_weight
@@ -982,7 +1002,8 @@ def main() -> None:
         write_run_metadata(result_path, mode=mode, contact_weight=contact_weight,
                            quarantine_breach=(quarantine_breach if mode in FIRST_WAVE_SEED_FILES
                                               else None),
-                           **options, stream=args.stream, seed_start=seed_start,
+                           **options, stream=args.stream or seed_streams.SELECTION_STREAM,
+                           seed_start=seed_start,
                            monte_carlo_number=mc_number,
                            parameter_path=str(parameter_path))
         print("--- Done %s seconds ---" % (time.time() - start_time))
