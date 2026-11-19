@@ -75,7 +75,13 @@ def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
     if not Path(path).is_file():
         return None, (f'no measurement at {path}: measure_age_rr.py has not run, failed, or '
                       f'wrote elsewhere')
-    return json.loads(Path(path).read_text()), ''
+    try:
+        measurement = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as error:  # cut short by a kill, or not JSON
+        return None, f'the measurement at {path} cannot be read ({error})'
+    if not isinstance(measurement, dict):
+        return None, f'the measurement at {path} cannot be read (not a JSON object)'
+    return measurement, ''
 
 
 def check(decision, name, value, target, unit='', ok=None, note='', ci=None, interval=True):

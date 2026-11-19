@@ -55,3 +55,12 @@ def test_a_whole_measurement_is_read(vpd, tmp_path):
     path = tmp_path / "age_rr.json"
     path.write_text(json.dumps({"n_index_cases": 400}))
     assert vpd.read_age_rr(path, tmp_path) == ({"n_index_cases": 400}, "")
+
+
+@pytest.mark.parametrize("text", ['{"n_index_cases": 4', "", "[1, 2]"])
+def test_a_measurement_cut_short_is_said_to_be_unreadable(vpd, tmp_path, text):
+    """A file a kill cut short, or not a measurement, gives a row instead of a crash."""
+    path = tmp_path / "age_rr.json"
+    path.write_text(text)
+    measurement, problem = vpd.read_age_rr(path, tmp_path)
+    assert measurement is None and str(path) in problem and "cannot be read" in problem
