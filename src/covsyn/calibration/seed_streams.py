@@ -4,7 +4,8 @@
 
 Block b of stream s covers s x 10^7 + b x S to s x 10^7 + (b + 1) x S - 1, so streams are
 disjoint for S up to 10,000 and up to 1,000 blocks each, and a use that takes its own stream
-never meets another stream's seeds; the two uses on 300, and the two on 301, share theirs.
+never meets another stream's seeds. The uses that share stream 300, or 301, share its first
+seeds: each synthesis mode's block 0 and the age risk ratio's first seeds start at s x 10^7.
 The reserved streams follow the rework plan (doc/plan_Nordling2026_CovSynFireflyNordlingLab.md
 in covid19-research, Task 7):
 
@@ -17,10 +18,10 @@ in covid19-research, Task 7):
 100    the stopping rule's monitoring blocks (Task 9)
 200-299 validation, one stream per use
 300    the reporting checklist and report, on seeds the candidate was not chosen
-       on (E97): the synthesis's block 0 and the age risk ratio's first seeds,
-       which overlap from its first seed
-301    the synthesis the candidate is chosen on and its age risk ratio, the
-       same two uses of the stream, which overlap from its first seed
+       on (E97): block 0 of each synthesis mode (spread, first wave, Cheng
+       2020) and the age risk ratio's first seeds, all from 300 x 10^7
+301    the synthesis the candidate is chosen on (spread, first wave) and its
+       age risk ratio, all from 301 x 10^7
 ====== =========================================================================
 
 The plan lists the run report under 301; the report stays on 300, as E97 decided, and the
