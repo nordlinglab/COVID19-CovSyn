@@ -59,6 +59,25 @@ MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contact
 results = []
 
 
+DEFAULT_AGE_RR_FILE = Path('validation_reference/age_rr.json')
+
+
+def age_rr_file() -> Path:
+    """The B14 measurement to score: AGE_RR_FILE, or the default when it is unset or empty."""
+    return Path(os.environ.get('AGE_RR_FILE') or DEFAULT_AGE_RR_FILE)
+
+
+def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
+    """The measurement at ``path`` and "", or None and why it cannot be scored.
+
+    spread_dir is the spread synthesis the checklist runs on; see the vector check below.
+    """
+    if not Path(path).is_file():
+        return None, (f'no measurement at {path}: measure_age_rr.py has not run, failed, or '
+                      f'wrote elsewhere')
+    return json.loads(Path(path).read_text()), ''
+
+
 def check(decision, name, value, target, unit='', ok=None, note='', ci=None, interval=True):
     """Record one checklist line. target is (lo, hi), a string, or None for information."""
     if ok is None and isinstance(target, tuple) and value is not None and np.isfinite(value):
@@ -635,9 +654,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                        'concentrated in 0-19, so this pooling is not comparable to his (E70)')
 
     # B60: the checklist-based selection measures each candidate into its own file.
-    age_rr_file = Path(os.environ.get('AGE_RR_FILE', 'validation_reference/age_rr.json'))
-    if age_rr_file.exists():
-        measurement = json.loads(age_rr_file.read_text())
+    measurement, problem = read_age_rr(age_rr_file(), SPREAD)
+    if measurement is not None:
         layers = ', '.join(measurement.get('cheng_comparable_layers', []))
         n_cases = measurement.get('n_index_cases')
         infections = measurement.get('cheng_comparable_infections')
@@ -670,9 +688,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                   note='information: the same high-N measurement pooled over all five layers, '
                        'for the size of the composition effect (E70)')
     else:
-        check('B14', 'high-N age risk ratio measurement', None,
-              'no measurement at AGE_RR_FILE: measure_age_rr.py has not run, failed, or wrote '
-              'elsewhere',
+        check('B14', 'high-N age risk ratio measurement', None, problem,
               note='B14 is accepted on that measurement since E68; without it only the '
                    'informational rows above are available')
 
