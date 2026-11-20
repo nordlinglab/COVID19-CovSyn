@@ -559,19 +559,28 @@ def test_a_relative_previous_checks_is_read_from_the_repository_root(tmp_path, c
     assert compare[2] == str(pr.runs.REPO_ROOT / name)
 
 
-def test_warnings_are_kept_with_the_run(tmp_path, config):
+@pytest.mark.parametrize("share", [0.5, 0.03])  # plenty of memory, and less than 10% (Task 5)
+def test_warnings_are_kept_with_the_run(tmp_path, config, monkeypatch, share):
     """In pipeline.log and the stage's run.log line, not only in pipeline.out.
 
-    The next resume overwrites pipeline.out.
+    The next resume overwrites pipeline.out. The available memory is fixed, so the machine's
+    at the time does not decide which warnings there are: with less than 10% each stage also
+    keeps the low-memory warning.
     """
+    from covsyn.runtime import memory
+
+    total = memory.total_bytes()
+    monkeypatch.setattr(memory, "available_bytes", lambda: int(total * share))
+    monkeypatch.setattr(memory, "system_memory", lambda: (int(total * share), total))
     _, run_dir = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.validation.show_final"}))
     assert "WARNING: the report's show_final failed" in (run_dir / "pipeline.log").read_text()
     lines = {
         json.loads(x)["stage"]: json.loads(x)
         for x in (run_dir / "run.log").read_text().splitlines()
     }
-    assert lines["report"]["warnings"] == ["the report's show_final failed"]
-    assert lines["check"]["warnings"] == []
+    low = [memory.low_memory_warning(int(total * share), total)] if share < 0.1 else []
+    assert lines["report"]["warnings"] == ["the report's show_final failed", *low]
+    assert lines["check"]["warnings"] == low
 
 
 def test_a_run_in_use_cannot_be_resumed(tmp_path, config):
