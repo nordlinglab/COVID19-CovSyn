@@ -247,6 +247,27 @@ def test_a_plan_longer_than_the_run_is_run_with_a_warning(tmp_path, monkeypatch)
     assert settings["g_plan"] == 1200
 
 
+def test_the_warning_gives_alpha_end_and_the_last_step(tmp_path, monkeypatch):
+    """Where the steps end, beside where the plan would have taken them."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    last = fo.step_size(1, 0.2, 0.001, 1200)
+    with pytest.warns(UserWarning) as caught:
+        _optimise(_engine(alpha_0=0.2, g_plan=1200), 2)
+    said = [str(w.message) for w in caught if "G_plan" in str(w.message)]
+    assert said == [fo.step_schedule.plan_outlasts_run(1200, 2)
+                    + f" (alpha_end 0.001, last step {last:.3g})"]  # fmt: skip
+
+
+def test_a_resumed_run_does_not_warn_of_its_plan_again(tmp_path, monkeypatch, recwarn):
+    """Its start warned once; optimiser.log, appended to on each resume, holds it once."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    with pytest.warns(UserWarning, match="G_plan 1200"):
+        _optimise(_engine(alpha_0=0.2, g_plan=1200), 2)
+    recwarn.clear()
+    _optimise(_engine(alpha_0=0.2, g_plan=1200), 3, resume=True)
+    assert not [w for w in recwarn if "G_plan" in str(w.message)]
+
+
 def test_a_plan_as_long_as_the_run_is_not_warned_about(tmp_path, monkeypatch, recwarn):
     """The plan's own case: G_plan = G (Task 9, pilot 2)."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
@@ -323,7 +344,9 @@ def test_a_resume_of_a_mode_longer_than_a_stream_cannot_be_resumed(monkeypatch, 
     (tmp_path / "checkpoints" / "initial.npz").write_text("x")  # something to continue
     monkeypatch.setattr(fo.seed_streams, "MAX_BLOCKS", 3)
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(tmp_path)])
+    before = {f: f.read_bytes() for f in tmp_path.rglob("*") if f.is_file()}
     with pytest.raises(SystemExit) as stop:
         fo.main()
     assert stop.value.code == fo.runs.NOT_RESUMABLE
     assert "cannot be resumed: the mode's max_generations 10" in capsys.readouterr().err
+    assert {f: f.read_bytes() for f in tmp_path.rglob("*") if f.is_file()} == before  # untouched

@@ -1624,9 +1624,9 @@ class Firefly:
                               f'{recorded}')
         step_size(0, self.alpha_0, self.alpha_end, g_plan, names=SETTING_NAMES)  # out of range?
         outlasts = step_schedule.plan_outlasts_run(g_plan, max_generations)
-        if outlasts is not None:  # no cap on G_plan, but it may be a typo
+        if outlasts is not None and checkpoint is None:  # no cap, but maybe a typo; said once
             last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
-            warnings.warn(f'{outlasts} {self.alpha_end!r}: they end at {last:.3g}',
+            warnings.warn(f'{outlasts} (alpha_end {self.alpha_end!r}, last step {last:.3g})',
                           stacklevel=2)
         settings = {'pop_size': self.pop_size, 'alpha_0': self.alpha_0,
                     'alpha_end': self.alpha_end, 'g_plan': g_plan, 'betamin': self.betamin,

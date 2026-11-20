@@ -190,7 +190,21 @@ def test_a_plan_as_long_as_the_mode_s_run_is_not_warned_about(tmp_path):
     """The plan's own case: G_plan = G (Task 9, pilot 2)."""
     config = dataclasses.replace(pc.load("default"), g_plan=120)
     _, run_dir = run_pipeline(tmp_path, config, Recorder())
-    assert "g_plan" not in (run_dir / "pipeline.log").read_text()
+    assert "WARNING: [optimise]" not in (run_dir / "pipeline.log").read_text()
+
+
+def test_a_resumed_pipeline_does_not_warn_of_its_plan_again(tmp_path):
+    """The new run warned once; the log it appends to on resume keeps that one line."""
+    config = dataclasses.replace(pc.load("default"), g_plan=1200)
+    run_pipeline(tmp_path, config, Recorder(fail={"covsyn.calibration.firefly_optimizer"}))
+    _, run_dir = run_pipeline(tmp_path, None, Recorder(), resume=True)
+    assert (run_dir / "pipeline.log").read_text().count("WARNING: [optimise] g_plan") == 1
+
+
+def test_a_built_configuration_with_an_unknown_mode_gives_no_schedule_warning():
+    """One made without parse(): the optimiser refuses the mode; the warning does not crash."""
+    config = dataclasses.replace(pc.load("default"), mode="trian", g_plan=1200)
+    assert pc.schedule_warnings(config) == []
 
 
 def test_reading_a_long_plan_raises_no_warning(recwarn):

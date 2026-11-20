@@ -173,10 +173,10 @@ def schedule_warnings(config: PipelineConfig) -> list[str]:
     (decision of 2026-11-20); the log keeps it with the run, which a warning from parse() would
     not reach.
     """
-    if config.g_plan is None:
+    generations = step_schedule.MODE_GENERATIONS.get(config.mode)
+    if config.g_plan is None or generations is None:  # no mode: the optimiser refuses it
         return []
-    outlasts = step_schedule.plan_outlasts_run(
-        config.g_plan, step_schedule.MODE_GENERATIONS[config.mode], "g_plan")
+    outlasts = step_schedule.plan_outlasts_run(config.g_plan, generations, "g_plan")
     return [] if outlasts is None else [f"[optimise] {outlasts}"]
 
 
