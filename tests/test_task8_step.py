@@ -122,3 +122,23 @@ def test_a_run_from_before_task_8_cannot_be_resumed(tmp_path):
     with pytest.raises(SystemExit) as stop:
         fo.recorded_schedule(tmp_path)
     assert stop.value.code == fo.runs.NOT_RESUMABLE
+
+
+def test_a_schedule_that_grows_is_refused():
+    """A step that grows, as when alpha_0 and alpha_end are swapped, is a mistake.
+
+    Task 8's steps shrink; equal ends keep one step throughout.
+    """
+    with pytest.raises(ValueError, match="alpha_end"):
+        fo.step_size(0, 0.001, 0.2, 5)
+    assert fo.step_size(3, 0.1, 0.1, 5) == 0.1
+
+
+def test_the_command_refuses_a_schedule_that_grows(monkeypatch, tmp_path):
+    """Before the run directory is claimed."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test", "--alpha-0", "0.001",
+                                      "--alpha-end", "0.2", "--run-dir", str(tmp_path / "r")])
+    with pytest.raises(SystemExit):
+        fo.main()
+    assert not (tmp_path / "r").exists()
+

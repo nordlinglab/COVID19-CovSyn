@@ -1134,14 +1134,18 @@ def step_size(generation, alpha_0, alpha_end, g_plan):
     """The step size of a generation under the Task 8 schedule.
 
     alpha_0 (alpha_end / alpha_0)^(g / (G_plan - 1)) for g < G_plan, alpha_end after; a
-    one-generation plan moves with alpha_0 only at g = 0. It replaces the factor of 0.97 per generation, so the steps shrink over the run that was
-    planned, whatever its length.
+    one-generation plan moves with alpha_0 only at g = 0. It replaces the factor of 0.97 per
+    generation, so the steps shrink over the run that was planned, whatever its length.
 
     Raises:
-        ValueError: A step size that is not positive, or a plan shorter than one generation.
+        ValueError: A step size that is not positive, alpha_end above alpha_0, which would make
+            the steps grow, or a plan shorter than one generation.
     """
     if not (alpha_0 > 0 and alpha_end > 0 and np.isfinite(alpha_0) and np.isfinite(alpha_end)):
         raise ValueError(f'step sizes must be positive, not {alpha_0!r} and {alpha_end!r}')
+    if alpha_end > alpha_0:
+        raise ValueError(f'alpha_end {alpha_end!r} is above alpha_0 {alpha_0!r}: the steps '
+                         f'would grow')
     if isinstance(g_plan, bool) or not isinstance(g_plan, (int, np.integer)) or g_plan < 1:
         raise ValueError(f'G_plan must be a whole number of generations, at least 1, '
                          f'not {g_plan!r}')
@@ -2122,6 +2126,10 @@ def main() -> None:
                  seed=args.seed,
                  alpha_end=DEFAULT_ALPHA_END if args.alpha_end is None else args.alpha_end,
                  g_plan=args.g_plan)
+    try:  # Task 8: refused here, before the run directory is claimed
+        step_size(0, fa.alpha_0, fa.alpha_end, max_generations if fa.g_plan is None else fa.g_plan)
+    except ValueError as error:
+        sys.exit(f'step schedule: {error}')
     fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
