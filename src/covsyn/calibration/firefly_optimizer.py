@@ -1602,6 +1602,14 @@ class Firefly:
         if resume:
             check_progress_table(result_path)  # a checkpoint, and its table: else NOT_RESUMABLE
         checkpoint = load_last_checkpoint(result_path) if resume else None
+        # Task 7: generation g takes block g of the stream, so a stream's blocks bound the
+        # generations, checked before anything is written or run (decision of 2026-11-20).
+        if max_generations > seed_streams.MAX_BLOCKS:
+            refusal = (f"max_generations {max_generations} is more than a stream's "
+                       f'{seed_streams.MAX_BLOCKS} blocks, one per generation')
+            if checkpoint is not None:
+                not_resumable(f'{result_path} cannot be resumed: {refusal}')
+            raise ValueError(refusal)
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         g_plan = max_generations if self.g_plan is None else self.g_plan
         if checkpoint is not None:
@@ -1615,6 +1623,11 @@ class Firefly:
                               f'{(self.alpha_0, self.alpha_end, g_plan)}: it started with '
                               f'{recorded}')
         step_size(0, self.alpha_0, self.alpha_end, g_plan)  # refuses a schedule out of range
+        if g_plan > max_generations:  # G_plan takes no blocks, so no cap; but it may be a typo
+            last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
+            warnings.warn(f"G_plan {g_plan} is longer than the run's {max_generations} "
+                          f'generations, so the steps end at {last:.3g}, not alpha_end '
+                          f'{self.alpha_end!r}', stacklevel=2)
         settings = {'pop_size': self.pop_size, 'alpha_0': self.alpha_0,
                     'alpha_end': self.alpha_end, 'g_plan': g_plan, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,

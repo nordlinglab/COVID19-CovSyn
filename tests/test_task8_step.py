@@ -224,12 +224,40 @@ def test_an_alpha_end_alone_above_the_default_alpha_0_is_told_to_give_alpha_0(mo
     assert "--alpha-end 0.5 is above --alpha-0 0.2" in str(stop.value)  # the flags' names
 
 
-def test_the_command_refuses_a_plan_longer_than_a_stream(monkeypatch, tmp_path):
-    """A stream holds 1000 blocks, one per generation."""
-    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test", "--g-plan", "1001",
-                                      "--run-dir", str(tmp_path / "r")])
-    with pytest.raises(SystemExit, match="--g-plan"):
-        fo.main()
+def test_a_plan_longer_than_the_run_is_run_with_a_warning(tmp_path, monkeypatch):
+    """G_plan uses no seed blocks, so it has no cap; a run that ends first is told so.
+
+    Decision of 2026-11-20: a stream's 1000 blocks bound the generations run, not G_plan; a
+    typed G_plan of 1200 for 120 is only warned about, as the steps barely shrink.
+    """
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    with pytest.warns(UserWarning, match="G_plan 1200 is longer than the run's 2 generations"):
+        _optimise(_engine(alpha_0=0.2, g_plan=1200), 2)
+    settings = json.loads((tmp_path / "config.json").read_text())["settings"]
+    assert settings["g_plan"] == 1200
+
+
+def test_a_plan_as_long_as_the_run_is_not_warned_about(tmp_path, monkeypatch, recwarn):
+    """The plan's own case: G_plan = G (Task 9, pilot 2)."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    _optimise(_engine(alpha_0=0.2, g_plan=2), 2)
+    assert not [w for w in recwarn if "G_plan" in str(w.message)]
+
+
+def test_a_run_longer_than_a_stream_is_refused_before_it_starts(tmp_path, monkeypatch):
+    """Generation g takes block g, so a stream's blocks bound max_generations; nothing is run."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    monkeypatch.setattr(fo.seed_streams, "MAX_BLOCKS", 3)
+    _optimise(_engine(alpha_0=0.2), 3)  # blocks 0 to 2: as many as the stream holds
+    with pytest.raises(SystemExit) as stop:  # retrying cannot help
+        _optimise(_engine(alpha_0=0.2), 4, resume=True)
+    assert stop.value.code == fo.runs.NOT_RESUMABLE
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    monkeypatch.setattr(fo, "result_path", fresh, raising=False)
+    with pytest.raises(ValueError, match="max_generations 4 is more than a stream's 3 blocks"):
+        _optimise(_engine(alpha_0=0.2), 4)
+    assert not (fresh / "config.json").exists()
 
 
 def test_the_command_starts_from_the_mode_s_alpha_0_the_pipeline_checks(started, monkeypatch):  # noqa: F811

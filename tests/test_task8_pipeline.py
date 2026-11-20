@@ -135,15 +135,10 @@ def test_an_integer_too_long_to_read_is_refused_naming_the_file():
         pc.parse("[optimise]\nalpha_0 = 1" + "0" * 5000 + "\n", "t")
 
 
-@pytest.mark.parametrize("g_plan, ok", [(1000, True), (1001, False), (10**400, False)])
-def test_a_plan_longer_than_a_stream_is_refused(g_plan, ok):
-    """A stream holds 1000 blocks, one per generation, so a longer plan is never reached."""
-    text = f"[optimise]\ng_plan = {g_plan}\n"
-    if ok:
-        assert pc.parse(text, "t").g_plan == g_plan
-    else:
-        with pytest.raises(ValueError, match="g_plan"):
-            pc.parse(text, "t")
+@pytest.mark.parametrize("g_plan", [1000, 1001, 10**400])
+def test_a_plan_of_any_length_is_taken(g_plan):
+    """G_plan uses no seed blocks, so a stream's 1000 do not bound it (decision of 2026-11-20)."""
+    assert pc.parse(f"[optimise]\ng_plan = {g_plan}\n", "t").g_plan == g_plan
 
 
 def test_the_schedule_a_run_moves_on():

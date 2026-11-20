@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from covsyn.calibration import seed_streams
-
 # Task 8: the step size schedule's ends until pilot 2 (Task 9) chooses them, the larger of the
 # plan's two starting points for alpha_0 (decision of 2026-11-20); G_plan defaults to the run's
 # generations.
@@ -74,8 +72,8 @@ def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int
 
     Raises:
         ValueError: As step_size; for steps that would grow, naming an end left at its default
-            and the range the other must be in; or a plan longer than a stream's blocks, one
-            per generation, which no run reaches.
+            and the range the other must be in. G_plan has no upper bound: it takes no seed
+            blocks, and the optimiser warns when it outlasts the run (decision of 2026-11-20).
     """
     schedule = (alpha_0_default if alpha_0 is None else alpha_0,
                 DEFAULT_ALPHA_END if alpha_end is None else alpha_end,
@@ -91,7 +89,4 @@ def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int
             message += (f'; {names[1]} was left at its default, so give {names[1]} too, at '
                         f'most {names[0]}')
         raise ValueError(message) from None
-    if schedule[2] > seed_streams.MAX_BLOCKS:
-        raise ValueError(f"{names[2]} {schedule[2]} is longer than a stream's "
-                         f"{seed_streams.MAX_BLOCKS} blocks, one per generation")
     return schedule
