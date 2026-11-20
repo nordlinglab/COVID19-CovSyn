@@ -1921,16 +1921,37 @@ def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
     return seed, mode, stage_timing
 
 
+def recorded_settings(run_dir: Path) -> dict:
+    """The settings a run recorded in its config.json, for a resume to read (Task 8).
+
+    Raises:
+        SystemExit: With code runs.NOT_RESUMABLE when retrying cannot help: config.json is
+            missing, not a file, unreadable as JSON, or has no settings table. With a message
+            (status 1) for any other read error, which may pass, as in resumed_settings.
+    """
+    try:
+        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
+            'settings']
+        if not isinstance(settings, dict):
+            raise TypeError(f'settings is {settings!r}')
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
+            TypeError) as error:  # what retrying cannot change
+        not_resumable(f'{run_dir} cannot be resumed: no settings in its config.json ({error!r})')
+    except OSError as error:  # a disk that may come back: retrying can help, so not that code
+        raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})') from error
+    return settings
+
+
 def recorded_stream(run_dir: Path) -> int:
     """The optimisation stream a run recorded in its config.json, to resume it on (Task 7).
 
     Raises:
-        SystemExit: runs.NOT_RESUMABLE when it is missing or not an optimisation stream.
+        SystemExit: runs.NOT_RESUMABLE when it is missing or not an optimisation stream; see
+            recorded_settings for a config.json that cannot be read.
     """
     try:
-        stream = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
-            'settings']['stream']
-    except (OSError, ValueError, KeyError, TypeError) as error:
+        stream = recorded_settings(run_dir)['stream']
+    except KeyError as error:
         not_resumable(f'{run_dir} cannot be resumed: no stream in its config.json ({error!r})')
     try:
         return seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, 'optimisation')
@@ -1993,20 +2014,20 @@ def recorded_schedule(run_dir: Path) -> tuple[float, float, int]:
 
     Raises:
         SystemExit: runs.NOT_RESUMABLE when it is missing, as in a run started before Task 8,
-            which moved by a factor of 0.97, or out of range; with a message (status 1) for a
-            read error that retrying may get past, as resumed_settings does.
+            which moved by a factor of 0.97, or out of range; see recorded_settings for a
+            config.json that cannot be read.
     """
+    settings = recorded_settings(run_dir)
     try:
-        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
-            'settings']
         schedule = settings['alpha_0'], settings['alpha_end'], settings['g_plan']
-        step_size(0, *schedule)
-    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
-            TypeError) as error:  # what retrying cannot change
+    except KeyError as error:
         not_resumable(f'{run_dir} cannot be resumed: no step schedule in its config.json, as '
                       f'in a run started before Task 8 ({error!r})')
-    except OSError as error:  # a disk that may come back
-        raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})') from None
+    try:
+        step_size(0, *schedule)
+    except (ValueError, TypeError) as error:
+        not_resumable(f'{run_dir} cannot be resumed: its recorded step schedule {schedule} is '
+                      f'out of range ({error})')
     return schedule
 
 
@@ -2100,7 +2121,7 @@ def main() -> None:
     parser.add_argument('--alpha-0', type=positive_float, default=None,
                         help=f'step size of generation 0 (default {DEFAULT_ALPHA_0})')
     parser.add_argument('--alpha-end', type=positive_float, default=None,
-                        help=f'step size from generation G_plan - 1 on '
+                        help=f'step size from generation G_plan - 1 on, at most --alpha-0 '
                              f'(default {DEFAULT_ALPHA_END})')
     parser.add_argument('--g-plan', type=positive_int, default=None,
                         help="planned run length G_plan (default: the mode's generations)")
@@ -2142,11 +2163,13 @@ def main() -> None:
     fa = Firefly(pop_size, alpha_0 if args.alpha_0 is None else args.alpha_0, betamin, gamma,
                  seed=args.seed,
                  alpha_end=DEFAULT_ALPHA_END if args.alpha_end is None else args.alpha_end,
-                 g_plan=args.g_plan)
+                 g_plan=max_generations if args.g_plan is None else args.g_plan)
     try:  # Task 8: refused here, before the run directory is claimed
-        step_size(0, fa.alpha_0, fa.alpha_end, max_generations if fa.g_plan is None else fa.g_plan)
+        step_size(0, fa.alpha_0, fa.alpha_end, fa.g_plan)
     except ValueError as error:
-        sys.exit(f'step schedule: {error}')
+        hint = ('; give --alpha-end too, at most --alpha-0'
+                if args.alpha_end is None and fa.alpha_end > fa.alpha_0 else '')
+        sys.exit(f'step schedule: {error}{hint}')
     fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings

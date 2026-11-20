@@ -77,7 +77,7 @@ def test_the_modes_start_from_alpha_0_of_0_2(started):  # noqa: F811
     """Until pilot 2 chooses, alpha_0 = 0.2 and alpha_end = 0.001 (decision of 2026-11-20)."""
     engine = started("--mode", "test")["engine"]
     assert (engine.alpha_0, engine.alpha_end) == (0.2, 0.001)
-    assert engine.g_plan is None  # the mode's generations
+    assert engine.g_plan == fo.OPTIMISER_MODES["test"][4]  # the mode's generations
 
 
 def test_the_command_takes_the_schedule(started):  # noqa: F811
@@ -138,29 +138,57 @@ def test_the_command_refuses_a_schedule_that_grows(monkeypatch, tmp_path):
     """Before the run directory is claimed."""
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test", "--alpha-0", "0.001",
                                       "--alpha-end", "0.2", "--run-dir", str(tmp_path / "r")])
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="step schedule"):
         fo.main()
     assert not (tmp_path / "r").exists()
 
 
-def test_a_config_that_cannot_be_read_now_may_be_retried(tmp_path, monkeypatch):
-    """A read error that may pass is not NOT_RESUMABLE, as in resumed_settings."""
-    (tmp_path / "config.json").write_text("{}")
+def test_a_small_alpha_0_alone_is_told_to_give_alpha_end(monkeypatch, tmp_path):
+    """Below the default alpha_end, the refusal names the flag that fixes it."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test", "--alpha-0", "0.0005",
+                                      "--run-dir", str(tmp_path / "r")])
+    with pytest.raises(SystemExit, match="--alpha-end"):
+        fo.main()
 
-    def failing(*args, **kwargs):
-        raise OSError(5, "Input/output error")
+
+def _config_fails_to_read(monkeypatch, run_dir):
+    """Make reading run_dir/config.json, and only it, fail as a flaky disk does."""
+    read_text = fo.Path.read_text
+
+    def failing(self, *args, **kwargs):
+        if self == run_dir / "config.json":
+            raise OSError(5, "Input/output error")
+        return read_text(self, *args, **kwargs)
 
     monkeypatch.setattr(fo.Path, "read_text", failing)
+
+
+@pytest.mark.parametrize("reader", ["recorded_schedule", "recorded_stream"])
+def test_a_config_that_cannot_be_read_now_may_be_retried(tmp_path, monkeypatch, reader):
+    """A read error that may pass is not NOT_RESUMABLE, as in resumed_settings."""
+    (tmp_path / "config.json").write_text("{}")
+    _config_fails_to_read(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit) as stop:
+        getattr(fo, reader)(tmp_path)
+    assert stop.value.code != fo.runs.NOT_RESUMABLE and "could not read" in str(stop.value)
+
+
+def test_a_recorded_schedule_out_of_range_says_so(tmp_path, capsys):
+    """Not that the run predates Task 8, which it does not."""
+    settings = {"alpha_0": 0.001, "alpha_end": 0.2, "g_plan": 50}
+    (tmp_path / "config.json").write_text(json.dumps({"settings": settings}))
     with pytest.raises(SystemExit) as stop:
         fo.recorded_schedule(tmp_path)
-    assert stop.value.code != fo.runs.NOT_RESUMABLE
+    assert stop.value.code == fo.runs.NOT_RESUMABLE
+    said = capsys.readouterr().err
+    assert "out of range" in said and "before Task 8" not in said
 
 
 def _engine(**schedule):
     return fo.Firefly(pop_size=3, betamin=1, gamma=0.03, seed=2, **schedule)
 
 
-def _optimise(engine, path, generations, resume=False):
+def _optimise(engine, generations, resume=False):
     engine.firefly(function=standins.objective, dim=208, lb=np.zeros(208), ub=np.ones(208),
                    demographic_parameters=None, max_generations=generations, max_workers=2,
                    Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None,
@@ -170,17 +198,17 @@ def _optimise(engine, path, generations, resume=False):
 def test_a_resume_with_another_schedule_is_refused(tmp_path, monkeypatch):
     """Through the engine too: config.json's schedule describes the run, so it must hold."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    _optimise(_engine(alpha_0=0.2, g_plan=4), tmp_path, 2)
+    _optimise(_engine(alpha_0=0.2, g_plan=4), 2)
     with pytest.raises(SystemExit) as stop:
-        _optimise(_engine(alpha_0=0.05, g_plan=4), tmp_path, 4, resume=True)
+        _optimise(_engine(alpha_0=0.05, g_plan=4), 4, resume=True)
     assert stop.value.code == fo.runs.NOT_RESUMABLE
 
 
 def test_a_resume_without_a_plan_keeps_the_recorded_one(tmp_path, monkeypatch):
     """A run extended to more generations goes on shrinking over the plan it started with."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    _optimise(_engine(alpha_0=0.2), tmp_path, 2)  # G_plan = 2, recorded
-    _optimise(_engine(alpha_0=0.2), tmp_path, 4, resume=True)
+    _optimise(_engine(alpha_0=0.2), 2)  # G_plan = 2, recorded
+    _optimise(_engine(alpha_0=0.2), 4, resume=True)
     for g in range(4):
         with np.load(tmp_path / fo.CHECKPOINTS / f"generation_{g:04d}.npz") as saved:
             assert float(saved["alpha"]) == fo.step_size(g, 0.2, fo.DEFAULT_ALPHA_END, 2), g
