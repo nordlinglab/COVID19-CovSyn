@@ -276,13 +276,18 @@ def _age_rr(ctx: Context, stream: int, name: str, what: str) -> Path:
     """Measure the age risk ratio on a stream into tables/<name>.json; its path.
 
     An earlier attempt's file goes first, so a measurement that fails leaves none for the
-    checklist to score, and so do the temporary files a killed write of this stage left
-    (measure_age_rr writes <name>.json.<random>.tmp and renames it). This assumes nothing else
-    writes this measurement meanwhile: the pipeline does not, and a hand run into the run's
-    tables at the same time is not supported. One that cannot be removed is warned about.
+    checklist to score; one that cannot be removed would be scored, so the stage stops. Every
+    <name>.json.<random>.tmp in the tables goes too, the temporary files killed writes left
+    (measure_age_rr writes one and renames it), whoever ran them; a leftover that cannot be
+    removed is warned about. This assumes nothing else writes this measurement meanwhile: the
+    pipeline does not, and a hand run into the run's tables at the same time is not supported.
     """
     out = ctx.layout.tables / f"{name}.json"
-    out.unlink(missing_ok=True)
+    try:
+        out.unlink(missing_ok=True)
+    except OSError as error:
+        raise StageFailed(f"{out} could not be removed, and would be scored as this run's B14 "
+                          f"({error})") from None
     for leftover in ctx.layout.tables.glob(f"{name}.json.*.tmp"):
         try:
             leftover.unlink(missing_ok=True)

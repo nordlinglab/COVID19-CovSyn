@@ -235,3 +235,19 @@ def test_a_leftover_that_cannot_be_removed_does_not_stop_the_measurement(tmp_pat
                           may=lambda args, what, output: calls.append(args))  # fmt: skip
     stages._age_rr(ctx, ss.SELECTION_STREAM, "age_rr", "measure")
     assert calls and warnings and "age_rr.json.k3j9x.tmp" in warnings[0]
+
+
+def test_an_earlier_measurement_that_cannot_be_removed_stops_the_stage(tmp_path):
+    """Left in place it would be scored as this run's B14, so the stage stops, resumably."""
+    from types import SimpleNamespace
+
+    from covsyn.pipeline import stages
+
+    (tmp_path / "age_rr.json").mkdir()  # cannot be unlinked as a file
+    calls = []
+    ctx = SimpleNamespace(layout=SimpleNamespace(tables=tmp_path), candidate=tmp_path / "c",
+                          config=SimpleNamespace(age_rr_cases=20000), warnings=[],
+                          may=lambda args, what, output: calls.append(args))  # fmt: skip
+    with pytest.raises(stages.StageFailed, match="age_rr.json") as stop:
+        stages._age_rr(ctx, ss.SELECTION_STREAM, "age_rr", "measure")
+    assert stop.value.resumable and not calls
