@@ -14,21 +14,27 @@ age gradient locked into its input comes out the other end.
 
 Writes validation_reference/age_rr.json, which verify_phaseD.py reads for B14.
 
+Task 7: the seeds are the first n of a stream: 301 by default, the seeds the candidate is
+chosen on, 300 for the independent checklist (E97), and 0 for the seeds from 0 earlier runs
+used, as the regression pipeline re-makes them.
+
 Usage:
     uv run python -m covsyn.validation.measure_age_rr \\
-        [firefly_result_dir] [n_index_cases] [--workers N]
+        [firefly_result_dir] [n_index_cases] [--workers N] [--stream 301|300|0]
 """
 import argparse
 import concurrent.futures
 import json
 import os
 import pickle
+import sys
+import tempfile
 import time
 from pathlib import Path
 
 import numpy as np
 
-from covsyn.calibration import fast_cost
+from covsyn.calibration import fast_cost, seed_streams
 from covsyn.runtime import hardware
 from covsyn.model.data_synthesis_main import run_covid
 
@@ -122,13 +128,75 @@ def wilson(successes, trials, z=1.959963984540054):
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
-def main():
+# Task 7: the streams a checklist is scored on (E97), the chosen seeds and the reported ones,
+# and stream 0 for the seeds from 0 earlier runs used.
+AGE_RR_STREAMS = (seed_streams.SELECTION_STREAM, seed_streams.REPORTING_STREAM,
+                  seed_streams.EARLIER_STREAM)  # 0: the seeds from 0 of before, as recorded
+
+
+def parse_arguments(argv=None):
+    """The command line: the run, n, the stream (301 by default), workers and output."""
     parser = argparse.ArgumentParser()
     parser.add_argument('directory', help='run directory, such as results/models/<run-id>')
     parser.add_argument('n', nargs='?', type=int, default=20000)
     hardware.add_workers_argument(parser)  # Task 2: was 32 workers (D3)
     parser.add_argument('--out', default='validation_reference/age_rr.json')
-    args = parser.parse_args()
+    parser.add_argument('--stream', type=int, default=seed_streams.SELECTION_STREAM,
+                        help='seed stream of the checklist it scores: 301, the chosen seeds '
+                             '(default), 300, the reported ones, or 0, the seeds from 0 of '
+                             'before Task 7')
+    args = parser.parse_args(argv)
+    try:
+        seed_streams.require(args.stream, AGE_RR_STREAMS, 'age risk ratio')
+        seed_streams.first_seeds(args.stream, args.n)
+    except ValueError as error:
+        parser.error(str(error))
+    return args
+
+
+def seed_batches(stream, n, workers):
+    """The first n seeds of the stream, in pool tasks of about n / (4 x workers) each."""
+    seeds = seed_streams.first_seeds(stream, n)
+    per_task = max(n // (workers * 4), 1)
+    return [list(seeds[i:i + per_task]) for i in range(0, n, per_task)]
+
+
+def write_measurement(out, record):
+    """Write the measurement as JSON under a temporary name of its own, then rename it to ``out``.
+
+    The data reaches the disk before the rename, so a kill, a full disk or a power cut leaves
+    the earlier file whole, or none, never one cut short, and two writers never share a
+    temporary file.
+    """
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=out.parent, prefix=out.name + '.', suffix='.tmp')
+    try:
+        with os.fdopen(handle, 'w') as f:  # closes the file however the write ends
+            # mkstemp creates it owner-only; give it 0666 less the process umask, as write_text
+            # did.
+            mask = os.umask(0)
+            os.umask(mask)
+            try:
+                os.fchmod(f.fileno(), 0o666 & ~mask)
+            except OSError as error:
+                # The mode change was refused, by a mount or a sandbox, so the file keeps the
+                # mode it was created with, which may or may not equal the one asked for; a
+                # mount that ignores the change silently gives no warning. Under covsyn-pipeline
+                # this goes to the step's log, tables/<name>.txt; by hand, to stderr.
+                print(f'warning: {out} keeps the mode it was created with; setting 0666 less the '
+                      f'process umask was refused ({error})', file=sys.stderr)
+            f.write(json.dumps(record, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, out)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def main():
+    args = parse_arguments()
     workers = hardware.resolve_workers(args.workers, os.environ, None)
 
     directory = args.directory  # Task 3: required, no longer a guess among legacy names
@@ -139,12 +207,12 @@ def main():
         demo = pickle.load(f)
     columns = np.load('./variable/Taiwan_data_matrix.npy').shape[1]
 
+    # The printed report is a regression fixture; the stream goes into the JSON (Task 7).
     print('age risk ratio on %d index cases, parameters from %s' % (args.n, directory))
     start = time.perf_counter()
     executor = concurrent.futures.ProcessPoolExecutor(
         max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns))
-    per_task = max(args.n // (workers * 4), 1)
-    batches = [list(range(i, min(i + per_task, args.n))) for i in range(0, args.n, per_task)]
+    batches = seed_batches(args.stream, args.n, workers)
     contacts = np.zeros((5, 4))
     infections = np.zeros((5, 4))
     for future in [executor.submit(count_batch, batch, P) for batch in batches]:
@@ -235,9 +303,8 @@ def main():
         print('  %-14s %.3f' % (layer, gap))
 
     out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(
-        {'n_index_cases': args.n, 'parameters_from': str(directory),
+    write_measurement(out,
+        {'n_index_cases': args.n, 'stream': args.stream, 'parameters_from': str(directory),
          'total_infections': int(total_infections.sum()),
          'cheng_comparable_layers': CHENG_COMPARABLE,
          'cheng_comparable_infections': int(cheng_infections.sum()),
@@ -245,7 +312,7 @@ def main():
          'locked_input': [float(v) for v in locked],
          'layer_input_reproduction_gap': {k: float(v) for k, v in layer_gaps.items()},
          'all_layer_rr': [float(v) for v in all_layer_rr],
-         'bands': intervals}, indent=2))
+         'bands': intervals})
     print('\nwritten %s' % out)
 
 

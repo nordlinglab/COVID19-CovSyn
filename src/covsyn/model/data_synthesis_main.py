@@ -12,6 +12,7 @@ from pathlib import Path
 from tqdm import tqdm
 from covsyn.model.data_synthesize import *
 from covsyn.model.school_calendar import SchoolCalendar
+from covsyn.calibration import seed_streams
 from covsyn.runtime import hardware
 from covsyn.model.work_calendar import WorkCalendar, first_wave_day_zero, weekday_calendar
 from covsyn.model.data_synthesize import (community_event_parameters, community_power_law_exponent,
@@ -834,6 +835,46 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     return (demographic_data_list, social_data_list, course_of_disease_data_list, contact_data_list)
 
 
+# Stream 0 re-makes output recorded on the seeds from 0 of before Task 7, as the regression
+# pipeline does.
+SYNTHESIS_STREAMS = (seed_streams.SELECTION_STREAM, seed_streams.REPORTING_STREAM,
+                     seed_streams.EARLIER_STREAM)
+
+
+def synthesis_seeds(stream: int, monte_carlo_number: int) -> range:
+    """The Monte-Carlo seeds of a synthesis: block 0 of its stream (Task 7).
+
+    Stream 301 is the synthesis the candidate is chosen on, 300 the one reported from (E97).
+    They replace the seed starts 0 and 500,000 of before Task 7; stream 0 re-makes output of
+    the seeds from 0.
+
+    Raises:
+        ValueError: The stream is none of these, or the count is outside 1 to 10,000.
+    """
+    seed_streams.require(stream, SYNTHESIS_STREAMS, "synthesis")
+    return seed_streams.block_seeds(stream, 0, monte_carlo_number)
+
+
+DEVELOPER_MODES = ('test', 'profile')  # they run seeds from 0 of their own
+
+
+def seed_start_for(mode: str, stream: int | None,
+                   monte_carlo_number: int) -> tuple[int | None, int | None]:
+    """The stream and first seed of a synthesis: block 0 of its stream, 301 by default.
+
+    The test and profile modes run their own seeds from 0 and take no stream: (None, None).
+
+    Raises:
+        ValueError: A stream given to test or profile, or one synthesis_seeds refuses.
+    """
+    if mode in DEVELOPER_MODES:
+        if stream is not None:
+            raise ValueError(f'--mode {mode} runs its own seeds from 0 and takes no --stream')
+        return None, None
+    stream = seed_streams.SELECTION_STREAM if stream is None else stream
+    return stream, synthesis_seeds(stream, monte_carlo_number).start
+
+
 def main() -> None:
     """Synthesise data from the command line (``covsyn-data-synthesis``)."""
     start_time = time.time()
@@ -862,15 +903,20 @@ def main() -> None:
                              'community (1 = off)')
     parser.add_argument('--seed_file', type=str, default=None,
                         help='first-wave modes: seed table replacing the mode\'s own (B79)')
-    parser.add_argument('--seed_start', type=int, default=0,
-                        help='first Monte-Carlo seed; B60 uses 100000 for an independent set')
+    parser.add_argument('--stream', type=int, default=None,
+                        help='seed stream: 301, the candidate is chosen on it (default), 300, '
+                             'the reported one, or 0, the seeds from 0 of before Task 7 '
+                             '(replaces --seed_start); not for the test and profile modes')
 
     args = parser.parse_args()
     mode = args.mode
     parameter_path = Path(args.parameter_path)
     mc_number = args.monte_carlo_number
     cpu_cores = hardware.resolve_workers(args.workers, os.environ, None)
-    seed_start = args.seed_start
+    try:  # Task 7: before anything loads
+        stream, seed_start = seed_start_for(mode, args.stream, mc_number)
+    except ValueError as error:
+        parser.error(str(error))
     contact_weight = args.contact_weight
     quarantine_breach = args.quarantine_breach
     options = {'imported_isolation': args.imported_isolation,
@@ -960,7 +1006,8 @@ def main() -> None:
         write_run_metadata(result_path, mode=mode, contact_weight=contact_weight,
                            quarantine_breach=(quarantine_breach if mode in FIRST_WAVE_SEED_FILES
                                               else None),
-                           **options, seed_start=seed_start, monte_carlo_number=mc_number,
+                           **options, stream=stream, seed_start=seed_start,
+                           monte_carlo_number=mc_number,
                            parameter_path=str(parameter_path))
         print("--- Done %s seconds ---" % (time.time() - start_time))
 

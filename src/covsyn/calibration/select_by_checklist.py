@@ -9,8 +9,9 @@ runs the full checklist for the TOP candidates by validation cost, each on its o
 data and age risk ratio measurement, and keeps the one with the fewest failures, then the
 fewest results that pass only within their 95% interval, then the lowest validation cost.
 
-The data are generated on the chain's usual seeds 0..999. Because the choice is made on them,
-the chain reports the chosen candidate's checklist again on an independent seed set as well.
+The data are generated on stream 301 (Task 7; the chain's seeds 0..999 before it). Because the
+choice is made on them, the chain reports the chosen candidate's checklist again on stream 300,
+an independent seed set (E97).
 
 Usage (repository root, after uv sync):
     uv run python -m covsyn.calibration.select_by_checklist REVALIDATION_DIR OUT_DIR \\
@@ -36,6 +37,7 @@ from pathlib import Path
 
 import numpy as np
 
+from covsyn.calibration import seed_streams
 from covsyn.calibration.revalidation import write_best_file
 from covsyn.runtime import hardware
 
@@ -84,6 +86,8 @@ def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, env: dict
                     str(workdir / name),
                     "--parameter_path",
                     str(workdir),
+                    "--stream",
+                    str(seed_streams.SELECTION_STREAM),
                 ],
                 log,
                 env=env,
@@ -97,6 +101,8 @@ def evaluate_candidate(vector: np.ndarray, cost: float, workdir: Path, env: dict
                 str(AGE_RR_CASES),
                 "--out",
                 str(age_rr),
+                "--stream",
+                str(seed_streams.SELECTION_STREAM),
             ],
             log,
             env=env,

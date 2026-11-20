@@ -8,7 +8,7 @@ the chain's; what differs is where it goes. The chain wrote into the working dir
 run overwrote the last; here a run writes only into its own directories (Task 3):
 
 - ``results/models/<run-id>/``: the optimiser's files, revalidation/, selected/, and the
-  simulations under synthetic/ (seeds 0..999) and independent/ (seeds from 500000);
+  simulations under synthetic/ (stream 301) and independent/ (stream 300, Task 7);
 - ``results/tables/<run-id>/``: the age risk ratio, both checklists and the run report;
 - ``results/figures/<run-id>/``: the validation, todolist923 and Wu 2025 figures.
 
@@ -23,6 +23,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from covsyn.calibration import seed_streams
 from covsyn.pipeline.config import PipelineConfig
 from covsyn.runtime import measure, runs
 
@@ -57,7 +58,7 @@ class Layout:
         self.logs = self.run / "logs"
 
     def synthetic(self, mode: str) -> Path:
-        """The simulations of seeds 0..999, on which the candidate is chosen."""
+        """The simulations of stream 301, on which the candidate is chosen (Task 7)."""
         return self.run / "synthetic" / mode
 
     def independent(self, mode: str) -> Path:
@@ -145,9 +146,9 @@ def optimise(ctx: Context, resume: bool) -> None:
         ctx.config.mode,
         "--run-dir",
         run,
+        "--stream",
+        str(ctx.config.stream),
     ]
-    if ctx.config.warm_start:
-        args += ["--warm_start", *ctx.config.warm_start]
     ctx.must(args, "the optimiser", output=log)
 
 
@@ -199,6 +200,8 @@ def revalidate(ctx: Context) -> None:
             ctx.layout.run,
             out,
             str(ctx.config.revalidation_blocks),
+            "--stream",
+            str(ctx.config.validation_stream),
         ],
         "revalidation",
         output=ctx.layout.logs / "revalidate.log",
@@ -222,7 +225,7 @@ def select(ctx: Context) -> None:
     )
 
 
-def _synthesis(ctx: Context, mode: str, out: Path, seed_start: int | None) -> None:
+def _synthesis(ctx: Context, mode: str, out: Path, stream: int) -> None:
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)  # data_synthesis_main does not create its result path
     args = [
@@ -237,8 +240,7 @@ def _synthesis(ctx: Context, mode: str, out: Path, seed_start: int | None) -> No
         "--parameter_path",
         ctx.candidate,
     ]
-    if seed_start is not None:
-        args += ["--seed_start", str(seed_start)]
+    args += ["--stream", str(stream)]  # Task 7
     ctx.must(
         args,
         f"data synthesis of {out.relative_to(ctx.layout.run)}",
@@ -248,12 +250,14 @@ def _synthesis(ctx: Context, mode: str, out: Path, seed_start: int | None) -> No
 
 
 def synthesise(ctx: Context) -> None:
-    """Both modes on seeds 0..999, again on the independent seeds, and Cheng 2020 for Fig 6."""
+    """Both modes on streams 301 and 300, and Cheng 2020 for Fig 6 on 300 (Task 7).
+
+    The candidate is chosen on stream 301 and reported from stream 300 (E97).
+    """
     for mode in (SPREAD_MODE, FIRST_MODE):
-        _synthesis(ctx, mode, ctx.layout.synthetic(mode), None)
-    start = ctx.config.independent_seed_start
+        _synthesis(ctx, mode, ctx.layout.synthetic(mode), seed_streams.SELECTION_STREAM)
     for mode in (SPREAD_MODE, FIRST_MODE, CHENG_MODE):
-        _synthesis(ctx, mode, ctx.layout.independent(mode), start)
+        _synthesis(ctx, mode, ctx.layout.independent(mode), seed_streams.REPORTING_STREAM)
     # A synthesis can report success and write no simulation (chain step 5).
     for mode in (SPREAD_MODE, FIRST_MODE):
         if not list(ctx.layout.independent(mode).glob("social_data_*.npy")):
@@ -268,11 +272,27 @@ def repository_path(setting: str) -> Path | None:
     return path if path.is_absolute() else runs.REPO_ROOT / path
 
 
-def check(ctx: Context) -> None:
-    """The age risk ratio, then the checklist on both seed sets, and the previous run's."""
-    tables = ctx.layout.tables
-    age_rr = tables / "age_rr.json"
-    # B14 is judged on 20000 index cases, not the spread output (E68); before the checklist.
+def _age_rr(ctx: Context, stream: int, name: str, what: str) -> Path:
+    """Measure the age risk ratio on a stream into tables/<name>.json; its path.
+
+    An earlier attempt's file goes first, so a measurement that fails leaves none for the
+    checklist to score; one that cannot be removed would be scored, so the stage stops. Every
+    <name>.json.<random>.tmp in the tables goes too, the temporary files killed writes left
+    (measure_age_rr writes one and renames it), whoever ran them; a leftover that cannot be
+    removed is warned about. This assumes nothing else writes this measurement meanwhile: the
+    pipeline does not, and a hand run into the run's tables at the same time is not supported.
+    """
+    out = ctx.layout.tables / f"{name}.json"
+    try:
+        out.unlink(missing_ok=True)
+    except OSError as error:
+        raise StageFailed(f"{out} could not be removed, and would be scored as this run's B14 "
+                          f"({error}); remove it by hand") from None
+    for leftover in ctx.layout.tables.glob(f"{name}.json.*.tmp"):
+        try:
+            leftover.unlink(missing_ok=True)
+        except OSError as error:
+            ctx.warnings.append(f"could not remove {leftover.name} ({error})")
     ctx.may(
         [
             "-m",
@@ -280,11 +300,26 @@ def check(ctx: Context) -> None:
             ctx.candidate,
             str(ctx.config.age_rr_cases),
             "--out",
-            age_rr,
+            out,
+            "--stream",
+            str(stream),
         ],
-        "the age risk ratio measurement",
-        output=tables / "age_rr.txt",
+        what,
+        output=ctx.layout.tables / f"{name}.txt",
     )
+    return out
+
+
+def check(ctx: Context) -> None:
+    """The age risk ratio, then the checklist on both seed sets, and the previous run's."""
+    tables = ctx.layout.tables
+    # B14 is judged on 20000 index cases, not the spread output (E68); before the checklist.
+    # Task 7 (decision of 2026-11-17): each checklist on its own stream, 301 for the chosen
+    # seeds and 300 for the independent ones, so the reported B14 is not on the chosen seeds.
+    age_rr = _age_rr(ctx, seed_streams.SELECTION_STREAM, "age_rr",
+                     "the age risk ratio measurement")  # fmt: skip
+    independent_age_rr = _age_rr(ctx, seed_streams.REPORTING_STREAM, "age_rr_independent",
+                                 "the independent age risk ratio measurement")  # fmt: skip
     env = {"AGE_RR_FILE": str(age_rr)}
     ctx.may(
         [
@@ -308,7 +343,7 @@ def check(ctx: Context) -> None:
         ],
         "the independent checklist",
         output=tables / "checks_independent.txt",
-        env=env,
+        env={"AGE_RR_FILE": str(independent_age_rr)},
     )
     previous = repository_path(ctx.config.previous_checks)
     if previous is not None and previous.is_file():

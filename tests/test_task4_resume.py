@@ -24,7 +24,9 @@ from covsyn.calibration import firefly_optimizer as fo
 from covsyn.runtime import runs
 from tests.firefly_standins import Killed, killed_on, objective
 
-RESUMABLE = {"moves": fo.MOVES}  # what a Task 6 run records in its settings
+RESUMABLE = {"moves": fo.MOVES, "initial_population": {"version": 1, "sha256": "x"},
+             "stream": 1}
+# what a Task 7 run records in its settings
 
 DIM = 208
 POP = 4
@@ -167,18 +169,18 @@ def test_a_resumed_run_takes_its_seed_from_its_configuration(tmp_path):
     """The optimiser's --resume reads the seed config.json recorded, not a fresh one."""
     import json
 
-    (tmp_path / "config.json").write_text(json.dumps({"seed": 123,
+    (tmp_path / "config.json").write_text(json.dumps({"rng_seed": 123,
                                                       "settings": {"mode": "test", **RESUMABLE}}))
     assert fo.resumed_settings(tmp_path) == (123, "test", False)
 
 
-@pytest.mark.parametrize("config", [None, '{"claimed": true}', '{"seed": null}', "not json",
-                                    '{"seed": 1}', '{"seed": 1, "settings": {}}',
-                                    '{"seed": true, "settings": {"mode": "train"}}',
-                                    '{"seed": 1, "settings": {"mode": "bogus"}}',
-                                    '{"seed": -1, "settings": {"mode": "train"}}', "directory",
+@pytest.mark.parametrize("config", [None, '{"claimed": true}', '{"rng_seed": null}', "not json",
+                                    '{"rng_seed": 1}', '{"rng_seed": 1, "settings": {}}',
+                                    '{"rng_seed": true, "settings": {"mode": "train"}}',
+                                    '{"rng_seed": 1, "settings": {"mode": "bogus"}}',
+                                    '{"rng_seed": -1, "settings": {"mode": "train"}}', "directory",
                                     "below a file",
-                                    '{"seed": 1, "settings": {"mode": ["train"]}}'])
+                                    '{"rng_seed": 1, "settings": {"mode": ["train"]}}'])
 def test_a_run_without_a_recorded_seed_cannot_be_resumed(tmp_path, config):
     """A claim marker, a missing file, or no seed or mode would resume the wrong run.
 
@@ -215,7 +217,7 @@ def test_a_resumed_run_takes_its_mode_from_its_configuration(tmp_path):
     """main() runs the mode config.json recorded: it sets the population the checkpoint holds."""
     import json
 
-    (tmp_path / "config.json").write_text(json.dumps({"seed": 5,
+    (tmp_path / "config.json").write_text(json.dumps({"rng_seed": 5,
                                                       "settings": {"mode": "test", **RESUMABLE}}))
     (tmp_path / "checkpoints").mkdir()
     (tmp_path / "checkpoints" / "initial.npz").write_text("x")  # something to continue
@@ -244,7 +246,7 @@ def test_a_resumed_run_times_its_stages_as_it_started(tmp_path, recorded):
     settings = {"mode": "test", **RESUMABLE}
     if recorded is not None:
         settings["stage_timing"] = recorded
-    (tmp_path / "config.json").write_text(json.dumps({"seed": 5, "settings": settings}))
+    (tmp_path / "config.json").write_text(json.dumps({"rng_seed": 5, "settings": settings}))
     (tmp_path / "checkpoints").mkdir()
     (tmp_path / "checkpoints" / "initial.npz").write_text("x")
     args = _args(resume=tmp_path, stage_timings=False)
@@ -330,7 +332,7 @@ def test_the_optimiser_refuses_a_lost_table_at_startup(tmp_path, monkeypatch, ca
     run = tmp_path / "results" / "models" / "r"
     (run / "checkpoints").mkdir(parents=True)
     (run / "checkpoints" / "generation_0002.npz").write_text("x")
-    (run / "config.json").write_text(json.dumps({"seed": 1, "settings": {"mode": "test"}}))
+    (run / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": {"mode": "test"}}))
     (run / "bound.txt").write_text("kept\n")
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
     with pytest.raises(SystemExit) as stop:
@@ -344,7 +346,7 @@ def test_a_config_the_disk_cannot_read_now_can_be_retried(tmp_path, monkeypatch)
     """An I/O error that may pass is not NOT_RESUMABLE: retrying can help."""
     import errno
 
-    (tmp_path / "config.json").write_text('{"seed": 1, "settings": {"mode": "train"}}')
+    (tmp_path / "config.json").write_text('{"rng_seed": 1, "settings": {"mode": "train"}}')
 
     def failing(self, *args, **kwargs):
         raise OSError(errno.EIO, "I/O error")
@@ -363,7 +365,7 @@ def test_the_optimiser_refuses_a_run_without_a_checkpoint_at_startup(tmp_path, m
 
     run = tmp_path / "results" / "models" / "r"
     run.mkdir(parents=True)
-    (run / "config.json").write_text(json.dumps({"seed": 1, "settings": {"mode": "test"}}))
+    (run / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": {"mode": "test"}}))
     monkeypatch.chdir(tmp_path)  # no ./variable here: loading any input would fail instead
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
     with pytest.raises(SystemExit) as stop:

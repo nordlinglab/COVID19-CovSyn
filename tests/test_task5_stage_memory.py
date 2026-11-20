@@ -154,11 +154,18 @@ def test_a_stage_whose_steps_report_nothing_has_no_peaks(tmp_path, config):
 
 
 def test_low_memory_during_a_stage_is_a_warning_of_it(tmp_path, config, monkeypatch):
-    """The pipeline samples the available memory; below 10% it warns in run.log and pipeline.log."""
+    """The pipeline samples the available memory; below 10% it warns in run.log and pipeline.log.
+
+    A stage with a warning of its own keeps both, its own first, the memory warning once.
+    """
     monkeypatch.setattr(memory, "system_memory", lambda: (5, 100))
-    _, run_dir = run_pipeline(tmp_path, config, Recorder())
-    for line in run_log(run_dir).values():
-        assert any("below 10%" in w for w in line["warnings"])
+    _, run_dir = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.validation.show_final"}))
+    low = memory.low_memory_warning(5, 100)
+    recorded = [json.loads(x)["stage"] for x in (run_dir / "run.log").read_text().splitlines()]
+    assert recorded == STAGES  # every stage ran once, in order, the report included
+    for stage, line in run_log(run_dir).items():
+        own = ["the report's show_final failed"] if stage == "report" else []
+        assert line["warnings"] == [*own, low], stage
         assert line["lowest_available_mb"] is not None
     assert "below 10%" in (run_dir / pr.PIPELINE_LOG).read_text()
 

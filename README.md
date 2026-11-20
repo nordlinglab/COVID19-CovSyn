@@ -87,7 +87,16 @@ In each generation every firefly moves towards each brighter one from the positi
 The brightest firefly does not move, and in generation 0, which shares the initial population's block, it keeps its initial cost.
 The workers start by spawn on macOS and Linux, and the results do not depend on the number of workers.
 A run started before this algorithm cannot be resumed.
-A run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`, with `config.json` recording the optimiser's settings, seed, workers, machine and versions, and `pipeline.toml` the pipeline's;
+Every run starts from the committed initial population `variable/initial_population_v1.npz`, taking its first n rows: the literature vector, the best vectors of runs 10 and 19, then a Latin hypercube.
+A run whose bounds or dimension differ from the population's is refused;
+`uv run covsyn-initial-population --version 2` then makes a new version, which is how the warm starts change too.
+The moves are drawn from `rng_seed` (`--seed`, default 1), so two runs of one configuration are identical.
+Each use takes its simulation seeds from its own stream: block b of stream s holds the seeds s × 10^7 + b × S to s × 10^7 + (b + 1) × S − 1.
+The optimiser takes streams 1 to 99 (`--stream`, default 1), revalidation 200 to 299 (default 200), the synthesis the candidate is chosen on stream 301, and the reported synthesis stream 300.
+The age risk ratio is measured on each checklist's stream, 301 for `checks.json` and 300 for `checks_independent.json`, into `age_rr.json` and `age_rr_independent.json`.
+Stream 0 holds the seeds of earlier runs, which the regression tests re-make;
+a run draws from its own streams instead, so the optimiser's, revalidation's and 301 may choose another vector, and its checklists, on 301 and 300, differ from ones made before these streams partly because their seeds differ.
+A run writes into `results/models/<run-id>/`, named `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>`, with `config.json` recording the optimiser's settings, stream, initial population, `rng_seed`, workers, machine and versions, and `pipeline.toml` the pipeline's;
 its tables go into `results/tables/<run-id>/` and its figures into `results/figures/<run-id>/`.
 Each finished stage adds a line to `run.log`, and the optimiser saves a checkpoint after every generation, so
 
@@ -99,7 +108,7 @@ continues an interrupted run where it stopped.
 `--resume` takes the run id, or `results/models/<run-id>` written out as a whole path;
 anything else, such as `.`, a subdirectory of the run or the place the run is stored, is refused before anything is written, because its tables and figures could then go elsewhere.
 A run directory that is a link to other storage is not supported.
-`src/covsyn/pipeline/default.toml` holds the settings, such as the warm start (default: run 10) and the previous run's `checks.json` to compare with;
+`src/covsyn/pipeline/default.toml` holds the settings, such as the optimisation and validation streams and the previous run's `checks.json` to compare with;
 `--config` also takes another TOML file.
 
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.

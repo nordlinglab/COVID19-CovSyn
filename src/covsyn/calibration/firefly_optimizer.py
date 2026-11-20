@@ -11,6 +11,7 @@ import pickle
 import sys
 import time
 import traceback
+import warnings
 import os
 from pathlib import Path
 from numpy.random import default_rng
@@ -18,6 +19,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
+from covsyn.calibration import initial_population, parameter_space, seed_streams
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -28,9 +30,7 @@ from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_p
                                            one_day_counts, one_day_shape)
 from covsyn.calibration.target_margins import load_charged_bounds
 from covsyn.model.data_synthesize import *
-from covsyn.model.data_synthesize import (COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX,
-                                          COMMUNITY_POWER_LAW_INDEX,
-                                          WORK_GROUP_SATURATION_INDEX)
+from covsyn.model.data_synthesize import COMMUNITY_EVENT_FIELDS, COMMUNITY_EVENT_FIRST_INDEX
 from covsyn.figures.plot_results import *
 from covsyn.data_processing.rw_data_processing import convert_synthetic_data_to_test_matrix
 # from sklearn.metrics.pairwise import nan_euclidean_distances
@@ -1110,13 +1110,17 @@ SIMULATIONS_PER_EVALUATION = 300
 # moves on those scores. Before the code review of 2026-11-09 (F7) generation 0 scored the same
 # population again on block 300 and discarded the block-0 scores: one population of evaluations
 # for a different noise draw, not a better search. Runs from then on therefore take other paths
-# than runs 20-22. 120 generations end at 35,999, clear of revalidation's blocks from 100,000
-# (E87).
+# than runs 20-22. 120 generations ended at 35,999, clear of revalidation's blocks from 100,000
+# (E87); since Task 7 each run scores on its own optimisation stream, which no validation
+# stream meets (seed_streams).
 # Costs from different blocks are NOT comparable, so nothing keeps a running minimum across
 # generations: the attraction, the elite and the progress row all use this generation's scores,
 # and the candidates are re-scored on one common set of blocks afterwards.
 ARCHIVE_EVERY = 5
 
+
+# Task 7: the move generator's seed when none is given.
+DEFAULT_RNG_SEED = 1
 
 # Task 6: the synchronous firefly algorithm (Yang, 2010). config.json records it, and a run
 # that does not, started before Task 6 with its sequential moves, is not resumed with these.
@@ -1232,11 +1236,13 @@ def _whole_row(row: dict) -> bool:
     return True
 
 
-def generation_seed_offset(generation, simulations=SIMULATIONS_PER_EVALUATION):
+def generation_seed_offset(generation, simulations=SIMULATIONS_PER_EVALUATION,
+                           stream=seed_streams.DEFAULT_OPTIMISATION_STREAM):
     """First simulation seed of a generation's own block (B81); generation 0 shares block 0
     with the initial population, whose scores it starts from (F7). A block is one evaluation's
-    simulations, which only profile mode changes (Task 5)."""
-    return simulations * generation
+    simulations, which only profile mode changes (Task 5). Task 7: block g of the run's
+    optimisation stream, s x 10^7 + g x S, so no run meets another use's seeds."""
+    return seed_streams.block_start(stream, generation, simulations)
 
 # E86: the objective summed the contact bins of all 300 simulated cases and compared them
 # with Cheng et al. 2020's totals for 100 cases (the original 100 cases x 3 repeats lost its
@@ -1466,53 +1472,15 @@ def decode_metrics(P):
     return {k: float(v) for k, v in m.items()}
 
 
-def clip_warm_start(vector: np.ndarray, lb: np.ndarray, ub: np.ndarray, label: str) -> np.ndarray:
-    """Clip a starting vector to the search bounds and say which values moved.
-
-    Rebuilt bounds can exclude an earlier best vector (B75: run 18's attack rates fall outside the
-    bounds rebuilt for the work calendar in 17 places), and the firefly then starts somewhere
-    other than the vector and cost the run log names.
-    """
-    clipped = np.clip(vector, lb, ub)
-    moved = np.flatnonzero(clipped != vector)
-    if len(moved):
-        print(f'warm start: {label}: {len(moved)} of {len(vector)} values clipped to the bounds '
-              f'({", ".join(f"P[{i}]" for i in moved)})', flush=True)
-    return clipped
-
-
-def pad_pre_b54_vector(vector: np.ndarray, seed_vector: np.ndarray) -> np.ndarray:
-    """Extend a pre-B54 warm-start vector with the seed values of the appended parameters.
-
-    Args:
-        vector: A best vector read from an earlier run.
-        seed_vector: The literature seed vector of this run.
-
-    Returns:
-        The vector with the seed values of the missing tail appended when it has exactly the
-        199 values of run 10 and earlier, the 204 values of runs 11-16 (before B62's
-        P[204]) or the 205 values of run 17 (before B64's P[205]); otherwise the vector
-        unchanged, so a misaligned vector of any other length still fails the caller's shape
-        check instead of being padded into a plausible-looking start.
-    """
-    # B62: a vector of run 11-16 ends before P[204] and is padded the same way; B64: so does
-    # a run-17 vector, which ends before P[205].
-    if (vector.size in (COMMUNITY_EVENT_FIRST_INDEX, COMMUNITY_POWER_LAW_INDEX,
-                        WORK_GROUP_SATURATION_INDEX)
-            and vector.size < seed_vector.size):
-        return np.concatenate([vector, seed_vector[vector.size:]])
-    return vector
-
-
 class Firefly:
     def __init__(self, pop_size, alpha, betamin, gamma, seed=None):
         self.pop_size = pop_size
         self.alpha = alpha
         self.betamin = betamin
         self.gamma = gamma
-        # Task 3: an unseeded run draws its seed here, so config.json can record it and the
-        # initial population can be drawn again from it.
-        self.seed = int(np.random.SeedSequence().entropy) if seed is None else seed
+        # Task 7: the seed of the moves, config.json's rng_seed; without one, the fixed default,
+        # so two runs of one configuration make the same moves (decision of 2026-11-17).
+        self.seed = DEFAULT_RNG_SEED if seed is None else seed
         self.rng = default_rng(self.seed)
         # Task 3: recorded in config.json with the settings above; main() adds its own.
         self.run_settings = {}
@@ -1521,6 +1489,8 @@ class Firefly:
         self.simulations = SIMULATIONS_PER_EVALUATION
         self.stage_timing = False
         self.profile_dir = None
+        # Task 7: the run's optimisation stream, whose block g generation g is scored on.
+        self.stream = seed_streams.DEFAULT_OPTIMISATION_STREAM
 
     @staticmethod
     def _state(normalized, fireflies, intensities, cost_parts, archive, worst_fireflies,
@@ -1536,27 +1506,21 @@ class Firefly:
                 'worst_iteration': np.asarray(worst_iteration, dtype=float),
                 'evaluations': evaluations, 'alpha': alpha}
 
-    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, seed_vector=None, warm_start_vectors=(), resume=False):
-        normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
-        # fireflies = self.rng.uniform(lb, ub, (self.pop_size, dim))
+    def firefly(self, function, dim, lb, ub, demographic_parameters, max_generations, max_workers, Cheng_contact_array, Cheng_attack_rate, norm_weights, initial_population=None, resume=False):
+        # Task 7: a run starts from the first pop_size rows of the committed initial population,
+        # in normalised coordinates, which main() reads and checks against the bounds: the
+        # literature vector (firefly 0), the warm starts (B49, E75: run 8 finished at 3.80
+        # while run 7's best vector scores 2.75 on run 8's own objective), then a Latin
+        # hypercube. Without one, as in the tests, the population is drawn from the seed.
+        if initial_population is None:
+            normalized_fireflies = self.rng.uniform(0, 1, (self.pop_size, dim))
+        else:
+            normalized_fireflies = np.array(initial_population, dtype=float)
+            if normalized_fireflies.shape != (self.pop_size, dim):
+                raise ValueError(f'initial population of shape {normalized_fireflies.shape}, '
+                                 f'expected {(self.pop_size, dim)}')
         # inverse of min-max normalization
         fireflies = normalized_fireflies*(ub-lb) + lb
-        # Seed firefly 0 at the literature central estimate instead of leaving the whole
-        # population random, so the run always contains the documented starting point.
-        if seed_vector is not None:
-            span = np.where((ub - lb) > 0, ub - lb, 1.0)
-            normalized_fireflies[0] = np.clip((clip_warm_start(seed_vector, lb, ub, 'seed vector') - lb) / span, 0, 1)
-            fireflies[0] = normalized_fireflies[0]*(ub-lb) + lb
-        # B49 (E75): fireflies 1.. start at the best vectors of earlier runs. Every run used to
-        # restart from the literature seed, and run 8 finished at 3.80 while run 7's best vector
-        # scores 2.75 on run 8's own objective -- a known better point the search never found.
-        span = np.where((ub - lb) > 0, ub - lb, 1.0)
-        for k, vector in enumerate(warm_start_vectors, start=1):
-            if k >= self.pop_size:
-                break
-            normalized_fireflies[k] = np.clip((clip_warm_start(vector, lb, ub, f'firefly {k}') - lb) / span, 0, 1)
-            fireflies[k] = normalized_fireflies[k]*(ub-lb) + lb
-            print(f'warm start: firefly {k} set from an earlier best vector', flush=True)
         # Task 4: a resumed run continues from its last checkpoint; its config.json stands.
         if resume:
             check_progress_table(result_path)  # a checkpoint, and its table: else NOT_RESUMABLE
@@ -1565,9 +1529,10 @@ class Firefly:
         settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
                     'simulations': self.simulations, 'stage_timing': self.stage_timing,
-                    **self.run_settings, 'moves': MOVES}  # Task 6: last, so nothing overrides it
+                    **self.run_settings, 'moves': MOVES,  # Task 6: last, so nothing overrides it
+                    'stream': self.stream}
         if checkpoint is None:
-            runs.write_config(result_path, settings, seed=self.seed, workers=max_workers,
+            runs.write_config(result_path, settings, rng_seed=self.seed, workers=max_workers,
                               initial_population=fireflies)
         # Create ONE persistent process pool reused for every evaluation in this run.
         # (Previously each evaluation created and tore down its own pool, re-spawning
@@ -1639,7 +1604,8 @@ class Firefly:
             else:
                 print(f'evaluating initial population: {self.pop_size} fireflies '
                       f'({self.simulations} simulations each)...', flush=True)
-                evaluate(range(self.pop_size), fireflies, 0)
+                evaluate(range(self.pop_size), fireflies,
+                         generation_seed_offset(0, self.simulations, self.stream))
                 for k in range(self.pop_size):
                     print(f'  initial firefly {k+1}/{self.pop_size}: cost={intensities[k]:.4f}',
                           flush=True)
@@ -1683,7 +1649,7 @@ class Firefly:
             for generation in tqdm(range(start, max_generations)):
                 # B81: this generation's block, and every firefly scored on it -- the brightest
                 # included, since its score came from another block and cannot be compared here.
-                offset = generation_seed_offset(generation, self.simulations)
+                offset = generation_seed_offset(generation, self.simulations, self.stream)
                 clock = timings.GenerationClock(generation, max_workers)
                 new_alpha *= 0.97
                 # Task 6: every firefly moves on the positions and costs the generation starts
@@ -1801,30 +1767,86 @@ def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
 
     Raises:
         SystemExit: With code runs.NOT_RESUMABLE when retrying cannot help: config.json is
-            missing, not a file, unreadable as JSON, or lacks a seed of at least 0 or a mode
+            missing, not a file, unreadable as JSON, or lacks an rng_seed of at least 0 or a mode
             of OPTIMISER_MODES. With a message (status 1) for any other read error, which may
             pass.
     """
     try:
         config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
-        seed, mode = config['seed'], config['settings']['mode']
+        seed, mode = config['rng_seed'], config['settings']['mode']
         stage_timing = config['settings'].get('stage_timing') is True
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
             TypeError) as error:  # what retrying cannot change
-        not_resumable(f'{run_dir} cannot be resumed: no seed and mode in its config.json '
+        not_resumable(f'{run_dir} cannot be resumed: no rng_seed and mode in its config.json '
                       f'({error!r})')
     except OSError as error:  # a disk that may come back: retrying can help, so not that code
         raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})')
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
-        not_resumable(f'{run_dir} cannot be resumed: its config.json seed is {seed!r}')
+        not_resumable(f'{run_dir} cannot be resumed: its config.json rng_seed is {seed!r}')
     if not isinstance(mode, str) or mode not in OPTIMISER_MODES:  # a list would not hash
         not_resumable(f'{run_dir} cannot be resumed: its config.json mode is {mode!r}')
     if mode == 'profile':  # Task 5: its population is the worker count of that run
         not_resumable(f'{run_dir} is a profile, which is run again rather than resumed')
+    if 'initial_population' not in config['settings']:  # Task 7
+        not_resumable(f'{run_dir} was started before the committed initial population; its '
+                      f'generations cannot be continued from it')
     if config['settings'].get('moves') != MOVES:  # Task 6
         not_resumable(f'{run_dir} was started with the moves of before Task 6; its generations '
                       f'cannot be continued with the synchronous ones')
     return seed, mode, stage_timing
+
+
+def recorded_stream(run_dir: Path) -> int:
+    """The optimisation stream a run recorded in its config.json, to resume it on (Task 7).
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when it is missing or not an optimisation stream.
+    """
+    try:
+        stream = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
+            'settings']['stream']
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        not_resumable(f'{run_dir} cannot be resumed: no stream in its config.json ({error!r})')
+    try:
+        return seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, 'optimisation')
+    except ValueError as error:
+        not_resumable(f'{run_dir} cannot be resumed: its config.json stream: {error}')
+
+
+def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) -> None:
+    """Refuse to resume a run under bounds other than those it started with (Task 7).
+
+    Its checkpoints hold positions within the bounds in its bound.txt, which savetxt writes
+    exactly; resuming under others would move them in another box.
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when bound.txt is missing, unreadable or different.
+    """
+    path = Path(run_dir) / 'bound.txt'
+    if not path.is_file():
+        not_resumable(f'{run_dir} cannot be resumed: no bound.txt records the bounds it '
+                      f'started with')
+    try:
+        with warnings.catch_warnings():  # an empty file only warns, and reads as no values
+            warnings.simplefilter('error', UserWarning)
+            recorded = np.loadtxt(path, ndmin=2)  # rows stay rows, of one value too
+    except (OSError, ValueError, UserWarning) as error:
+        not_resumable(f'{run_dir} cannot be resumed: its bound.txt cannot be read ({error!r})')
+    if len(recorded) != 2:
+        not_resumable(f'{run_dir} cannot be resumed: its bound.txt does not hold a lower and an '
+                      f'upper row (it holds {len(recorded)})')
+    if recorded.shape != (2, len(lower)) or not (np.array_equal(recorded[0], lower)
+                                                  and np.array_equal(recorded[1], upper)):
+        not_resumable(f'{run_dir} started with other bounds or another dimension than '
+                      f'./variable now gives; it cannot be resumed under them')
+
+
+def optimisation_stream(text: str) -> int:
+    """--stream: one of the optimisation streams, 1 to 99 (Task 7)."""
+    try:
+        return seed_streams.require(int(text), seed_streams.OPTIMISATION_STREAMS, 'optimisation')
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
 
 
 def resume_arguments(args: argparse.Namespace) -> str:
@@ -1834,19 +1856,20 @@ def resume_arguments(args: argparse.Namespace) -> str:
     than ignored.
 
     Raises:
-        SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations or
-            --stage-timings.
+        SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations,
+            --stream or --stage-timings.
     """
     if args.resume is None:
         return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
     given = [flag for flag, value in (('--run-dir', args.run_dir), ('--seed', args.seed),
                                       ('--mode', args.mode), ('--warm_start', args.warm_start),
                                       ('--simulations', getattr(args, 'simulations', None)),
+                                      ('--stream', getattr(args, 'stream', None)),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
     if given:  # a mistake in the command, reported before anything is read
-        sys.exit(f'--resume takes the directory, seed, mode and warm start from the run; '
+        sys.exit(f'--resume takes the directory, seed, mode and stream from the run; '
                  f'remove {", ".join(given)}')
     # Then the checkpoints: a run killed before any has nothing to continue, whatever its
     # config.json holds, and that is the reason to report.
@@ -1854,6 +1877,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
     if problem is not None:
         not_resumable(problem)
     args.seed, mode, args.stage_timings = resumed_settings(args.resume)
+    args.stream = recorded_stream(args.resume)
     return mode
 
 
@@ -1877,8 +1901,10 @@ def main() -> None:
                         help='train (default), test or profile; a resumed run keeps its own')
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
-    # B49: firefly_best.txt files of earlier runs; each one's lowest-cost row seeds a firefly.
-    parser.add_argument('--warm_start', type=str, nargs='*', default=None)
+    # B49: firefly_best.txt files of earlier runs seeded fireflies 1..; since Task 7 the warm
+    # starts are rows of the initial population, and the option is refused with that reason.
+    parser.add_argument('--warm_start', type=str, nargs='*', default=None,
+                        help=argparse.SUPPRESS)
     # Task 3: the run writes into results/models/<run-id>/; covsyn-pipeline names it with
     # covsyn.runtime.runs and passes it here, so the chain knows where to read.
     parser.add_argument('--run-dir', type=Path, default=None,
@@ -1888,15 +1914,21 @@ def main() -> None:
     parser.add_argument('--resume', type=Path, default=None,
                         help='run directory to continue from its last checkpoint (Task 4)')
     parser.add_argument('--seed', type=runs.non_negative_int, default=None,
-                        help='seed of the initial population, as config.json records it '
-                             '(default: drawn and recorded)')
+                        help="seed of the moves, config.json's rng_seed "
+                             f'(default {DEFAULT_RNG_SEED})')
     # Task 5
     parser.add_argument('--simulations', type=int, default=None,
                         help=f'profile mode: simulations per evaluation, S '
                              f'(default {PROFILE_SIMULATIONS})')
+    parser.add_argument('--stream', type=optimisation_stream, default=None,
+                        help='optimisation stream, 1 to 99, whose block g scores generation g '
+                             f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
     parser.add_argument('--stage-timings', action='store_true',
                         help="time run_covid's stages into timings_evaluation.csv")
     args = parser.parse_args()
+    if args.warm_start is not None and args.resume is None:
+        sys.exit('--warm_start is gone (Task 7): the warm starts are rows of the initial '
+                 'population; make a new version with covsyn-initial-population to change them')
 
     cores = hardware.performance_core_count()
     max_workers = hardware.resolve_workers(args.workers, os.environ, None, cores=cores.count)
@@ -1915,8 +1947,9 @@ def main() -> None:
     if mode == 'profile':
         pop_size = max_workers
         simulations = PROFILE_SIMULATIONS if args.simulations is None else args.simulations
-        if simulations < 1:
-            sys.exit(f'--simulations must be at least 1, not {simulations}')
+        if not 1 <= simulations <= seed_streams.MAX_SIMULATIONS:  # Task 7: one block's seeds
+            sys.exit(f'--simulations must be 1 to {seed_streams.MAX_SIMULATIONS}, '
+                     f'not {simulations}')
     elif args.simulations is not None:
         sys.exit('--simulations changes the objective, so it is for --mode profile only')
     else:
@@ -1924,63 +1957,25 @@ def main() -> None:
 
     # Firefly
     fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
-    fa.run_settings = {'mode': mode, 'warm_start': list(args.warm_start or [])}
+    fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
+    fa.stream = (seed_streams.DEFAULT_OPTIMISATION_STREAM if args.stream is None
+                 else args.stream)
 
-    with open('./variable/contact_parameters.pkl', 'rb') as f:
-        contact_parameters = pickle.load(f)
-    household_lower_bound = contact_parameters['household_lower_bound']
-    household_upper_bound = contact_parameters['household_upper_bound']
-    school_lower_bound = contact_parameters['school_lower_bound']
-    school_upper_bound = contact_parameters['school_upper_bound']
-    workplace_lower_bound = contact_parameters['workplace_lower_bound']
-    workplace_upper_bound = contact_parameters['workplace_upper_bound']
-    health_care_lower_bound = contact_parameters['health_care_lower_bound']
-    health_care_upper_bound = contact_parameters['health_care_upper_bound']
-    municipality_lower_bound = contact_parameters['municipality_lower_bound']
-    municipality_upper_bound = contact_parameters['municipality_upper_bound']
-    overdispersion_lower_bound = contact_parameters['overdispersion_lower_bound']
-    overdispersion_upper_bound = contact_parameters['overdispersion_upper_bound']
-
-    lower_bound = np.array(household_lower_bound + school_lower_bound +
-                           workplace_lower_bound + health_care_lower_bound + municipality_lower_bound +
-                           overdispersion_lower_bound)
-    upper_bound = np.array(household_upper_bound + school_upper_bound +
-                           workplace_upper_bound + health_care_upper_bound + municipality_upper_bound +
-                           overdispersion_upper_bound)
-
-    # Load course of disease data
-    course_parameters = np.load(
-        './variable/course_parameters.npy')
-    course_parameters_lb = np.load('./variable/course_parameters_lb.npy')
-    course_parameters_ub = np.load('./variable/course_parameters_ub.npy')
-    # Extend lb and hb to include the lower and upper bound of the course of disease
-    lower_bound = np.hstack(
-        (lower_bound, course_parameters_lb))
-    # lower_bound[lower_bound < 0] = 0
-    upper_bound = np.hstack(
-        (upper_bound, course_parameters_ub))
-    # upper_bound_tmp = upper_bound[65::]  # upper limit for probability
-    # upper_bound_tmp[upper_bound_tmp > 1] = 1
-    # upper_bound[65::] = upper_bound_tmp
-
-    # Literature central estimate for firefly 0: documented values for the course of
-    # disease block, midpoint of the bounds for the contact block (which has no central
-    # estimate stored).
-    seed_vector = np.hstack(((lower_bound[:37] + upper_bound[:37]) / 2, course_parameters))
-
-    warm_start_vectors = []
-    for path in args.warm_start or []:
-        earlier = np.atleast_2d(np.loadtxt(path))
-        vector = earlier[int(np.argmin(earlier[:, -1])), 1:-1]
-        padded = pad_pre_b54_vector(vector, seed_vector)
-        if padded.shape != lower_bound.shape:
-            sys.exit(f'warm start {path}: {vector.size} parameters, expected {lower_bound.size}')
-        warm_start_vectors.append(padded)
-        print(f'warm start from {path}: recorded cost {earlier[:, -1].min():.4f}'
-              + (f' for its {vector.size} parameters; P[{vector.size}:] from the seed vector'
-                 if padded.size != vector.size else ''), flush=True)
+    # Task 7: the bounds come from one place, which the initial population is made from too.
+    space = parameter_space.load()
+    lower_bound, upper_bound = space.lower, space.upper
+    # Task 7: the first pop_size rows of the committed population, refused, not clipped, when
+    # the bounds or the dimension differ from those it was made with. A resumed run continues
+    # from its checkpoint and keeps the config.json that names its population.
+    population = None
+    if args.resume is not None:
+        check_resumed_bounds(args.resume, lower_bound, upper_bound)
+    else:
+        population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
+        population = initial_population.load(population_file, pop_size, lower_bound, upper_bound)
+        fa.run_settings['initial_population'] = initial_population.describe(population_file)
 
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
@@ -2003,8 +1998,9 @@ def main() -> None:
     # Optimization
     if mode == 'profile':  # Task 5: the workers profile their tasks into the run directory
         fa.profile_dir = result_path / 'profile'
-    np.savetxt(result_path/'bound.txt',
-               np.vstack((lower_bound, upper_bound)))
+    if args.resume is None:  # a resumed run keeps the bounds it started with (Task 7)
+        np.savetxt(result_path/'bound.txt',
+                   np.vstack((lower_bound, upper_bound)))
     # E65: fast_cost.cost_function reduces inside the workers -- 1.63x on the steady-state
     # benchmark, on top of the 2.46x the batching gave (run 5 0.1284 s -> run 6 0.0523 s
     # per evaluation). It is verified bit-identical to cost_function() below on nine
@@ -2020,7 +2016,7 @@ def main() -> None:
             function=evaluate_candidate, dim=len(lower_bound), lb=lower_bound, ub=upper_bound,
             demographic_parameters=demographic_parameters, max_generations=max_generations, max_workers=max_workers, Cheng_contact_array=Cheng_contact_array,
             Cheng_attack_rate=Cheng_attack_rate, norm_weights=norm_weights,
-            seed_vector=seed_vector, warm_start_vectors=warm_start_vectors,
+            initial_population=population,
             resume=args.resume is not None)
     fireflies_result = np.hstack((fireflies, np.matrix(intensities).T))
     best_result = np.hstack(

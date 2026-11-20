@@ -4,12 +4,14 @@
 [optimise]
 mode = "train"
 config_name = "phase-d"   # the name in a new run id
-# B49: firefly_best.txt files whose best vectors seed the initial population (WARM_START).
-warm_start = ["results/models/phaseD_run10/firefly_best.txt"]
+stream = 1                # Task 7: the optimisation stream, 1 to 99, one per run
+# B49's warm starts (run 10, and run 19) are rows of variable/initial_population_v1.npz since
+# Task 7; the warm_start setting is gone.
 
 [revalidate]
 enabled = true   # B56, E87 (REVALIDATE)
 blocks = 10      # E95: 4 left the choice noisy (REVALIDATION_BLOCKS)
+stream = 200     # Task 7: the validation stream, 200 to 299, one per use
 
 [select]
 enabled = true   # B60 (SELECT)
@@ -17,10 +19,15 @@ top = 5          # candidates the checklist chooses among (SELECT_TOP)
 
 [synthesise]
 monte_carlo = 1000              # A5: at least 1000; 100 was shown to be unreliable
-independent_seed_start = 500000 # B60: clear of the objective, revalidation and the probes
+# B60's independent seeds (500000..) are stream 300 since Task 7, and the seeds the candidate
+# is chosen on (0..999) stream 301; the independent_seed_start setting is gone.
 
 [check]
-age_rr_cases = 20000   # E68: about 4300 infections over the four age bands
+age_rr_cases = 20000   # E68: about 4300 infections over the four age bands; Task 7: measured
+                       # twice, on stream 301 for checks.json and 300 for checks_independent.json;
+                       # the selection measures its own 20000 on stream 301 whatever is set here,
+                       # so another value gives both checklists' B14 more or fewer seeds than
+                       # the selection scored
 previous_checks = ""   # checks.json of the previous run, to compare with (PREVIOUS_CHECKS)
 
 [run]

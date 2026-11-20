@@ -59,6 +59,74 @@ MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contact
 results = []
 
 
+DEFAULT_AGE_RR_FILE = Path('validation_reference/age_rr.json')
+
+
+def age_rr_file() -> Path:
+    """The B14 measurement to score: AGE_RR_FILE, or the default when it is unset or empty."""
+    return Path(os.environ.get('AGE_RR_FILE') or DEFAULT_AGE_RR_FILE)
+
+
+def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
+    """The measurement at ``path`` and "", or None and why it cannot be scored.
+
+    A measurement made from another parameter directory than the spread synthesis in spread_dir
+    -- one left by another candidate in the default file, say -- is not scored. The recorded
+    paths are compared as text, after os.path.normpath, and only when both are relative or both
+    absolute; otherwise, as for older records that name none, it is scored as before. The
+    pipeline and its steps record the same absolute path, so the check holds there. By hand it
+    has limits (decision of 2026-11-20): the vectors themselves are not compared, a directory
+    reached through a link or another mount reads as another, and relative paths recorded from
+    different working directories can read as other or as the same.
+    """
+    if not Path(path).is_file():
+        return None, (f'no measurement at {path}: measure_age_rr.py has not run, failed, or '
+                      f'wrote elsewhere')
+    try:
+        measurement = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as error:  # cut short by a kill, or not JSON
+        return None, f'the measurement at {path} cannot be read ({error})'
+    if not isinstance(measurement, dict):
+        return None, f'the measurement at {path} cannot be read (not a JSON object)'
+    measured = measurement.get('parameters_from')
+    synthesised = _synthesis_parameters(Path(spread_dir))
+    if _other_directories(measured, synthesised):
+        return None, (f'the measurement at {path} was made from {measured}, not from '
+                      f'{synthesised}, which the synthesis was made from')
+    return measurement, ''
+
+
+def _other_directories(measured, synthesised) -> bool:
+    """Whether two recorded parameter directories are known to differ (see read_age_rr)."""
+    if not (isinstance(measured, str) and isinstance(synthesised, str) and measured
+            and synthesised):
+        return False
+    if os.path.isabs(measured) != os.path.isabs(synthesised):
+        return False
+    return os.path.normpath(measured) != os.path.normpath(synthesised)
+
+
+def _synthesis_parameters(spread_dir: Path) -> str | None:
+    """The parameter directory a synthesis's run_metadata.json names, None if it names none."""
+    try:
+        return json.loads((spread_dir / 'run_metadata.json').read_text()).get('parameter_path')
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+MISSING_AGE_RR = 'no usable measurement'
+
+
+def missing_age_rr_row(problem: str) -> None:
+    """The B14 row without a measurement, its path and reason in the note.
+
+    The target is fixed, so the checklists of two runs compare row by row.
+    """
+    check('B14', 'high-N age risk ratio measurement', None, MISSING_AGE_RR,
+          note=f'{problem}. B14 is accepted on that measurement since E68; without it only the '
+               f'informational rows above are available')
+
+
 def check(decision, name, value, target, unit='', ok=None, note='', ci=None, interval=True):
     """Record one checklist line. target is (lo, hi), a string, or None for information."""
     if ok is None and isinstance(target, tuple) and value is not None and np.isfinite(value):
@@ -635,9 +703,8 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                        'concentrated in 0-19, so this pooling is not comparable to his (E70)')
 
     # B60: the checklist-based selection measures each candidate into its own file.
-    age_rr_file = Path(os.environ.get('AGE_RR_FILE', 'validation_reference/age_rr.json'))
-    if age_rr_file.exists():
-        measurement = json.loads(age_rr_file.read_text())
+    measurement, problem = read_age_rr(age_rr_file(), SPREAD)
+    if measurement is not None:
         layers = ', '.join(measurement.get('cheng_comparable_layers', []))
         n_cases = measurement.get('n_index_cases')
         infections = measurement.get('cheng_comparable_infections')
@@ -670,9 +737,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                   note='information: the same high-N measurement pooled over all five layers, '
                        'for the size of the composition effect (E70)')
     else:
-        check('B14', 'high-N age risk ratio measurement', None, 'measure_age_rr.py has not run',
-              note='B14 is accepted on that measurement since E68; without it only the '
-                   'informational rows above are available')
+        missing_age_rr_row(problem)
 
     # ---------------------------------------------------------------- B66 Taiwan first wave
     # B66: the first-wave scenario starts from every imported case of the first wave and the 13

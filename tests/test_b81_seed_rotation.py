@@ -62,20 +62,26 @@ def run(monkeypatch, tmp_path):
 
 
 def test_offset_of_each_generation_is_its_own_block():
-    """Generation g scores on its own 300 seeds; generation 0 shares 0..299 with the initial
-    population (F7)."""
-    assert fo.generation_seed_offset(0) == 0
-    assert fo.generation_seed_offset(5) == 5 * fo.SIMULATIONS_PER_EVALUATION
+    """Generation g scores on its own 300 seeds; generation 0 shares block 0 with the initial
+    population (F7). Task 7: blocks of the run's stream, from 10^7 on stream 1."""
+    first = fo.generation_seed_offset(0)
+    assert first == 10**7
+    assert fo.generation_seed_offset(5) == first + 5 * fo.SIMULATIONS_PER_EVALUATION
     offsets = {fo.generation_seed_offset(g) for g in range(120)}
     assert len(offsets) == 120
 
 
 def test_training_seeds_never_reach_the_validation_blocks():
-    """B60 re-scores candidates from 100000; a training block there would leak (E87)."""
-    from covsyn.calibration.revalidation import VALIDATION_SEED_START
+    """B60 re-scores candidates on unseen blocks; a training block there would leak (E87).
 
-    last = fo.generation_seed_offset(119) + fo.SIMULATIONS_PER_EVALUATION
-    assert last <= VALIDATION_SEED_START
+    Task 7: the optimisation and validation streams are disjoint by construction.
+    """
+    from covsyn.calibration.revalidation import validation_seed_blocks
+
+    training = {s for g in range(120) for s in range(fo.generation_seed_offset(g),
+                fo.generation_seed_offset(g) + fo.SIMULATIONS_PER_EVALUATION)}  # fmt: skip
+    validation = validation_seed_blocks(10, fo.SIMULATIONS_PER_EVALUATION)
+    assert not any(seed in training for block in validation for seed in block)
 
 
 def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):
@@ -174,7 +180,7 @@ def test_the_run_directory_holds_the_configuration(run):
 
     _, _, path = run
     config = json.loads((path / "config.json").read_text())
-    assert (config["seed"], config["workers"]) == (7, 2)
+    assert (config["rng_seed"], config["workers"]) == (7, 2)
     assert config["settings"]["pop_size"] == POP
     assert config["settings"]["max_generations"] == GENERATIONS
     digest = config["initial_population_sha256"]
@@ -187,7 +193,7 @@ def test_the_run_directory_holds_the_configuration(run):
 
 
 def test_an_unseeded_run_records_a_seed_that_redraws_it():
-    """Task 3: without a seed the optimiser draws one, so config.json is never seed null."""
+    """Without a seed the run takes the fixed default (Task 7), so rng_seed is never null."""
     first = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03)
     again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=first.seed)
     assert isinstance(first.seed, int)
@@ -204,7 +210,7 @@ def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, t
         engine.firefly(function=standins.crashes, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
                        demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,
                        Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)
-    assert json.loads((tmp_path / "config.json").read_text())["seed"] == 7
+    assert json.loads((tmp_path / "config.json").read_text())["rng_seed"] == 7
 
 
 def test_every_file_the_optimiser_writes_marks_its_directory(run):

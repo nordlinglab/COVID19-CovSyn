@@ -63,6 +63,26 @@ def modules(recorder):
     return [c[1] for c in recorder.calls]
 
 
+@pytest.fixture(autouse=True)
+def plenty_of_memory(monkeypatch):
+    """Half of 64 GiB free for every test here, whatever the machine has at the time.
+
+    The pipeline warns, and its memory check refuses, by the available memory; on the Mac,
+    with another user's servers holding most of it, the real reading added warnings these
+    tests did not expect. The readers the pipeline's warnings and memory check use are fixed,
+    the total too. hardware._available_gb is not: the pipeline calls resolve_workers without a
+    per-worker size, so it does not read it in-process (the steps that size workers by memory
+    run as processes of their own). A test that needs other memory sets its own after this.
+    """
+    from covsyn.runtime import memory
+
+    total = 64 * 1024**3
+    available = total // 2
+    monkeypatch.setattr(memory, "total_bytes", lambda: total)
+    monkeypatch.setattr(memory, "available_bytes", lambda: available)
+    monkeypatch.setattr(memory, "system_memory", lambda: (available, total))
+
+
 @pytest.fixture
 def config():
     """The default configuration with a short warm start."""
@@ -92,9 +112,9 @@ def test_the_default_configuration_matches_the_chains_defaults(config):
     """The chain's defaults: revalidation on 10 blocks (E95), the best 5 checked (B60), ..."""
     assert (config.revalidate, config.revalidation_blocks) == (True, 10)
     assert (config.select, config.select_top) == (True, 5)
-    assert (config.monte_carlo, config.independent_seed_start) == (1000, 500000)
+    assert config.monte_carlo == 1000
+    assert (config.stream, config.validation_stream) == (1, 200)  # Task 7
     assert config.age_rr_cases == 20000
-    assert config.warm_start == ("results/models/phaseD_run10/firefly_best.txt",)
     assert config.mode == "train" and config.workers is None
 
 
@@ -152,14 +172,15 @@ def test_the_stages_run_in_the_chains_order(tmp_path, config):
     )  # the checklist reads its JSON (B14, E68)
 
 
-def test_the_optimiser_writes_into_the_run_directory_with_the_warm_start(tmp_path, config):
-    """Like launch_phase_d.sh: --mode train, the run directory, and the warm-start files."""
+def test_the_optimiser_writes_into_the_run_directory(tmp_path, config):
+    """Like launch_phase_d.sh: --mode train and the run directory; no warm start (Task 7)."""
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     args = recorder.calls[0]
     assert args[args.index("--run-dir") + 1] == str(run_dir)
     assert args[args.index("--mode") + 1] == "train"
-    assert args[args.index("--warm_start") + 1 :] == list(config.warm_start)
+    assert "--warm_start" not in args  # the warm starts are rows of the initial population
+    assert args[args.index("--stream") + 1] == "1"  # Task 7: the run's optimisation stream
 
 
 def test_revalidation_and_selection_stay_in_the_run_directory(tmp_path, config):
@@ -167,7 +188,8 @@ def test_revalidation_and_selection_stay_in_the_run_directory(tmp_path, config):
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     revalidation = recorder.calls[1]
-    assert revalidation[2:] == [str(run_dir), str(run_dir / "revalidation"), "10"]
+    assert revalidation[2:] == [str(run_dir), str(run_dir / "revalidation"), "10",
+                                "--stream", "200"]  # fmt: skip
     select = recorder.calls[2]
     assert select[2:] == [str(run_dir / "revalidation"), str(run_dir / "selected"), "5"]
 
@@ -208,7 +230,7 @@ def test_without_selection_the_revalidated_vector_is_used(tmp_path, config):
 
 
 def test_the_synthesis_runs_both_modes_and_the_independent_seeds(tmp_path, config):
-    """Seeds 0..999 for choosing, 500000.. for reporting (B60, E97), and Cheng 2020 for Fig 6."""
+    """Stream 301 for choosing, 300 for reporting (B60, E97; Task 7), and Cheng 2020 for Fig 6."""
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     syntheses = [a for a in recorder.calls if a[1] == "covsyn.model.data_synthesis_main"]
@@ -216,38 +238,44 @@ def test_the_synthesis_runs_both_modes_and_the_independent_seeds(tmp_path, confi
         (
             a[a.index("--mode") + 1],
             Path(a[a.index("--result_path") + 1]).relative_to(run_dir),
-            a[a.index("--seed_start") + 1] if "--seed_start" in a else None,
+            a[a.index("--stream") + 1],
         )
         for a in syntheses
     ]
     assert plan == [
-        ("spread_Taiwan_weight", Path("synthetic/spread_Taiwan_weight"), None),
-        ("taiwan_first_outbreak", Path("synthetic/taiwan_first_outbreak"), None),
-        ("spread_Taiwan_weight", Path("independent/spread_Taiwan_weight"), "500000"),
-        ("taiwan_first_outbreak", Path("independent/taiwan_first_outbreak"), "500000"),
-        ("cheng2020", Path("independent/cheng2020"), "500000"),
+        ("spread_Taiwan_weight", Path("synthetic/spread_Taiwan_weight"), "301"),
+        ("taiwan_first_outbreak", Path("synthetic/taiwan_first_outbreak"), "301"),
+        ("spread_Taiwan_weight", Path("independent/spread_Taiwan_weight"), "300"),
+        ("taiwan_first_outbreak", Path("independent/taiwan_first_outbreak"), "300"),
+        ("cheng2020", Path("independent/cheng2020"), "300"),
     ]
     assert all(a[a.index("--monte_carlo_number") + 1] == "1000" for a in syntheses)
 
 
 def test_the_checklists_score_this_runs_age_risk_ratio(tmp_path, config):
-    """AGE_RR_FILE names this run's age_rr.json, never validation_reference's."""
+    """AGE_RR_FILE names this run's measurements, never validation_reference's.
+
+    Task 7 (decision of 2026-11-17): the checklist on the chosen seeds scores the age risk
+    ratio measured on stream 301, the independent one that measured on stream 300 (E97).
+    """
     recorder = Recorder()
     _, run_dir = run_pipeline(tmp_path, config, recorder)
     tables = ps.Layout(run_dir).tables
-    age = next(a for a in recorder.calls if a[1] == "covsyn.validation.measure_age_rr")
-    assert age[2:4] == [str(run_dir / "selected"), "20000"]
-    assert age[age.index("--out") + 1] == str(tables / "age_rr.json")
+    ages = [a for a in recorder.calls if a[1] == "covsyn.validation.measure_age_rr"]
+    assert [a[2:4] for a in ages] == [[str(run_dir / "selected"), "20000"]] * 2
+    assert [(a[a.index("--stream") + 1], a[a.index("--out") + 1]) for a in ages] == [
+        ("301", str(tables / "age_rr.json")),
+        ("300", str(tables / "age_rr_independent.json")),
+    ]
     checks = [
         (a, e)
         for a, e in zip(recorder.calls, recorder.envs, strict=True)
         if a[1] == "covsyn.validation.verify_phase_d"
     ]
-    assert [a[4] for a, _ in checks] == [
-        str(tables / "checks.json"),
-        str(tables / "checks_independent.json"),
+    assert [(a[4], e["AGE_RR_FILE"]) for a, e in checks] == [
+        (str(tables / "checks.json"), str(tables / "age_rr.json")),
+        (str(tables / "checks_independent.json"), str(tables / "age_rr_independent.json")),
     ]
-    assert all(e["AGE_RR_FILE"] == str(tables / "age_rr.json") for _, e in checks)
 
 
 def test_outputs_go_into_the_runs_tables_and_figures(tmp_path, config):
@@ -554,7 +582,10 @@ def test_a_relative_previous_checks_is_read_from_the_repository_root(tmp_path, c
 def test_warnings_are_kept_with_the_run(tmp_path, config):
     """In pipeline.log and the stage's run.log line, not only in pipeline.out.
 
-    The next resume overwrites pipeline.out.
+    The next resume overwrites pipeline.out. The memory is fixed to plenty for this module
+    (plenty_of_memory), so the report's warning is the only one; with less than 10% each stage
+    would also keep the low-memory warning, which test_task5_stage_memory.py's
+    test_low_memory_during_a_stage_is_a_warning_of_it checks.
     """
     _, run_dir = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.validation.show_final"}))
     assert "WARNING: the report's show_final failed" in (run_dir / "pipeline.log").read_text()

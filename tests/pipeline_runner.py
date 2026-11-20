@@ -40,6 +40,10 @@ def file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Task 7: the fixtures were recorded on seeds 0.., which stream 0 keeps for earlier runs.
+SYNTHESIS_STREAM = ["--stream", "0"]
+
+
 def build_dataset(workdir: Path) -> dict[str, str]:
     """Synthesise both pipeline modes into ``workdir``; return a digest per data file."""
     digests = {}
@@ -48,7 +52,7 @@ def build_dataset(workdir: Path) -> dict[str, str]:
         out.mkdir(parents=True, exist_ok=True)
         done = _run(["-m", "covsyn.model.data_synthesis_main", "--mode", mode, "--monte_carlo_number",
                      str(MONTE_CARLO), "--result_path", str(out), "--workers", "4",
-                     "--parameter_path", RUN_DIR], workdir)
+                     "--parameter_path", RUN_DIR, *SYNTHESIS_STREAM], workdir)
         if done.returncode:
             raise RuntimeError(f"data synthesis failed for {mode}:\n{done.stderr[-2000:]}")
         for f in sorted(out.glob("*.npy")):
@@ -63,7 +67,8 @@ def report_steps(workdir: Path) -> dict[str, list[str]]:
     # Order matters and follows the pipeline: measure_age_rr.py writes
     # validation_reference/age_rr.json, which verify_phaseD.py reads.
     return {
-        "measure_age_rr": ["-m", "covsyn.validation.measure_age_rr", RUN_DIR, "400"],
+        "measure_age_rr": ["-m", "covsyn.validation.measure_age_rr", RUN_DIR, "400",
+                           *SYNTHESIS_STREAM],
         "verify_phaseD": ["-m", "covsyn.validation.verify_phase_d", spread, first, checks],
         "check_constraints": ["-m", "covsyn.validation.check_constraints", spread, first, "--out",
                               str(workdir / "constraint_check")],
