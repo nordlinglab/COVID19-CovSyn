@@ -126,7 +126,7 @@ def parse(text: str, source: str) -> PipelineConfig:
     """
     try:
         data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
+    except ValueError as error:  # TOMLDecodeError, or an integer over Python's digit limit
         raise ValueError(f"{source}: {error}") from None
     values: dict[str, Any] = {}
     for section, keys in data.items():
@@ -150,9 +150,11 @@ def _check_schedule(values: dict[str, Any], source: str) -> None:
     """Refuse a schedule the optimiser would refuse, unset ends at its defaults (Task 8)."""
     if all(values.get(field) is None for field in ("alpha_0", "alpha_end", "g_plan")):
         return
-    try:  # every mode starts from the default alpha_0 (tests/test_task8_pipeline.py)
-        step_schedule.checked_schedule(values.get("alpha_0"), values.get("alpha_end"),
-                                       values.get("g_plan"), 1)  # fmt: skip
+    mode = values.get("mode", PipelineConfig.mode)
+    try:  # the mode's generations are the optimiser's; no check compares G_plan with them
+        step_schedule.checked_schedule(
+            values.get("alpha_0"), values.get("alpha_end"), values.get("g_plan"), 1,
+            alpha_0_default=step_schedule.MODE_ALPHA_0.get(mode, step_schedule.DEFAULT_ALPHA_0))
     except ValueError as error:
         raise ValueError(f"{source}: [optimise] step schedule: {error}") from None
 

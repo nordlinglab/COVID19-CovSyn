@@ -1843,11 +1843,11 @@ OPTIMISER_MODES = {
     # approach 1 as fireflies close in.
     # Task 8: alpha_0 starts the step schedule (step_size); it was the step that shrank by 0.97,
     # from 1.
-    'train': (100, DEFAULT_ALPHA_0, 1, 0.03, 120),
-    'test': (3, DEFAULT_ALPHA_0, 1, 0.01, 10),
+    'train': (100, step_schedule.MODE_ALPHA_0['train'], 1, 0.03, 120),
+    'test': (3, step_schedule.MODE_ALPHA_0['test'], 1, 0.01, 10),
     # Task 5: the population is the worker count, set in main(), and S comes from the command
     # line; a profile is run again, never resumed.
-    'profile': (None, DEFAULT_ALPHA_0, 1, 0.01, 2),
+    'profile': (None, step_schedule.MODE_ALPHA_0['profile'], 1, 0.01, 2),
 }
 PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
 
@@ -2138,7 +2138,7 @@ def main() -> None:
     try:  # Task 8: refused here, before the run directory is claimed
         schedule = step_schedule.checked_schedule(
             args.alpha_0, args.alpha_end, args.g_plan, max_generations,
-            names=('--alpha-0', '--alpha-end'), alpha_0_default=alpha_0)
+            names=('--alpha-0', '--alpha-end', '--g-plan'), alpha_0_default=alpha_0)
     except ValueError as error:
         sys.exit(f'step schedule: {error}')
     fa = Firefly(pop_size, schedule[0], betamin, gamma, seed=args.seed, alpha_end=schedule[1],

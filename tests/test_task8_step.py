@@ -219,5 +219,14 @@ def test_an_alpha_end_alone_above_the_default_alpha_0_is_told_to_give_alpha_0(mo
     """The mirror of a small --alpha-0 alone: the refusal names --alpha-0."""
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test", "--alpha-end", "0.5",
                                       "--run-dir", str(tmp_path / "r")])
-    with pytest.raises(SystemExit, match="--alpha-0 was left at its default"):
+    with pytest.raises(SystemExit, match="--alpha-0 was left at its default") as stop:
+        fo.main()
+    assert "--alpha-end 0.5 is above --alpha-0 0.2" in str(stop.value)  # the flags' names
+
+
+def test_the_command_refuses_a_plan_longer_than_a_stream(monkeypatch, tmp_path):
+    """A stream holds 1000 blocks, one per generation."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test", "--g-plan", "1001",
+                                      "--run-dir", str(tmp_path / "r")])
+    with pytest.raises(SystemExit, match="--g-plan"):
         fo.main()

@@ -98,9 +98,52 @@ def test_a_schedule_refused_for_its_default_end_names_that_end(text, unset):
         pc.parse(text, "t")
 
 
-def test_every_mode_starts_from_the_default_alpha_0():
-    """The pipeline checks an unset alpha_0 at the default, so no mode may start elsewhere."""
-    assert {mode[1] for mode in fo.OPTIMISER_MODES.values()} == {fo.DEFAULT_ALPHA_0}
+def test_each_mode_starts_from_the_alpha_0_the_pipeline_checks_against():
+    """One table of each mode's alpha_0, which the optimiser's modes and the pipeline read."""
+    assert {m: v[1] for m, v in fo.OPTIMISER_MODES.items()} == step_schedule.MODE_ALPHA_0
+
+
+def test_the_pipeline_checks_an_unset_alpha_0_at_the_mode_s(monkeypatch):
+    """A mode that starts lower refuses an alpha_end above its own alpha_0."""
+    monkeypatch.setitem(step_schedule.MODE_ALPHA_0, "test", 0.05)
+    with pytest.raises(ValueError, match="alpha_0 was left at its default"):
+        pc.parse('[optimise]\nmode = "test"\nalpha_end = 0.1\n', "t")
+    assert pc.parse('[optimise]\nmode = "train"\nalpha_end = 0.1\n', "t").alpha_end == 0.1
+
+
+@pytest.mark.parametrize("text", ["[optimise]\nalpha_0 = -1\n", "[optimise]\nalpha_0 = 0\n"])
+def test_a_step_size_not_positive_is_not_blamed_on_the_other_end(text):
+    """Setting alpha_end cannot fix alpha_0 <= 0, so the refusal does not suggest it."""
+    with pytest.raises(ValueError) as refused:
+        pc.parse(text, "t")
+    assert "positive" in str(refused.value) and "left at its default" not in str(refused.value)
+
+
+@pytest.mark.parametrize("text, said", [
+    ("[optimise]\nalpha_0 = 0.0005\n", "give alpha_end too, at most alpha_0"),
+    ("[optimise]\nalpha_end = 0.5\n", "give alpha_0 too, at least alpha_end"),
+])  # fmt: skip
+def test_the_refusal_says_which_values_would_do(text, said):
+    """Not only which end to give, but the range it must be in."""
+    with pytest.raises(ValueError, match=said):
+        pc.parse(text, "t")
+
+
+def test_an_integer_too_long_to_read_is_refused_naming_the_file():
+    """Over Python's 4300-digit limit tomllib itself refuses; the file is still named."""
+    with pytest.raises(ValueError, match="^t: "):
+        pc.parse("[optimise]\nalpha_0 = 1" + "0" * 5000 + "\n", "t")
+
+
+@pytest.mark.parametrize("g_plan, ok", [(1000, True), (1001, False), (10**400, False)])
+def test_a_plan_longer_than_a_stream_is_refused(g_plan, ok):
+    """A stream holds 1000 blocks, one per generation, so a longer plan is never reached."""
+    text = f"[optimise]\ng_plan = {g_plan}\n"
+    if ok:
+        assert pc.parse(text, "t").g_plan == g_plan
+    else:
+        with pytest.raises(ValueError, match="g_plan"):
+            pc.parse(text, "t")
 
 
 def test_the_schedule_a_run_moves_on():

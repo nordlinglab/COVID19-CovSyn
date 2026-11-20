@@ -10,11 +10,20 @@ from __future__ import annotations
 
 import numpy as np
 
+from covsyn.calibration import seed_streams
+
 # Task 8: the step size schedule's ends until pilot 2 (Task 9) chooses them, the larger of the
 # plan's two starting points for alpha_0 (decision of 2026-11-20); G_plan defaults to the run's
 # generations.
 DEFAULT_ALPHA_0 = 0.2
 DEFAULT_ALPHA_END = 0.001
+# Each optimiser mode's alpha_0, which OPTIMISER_MODES takes and the pipeline checks an unset
+# alpha_0 against.
+MODE_ALPHA_0 = {'train': DEFAULT_ALPHA_0, 'test': DEFAULT_ALPHA_0, 'profile': DEFAULT_ALPHA_0}
+
+
+class GrowingSchedule(ValueError):
+    """alpha_end above alpha_0: the steps would grow, though the schedule shrinks them."""
 
 
 def step_size(generation: int, alpha_0: float, alpha_end: float, g_plan: int) -> float:
@@ -31,7 +40,7 @@ def step_size(generation: int, alpha_0: float, alpha_end: float, g_plan: int) ->
     if not (alpha_0 > 0 and alpha_end > 0 and np.isfinite(alpha_0) and np.isfinite(alpha_end)):
         raise ValueError(f'step sizes must be positive, not {alpha_0!r} and {alpha_end!r}')
     if alpha_end > alpha_0:
-        raise ValueError(f'alpha_end {alpha_end!r} is above alpha_0 {alpha_0!r}: the steps '
+        raise GrowingSchedule(f'alpha_end {alpha_end!r} is above alpha_0 {alpha_0!r}: the steps '
                          f'would grow')
     if isinstance(g_plan, bool) or not isinstance(g_plan, (int, np.integer)) or g_plan < 1:
         raise ValueError(f'G_plan must be a whole number of generations, at least 1, '
@@ -44,7 +53,8 @@ def step_size(generation: int, alpha_0: float, alpha_end: float, g_plan: int) ->
 
 
 def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int | None,
-                     generations: int, names: tuple[str, str] = ('alpha_0', 'alpha_end'),
+                     generations: int,
+                     names: tuple[str, str, str] = ('alpha_0', 'alpha_end', 'g_plan'),
                      alpha_0_default: float = DEFAULT_ALPHA_0) -> tuple[float, float, int]:
     """The schedule a run moves on, each unset end at its default and G_plan at generations.
 
@@ -55,20 +65,30 @@ def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int
         alpha_end: As given; None when not given.
         g_plan: As given; None when not given.
         generations: The run's generations, G_plan when none is given.
-        names: How the caller names alpha_0 and alpha_end, for the refusal.
-        alpha_0_default: alpha_0 when none is given, the mode's.
+        names: How the caller names alpha_0, alpha_end and g_plan, for the refusal.
+        alpha_0_default: alpha_0 when none is given, the mode's (MODE_ALPHA_0).
 
     Raises:
-        ValueError: As step_size; when one end was left at its default, it says so and names it.
+        ValueError: As step_size; for steps that would grow, naming an end left at its default
+            and the range the other must be in; or a plan longer than a stream's blocks, one
+            per generation, which no run reaches.
     """
     schedule = (alpha_0_default if alpha_0 is None else alpha_0,
                 DEFAULT_ALPHA_END if alpha_end is None else alpha_end,
                 generations if g_plan is None else g_plan)
     try:
         step_size(0, *schedule)
-    except ValueError as error:
-        if (alpha_0 is None) != (alpha_end is None) and schedule[1] > schedule[0]:
-            unset = names[0] if alpha_0 is None else names[1]
-            raise ValueError(f'{error}; {unset} was left at its default, so give it too') from None
-        raise
+    except GrowingSchedule:
+        message = (f'{names[1]} {schedule[1]!r} is above {names[0]} {schedule[0]!r}: the steps '
+                   f'would grow')
+        if alpha_0 is None:
+            message += (f'; {names[0]} was left at its default, so give {names[0]} too, at '
+                        f'least {names[1]}')
+        elif alpha_end is None:
+            message += (f'; {names[1]} was left at its default, so give {names[1]} too, at '
+                        f'most {names[0]}')
+        raise ValueError(message) from None
+    if schedule[2] > seed_streams.MAX_BLOCKS:
+        raise ValueError(f"{names[2]} {schedule[2]} is longer than a stream's "
+                         f"{seed_streams.MAX_BLOCKS} blocks, one per generation")
     return schedule
