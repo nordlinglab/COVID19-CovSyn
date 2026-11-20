@@ -204,13 +204,19 @@ def test_a_failed_age_risk_ratio_leaves_no_earlier_file_to_score(tmp_path):
 
     stale = tmp_path / "age_rr_independent.json"
     stale.write_text('{"stale": true}')
+    leftover = tmp_path / "age_rr_independent.json.k3j9x.tmp"  # a killed write's
+    leftover.write_text("{")
+    other = tmp_path / "age_rr.json.k3j9x.tmp"  # another measurement's, left alone
+    other.write_text("{")
     calls = []
 
     def may(args, what, output):
         assert not stale.exists(), "the earlier file was still there as the measurement ran"
+        assert not leftover.exists(), "a killed write's temporary file was left"
         calls.append(args)
 
     ctx = SimpleNamespace(layout=SimpleNamespace(tables=tmp_path), candidate=tmp_path / "c",
                           config=SimpleNamespace(age_rr_cases=20000), may=may)  # fmt: skip
     out = stages._age_rr(ctx, ss.REPORTING_STREAM, "age_rr_independent", "measure")
     assert out == stale and calls and not stale.exists()  # the measurement wrote nothing
+    assert other.exists()

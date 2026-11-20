@@ -276,10 +276,13 @@ def _age_rr(ctx: Context, stream: int, name: str, what: str) -> Path:
     """Measure the age risk ratio on a stream into tables/<name>.json; its path.
 
     An earlier attempt's file goes first, so a measurement that fails leaves none for the
-    checklist to score.
+    checklist to score, and so do the temporary files a killed write left (measure_age_rr
+    writes <name>.json.<random>.tmp and renames it); nothing else writes them meanwhile.
     """
     out = ctx.layout.tables / f"{name}.json"
     out.unlink(missing_ok=True)
+    for leftover in ctx.layout.tables.glob(f"{name}.json.*.tmp"):
+        leftover.unlink(missing_ok=True)
     ctx.may(
         [
             "-m",
