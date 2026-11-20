@@ -1761,6 +1761,9 @@ class Firefly:
                 for table in (progress_table, evaluation_table, generation_table):
                     drop_progress_after(table.path, start - 1)
 
+            # Task 8: the elite the next generation keeps, from the costs it starts with; each
+            # generation's costs choose the one after, so it is chosen once.
+            elite = elite_members(intensities, elite_size(self.pop_size))
             for generation in tqdm(range(start, max_generations)):
                 # B81: this generation's block, and every firefly scored on it -- the brightest
                 # included, since its score came from another block and cannot be compared here.
@@ -1771,7 +1774,6 @@ class Firefly:
                 # from, then all are scored at once. B49 / E78: the brightest stays where it is;
                 # Task 8: so do the rest of the k lowest, all re-scored on this block.
                 moving = time.perf_counter_ns()
-                elite = elite_members(intensities, elite_size(self.pop_size))
                 normalized_fireflies = synchronous_moves(
                     normalized_fireflies, intensities, new_alpha, self.betamin, self.gamma,
                     generation_rng(self.seed, generation), fixed=elite)  # Task 4
@@ -1802,9 +1804,10 @@ class Firefly:
                 # Task 8: the members kept in place, and those this block puts in the next
                 # elite, each with its cost on this block; generation 0's kept members their
                 # block-0 costs, counted here only.
-                members = set(elite) | set(elite_members(intensities, elite_size(self.pop_size)))
-                elite_records = record_elite(elite_records, fireflies, intensities, members,
-                                             generation)
+                next_elite = elite_members(intensities, elite_size(self.pop_size))
+                elite_records = record_elite(elite_records, fireflies, intensities,
+                                             set(elite) | set(next_elite), generation)
+                elite = next_elite
                 row = {'generation': generation, 'seed_offset': offset,
                        'best_cost': float(np.min(intensities))}
                 row.update(cost_parts[best_idx])
