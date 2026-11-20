@@ -70,9 +70,11 @@ def age_rr_file() -> Path:
 def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
     """The measurement at ``path`` and "", or None and why it cannot be scored.
 
-    A measurement of another parameter vector than the spread synthesis in spread_dir was made
-    from -- one left by another candidate in the default file, say -- is not scored; when either
-    does not record its vector, as older ones do not, it is scored as before.
+    A measurement made from another parameter directory than the spread synthesis in spread_dir
+    -- one left by another candidate in the default file, say -- is not scored. The directories
+    are compared, not the vectors in them, and only when both are recorded as paths of the same
+    kind, both relative (to the repository root, where every step runs) or both absolute;
+    otherwise, as for older records that name none, the measurement is scored as before.
     """
     if not Path(path).is_file():
         return None, (f'no measurement at {path}: measure_age_rr.py has not run, failed, or '
@@ -85,10 +87,20 @@ def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
         return None, f'the measurement at {path} cannot be read (not a JSON object)'
     measured = measurement.get('parameters_from')
     synthesised = _synthesis_parameters(Path(spread_dir))
-    if measured and synthesised and Path(measured).resolve() != Path(synthesised).resolve():
-        return None, (f'the measurement at {path} is of the vector in {measured}, not of '
+    if _other_directories(measured, synthesised):
+        return None, (f'the measurement at {path} was made from {measured}, not from '
                       f'{synthesised}, which the synthesis was made from')
     return measurement, ''
+
+
+def _other_directories(measured, synthesised) -> bool:
+    """Whether two recorded parameter directories are known to differ (see read_age_rr)."""
+    if not (isinstance(measured, str) and isinstance(synthesised, str) and measured
+            and synthesised):
+        return False
+    if os.path.isabs(measured) != os.path.isabs(synthesised):
+        return False
+    return os.path.normpath(measured) != os.path.normpath(synthesised)
 
 
 def _synthesis_parameters(spread_dir: Path) -> str | None:

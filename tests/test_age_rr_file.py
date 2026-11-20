@@ -141,3 +141,26 @@ def test_two_writers_do_not_share_a_temporary_file(tmp_path, monkeypatch):
     mar.write_measurement(tmp_path / "age_rr.json", {"n": 1})
     mar.write_measurement(tmp_path / "age_rr.json", {"n": 2})
     assert len(set(names)) == 2 and all(n.startswith(str(tmp_path)) for n in names)
+
+
+@pytest.mark.parametrize("measured, synthesised", [(["a"], "run_a"), ("run_b", 3), (None, None)])
+def test_a_record_that_is_not_a_path_is_taken_as_no_record(vpd, tmp_path, measured, synthesised):
+    """Nothing to compare: scored as before, not a crash."""
+    path = tmp_path / "age_rr.json"
+    path.write_text(json.dumps({"parameters_from": measured}))
+    assert vpd.read_age_rr(path, _synthesis(tmp_path, synthesised))[0] is not None
+
+
+def test_a_relative_and_an_absolute_record_are_not_compared(vpd, tmp_path):
+    """A relative path's base is unknown, so it is not judged another directory."""
+    path = tmp_path / "age_rr.json"
+    path.write_text(json.dumps({"parameters_from": "/elsewhere/run_a"}))
+    assert vpd.read_age_rr(path, _synthesis(tmp_path, "results/models/run_a"))[0] is not None
+
+
+def test_two_relative_records_of_other_directories_are_not_scored(vpd, tmp_path):
+    """Both relative to the repository root, as the pipeline and its steps record them."""
+    path = tmp_path / "age_rr.json"
+    path.write_text(json.dumps({"parameters_from": "results/models/run_b"}))
+    measurement, problem = vpd.read_age_rr(path, _synthesis(tmp_path, "results/models/run_a"))
+    assert measurement is None and "run_b" in problem
