@@ -177,8 +177,10 @@ def write_measurement(out, record):
             os.umask(mask)
             try:
                 os.fchmod(f.fileno(), 0o666 & ~mask)
-            except OSError as error:  # a mount that refuses mode changes: keep mkstemp's
-                print(f'warning: {out} keeps mode 0600 ({error})', file=sys.stderr)
+            except OSError as error:  # a mount that refuses mode changes sets its own
+                # Under covsyn-pipeline this goes to the step's log, tables/<name>.txt.
+                print(f'warning: {out} keeps the mode it was created with, which the umask did '
+                      f'not set ({error})', file=sys.stderr)
             f.write(json.dumps(record, indent=2))
             f.flush()
             os.fsync(f.fileno())

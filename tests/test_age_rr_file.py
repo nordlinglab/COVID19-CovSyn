@@ -192,9 +192,10 @@ def test_a_measurement_is_as_readable_as_a_plain_write_makes_it(tmp_path):
 
 
 def test_a_refused_permission_change_still_writes_the_measurement(tmp_path, monkeypatch, capsys):
-    """A mount that refuses mode changes keeps mkstemp's mode; the measurement is not lost.
+    """A refused mode change is warned about, and the measurement is still written.
 
-    The plain write it replaced never changed the mode, so it worked on such mounts too.
+    The plain write it replaced never changed the mode, so it worked on such mounts too. Which
+    mode the file then has is the mount's, which this test does not check.
     """
     from covsyn.validation import measure_age_rr as mar
 
@@ -206,4 +207,4 @@ def test_a_refused_permission_change_still_writes_the_measurement(tmp_path, monk
     mar.write_measurement(out, {"n": 1})
     assert json.loads(out.read_text()) == {"n": 1}
     assert [p.name for p in tmp_path.iterdir()] == ["age_rr.json"]
-    assert "mode" in capsys.readouterr().err
+    assert "keeps the mode it was created with" in capsys.readouterr().err
