@@ -111,6 +111,19 @@ def _synthesis_parameters(spread_dir: Path) -> str | None:
         return None
 
 
+MISSING_AGE_RR = 'no usable measurement'
+
+
+def missing_age_rr_row(problem: str) -> None:
+    """The B14 row without a measurement, its path and reason in the note.
+
+    The target is fixed, so the checklists of two runs compare row by row.
+    """
+    check('B14', 'high-N age risk ratio measurement', None, MISSING_AGE_RR,
+          note=f'{problem}. B14 is accepted on that measurement since E68; without it only the '
+               f'informational rows above are available')
+
+
 def check(decision, name, value, target, unit='', ok=None, note='', ci=None, interval=True):
     """Record one checklist line. target is (lo, hi), a string, or None for information."""
     if ok is None and isinstance(target, tuple) and value is not None and np.isfinite(value):
@@ -721,9 +734,7 @@ def compute_checks(runs: list, first_runs: list, permutations: bool = True) -> l
                   note='information: the same high-N measurement pooled over all five layers, '
                        'for the size of the composition effect (E70)')
     else:
-        check('B14', 'high-N age risk ratio measurement', None, problem,
-              note='B14 is accepted on that measurement since E68; without it only the '
-                   'informational rows above are available')
+        missing_age_rr_row(problem)
 
     # ---------------------------------------------------------------- B66 Taiwan first wave
     # B66: the first-wave scenario starts from every imported case of the first wave and the 13

@@ -164,3 +164,12 @@ def test_two_relative_records_of_other_directories_are_not_scored(vpd, tmp_path)
     path.write_text(json.dumps({"parameters_from": "results/models/run_b"}))
     measurement, problem = vpd.read_age_rr(path, _synthesis(tmp_path, "results/models/run_a"))
     assert measurement is None and "run_b" in problem
+
+
+def test_the_missing_row_keeps_a_fixed_target_and_says_why_in_its_note(vpd, monkeypatch):
+    """Checklists of two runs compare row by row; the path and reason go in the note."""
+    monkeypatch.setattr(vpd, "results", [])
+    vpd.missing_age_rr_row("no measurement at /machine/run-1/tables/age_rr.json: ...")
+    (row,) = vpd.results
+    assert row["decision"] == "B14" and row["target"] == vpd.MISSING_AGE_RR
+    assert "/machine/run-1" not in row["target"] and "/machine/run-1" in row["note"]
