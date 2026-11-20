@@ -19,7 +19,7 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration import initial_population, parameter_space, seed_streams
+from covsyn.calibration import initial_population, parameter_space, revalidation, seed_streams
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1115,8 +1115,9 @@ SIMULATIONS_PER_EVALUATION = 300
 # stream meets (seed_streams).
 # Costs from different blocks are NOT comparable, so nothing keeps a running minimum across
 # generations: the attraction, the elite and the progress row all use this generation's scores,
-# and the candidates are re-scored on one common set of blocks afterwards.
-ARCHIVE_EVERY = 5
+# and the candidates are re-scored on one common set of blocks afterwards. Until Task 8 the
+# archive held a snapshot of the best firefly of one generation in five; it now holds every
+# elite vector with its mean over the blocks it was scored on there (record_elite).
 
 
 # Task 7: the move generator's seed when none is given.
@@ -1168,6 +1169,51 @@ def elite_size(pop_size: int) -> int:
 def elite_members(costs, k: int) -> list[int]:
     """The indices of the k lowest costs, lowest first, a tie going to the lower index."""
     return [int(i) for i in np.argsort(np.asarray(costs), kind='stable')[:k]]
+
+
+# Task 8: an elite record is (entered, last block, blocks, total cost, params...): the
+# generation whose block first scored the vector in the elite, the last such block, how many
+# blocks, and the sum of their costs. The checkpoint keeps the records, so a resumed run goes on
+# counting where it stopped.
+RECORD_PARAMS = 4
+ARCHIVE_HEADER = revalidation.ARCHIVE_HEADER
+
+
+def no_elite_records(dim: int) -> np.ndarray:
+    """The records of a run before any generation: none, with room for dim parameters."""
+    return np.empty((0, RECORD_PARAMS + dim))
+
+
+def record_elite(records, fireflies, intensities, members, block: int) -> np.ndarray:
+    """The records after adding each member's cost on block (Task 8).
+
+    A vector already recorded adds the cost unless that block is already counted, so a block
+    counts once; any other vector, such as a member that moved, starts a record of its own.
+    Members are taken in ascending order, so new records come in a fixed order.
+
+    Returns:
+        A new array; ``records`` is left unchanged.
+    """
+    records = np.array(records, dtype=float)
+    for m in sorted(members):
+        vector = np.asarray(fireflies[m], dtype=float)
+        same = np.flatnonzero(np.all(records[:, RECORD_PARAMS:] == vector, axis=1))
+        if len(same) == 0:
+            new = np.concatenate(([block, block, 1, intensities[m]], vector))
+            records = np.vstack([records, new])
+        elif records[same[0], 1] != block:
+            row = records[same[0]]  # a view, so the update lands in records
+            row[1] = block
+            row[2] += 1
+            row[3] += intensities[m]
+    return records
+
+
+def archive_rows(records) -> np.ndarray:
+    """firefly_archive.txt's rows, (entered, blocks, params..., mean cost), from the records."""
+    records = np.asarray(records, dtype=float)
+    return np.column_stack([records[:, 0], records[:, 2], records[:, RECORD_PARAMS:],
+                            records[:, 3] / np.maximum(records[:, 2], 1)])
 
 
 def synchronous_moves(normalized, costs, alpha, betamin, gamma, rng, fixed=()):
@@ -1544,14 +1590,15 @@ class Firefly:
         self.stream = seed_streams.DEFAULT_OPTIMISATION_STREAM
 
     @staticmethod
-    def _state(normalized, fireflies, intensities, cost_parts, archive, worst_fireflies,
+    def _state(normalized, fireflies, intensities, cost_parts, elite_records, worst_fireflies,
                worst_intensities, worst_iteration, evaluations, alpha, dim):
         """What a checkpoint holds: everything the next generation reads (Task 4)."""
         return {'normalized': np.asarray(normalized, dtype=float),
                 'fireflies': np.asarray(fireflies, dtype=float),
                 'intensities': np.asarray(intensities, dtype=float),
                 'cost_parts': np.array(json.dumps(cost_parts)),
-                'archive': np.asarray(archive, dtype=float).reshape(len(archive), dim + 2),
+                'elite_records': np.asarray(elite_records, dtype=float).reshape(
+                    len(elite_records), RECORD_PARAMS + dim),
                 'worst_fireflies': np.asarray(worst_fireflies, dtype=float),
                 'worst_intensities': np.asarray(worst_intensities, dtype=float),
                 'worst_iteration': np.asarray(worst_iteration, dtype=float),
@@ -1668,8 +1715,9 @@ class Firefly:
             # updated after a firefly MOVED, so an initial point -- a warm start of 2.49 in the test
             # of run 9 -- was never recorded as the best.
             # B81: no running minimum over generations -- see generation_seed_offset. The archive
-            # below carries positions from across the search into the candidate pool instead.
-            archive = []
+            # carries positions from across the search into the candidate pool instead; Task 8:
+            # every elite vector, with its mean over the blocks it was scored on there.
+            elite_records = no_elite_records(dim)
             worst_fireflies = np.zeros(np.shape(fireflies))
             worst_intensities = np.zeros(np.shape(intensities))
             worst_iteration = np.zeros(np.shape(intensities))
@@ -1682,7 +1730,7 @@ class Firefly:
                 np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
                            result, fmt='%.7f')
                 finish_generation(self._state(
-                    normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                    normalized_fireflies, fireflies, intensities, cost_parts, elite_records,
                     worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
                     dim))
             else:
@@ -1690,7 +1738,7 @@ class Firefly:
                 fireflies = checkpoint['fireflies'].copy()
                 intensities = checkpoint['intensities'].copy()
                 cost_parts = json.loads(str(checkpoint['cost_parts']))
-                archive = [row for row in checkpoint['archive']]
+                elite_records = checkpoint['elite_records'].copy()
                 worst_fireflies = checkpoint['worst_fireflies'].copy()
                 worst_intensities = checkpoint['worst_intensities'].copy()
                 worst_iteration = checkpoint['worst_iteration'].copy()
@@ -1737,9 +1785,12 @@ class Firefly:
                 # Append this generation's best solution's decoded metrics to a CSV so the
                 # run can be plotted/inspected live (and aborted early if values look wrong).
                 best_idx = int(np.argmin(intensities))
-                if generation % ARCHIVE_EVERY == 0:
-                    archive.append(np.concatenate(
-                        ([generation], fireflies[best_idx], [intensities[best_idx]])))
+                # Task 8: the members kept in place, and those this block puts in the next
+                # elite, each with its cost on this block; generation 0's kept members their
+                # block-0 costs, counted here only.
+                members = set(elite) | set(elite_members(intensities, elite_size(self.pop_size)))
+                elite_records = record_elite(elite_records, fireflies, intensities, members,
+                                             generation)
                 row = {'generation': generation, 'seed_offset': offset,
                        'best_cost': float(np.min(intensities))}
                 row.update(cost_parts[best_idx])
@@ -1751,7 +1802,7 @@ class Firefly:
                 # Task 5: the timing row follows the checkpoint, whose time it records; a kill
                 # between the two leaves that generation without one.
                 finish_generation(self._state(
-                    normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                    normalized_fireflies, fireflies, intensities, cost_parts, elite_records,
                     worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
                     dim))
 
@@ -1780,10 +1831,10 @@ class Firefly:
                   flush=True)
         # B81: firefly_best.txt keeps one row per firefly -- reproduce_wu2025 and
         # firefly_txt_to_csv require the four result files to have equal row counts -- so the
-        # final population fills it, and the snapshots go to firefly_archive.txt, which
-        # revalidation.load_candidates adds to the candidate pool when it exists.
-        np.savetxt(result_path/'firefly_archive.txt', np.atleast_2d(np.array(archive)),
-                   fmt='%.7f')
+        # final population fills it, and the elite vectors go to firefly_archive.txt, which
+        # revalidation.load_candidates adds to the candidate pool when it exists (Task 8).
+        np.savetxt(result_path/'firefly_archive.txt', archive_rows(elite_records), fmt='%.7f',
+                   header=ARCHIVE_HEADER)
         best_iteration = np.full(self.pop_size, float(evaluations))
         return (np.array(fireflies, dtype=float), np.array(intensities, dtype=float),
                 best_iteration, worst_fireflies, worst_intensities, worst_iteration,

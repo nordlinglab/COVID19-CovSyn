@@ -126,14 +126,16 @@ def test_the_returned_best_rows_are_the_final_population(run):
     assert np.array_equal(best_intensities, intensities)
 
 
-def test_the_archive_holds_one_snapshot_per_sampled_generation(run):
-    """The candidate pool spreads over the search, not just its last generations."""
+def test_the_archive_spreads_over_the_search(run):
+    """The candidate pool spreads over the search, not just its last generations.
+
+    Task 8 replaced the snapshot of one generation in five by every elite vector, entered on
+    the generation listed first (tests/test_task8_archive.py).
+    """
     _, _, path = run
-    archive = np.atleast_2d(np.loadtxt(path / "firefly_archive.txt"))
-    generations = [g for g in range(GENERATIONS) if g % fo.ARCHIVE_EVERY == 0]
-    assert len(archive) == len(generations)
-    assert archive[:, 0].tolist() == [float(g) for g in generations]
-    assert archive.shape[1] == DIM + 2
+    archive = np.loadtxt(path / "firefly_archive.txt", ndmin=2)
+    assert archive.shape[1] == DIM + 3
+    assert archive[:, 0].min() == 0 and archive[:, 0].max() > 0
 
 
 def test_progress_metrics_record_this_generation_not_a_running_best(run):
