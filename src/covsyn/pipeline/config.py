@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import tomllib
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -147,20 +148,29 @@ def parse(text: str, source: str) -> PipelineConfig:
 
 
 def _check_schedule(values: dict[str, Any], source: str) -> None:
-    """Refuse a schedule the optimiser would refuse, unset ends at its defaults (Task 8)."""
+    """Refuse a mode or schedule the optimiser would refuse, unset ends at its defaults.
+
+    A g_plan longer than the mode's generations runs, as the optimiser does, but is warned
+    about here, before the run, as it may be a typo (Task 8, decision of 2026-11-20).
+    """
+    mode = values.get("mode", PipelineConfig.mode)
+    if mode not in step_schedule.MODE_GENERATIONS:  # the optimiser's modes
+        raise ValueError(f"{source}: [optimise] mode {mode!r} is not one of "
+                         f"{sorted(step_schedule.MODE_GENERATIONS)}")
     if all(values.get(field) is None for field in ("alpha_0", "alpha_end", "g_plan")):
         return
-    mode = values.get("mode", PipelineConfig.mode)
-    if mode not in step_schedule.MODE_ALPHA_0:  # its alpha_0, and so the schedule, is unknown
-        raise ValueError(f"{source}: [optimise] mode {mode!r} is not one of "
-                         f"{sorted(step_schedule.MODE_ALPHA_0)}, so its step schedule cannot be "
-                         f"checked")
-    try:  # the mode's generations are the optimiser's; no check compares G_plan with them
+    generations = step_schedule.MODE_GENERATIONS[mode]
+    try:
         step_schedule.checked_schedule(
-            values.get("alpha_0"), values.get("alpha_end"), values.get("g_plan"), 1,
+            values.get("alpha_0"), values.get("alpha_end"), values.get("g_plan"), generations,
             alpha_0_default=step_schedule.MODE_ALPHA_0[mode])
     except ValueError as error:
         raise ValueError(f"{source}: [optimise] step schedule: {error}") from None
+    g_plan = values.get("g_plan")
+    if g_plan is not None and g_plan > generations:
+        warnings.warn(f"{source}: [optimise] g_plan {g_plan} is longer than mode {mode!r}'s "
+                      f"{generations} generations, so the steps do not reach alpha_end",
+                      stacklevel=3)
 
 
 def load(name: str) -> PipelineConfig:

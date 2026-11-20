@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+import warnings
 
 import numpy as np
 import pytest
@@ -77,7 +78,7 @@ def test_the_modes_start_from_alpha_0_of_0_2(started):  # noqa: F811
     """Until pilot 2 chooses, alpha_0 = 0.2 and alpha_end = 0.001 (decision of 2026-11-20)."""
     engine = started("--mode", "test")["engine"]
     assert (engine.alpha_0, engine.alpha_end) == (0.2, 0.001)
-    assert engine.g_plan == fo.OPTIMISER_MODES["test"][4]  # the mode's generations
+    assert engine.g_plan == fo.step_schedule.MODE_GENERATIONS["test"]  # the mode's generations
 
 
 def test_the_command_takes_the_schedule(started):  # noqa: F811
@@ -182,6 +183,16 @@ def test_a_recorded_schedule_out_of_range_says_so(tmp_path, capsys):
     assert stop.value.code == fo.runs.NOT_RESUMABLE
     said = capsys.readouterr().err
     assert "out of range" in said and "before Task 8" not in said
+    assert "alpha_end 0.2 is above alpha_0 0.001" in said  # config.json's keys
+
+
+def test_a_recorded_plan_out_of_range_is_named_by_its_key(tmp_path, capsys):
+    """config.json records g_plan, so the refusal says g_plan, not G_plan."""
+    settings = {"alpha_0": 0.2, "alpha_end": 0.001, "g_plan": 0}
+    (tmp_path / "config.json").write_text(json.dumps({"settings": settings}))
+    with pytest.raises(SystemExit):
+        fo.recorded_schedule(tmp_path)
+    assert "g_plan must be a whole number" in capsys.readouterr().err
 
 
 def _engine(**schedule):
@@ -244,7 +255,8 @@ def test_a_plan_as_long_as_the_run_is_not_warned_about(tmp_path, monkeypatch, re
     assert not [w for w in recwarn if "G_plan" in str(w.message)]
 
 
-def test_a_run_longer_than_a_stream_is_refused_before_it_starts(tmp_path, monkeypatch):
+def test_a_run_longer_than_a_stream_is_refused_before_it_starts(tmp_path, monkeypatch,
+                                                                 capsys):
     """Generation g takes block g, so a stream's blocks bound max_generations; nothing is run."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     monkeypatch.setattr(fo.seed_streams, "MAX_BLOCKS", 3)
@@ -252,6 +264,7 @@ def test_a_run_longer_than_a_stream_is_refused_before_it_starts(tmp_path, monkey
     with pytest.raises(SystemExit) as stop:  # retrying cannot help
         _optimise(_engine(alpha_0=0.2), 4, resume=True)
     assert stop.value.code == fo.runs.NOT_RESUMABLE
+    assert "the mode's max_generations 4" in capsys.readouterr().err  # not the run's record
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     monkeypatch.setattr(fo, "result_path", fresh, raising=False)
@@ -264,3 +277,42 @@ def test_the_command_starts_from_the_mode_s_alpha_0_the_pipeline_checks(started,
     """main() reads step_schedule.MODE_ALPHA_0, the table the pipeline checks against."""
     monkeypatch.setitem(fo.step_schedule.MODE_ALPHA_0, "test", 0.05)
     assert started("--mode", "test")["engine"].alpha_0 == 0.05
+
+
+def test_the_command_refuses_a_mode_longer_than_a_stream_before_claiming(monkeypatch, tmp_path):
+    """Before the run directory is claimed, so --run-dir stays free for the next try."""
+    monkeypatch.setitem(fo.step_schedule.MODE_GENERATIONS, "test", 4)
+    monkeypatch.setattr(fo.seed_streams, "MAX_BLOCKS", 3)
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test",
+                                      "--run-dir", str(tmp_path / "r")])  # fmt: skip
+    with pytest.raises(SystemExit, match="max_generations 4 is more than a stream's 3 blocks"):
+        fo.main()
+    assert not (tmp_path / "r").exists()
+
+
+def test_the_command_runs_the_mode_s_generations_from_one_table(started, monkeypatch):  # noqa: F811
+    """step_schedule.MODE_GENERATIONS, which the pipeline compares g_plan with."""
+    monkeypatch.setitem(fo.step_schedule.MODE_GENERATIONS, "test", 4)
+    seen = started("--mode", "test")
+    assert seen["max_generations"] == 4 and seen["engine"].g_plan == 4
+
+
+def test_the_help_gives_the_mode_s_alpha_0_as_the_default(monkeypatch, capsys):
+    """The default is per mode (MODE_ALPHA_0), so --help does not print one number."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--help"])
+    with pytest.raises(SystemExit):
+        fo.main()
+    assert "default: the mode's" in " ".join(capsys.readouterr().out.split()).split("--alpha-0")[2]
+
+
+def test_a_run_of_no_generations_gives_no_step_warning(tmp_path, monkeypatch):
+    """No step is taken, so none is reported as where the steps end."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    engine = _engine(alpha_0=0.2, g_plan=10)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            _optimise(engine, 0)
+        except Exception:  # what else a run of no generations does is not this test's
+            pass
+    assert not [w for w in caught if "G_plan" in str(w.message)]

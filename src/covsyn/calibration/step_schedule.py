@@ -15,9 +15,12 @@ import numpy as np
 # generations.
 DEFAULT_ALPHA_0 = 0.2
 DEFAULT_ALPHA_END = 0.001
-# Each optimiser mode's alpha_0, which OPTIMISER_MODES takes and the pipeline checks an unset
-# alpha_0 against.
+# Each optimiser mode's alpha_0 and generations, which main() runs and the pipeline checks its
+# schedule against: an unset alpha_0 is the mode's, and a g_plan longer than its generations is
+# warned about. One table, so the two cannot differ.
 MODE_ALPHA_0 = {'train': DEFAULT_ALPHA_0, 'test': DEFAULT_ALPHA_0, 'profile': DEFAULT_ALPHA_0}
+# Task 5: a profile runs 2 generations.
+MODE_GENERATIONS = {'train': 120, 'test': 10, 'profile': 2}
 
 
 class GrowingSchedule(ValueError):

@@ -98,9 +98,14 @@ def test_a_schedule_refused_for_its_default_end_names_that_end(text, unset):
         pc.parse(text, "t")
 
 
-def test_each_mode_starts_from_the_alpha_0_the_pipeline_checks_against():
-    """One table of each mode's alpha_0, which the optimiser's modes and the pipeline read."""
-    assert {m: v[1] for m, v in fo.OPTIMISER_MODES.items()} == step_schedule.MODE_ALPHA_0
+def test_each_mode_s_schedule_is_in_one_table():
+    """alpha_0 and generations per mode in step_schedule, which main() and the pipeline read.
+
+    The optimiser's modes keep no copy that could differ.
+    """
+    assert set(step_schedule.MODE_ALPHA_0) == set(step_schedule.MODE_GENERATIONS)
+    assert set(step_schedule.MODE_GENERATIONS) == set(fo.OPTIMISER_MODES)
+    assert all(len(v) == 3 for v in fo.OPTIMISER_MODES.values())  # pop_size, betamin, gamma
 
 
 def test_the_pipeline_checks_an_unset_alpha_0_at_the_mode_s(monkeypatch):
@@ -164,3 +169,21 @@ def test_every_refusal_names_the_caller_s_settings():
                         ((None, None, 2.5), "--g-plan must be a whole number")]:  # fmt: skip
         with pytest.raises(ValueError, match=said):
             step_schedule.checked_schedule(*given, 10, names=names)
+
+
+def test_an_unknown_mode_is_refused_when_read_with_or_without_a_schedule():
+    """The optimiser would refuse it, so the pipeline does before any stage starts."""
+    with pytest.raises(ValueError, match="mode"):
+        pc.parse('[optimise]\nmode = "trian"\n', "t")
+
+
+def test_a_plan_longer_than_the_mode_s_run_is_warned_about_when_read():
+    """A typed extra zero (1200 for 120) is told before the run, not only in its log."""
+    with pytest.warns(UserWarning, match="g_plan 1200 is longer than mode 'train''s 120"):
+        pc.parse("[optimise]\ng_plan = 1200\n", "t")
+
+
+def test_a_plan_as_long_as_the_mode_s_run_is_not_warned_about(recwarn):
+    """The plan's own case: G_plan = G (Task 9, pilot 2)."""
+    pc.parse("[optimise]\ng_plan = 120\n", "t")
+    assert not [w for w in recwarn if "g_plan" in str(w.message)]

@@ -1603,13 +1603,13 @@ class Firefly:
             check_progress_table(result_path)  # a checkpoint, and its table: else NOT_RESUMABLE
         checkpoint = load_last_checkpoint(result_path) if resume else None
         # Task 7: generation g takes block g of the stream, so a stream's blocks bound the
-        # generations, checked before anything is written or run (decision of 2026-11-20).
-        if max_generations > seed_streams.MAX_BLOCKS:
-            refusal = (f"max_generations {max_generations} is more than a stream's "
-                       f'{seed_streams.MAX_BLOCKS} blocks, one per generation')
-            if checkpoint is not None:
-                not_resumable(f'{result_path} cannot be resumed: {refusal}')
-            raise ValueError(refusal)
+        # generations, checked before this run writes or runs anything (decision of
+        # 2026-11-20); main() checks before it claims the run directory.
+        problem = generations_problem(max_generations)
+        if problem is not None:
+            if checkpoint is not None:  # max_generations is the mode's now, not the run's
+                not_resumable(f"{result_path} cannot be resumed: the mode's {problem}")
+            raise ValueError(problem)
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         g_plan = max_generations if self.g_plan is None else self.g_plan
         if checkpoint is not None:
@@ -1622,8 +1622,9 @@ class Firefly:
                 not_resumable(f'{result_path} cannot be resumed with the step schedule '
                               f'{(self.alpha_0, self.alpha_end, g_plan)}: it started with '
                               f'{recorded}')
-        step_size(0, self.alpha_0, self.alpha_end, g_plan)  # refuses a schedule out of range
-        if g_plan > max_generations:  # G_plan takes no blocks, so no cap; but it may be a typo
+        step_size(0, self.alpha_0, self.alpha_end, g_plan, names=SETTING_NAMES)  # out of range?
+        # G_plan takes no blocks, so no cap; but it may be a typo. No generation, no step.
+        if 1 <= max_generations < g_plan:
             last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
             warnings.warn(f"G_plan {g_plan} is longer than the run's {max_generations} "
                           f'generations, so the steps end at {last:.3g}, not alpha_end '
@@ -1846,23 +1847,36 @@ class Firefly:
                 fireflies, intensities)
 
 
-# Each mode's (pop_size, alpha_0, betamin, gamma, max_generations); main() runs these, and a run
-# recorded with another mode cannot be continued.
+# Each mode's (pop_size, betamin, gamma); main() runs these, with the mode's alpha_0 and
+# generations from step_schedule (MODE_ALPHA_0, MODE_GENERATIONS), and a run recorded with
+# another mode cannot be continued.
 OPTIMISER_MODES = {
     # B51 (E79): gamma was 0.131, but r is the SQUARED distance over all 199 normalised
     # dimensions, whose expectation between two uniform points is d/6 = 33; at the median r of
     # 29.7 that gave beta = 0.02, i.e. no attraction -- run 9 never moved off its warm start in
     # 120 generations. gamma = 6/d makes beta = 1/e = 0.37 at the typical distance and lets it
     # approach 1 as fireflies close in.
-    # Task 8: alpha_0 starts the step schedule (step_size); it was the step that shrank by 0.97,
-    # from 1.
-    'train': (100, step_schedule.MODE_ALPHA_0['train'], 1, 0.03, 120),
-    'test': (3, step_schedule.MODE_ALPHA_0['test'], 1, 0.01, 10),
+    # Task 8: alpha_0 (step_schedule.MODE_ALPHA_0) starts the step schedule (step_size); it was
+    # the step that shrank by 0.97, from 1.
+    'train': (100, 1, 0.03),
+    'test': (3, 1, 0.01),
     # Task 5: the population is the worker count, set in main(), and S comes from the command
     # line; a profile is run again, never resumed.
-    'profile': (None, step_schedule.MODE_ALPHA_0['profile'], 1, 0.01, 2),
+    'profile': (None, 1, 0.01),
 }
 PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
+
+
+# Task 8: the step schedule's names in config.json, for a refusal of a recorded schedule.
+SETTING_NAMES = ('alpha_0', 'alpha_end', 'g_plan')
+
+
+def generations_problem(max_generations: int) -> str | None:
+    """Why a run of max_generations cannot start, or None: one block per generation (Task 7)."""
+    if max_generations > seed_streams.MAX_BLOCKS:
+        return (f"max_generations {max_generations} is more than a stream's "
+                f'{seed_streams.MAX_BLOCKS} blocks, one per generation')
+    return None
 
 
 def not_resumable(message: str) -> None:
@@ -2012,7 +2026,7 @@ def recorded_schedule(run_dir: Path) -> tuple[float, float, int]:
         not_resumable(f'{run_dir} cannot be resumed: no step schedule in its config.json, as '
                       f'in a run started before Task 8 ({error!r})')
     try:
-        step_size(0, *schedule)
+        step_size(0, *schedule, names=SETTING_NAMES)
     except (ValueError, TypeError) as error:
         not_resumable(f'{run_dir} cannot be resumed: its recorded step schedule {schedule} is '
                       f'out of range ({error})')
@@ -2107,7 +2121,8 @@ def main() -> None:
                              f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
     # Task 8: the step schedule, which pilot 2 (Task 9) chooses
     parser.add_argument('--alpha-0', type=positive_float, default=None,
-                        help=f'step size of generation 0 (default {DEFAULT_ALPHA_0})')
+                        help="step size of generation 0 (default: the mode's, "
+                             f'{DEFAULT_ALPHA_0} for every mode until pilot 2)')
     parser.add_argument('--alpha-end', type=positive_float, default=None,
                         help=f'step size from generation G_plan - 1 on, at most --alpha-0 '
                              f'(default {DEFAULT_ALPHA_END})')
@@ -2132,7 +2147,8 @@ def main() -> None:
     if mode not in OPTIMISER_MODES:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
-    pop_size, alpha_0, betamin, gamma, max_generations = OPTIMISER_MODES[mode]
+    pop_size, betamin, gamma = OPTIMISER_MODES[mode]
+    max_generations = step_schedule.MODE_GENERATIONS[mode]
     # Task 5: a profile has n = workers, 2 generations, and S from the command line.
     if mode == 'profile':
         pop_size = max_workers
@@ -2148,6 +2164,9 @@ def main() -> None:
     # Firefly
     # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
     # config.json (resume_arguments).
+    problem = generations_problem(max_generations)  # Task 7: before the claim, as below
+    if problem is not None:
+        sys.exit(f'mode {mode}: {problem}')
     try:  # Task 8: refused here, before the run directory is claimed
         schedule = step_schedule.checked_schedule(
             args.alpha_0, args.alpha_end, args.g_plan, max_generations,
