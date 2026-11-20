@@ -19,7 +19,8 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration import initial_population, parameter_space, revalidation, seed_streams
+from covsyn.calibration import (initial_population, parameter_space, revalidation, seed_streams,
+                                step_schedule)
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1123,37 +1124,11 @@ SIMULATIONS_PER_EVALUATION = 300
 # Task 7: the move generator's seed when none is given.
 DEFAULT_RNG_SEED = 1
 
-# Task 8: the step size schedule's ends until pilot 2 (Task 9) chooses them, the larger of the
-# plan's two starting points for alpha_0 (decision of 2026-11-20); G_plan defaults to the run's
-# generations.
-DEFAULT_ALPHA_0 = 0.2
-DEFAULT_ALPHA_END = 0.001
-
-
-def step_size(generation, alpha_0, alpha_end, g_plan):
-    """The step size of a generation under the Task 8 schedule.
-
-    alpha_0 (alpha_end / alpha_0)^(g / (G_plan - 1)) for g < G_plan, alpha_end after; a
-    one-generation plan moves with alpha_0 only at g = 0. It replaces the factor of 0.97 per
-    generation, so the steps shrink over the run that was planned, whatever its length.
-
-    Raises:
-        ValueError: A step size that is not positive, alpha_end above alpha_0, which would make
-            the steps grow, or a plan shorter than one generation.
-    """
-    if not (alpha_0 > 0 and alpha_end > 0 and np.isfinite(alpha_0) and np.isfinite(alpha_end)):
-        raise ValueError(f'step sizes must be positive, not {alpha_0!r} and {alpha_end!r}')
-    if alpha_end > alpha_0:
-        raise ValueError(f'alpha_end {alpha_end!r} is above alpha_0 {alpha_0!r}: the steps '
-                         f'would grow')
-    if isinstance(g_plan, bool) or not isinstance(g_plan, (int, np.integer)) or g_plan < 1:
-        raise ValueError(f'G_plan must be a whole number of generations, at least 1, '
-                         f'not {g_plan!r}')
-    if generation >= g_plan:
-        return alpha_end
-    if g_plan == 1:
-        return alpha_0
-    return alpha_0 * (alpha_end / alpha_0) ** (generation / (g_plan - 1))
+# Task 8: the step size schedule, in step_schedule so the pipeline checks its settings by the
+# same rule without loading the model.
+DEFAULT_ALPHA_0 = step_schedule.DEFAULT_ALPHA_0
+DEFAULT_ALPHA_END = step_schedule.DEFAULT_ALPHA_END
+step_size = step_schedule.step_size
 
 # Task 6: the synchronous firefly algorithm (Yang, 2010). config.json records it, and a run
 # that does not, started before Task 6 with its sequential moves, is not resumed with these.

@@ -5,6 +5,12 @@
 mode = "train"
 config_name = "phase-d"   # the name in a new run id
 stream = 1                # Task 7: the optimisation stream, 1 to 99, one per run
+# Task 8: the step schedule, which pilot 2 (Task 9) chooses and production repeats; unset, the
+# optimiser's defaults apply: alpha_0 = 0.2, alpha_end = 0.001 (at most alpha_0), g_plan = the
+# mode's generations. A resume moves on the schedule the run recorded.
+# alpha_0 = 0.2
+# alpha_end = 0.001
+# g_plan = 120
 # B49's warm starts (run 10, and run 19) are rows of variable/initial_population_v1.npz since
 # Task 7; the warm_start setting is gone.
 

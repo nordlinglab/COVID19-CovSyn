@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from covsyn.calibration import seed_streams
+from covsyn.calibration import seed_streams, step_schedule
 
 PACKAGED = Path(__file__).resolve().parent
 
@@ -27,6 +27,10 @@ class PipelineConfig:
     mode: str = "train"
     config_name: str = "phase-d"
     stream: int = seed_streams.DEFAULT_OPTIMISATION_STREAM  # Task 7
+    # Task 8: the step schedule; None leaves each to the optimiser's default
+    alpha_0: float | None = None
+    alpha_end: float | None = None
+    g_plan: int | None = None
     revalidate: bool = True
     revalidation_blocks: int = 10
     validation_stream: int = seed_streams.DEFAULT_VALIDATION_STREAM  # Task 7
@@ -67,6 +71,9 @@ SCHEMA: dict[str, dict[str, tuple[str, type, Any]]] = {
         "mode": ("mode", str, None),
         "config_name": ("config_name", str, None),
         "stream": ("stream", int, None),
+        "alpha_0": ("alpha_0", float, None),
+        "alpha_end": ("alpha_end", float, None),
+        "g_plan": ("g_plan", int, 1),
     },
     "revalidate": {
         "enabled": ("revalidate", bool, None),
@@ -87,6 +94,9 @@ SCHEMA: dict[str, dict[str, tuple[str, type, Any]]] = {
 
 def _value(section: str, key: str, raw: Any) -> tuple[str, Any]:
     field, kind, minimum = SCHEMA[section][key]
+    # TOML writes a whole step size such as 1 as an integer.
+    if kind is float and isinstance(raw, int) and not isinstance(raw, bool):
+        raw = float(raw)
     # bool is an int in Python; a count given as true must not pass.
     if not isinstance(raw, kind) or (kind is int and isinstance(raw, bool)):
         raise ValueError(f"[{section}] {key} must be {kind.__name__}, got {raw!r}")
@@ -128,7 +138,20 @@ def parse(text: str, source: str) -> PipelineConfig:
                 raise ValueError(f"{source}: unknown setting {key!r} in [{section}]")
             field, value = _value(section, key, raw)
             values[field] = value
+    _check_schedule(values, source)
     return PipelineConfig(**values)
+
+
+def _check_schedule(values: dict[str, Any], source: str) -> None:
+    """Refuse a schedule the optimiser would refuse, unset ends at its defaults (Task 8)."""
+    if all(values.get(field) is None for field in ("alpha_0", "alpha_end", "g_plan")):
+        return
+    try:
+        step_schedule.step_size(0, values.get("alpha_0", step_schedule.DEFAULT_ALPHA_0),
+                                values.get("alpha_end", step_schedule.DEFAULT_ALPHA_END),
+                                values.get("g_plan", 1))  # fmt: skip
+    except ValueError as error:
+        raise ValueError(f"{source}: [optimise] step schedule: {error}") from None
 
 
 def load(name: str) -> PipelineConfig:
@@ -156,6 +179,8 @@ def to_toml(config: PipelineConfig) -> str:
                 value = value or 0
             if isinstance(value, tuple):
                 value = list(value)
+            if value is None:  # Task 8: unset, so the optimiser's default; TOML has no None
+                continue
             lines.append(f"{key} = {_toml(value)}")
     return "\n".join(lines) + "\n"
 
