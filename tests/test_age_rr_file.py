@@ -191,31 +191,19 @@ def test_a_measurement_is_as_readable_as_a_plain_write_makes_it(tmp_path):
     assert out.stat().st_mode & 0o777 == 0o640
 
 
-def test_a_failed_permission_change_closes_and_removes_the_temporary_file(tmp_path, monkeypatch):
-    """Nothing is left open or on disk when the mode cannot be set."""
-    import os
+def test_a_refused_permission_change_still_writes_the_measurement(tmp_path, monkeypatch, capsys):
+    """A mount that refuses mode changes keeps mkstemp's mode; the measurement is not lost.
 
+    The plain write it replaced never changed the mode, so it worked on such mounts too.
+    """
     from covsyn.validation import measure_age_rr as mar
-
-    closed = []
-    real_fdopen = os.fdopen
-
-    def tracking(fd, *args, **kwargs):
-        f = real_fdopen(fd, *args, **kwargs)
-        real_close = f.close
-
-        def close():
-            closed.append(fd)
-            real_close()
-
-        f.close = close
-        return f
 
     def refusing(*args, **kwargs):
         raise PermissionError("mode changes refused")
 
-    monkeypatch.setattr(mar.os, "fdopen", tracking)
     monkeypatch.setattr(mar.os, "fchmod", refusing)
-    with pytest.raises(PermissionError):
-        mar.write_measurement(tmp_path / "age_rr.json", {"n": 1})
-    assert closed and list(tmp_path.iterdir()) == []
+    out = tmp_path / "age_rr.json"
+    mar.write_measurement(out, {"n": 1})
+    assert json.loads(out.read_text()) == {"n": 1}
+    assert [p.name for p in tmp_path.iterdir()] == ["age_rr.json"]
+    assert "mode" in capsys.readouterr().err

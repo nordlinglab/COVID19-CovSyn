@@ -27,6 +27,7 @@ import concurrent.futures
 import json
 import os
 import pickle
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -174,7 +175,10 @@ def write_measurement(out, record):
         with os.fdopen(handle, 'w') as f:  # closes the file however the write ends
             mask = os.umask(0)  # mkstemp makes it 0600; give it the umask's, as write_text did
             os.umask(mask)
-            os.fchmod(f.fileno(), 0o666 & ~mask)
+            try:
+                os.fchmod(f.fileno(), 0o666 & ~mask)
+            except OSError as error:  # a mount that refuses mode changes: keep mkstemp's
+                print(f'warning: {out} keeps mode 0600 ({error})', file=sys.stderr)
             f.write(json.dumps(record, indent=2))
             f.flush()
             os.fsync(f.fileno())
