@@ -159,6 +159,22 @@ def seed_batches(stream, n, workers):
     return [list(seeds[i:i + per_task]) for i in range(0, n, per_task)]
 
 
+def write_measurement(out, record):
+    """Write the measurement as JSON under a temporary name, then rename it to ``out``.
+
+    A kill while writing leaves the earlier file whole, or none, never one cut short.
+    """
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    temporary = out.with_name(out.name + '.tmp')
+    try:
+        temporary.write_text(json.dumps(record, indent=2))
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    os.replace(temporary, out)
+
+
 def main():
     args = parse_arguments()
     workers = hardware.resolve_workers(args.workers, os.environ, None)
@@ -267,8 +283,7 @@ def main():
         print('  %-14s %.3f' % (layer, gap))
 
     out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(
+    write_measurement(out,
         {'n_index_cases': args.n, 'stream': args.stream, 'parameters_from': str(directory),
          'total_infections': int(total_infections.sum()),
          'cheng_comparable_layers': CHENG_COMPARABLE,
@@ -277,7 +292,7 @@ def main():
          'locked_input': [float(v) for v in locked],
          'layer_input_reproduction_gap': {k: float(v) for k, v in layer_gaps.items()},
          'all_layer_rr': [float(v) for v in all_layer_rr],
-         'bands': intervals}, indent=2))
+         'bands': intervals})
     print('\nwritten %s' % out)
 
 

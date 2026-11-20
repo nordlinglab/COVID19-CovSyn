@@ -101,3 +101,16 @@ def test_without_a_record_of_either_vector_the_measurement_is_scored(vpd, tmp_pa
     assert vpd.read_age_rr(path, _synthesis(tmp_path, "run_a"))[0] is not None
     path.write_text(json.dumps({"parameters_from": "run_b"}))
     assert vpd.read_age_rr(path, tmp_path)[0] is not None  # no run_metadata.json here
+
+
+def test_a_measurement_is_written_whole_or_not_at_all(tmp_path):
+    """Written under another name and renamed, so a kill leaves the old file or the new one."""
+    from covsyn.validation import measure_age_rr as mar
+
+    out = tmp_path / "age_rr.json"
+    mar.write_measurement(out, {"n_index_cases": 4})
+    assert json.loads(out.read_text()) == {"n_index_cases": 4}
+    with pytest.raises(TypeError):  # fails while writing: the earlier file stays whole
+        mar.write_measurement(out, {"n_index_cases": object()})
+    assert json.loads(out.read_text()) == {"n_index_cases": 4}
+    assert [p.name for p in tmp_path.iterdir()] == ["age_rr.json"]
