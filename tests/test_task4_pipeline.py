@@ -63,6 +63,26 @@ def modules(recorder):
     return [c[1] for c in recorder.calls]
 
 
+@pytest.fixture(autouse=True)
+def plenty_of_memory(monkeypatch):
+    """Half of 64 GiB free for every test here, whatever the machine has at the time.
+
+    The pipeline warns, and its memory check refuses, by the available memory; on the Mac,
+    with another user's servers holding most of it, the real reading added warnings these
+    tests did not expect. The readers the pipeline's warnings and memory check use are fixed,
+    the total too. hardware._available_gb is not: the pipeline calls resolve_workers without a
+    per-worker size, so it does not read it in-process (the steps that size workers by memory
+    run as processes of their own). A test that needs other memory sets its own after this.
+    """
+    from covsyn.runtime import memory
+
+    total = 64 * 1024**3
+    available = total // 2
+    monkeypatch.setattr(memory, "total_bytes", lambda: total)
+    monkeypatch.setattr(memory, "available_bytes", lambda: available)
+    monkeypatch.setattr(memory, "system_memory", lambda: (available, total))
+
+
 @pytest.fixture
 def config():
     """The default configuration with a short warm start."""
@@ -559,28 +579,22 @@ def test_a_relative_previous_checks_is_read_from_the_repository_root(tmp_path, c
     assert compare[2] == str(pr.runs.REPO_ROOT / name)
 
 
-@pytest.mark.parametrize("share", [0.5, 0.03])  # plenty of memory, and less than 10% (Task 5)
-def test_warnings_are_kept_with_the_run(tmp_path, config, monkeypatch, share):
+def test_warnings_are_kept_with_the_run(tmp_path, config):
     """In pipeline.log and the stage's run.log line, not only in pipeline.out.
 
-    The next resume overwrites pipeline.out. The available memory is fixed, so the machine's
-    at the time does not decide which warnings there are: with less than 10% each stage also
-    keeps the low-memory warning.
+    The next resume overwrites pipeline.out. The memory is fixed to plenty for this module
+    (plenty_of_memory), so the report's warning is the only one; with less than 10% each stage
+    would also keep the low-memory warning, which test_task5_stage_memory.py's
+    test_low_memory_during_a_stage_is_a_warning_of_it checks.
     """
-    from covsyn.runtime import memory
-
-    total = memory.total_bytes()
-    monkeypatch.setattr(memory, "available_bytes", lambda: int(total * share))
-    monkeypatch.setattr(memory, "system_memory", lambda: (int(total * share), total))
     _, run_dir = run_pipeline(tmp_path, config, Recorder(fail={"covsyn.validation.show_final"}))
     assert "WARNING: the report's show_final failed" in (run_dir / "pipeline.log").read_text()
     lines = {
         json.loads(x)["stage"]: json.loads(x)
         for x in (run_dir / "run.log").read_text().splitlines()
     }
-    low = [memory.low_memory_warning(int(total * share), total)] if share < 0.1 else []
-    assert lines["report"]["warnings"] == ["the report's show_final failed", *low]
-    assert lines["check"]["warnings"] == low
+    assert lines["report"]["warnings"] == ["the report's show_final failed"]
+    assert lines["check"]["warnings"] == []
 
 
 def test_a_run_in_use_cannot_be_resumed(tmp_path, config):
