@@ -1980,16 +1980,20 @@ def recorded_schedule(run_dir: Path) -> tuple[float, float, int]:
 
     Raises:
         SystemExit: runs.NOT_RESUMABLE when it is missing, as in a run started before Task 8,
-            which moved by a factor of 0.97, or out of range.
+            which moved by a factor of 0.97, or out of range; with a message (status 1) for a
+            read error that retrying may get past, as resumed_settings does.
     """
     try:
         settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
             'settings']
         schedule = settings['alpha_0'], settings['alpha_end'], settings['g_plan']
         step_size(0, *schedule)
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
+            TypeError) as error:  # what retrying cannot change
         not_resumable(f'{run_dir} cannot be resumed: no step schedule in its config.json, as '
                       f'in a run started before Task 8 ({error!r})')
+    except OSError as error:  # a disk that may come back
+        raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})') from None
     return schedule
 
 

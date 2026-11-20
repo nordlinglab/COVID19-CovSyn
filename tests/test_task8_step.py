@@ -142,3 +142,16 @@ def test_the_command_refuses_a_schedule_that_grows(monkeypatch, tmp_path):
         fo.main()
     assert not (tmp_path / "r").exists()
 
+
+def test_a_config_that_cannot_be_read_now_may_be_retried(tmp_path, monkeypatch):
+    """A read error that may pass is not NOT_RESUMABLE, as in resumed_settings."""
+    (tmp_path / "config.json").write_text("{}")
+
+    def failing(*args, **kwargs):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(fo.Path, "read_text", failing)
+    with pytest.raises(SystemExit) as stop:
+        fo.recorded_schedule(tmp_path)
+    assert stop.value.code != fo.runs.NOT_RESUMABLE
+
