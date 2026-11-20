@@ -87,9 +87,8 @@ In each generation every firefly moves towards each brighter one from the positi
 An elite of the k = min(5, n − 1) lowest-cost fireflies does not move and is re-scored on every block, and in generation 0, which shares the initial population's block, it keeps its initial costs.
 `firefly_archive.txt` holds every vector that was in the elite, with its mean cost over the blocks it was scored on there and their number, and revalidation re-scores them with the final population.
 The step size shrinks geometrically from α_0 in generation 0 to α_end in generation G_plan − 1 and stays there: `--alpha-0` (default 0.2), `--alpha-end` (default 0.001) and `--g-plan` (default the mode's generations), recorded in `config.json`, until pilot 2 chooses them.
-A run started before this schedule cannot be resumed.
+A run started before this schedule (Task 8) cannot be resumed.
 The workers start by spawn on macOS and Linux, and the results do not depend on the number of workers.
-A run started before this algorithm cannot be resumed.
 Every run starts from the committed initial population `variable/initial_population_v1.npz`, taking its first n rows: the literature vector, the best vectors of runs 10 and 19, then a Latin hypercube.
 A run whose bounds or dimension differ from the population's is refused;
 `uv run covsyn-initial-population --version 2` then makes a new version, which is how the warm starts change too.
