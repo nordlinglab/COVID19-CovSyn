@@ -70,7 +70,9 @@ def age_rr_file() -> Path:
 def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
     """The measurement at ``path`` and "", or None and why it cannot be scored.
 
-    spread_dir is the spread synthesis the checklist runs on; see the vector check below.
+    A measurement of another parameter vector than the spread synthesis in spread_dir was made
+    from -- one left by another candidate in the default file, say -- is not scored; when either
+    does not record its vector, as older ones do not, it is scored as before.
     """
     if not Path(path).is_file():
         return None, (f'no measurement at {path}: measure_age_rr.py has not run, failed, or '
@@ -81,7 +83,20 @@ def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
         return None, f'the measurement at {path} cannot be read ({error})'
     if not isinstance(measurement, dict):
         return None, f'the measurement at {path} cannot be read (not a JSON object)'
+    measured = measurement.get('parameters_from')
+    synthesised = _synthesis_parameters(Path(spread_dir))
+    if measured and synthesised and Path(measured).resolve() != Path(synthesised).resolve():
+        return None, (f'the measurement at {path} is of the vector in {measured}, not of '
+                      f'{synthesised}, which the synthesis was made from')
     return measurement, ''
+
+
+def _synthesis_parameters(spread_dir: Path) -> str | None:
+    """The parameter directory a synthesis's run_metadata.json names, None if it names none."""
+    try:
+        return json.loads((spread_dir / 'run_metadata.json').read_text()).get('parameter_path')
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def check(decision, name, value, target, unit='', ok=None, note='', ci=None, interval=True):

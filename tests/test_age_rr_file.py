@@ -64,3 +64,40 @@ def test_a_measurement_cut_short_is_said_to_be_unreadable(vpd, tmp_path, text):
     path.write_text(text)
     measurement, problem = vpd.read_age_rr(path, tmp_path)
     assert measurement is None and str(path) in problem and "cannot be read" in problem
+
+
+def _synthesis(tmp_path, parameter_path):
+    """A spread synthesis directory whose run_metadata.json names its parameters."""
+    spread = tmp_path / "spread"
+    spread.mkdir()
+    (spread / "run_metadata.json").write_text(json.dumps({"parameter_path": parameter_path}))
+    return spread
+
+
+def test_a_measurement_of_another_vector_is_not_scored(vpd, tmp_path):
+    """Left over from another candidate, it would score that candidate's B14 as this one's."""
+    path = tmp_path / "age_rr.json"
+    path.write_text(json.dumps({"parameters_from": str(tmp_path / "run_b")}))
+    spread = _synthesis(tmp_path, str(tmp_path / "run_a"))
+    measurement, problem = vpd.read_age_rr(path, spread)
+    assert measurement is None and "run_b" in problem and "run_a" in problem
+
+
+@pytest.mark.parametrize("same", ["run_a", "./run_a/"])
+def test_a_measurement_of_the_same_vector_is_scored(vpd, tmp_path, monkeypatch, same):
+    """The same parameter directory, however written, is the same vector."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "run_a").mkdir()
+    path = tmp_path / "age_rr.json"
+    path.write_text(json.dumps({"parameters_from": same}))
+    measurement, problem = vpd.read_age_rr(path, _synthesis(tmp_path, "run_a"))
+    assert measurement is not None and problem == ""
+
+
+def test_without_a_record_of_either_vector_the_measurement_is_scored(vpd, tmp_path):
+    """Nothing to compare: scored as before (an older synthesis or measurement)."""
+    path = tmp_path / "age_rr.json"
+    path.write_text(json.dumps({"n_index_cases": 4}))
+    assert vpd.read_age_rr(path, _synthesis(tmp_path, "run_a"))[0] is not None
+    path.write_text(json.dumps({"parameters_from": "run_b"}))
+    assert vpd.read_age_rr(path, tmp_path)[0] is not None  # no run_metadata.json here
