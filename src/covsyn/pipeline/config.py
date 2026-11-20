@@ -96,7 +96,11 @@ def _value(section: str, key: str, raw: Any) -> tuple[str, Any]:
     field, kind, minimum = SCHEMA[section][key]
     # TOML writes a whole step size such as 1 as an integer.
     if kind is float and isinstance(raw, int) and not isinstance(raw, bool):
-        raw = float(raw)
+        try:
+            raw = float(raw)
+        except OverflowError:
+            raise ValueError(f"[{section}] {key} is too large, a {len(str(abs(raw)))}-digit "
+                             f"integer") from None
     # bool is an int in Python; a count given as true must not pass.
     if not isinstance(raw, kind) or (kind is int and isinstance(raw, bool)):
         raise ValueError(f"[{section}] {key} must be {kind.__name__}, got {raw!r}")
@@ -146,10 +150,9 @@ def _check_schedule(values: dict[str, Any], source: str) -> None:
     """Refuse a schedule the optimiser would refuse, unset ends at its defaults (Task 8)."""
     if all(values.get(field) is None for field in ("alpha_0", "alpha_end", "g_plan")):
         return
-    try:
-        step_schedule.step_size(0, values.get("alpha_0", step_schedule.DEFAULT_ALPHA_0),
-                                values.get("alpha_end", step_schedule.DEFAULT_ALPHA_END),
-                                values.get("g_plan", 1))  # fmt: skip
+    try:  # every mode starts from the default alpha_0 (tests/test_task8_pipeline.py)
+        step_schedule.checked_schedule(values.get("alpha_0"), values.get("alpha_end"),
+                                       values.get("g_plan"), 1)  # fmt: skip
     except ValueError as error:
         raise ValueError(f"{source}: [optimise] step schedule: {error}") from None
 

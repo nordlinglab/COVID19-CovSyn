@@ -2135,16 +2135,14 @@ def main() -> None:
     # Firefly
     # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
     # config.json (resume_arguments).
-    fa = Firefly(pop_size, alpha_0 if args.alpha_0 is None else args.alpha_0, betamin, gamma,
-                 seed=args.seed,
-                 alpha_end=DEFAULT_ALPHA_END if args.alpha_end is None else args.alpha_end,
-                 g_plan=max_generations if args.g_plan is None else args.g_plan)
     try:  # Task 8: refused here, before the run directory is claimed
-        step_size(0, fa.alpha_0, fa.alpha_end, fa.g_plan)
+        schedule = step_schedule.checked_schedule(
+            args.alpha_0, args.alpha_end, args.g_plan, max_generations,
+            names=('--alpha-0', '--alpha-end'), alpha_0_default=alpha_0)
     except ValueError as error:
-        hint = ('; give --alpha-end too, at most --alpha-0'
-                if args.alpha_end is None and fa.alpha_end > fa.alpha_0 else '')
-        sys.exit(f'step schedule: {error}{hint}')
+        sys.exit(f'step schedule: {error}')
+    fa = Firefly(pop_size, schedule[0], betamin, gamma, seed=args.seed, alpha_end=schedule[1],
+                 g_plan=schedule[2])
     fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings

@@ -212,3 +212,12 @@ def test_a_resume_without_a_plan_keeps_the_recorded_one(tmp_path, monkeypatch):
     for g in range(4):
         with np.load(tmp_path / fo.CHECKPOINTS / f"generation_{g:04d}.npz") as saved:
             assert float(saved["alpha"]) == fo.step_size(g, 0.2, fo.DEFAULT_ALPHA_END, 2), g
+
+
+def test_an_alpha_end_alone_above_the_default_alpha_0_is_told_to_give_alpha_0(monkeypatch,
+                                                                              tmp_path):
+    """The mirror of a small --alpha-0 alone: the refusal names --alpha-0."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "test", "--alpha-end", "0.5",
+                                      "--run-dir", str(tmp_path / "r")])
+    with pytest.raises(SystemExit, match="--alpha-0 was left at its default"):
+        fo.main()

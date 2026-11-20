@@ -17,7 +17,7 @@ DEFAULT_ALPHA_0 = 0.2
 DEFAULT_ALPHA_END = 0.001
 
 
-def step_size(generation, alpha_0, alpha_end, g_plan):
+def step_size(generation: int, alpha_0: float, alpha_end: float, g_plan: int) -> float:
     """The step size of a generation under the Task 8 schedule.
 
     alpha_0 (alpha_end / alpha_0)^(g / (G_plan - 1)) for g < G_plan, alpha_end after; a
@@ -41,3 +41,34 @@ def step_size(generation, alpha_0, alpha_end, g_plan):
     if g_plan == 1:
         return alpha_0
     return alpha_0 * (alpha_end / alpha_0) ** (generation / (g_plan - 1))
+
+
+def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int | None,
+                     generations: int, names: tuple[str, str] = ('alpha_0', 'alpha_end'),
+                     alpha_0_default: float = DEFAULT_ALPHA_0) -> tuple[float, float, int]:
+    """The schedule a run moves on, each unset end at its default and G_plan at generations.
+
+    The command line and the pipeline both check theirs here, so they refuse the same ones.
+
+    Args:
+        alpha_0: As given; None when not given.
+        alpha_end: As given; None when not given.
+        g_plan: As given; None when not given.
+        generations: The run's generations, G_plan when none is given.
+        names: How the caller names alpha_0 and alpha_end, for the refusal.
+        alpha_0_default: alpha_0 when none is given, the mode's.
+
+    Raises:
+        ValueError: As step_size; when one end was left at its default, it says so and names it.
+    """
+    schedule = (alpha_0_default if alpha_0 is None else alpha_0,
+                DEFAULT_ALPHA_END if alpha_end is None else alpha_end,
+                generations if g_plan is None else g_plan)
+    try:
+        step_size(0, *schedule)
+    except ValueError as error:
+        if (alpha_0 is None) != (alpha_end is None) and schedule[1] > schedule[0]:
+            unset = names[0] if alpha_0 is None else names[1]
+            raise ValueError(f'{error}; {unset} was left at its default, so give it too') from None
+        raise
+    return schedule

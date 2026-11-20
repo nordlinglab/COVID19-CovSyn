@@ -82,3 +82,32 @@ def test_the_saved_configuration_reads_back_with_or_without_a_schedule(schedule)
     """pipeline.toml, saved with each run, leaves an unset setting out rather than writing None."""
     config = dataclasses.replace(pc.load("default"), **schedule)
     assert pc.parse(pc.to_toml(config), "saved") == config
+
+
+def test_a_step_size_too_large_for_a_float_is_refused_when_read():
+    """A ValueError naming the setting, not a traceback from float()."""
+    with pytest.raises(ValueError, match=r"\[optimise\] alpha_0"):
+        pc.parse("[optimise]\nalpha_0 = 1" + "0" * 400 + "\n", "t")
+
+
+@pytest.mark.parametrize("text, unset", [("[optimise]\nalpha_0 = 0.0005\n", "alpha_end"),
+                                         ("[optimise]\nalpha_end = 0.5\n", "alpha_0")])  # fmt: skip
+def test_a_schedule_refused_for_its_default_end_names_that_end(text, unset):
+    """The user set one end; the refusal says the other was left at its default."""
+    with pytest.raises(ValueError, match=f"{unset} was left at its default"):
+        pc.parse(text, "t")
+
+
+def test_every_mode_starts_from_the_default_alpha_0():
+    """The pipeline checks an unset alpha_0 at the default, so no mode may start elsewhere."""
+    assert {mode[1] for mode in fo.OPTIMISER_MODES.values()} == {fo.DEFAULT_ALPHA_0}
+
+
+def test_the_schedule_a_run_moves_on():
+    """Unset ends at the defaults, G_plan at the run's generations; both ends given are kept."""
+    assert step_schedule.checked_schedule(None, None, None, 120) == (0.2, 0.001, 120)
+    assert step_schedule.checked_schedule(0.05, 0.002, 50, 120) == (0.05, 0.002, 50)
+    assert step_schedule.checked_schedule(None, None, None, 7, alpha_0_default=0.1) == (
+        0.1, 0.001, 7)  # fmt: skip
+    with pytest.raises(ValueError, match="grow"):
+        step_schedule.checked_schedule(0.001, 0.2, None, 10)  # both given: no default to blame
