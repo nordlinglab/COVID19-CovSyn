@@ -90,7 +90,7 @@ def test_firefly_starts_from_the_rows_it_is_given(tmp_path, monkeypatch):
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     lb, ub = np.full(208, 0.5), np.full(208, 2.5)
     rows = ip.load(POPULATION, 4, *_bounds())
-    engine = fo.Firefly(pop_size=4, alpha=1, betamin=1, gamma=0.03, seed=3)
+    engine = fo.Firefly(pop_size=4, alpha_0=1, betamin=1, gamma=0.03, seed=3)
     engine.firefly(function=standins.objective, dim=208, lb=lb, ub=ub,
                    demographic_parameters=None, max_generations=1, max_workers=2,
                    Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None,
@@ -123,7 +123,7 @@ def test_the_move_seed_is_recorded_as_rng_seed(tmp_path, monkeypatch):
     import json
 
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    engine = fo.Firefly(pop_size=2, alpha=1, betamin=1, gamma=0.03, seed=9)
+    engine = fo.Firefly(pop_size=2, alpha_0=1, betamin=1, gamma=0.03, seed=9)
     engine.firefly(function=standins.objective, dim=208, lb=np.zeros(208), ub=np.ones(208),
                    demographic_parameters=None, max_generations=1, max_workers=1,
                    Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)  # fmt: skip
@@ -133,7 +133,7 @@ def test_the_move_seed_is_recorded_as_rng_seed(tmp_path, monkeypatch):
 
 def test_without_a_seed_the_moves_use_the_fixed_default():
     """Two runs of one configuration make the same moves without naming a seed (decision)."""
-    assert fo.Firefly(pop_size=2, alpha=1, betamin=1, gamma=0.03).seed == fo.DEFAULT_RNG_SEED
+    assert fo.Firefly(pop_size=2, alpha_0=1, betamin=1, gamma=0.03).seed == fo.DEFAULT_RNG_SEED
     assert fo.DEFAULT_RNG_SEED == 1
 
 
@@ -201,6 +201,7 @@ def _resumable(tmp_path, upper_shift=0.0):
     (run / "checkpoints").mkdir(parents=True)
     (run / "checkpoints" / "initial.npz").write_text("x")  # something to continue
     settings = {"mode": "test", "moves": fo.MOVES, "stream": 1,
+                "alpha_0": 0.2, "alpha_end": 0.001, "g_plan": 10,
                 "initial_population": {"version": 1, "sha256": "x"}}  # fmt: skip
     (run / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": settings}))
     space = parameter_space.load()

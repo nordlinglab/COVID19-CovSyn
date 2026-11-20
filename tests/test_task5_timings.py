@@ -506,7 +506,7 @@ def test_a_failed_run_waits_for_its_running_task_and_leaves_no_worker(tmp_path, 
     path = tmp_path / "killed"
     path.mkdir()
     # Candidate 0 of the initial population, which optimise draws on [0, 1] from SEED.
-    first = float(fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03,
+    first = float(fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03,
                              seed=SEED).rng.uniform(0, 1, (POP, DIM))[0, 0])  # fmt: skip
     failing = functools.partial(standins.fails_while_another_runs, failing_first_value=first,
                                 flags=str(flags))  # fmt: skip

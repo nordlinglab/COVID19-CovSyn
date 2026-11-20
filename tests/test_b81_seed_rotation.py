@@ -53,7 +53,7 @@ def run(monkeypatch, tmp_path):
     """Run the optimizer on the recording stand-in and return (None, results, directory)."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
-    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    engine = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=7)
     out = engine.firefly(function=standins.recording, dim=DIM, lb=lb, ub=ub,
                          demographic_parameters=None, max_generations=GENERATIONS,
                          max_workers=2, Cheng_contact_array=None, Cheng_attack_rate=None,
@@ -186,7 +186,7 @@ def test_the_run_directory_holds_the_configuration(run):
     digest = config["initial_population_sha256"]
     assert len(digest) == 64 and int(digest, 16) >= 0
     # The same seed draws the same initial population, so its hash repeats.
-    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    again = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=7)
     lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
     first = lb + again.rng.uniform(0, 1, (POP, DIM)) * (ub - lb)
     assert digest == hashlib.sha256(np.ascontiguousarray(first, dtype=float).tobytes()).hexdigest()
@@ -194,8 +194,8 @@ def test_the_run_directory_holds_the_configuration(run):
 
 def test_an_unseeded_run_records_a_seed_that_redraws_it():
     """Without a seed the run takes the fixed default (Task 7), so rng_seed is never null."""
-    first = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03)
-    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=first.seed)
+    first = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03)
+    again = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=first.seed)
     assert isinstance(first.seed, int)
     assert np.array_equal(first.rng.uniform(size=5), again.rng.uniform(size=5))
 
@@ -205,7 +205,7 @@ def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, t
     import json
 
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    engine = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=7)
     with pytest.raises(RuntimeError):
         engine.firefly(function=standins.crashes, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
                        demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,

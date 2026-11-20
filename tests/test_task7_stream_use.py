@@ -39,7 +39,7 @@ def test_a_generation_is_scored_on_its_block_of_its_stream():
 def test_a_run_scores_on_its_stream_and_records_it(tmp_path, monkeypatch):
     """Every candidate, the initial population's too, on the run's stream; config.json says so."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    engine = fo.Firefly(pop_size=3, alpha=1, betamin=1, gamma=0.03, seed=2)
+    engine = fo.Firefly(pop_size=3, alpha_0=1, betamin=1, gamma=0.03, seed=2)
     engine.stream = 4
     engine.firefly(function=standins.recording, dim=208, lb=np.zeros(208), ub=np.ones(208),
                    demographic_parameters=None, max_generations=2, max_workers=2,

@@ -44,7 +44,7 @@ SEED = 3
 def optimise(path, function, workers=2, resume=False):
     """Run the optimiser on a stand-in objective into ``path``."""
     fo.result_path = path
-    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.5, seed=SEED)
+    engine = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.5, seed=SEED)
     return engine.firefly(function=function, dim=DIM, lb=np.zeros(DIM), ub=np.ones(DIM),
                           demographic_parameters=None, max_generations=GENERATIONS,
                           max_workers=workers, Cheng_contact_array=None,
@@ -320,7 +320,7 @@ def _real_run(path, workers, run10_vector, demographic_parameters, cheng_data):
     from covsyn.calibration.fast_cost import evaluate_candidate
 
     fo.result_path = path
-    engine = fo.Firefly(pop_size=WIDE, alpha=0.2, betamin=1, gamma=0.03, seed=SEED)
+    engine = fo.Firefly(pop_size=WIDE, alpha_0=0.2, betamin=1, gamma=0.03, seed=SEED)
     engine.simulations = 20
     engine.firefly(function=evaluate_candidate, dim=len(run10_vector),
                    lb=np.minimum(run10_vector * 0.95, run10_vector * 1.05),

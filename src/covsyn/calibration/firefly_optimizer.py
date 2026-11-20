@@ -1122,6 +1122,34 @@ ARCHIVE_EVERY = 5
 # Task 7: the move generator's seed when none is given.
 DEFAULT_RNG_SEED = 1
 
+# Task 8: the step size schedule's ends until pilot 2 (Task 9) chooses them, the larger of the
+# plan's two starting points for alpha_0 (decision of 2026-11-20); G_plan defaults to the run's
+# generations.
+DEFAULT_ALPHA_0 = 0.2
+DEFAULT_ALPHA_END = 0.001
+
+
+def step_size(generation, alpha_0, alpha_end, g_plan):
+    """The step size of a generation under the Task 8 schedule.
+
+    alpha_0 (alpha_end / alpha_0)^(g / (G_plan - 1)) for g < G_plan, alpha_end after; a
+    one-generation plan moves with alpha_0 only at g = 0. It replaces the factor of 0.97 per generation, so the steps shrink over the run that was
+    planned, whatever its length.
+
+    Raises:
+        ValueError: A step size that is not positive, or a plan shorter than one generation.
+    """
+    if not (alpha_0 > 0 and alpha_end > 0 and np.isfinite(alpha_0) and np.isfinite(alpha_end)):
+        raise ValueError(f'step sizes must be positive, not {alpha_0!r} and {alpha_end!r}')
+    if isinstance(g_plan, bool) or not isinstance(g_plan, (int, np.integer)) or g_plan < 1:
+        raise ValueError(f'G_plan must be a whole number of generations, at least 1, '
+                         f'not {g_plan!r}')
+    if generation >= g_plan:
+        return alpha_end
+    if g_plan == 1:
+        return alpha_0
+    return alpha_0 * (alpha_end / alpha_0) ** (generation / (g_plan - 1))
+
 # Task 6: the synchronous firefly algorithm (Yang, 2010). config.json records it, and a run
 # that does not, started before Task 6 with its sequential moves, is not resumed with these.
 MOVES = 'synchronous'
@@ -1473,9 +1501,13 @@ def decode_metrics(P):
 
 
 class Firefly:
-    def __init__(self, pop_size, alpha, betamin, gamma, seed=None):
+    def __init__(self, pop_size, alpha_0, betamin, gamma, seed=None,
+                 alpha_end=DEFAULT_ALPHA_END, g_plan=None):
         self.pop_size = pop_size
-        self.alpha = alpha
+        # Task 8: the step size schedule, see step_size; g_plan None is the run's generations.
+        self.alpha_0 = alpha_0
+        self.alpha_end = alpha_end
+        self.g_plan = g_plan
         self.betamin = betamin
         self.gamma = gamma
         # Task 7: the seed of the moves, config.json's rng_seed; without one, the fixed default,
@@ -1526,7 +1558,10 @@ class Firefly:
             check_progress_table(result_path)  # a checkpoint, and its table: else NOT_RESUMABLE
         checkpoint = load_last_checkpoint(result_path) if resume else None
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
-        settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
+        g_plan = max_generations if self.g_plan is None else self.g_plan
+        step_size(0, self.alpha_0, self.alpha_end, g_plan)  # refuses a schedule out of range
+        settings = {'pop_size': self.pop_size, 'alpha_0': self.alpha_0,
+                    'alpha_end': self.alpha_end, 'g_plan': g_plan, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
                     'simulations': self.simulations, 'stage_timing': self.stage_timing,
                     **self.run_settings, 'moves': MOVES,  # Task 6: last, so nothing overrides it
@@ -1620,7 +1655,7 @@ class Firefly:
             worst_intensities = np.zeros(np.shape(intensities))
             worst_iteration = np.zeros(np.shape(intensities))
             evaluations = self.pop_size
-            new_alpha = self.alpha
+            new_alpha = step_size(0, self.alpha_0, self.alpha_end, g_plan)
             start = 0
             if checkpoint is None:
                 # Save the first random guess
@@ -1641,7 +1676,6 @@ class Firefly:
                 worst_intensities = checkpoint['worst_intensities'].copy()
                 worst_iteration = checkpoint['worst_iteration'].copy()
                 evaluations = int(checkpoint['evaluations'])
-                new_alpha = float(checkpoint['alpha'])
                 start = int(checkpoint['generation']) + 1
                 for table in (progress_table, evaluation_table, generation_table):
                     drop_progress_after(table.path, start - 1)
@@ -1651,7 +1685,7 @@ class Firefly:
                 # included, since its score came from another block and cannot be compared here.
                 offset = generation_seed_offset(generation, self.simulations, self.stream)
                 clock = timings.GenerationClock(generation, max_workers)
-                new_alpha *= 0.97
+                new_alpha = step_size(generation, self.alpha_0, self.alpha_end, g_plan)  # Task 8
                 # Task 6: every firefly moves on the positions and costs the generation starts
                 # from, then all are scored at once. B49 / E78: the brightest stays where it is.
                 moving = time.perf_counter_ns()
@@ -1735,7 +1769,7 @@ class Firefly:
                 fireflies, intensities)
 
 
-# Each mode's (pop_size, alpha, betamin, gamma, max_generations); main() runs these, and a run
+# Each mode's (pop_size, alpha_0, betamin, gamma, max_generations); main() runs these, and a run
 # recorded with another mode cannot be continued.
 OPTIMISER_MODES = {
     # B51 (E79): gamma was 0.131, but r is the SQUARED distance over all 199 normalised
@@ -1743,11 +1777,13 @@ OPTIMISER_MODES = {
     # 29.7 that gave beta = 0.02, i.e. no attraction -- run 9 never moved off its warm start in
     # 120 generations. gamma = 6/d makes beta = 1/e = 0.37 at the typical distance and lets it
     # approach 1 as fireflies close in.
-    'train': (100, 1, 1, 0.03, 120),
-    'test': (3, 1, 1, 0.01, 10),
+    # Task 8: alpha_0 starts the step schedule (step_size); it was the step that shrank by 0.97,
+    # from 1.
+    'train': (100, DEFAULT_ALPHA_0, 1, 0.03, 120),
+    'test': (3, DEFAULT_ALPHA_0, 1, 0.01, 10),
     # Task 5: the population is the worker count, set in main(), and S comes from the command
     # line; a profile is run again, never resumed.
-    'profile': (None, 1, 1, 0.01, 2),
+    'profile': (None, DEFAULT_ALPHA_0, 1, 0.01, 2),
 }
 PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
 
@@ -1841,6 +1877,46 @@ def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) ->
                       f'./variable now gives; it cannot be resumed under them')
 
 
+def positive_float(text: str) -> float:
+    """A command-line number greater than 0."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'{text!r} is not a number') from None
+    if not (value > 0 and np.isfinite(value)):
+        raise argparse.ArgumentTypeError(f'{text} is not greater than 0')
+    return value
+
+
+def positive_int(text: str) -> int:
+    """A command-line whole number of at least 1."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'{text!r} is not a whole number') from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f'{value} is not at least 1')
+    return value
+
+
+def recorded_schedule(run_dir: Path) -> tuple[float, float, int]:
+    """The step schedule a run recorded in its config.json, to resume it with (Task 8).
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when it is missing, as in a run started before Task 8,
+            which moved by a factor of 0.97, or out of range.
+    """
+    try:
+        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
+            'settings']
+        schedule = settings['alpha_0'], settings['alpha_end'], settings['g_plan']
+        step_size(0, *schedule)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        not_resumable(f'{run_dir} cannot be resumed: no step schedule in its config.json, as '
+                      f'in a run started before Task 8 ({error!r})')
+    return schedule
+
+
 def optimisation_stream(text: str) -> int:
     """--stream: one of the optimisation streams, 1 to 99 (Task 7)."""
     try:
@@ -1857,7 +1933,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
 
     Raises:
         SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations,
-            --stream or --stage-timings.
+            --stream, --alpha-0, --alpha-end, --g-plan or --stage-timings.
     """
     if args.resume is None:
         return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
@@ -1865,12 +1941,15 @@ def resume_arguments(args: argparse.Namespace) -> str:
                                       ('--mode', args.mode), ('--warm_start', args.warm_start),
                                       ('--simulations', getattr(args, 'simulations', None)),
                                       ('--stream', getattr(args, 'stream', None)),
+                                      ('--alpha-0', getattr(args, 'alpha_0', None)),
+                                      ('--alpha-end', getattr(args, 'alpha_end', None)),
+                                      ('--g-plan', getattr(args, 'g_plan', None)),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
     if given:  # a mistake in the command, reported before anything is read
-        sys.exit(f'--resume takes the directory, seed, mode and stream from the run; '
-                 f'remove {", ".join(given)}')
+        sys.exit(f'--resume takes the directory, seed, mode, stream and step schedule from the '
+                 f'run; remove {", ".join(given)}')
     # Then the checkpoints: a run killed before any has nothing to continue, whatever its
     # config.json holds, and that is the reason to report.
     problem = runs.resume_problem(args.resume)
@@ -1878,6 +1957,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
         not_resumable(problem)
     args.seed, mode, args.stage_timings = resumed_settings(args.resume)
     args.stream = recorded_stream(args.resume)
+    args.alpha_0, args.alpha_end, args.g_plan = recorded_schedule(args.resume)
     return mode
 
 
@@ -1923,6 +2003,14 @@ def main() -> None:
     parser.add_argument('--stream', type=optimisation_stream, default=None,
                         help='optimisation stream, 1 to 99, whose block g scores generation g '
                              f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
+    # Task 8: the step schedule, which pilot 2 (Task 9) chooses
+    parser.add_argument('--alpha-0', type=positive_float, default=None,
+                        help=f'step size of generation 0 (default {DEFAULT_ALPHA_0})')
+    parser.add_argument('--alpha-end', type=positive_float, default=None,
+                        help=f'step size from generation G_plan - 1 on '
+                             f'(default {DEFAULT_ALPHA_END})')
+    parser.add_argument('--g-plan', type=positive_int, default=None,
+                        help="planned run length G_plan (default: the mode's generations)")
     parser.add_argument('--stage-timings', action='store_true',
                         help="time run_covid's stages into timings_evaluation.csv")
     args = parser.parse_args()
@@ -1942,7 +2030,7 @@ def main() -> None:
     if mode not in OPTIMISER_MODES:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
-    pop_size, alpha, betamin, gamma, max_generations = OPTIMISER_MODES[mode]
+    pop_size, alpha_0, betamin, gamma, max_generations = OPTIMISER_MODES[mode]
     # Task 5: a profile has n = workers, 2 generations, and S from the command line.
     if mode == 'profile':
         pop_size = max_workers
@@ -1956,7 +2044,12 @@ def main() -> None:
         simulations = SIMULATIONS_PER_EVALUATION
 
     # Firefly
-    fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
+    # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
+    # config.json (resume_arguments).
+    fa = Firefly(pop_size, alpha_0 if args.alpha_0 is None else args.alpha_0, betamin, gamma,
+                 seed=args.seed,
+                 alpha_end=DEFAULT_ALPHA_END if args.alpha_end is None else args.alpha_end,
+                 g_plan=args.g_plan)
     fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
