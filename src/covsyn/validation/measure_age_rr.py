@@ -27,6 +27,7 @@ import concurrent.futures
 import json
 import os
 import pickle
+import tempfile
 import time
 from pathlib import Path
 
@@ -160,19 +161,24 @@ def seed_batches(stream, n, workers):
 
 
 def write_measurement(out, record):
-    """Write the measurement as JSON under a temporary name, then rename it to ``out``.
+    """Write the measurement as JSON under a temporary name of its own, then rename it to ``out``.
 
-    A kill while writing leaves the earlier file whole, or none, never one cut short.
+    The data reaches the disk before the rename, so a kill, a full disk or a power cut leaves
+    the earlier file whole, or none, never one cut short, and two writers never share a
+    temporary file.
     """
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    temporary = out.with_name(out.name + '.tmp')
+    handle, temporary = tempfile.mkstemp(dir=out.parent, prefix=out.name + '.', suffix='.tmp')
     try:
-        temporary.write_text(json.dumps(record, indent=2))
+        with os.fdopen(handle, 'w') as f:
+            f.write(json.dumps(record, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, out)
     except BaseException:
-        temporary.unlink(missing_ok=True)
+        Path(temporary).unlink(missing_ok=True)
         raise
-    os.replace(temporary, out)
 
 
 def main():

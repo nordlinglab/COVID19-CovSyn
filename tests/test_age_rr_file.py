@@ -103,14 +103,41 @@ def test_without_a_record_of_either_vector_the_measurement_is_scored(vpd, tmp_pa
     assert vpd.read_age_rr(path, tmp_path)[0] is not None  # no run_metadata.json here
 
 
-def test_a_measurement_is_written_whole_or_not_at_all(tmp_path):
-    """Written under another name and renamed, so a kill leaves the old file or the new one."""
+def test_a_measurement_is_written_whole_or_not_at_all(tmp_path, monkeypatch):
+    """Written under another name and renamed, so a kill leaves the old file or the new one.
+
+    The write is stopped after the data is written and before it is renamed into place, where
+    a kill or a full disk would stop it; a writer to the file itself would have cut it short.
+    """
     from covsyn.validation import measure_age_rr as mar
 
     out = tmp_path / "age_rr.json"
     mar.write_measurement(out, {"n_index_cases": 4})
     assert json.loads(out.read_text()) == {"n_index_cases": 4}
-    with pytest.raises(TypeError):  # fails while writing: the earlier file stays whole
-        mar.write_measurement(out, {"n_index_cases": object()})
+
+    def killed(fd):
+        raise OSError("killed before the rename")
+
+    monkeypatch.setattr(mar.os, "fsync", killed)
+    with pytest.raises(OSError):
+        mar.write_measurement(out, {"n_index_cases": 5, "pad": "x" * 10_000})
+    monkeypatch.undo()
     assert json.loads(out.read_text()) == {"n_index_cases": 4}
     assert [p.name for p in tmp_path.iterdir()] == ["age_rr.json"]
+
+
+def test_two_writers_do_not_share_a_temporary_file(tmp_path, monkeypatch):
+    """Each write takes its own temporary name, so two at once cannot swap halves."""
+    from covsyn.validation import measure_age_rr as mar
+
+    names = []
+    real_replace = mar.os.replace
+
+    def recording(source, target):
+        names.append(str(source))
+        real_replace(source, target)
+
+    monkeypatch.setattr(mar.os, "replace", recording)
+    mar.write_measurement(tmp_path / "age_rr.json", {"n": 1})
+    mar.write_measurement(tmp_path / "age_rr.json", {"n": 2})
+    assert len(set(names)) == 2 and all(n.startswith(str(tmp_path)) for n in names)
