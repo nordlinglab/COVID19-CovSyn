@@ -155,3 +155,32 @@ def test_a_config_that_cannot_be_read_now_may_be_retried(tmp_path, monkeypatch):
         fo.recorded_schedule(tmp_path)
     assert stop.value.code != fo.runs.NOT_RESUMABLE
 
+
+def _engine(**schedule):
+    return fo.Firefly(pop_size=3, betamin=1, gamma=0.03, seed=2, **schedule)
+
+
+def _optimise(engine, path, generations, resume=False):
+    engine.firefly(function=standins.objective, dim=208, lb=np.zeros(208), ub=np.ones(208),
+                   demographic_parameters=None, max_generations=generations, max_workers=2,
+                   Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None,
+                   resume=resume)  # fmt: skip
+
+
+def test_a_resume_with_another_schedule_is_refused(tmp_path, monkeypatch):
+    """Through the engine too: config.json's schedule describes the run, so it must hold."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    _optimise(_engine(alpha_0=0.2, g_plan=4), tmp_path, 2)
+    with pytest.raises(SystemExit) as stop:
+        _optimise(_engine(alpha_0=0.05, g_plan=4), tmp_path, 4, resume=True)
+    assert stop.value.code == fo.runs.NOT_RESUMABLE
+
+
+def test_a_resume_without_a_plan_keeps_the_recorded_one(tmp_path, monkeypatch):
+    """A run extended to more generations goes on shrinking over the plan it started with."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    _optimise(_engine(alpha_0=0.2), tmp_path, 2)  # G_plan = 2, recorded
+    _optimise(_engine(alpha_0=0.2), tmp_path, 4, resume=True)
+    for g in range(4):
+        with np.load(tmp_path / fo.CHECKPOINTS / f"generation_{g:04d}.npz") as saved:
+            assert float(saved["alpha"]) == fo.step_size(g, 0.2, fo.DEFAULT_ALPHA_END, 2), g

@@ -1629,6 +1629,16 @@ class Firefly:
         checkpoint = load_last_checkpoint(result_path) if resume else None
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         g_plan = max_generations if self.g_plan is None else self.g_plan
+        if checkpoint is not None:
+            # Task 8: a resume moves on the schedule config.json records, which describes the
+            # run; one extended to more generations keeps shrinking over the plan it started
+            # with.
+            recorded = recorded_schedule(result_path)
+            g_plan = recorded[2] if self.g_plan is None else g_plan
+            if (self.alpha_0, self.alpha_end, g_plan) != recorded:
+                not_resumable(f'{result_path} cannot be resumed with the step schedule '
+                              f'{(self.alpha_0, self.alpha_end, g_plan)}: it started with '
+                              f'{recorded}')
         step_size(0, self.alpha_0, self.alpha_end, g_plan)  # refuses a schedule out of range
         settings = {'pop_size': self.pop_size, 'alpha_0': self.alpha_0,
                     'alpha_end': self.alpha_end, 'g_plan': g_plan, 'betamin': self.betamin,
