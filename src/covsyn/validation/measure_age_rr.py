@@ -180,11 +180,12 @@ def write_measurement(out, record):
             try:
                 os.fchmod(f.fileno(), 0o666 & ~mask)
             except OSError as error:
-                # A mount that raises on a mode change keeps the mode it gave the file; one that
-                # ignores the change silently gives no warning. Under covsyn-pipeline this goes
-                # to the step's log, tables/<name>.txt; by hand, to stderr.
-                print(f'warning: {out} keeps the mode the mount gave it, not 0666 less the '
-                      f'process umask ({error})', file=sys.stderr)
+                # The mode change was refused, by a mount or a sandbox, so the file keeps the
+                # mode it was created with, which may or may not equal the one asked for; a
+                # mount that ignores the change silently gives no warning. Under covsyn-pipeline
+                # this goes to the step's log, tables/<name>.txt; by hand, to stderr.
+                print(f'warning: {out} keeps the mode it was created with; setting 0666 less the '
+                      f'process umask was refused ({error})', file=sys.stderr)
             f.write(json.dumps(record, indent=2))
             f.flush()
             os.fsync(f.fileno())
