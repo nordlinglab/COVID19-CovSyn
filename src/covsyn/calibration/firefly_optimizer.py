@@ -1155,7 +1155,22 @@ def step_size(generation, alpha_0, alpha_end, g_plan):
 MOVES = 'synchronous'
 
 
-def synchronous_moves(normalized, costs, alpha, betamin, gamma, rng):
+# Task 8: the elite's size; a population of n <= 5 keeps n - 1, so one firefly still moves
+# (decision of 2026-11-20).
+ELITE_SIZE = 5
+
+
+def elite_size(pop_size: int) -> int:
+    """The number of fireflies a generation keeps unmoved, k = min(5, n - 1) (Task 8)."""
+    return max(0, min(ELITE_SIZE, pop_size - 1))
+
+
+def elite_members(costs, k: int) -> list[int]:
+    """The indices of the k lowest costs, lowest first, a tie going to the lower index."""
+    return [int(i) for i in np.argsort(np.asarray(costs), kind='stable')[:k]]
+
+
+def synchronous_moves(normalized, costs, alpha, betamin, gamma, rng, fixed=()):
     """Every firefly's new normalised position, from the positions and costs given (Task 6).
 
     Firefly i moves towards each strictly brighter firefly j (costs[j] < costs[i]), for i and
@@ -1163,14 +1178,18 @@ def synchronous_moves(normalized, costs, alpha, betamin, gamma, rng):
     per coordinate, beta = betamin exp(-gamma r) with r the squared distance (B51) from i's
     position so far to j's start position, and is clipped to [0, 1] after each move. Nothing
     is evaluated between moves, so the brightest firefly, and one as bright, stays put; the
-    steps are drawn from rng in that fixed order, one vector per move.
+    steps are drawn from rng in that fixed order, one vector per move. A firefly in ``fixed``,
+    the elite (Task 8), makes no move and draws no step.
 
     Returns:
         The new positions; ``normalized`` is left unchanged.
     """
     start = np.asarray(normalized, dtype=float)
     moved = start.copy()
+    fixed = set(fixed)
     for i in range(len(start)):
+        if i in fixed:
+            continue
         for j in range(len(start)):
             if costs[j] < costs[i]:
                 r = np.sum(np.square(moved[i] - start[j]), axis=-1)
@@ -1687,17 +1706,19 @@ class Firefly:
                 clock = timings.GenerationClock(generation, max_workers)
                 new_alpha = step_size(generation, self.alpha_0, self.alpha_end, g_plan)  # Task 8
                 # Task 6: every firefly moves on the positions and costs the generation starts
-                # from, then all are scored at once. B49 / E78: the brightest stays where it is.
+                # from, then all are scored at once. B49 / E78: the brightest stays where it is;
+                # Task 8: so do the rest of the k lowest, all re-scored on this block.
                 moving = time.perf_counter_ns()
-                elite = int(np.argmin(intensities))
+                elite = elite_members(intensities, elite_size(self.pop_size))
                 normalized_fireflies = synchronous_moves(
                     normalized_fireflies, intensities, new_alpha, self.betamin, self.gamma,
-                    generation_rng(self.seed, generation))  # Task 4
+                    generation_rng(self.seed, generation), fixed=elite)  # Task 4
                 fireflies = normalized_fireflies*(ub-lb) + lb
                 clock.moves_ns += time.perf_counter_ns() - moving
                 # Generation 0's block is the initial one, on which the elite is already scored
                 # (F7); every other candidate is scored on this generation's block.
-                candidates = [k for k in range(self.pop_size) if generation > 0 or k != elite]
+                candidates = [k for k in range(self.pop_size)
+                              if generation > 0 or k not in elite]
                 print(f'  gen {generation} | scoring {len(candidates)} fireflies | '
                       f'evals {evaluations}', flush=True)
                 evaluate(candidates, fireflies, offset)

@@ -127,11 +127,11 @@ def test_one_firefly_does_not_move():
 
 
 def test_the_elite_keeps_its_position_every_generation(scrambled_run):
-    """The brightest firefly at the start of a generation is where it was at its end."""
+    """The elite at the start of a generation is where it was at its end (Task 8: k of them)."""
     for generation in range(GENERATIONS):
         before = checkpoint(scrambled_run, generation - 1)
         after = checkpoint(scrambled_run, generation)
-        elite = int(np.argmin(before["intensities"]))
+        elite = fo.elite_members(before["intensities"], fo.elite_size(POP))
         np.testing.assert_array_equal(after["normalized"][elite], before["normalized"][elite])
 
 
@@ -139,14 +139,15 @@ def test_the_elite_keeps_its_position_every_generation(scrambled_run):
 
 
 def test_each_generation_evaluates_every_candidate_once(scrambled_run):
-    """Each generation has n evaluations, generation 0 n - 1: its elite keeps its cost."""
+    """Each generation has n evaluations, generation 0 n - k: its elite keeps its costs."""
     counts = Counter(int(r["generation"]) for r in table(scrambled_run,
                                                          timings.EVALUATION_TABLE))  # fmt: skip
-    assert counts == {-1: POP, 0: POP - 1, **{g: POP for g in range(1, GENERATIONS)}}
+    k = fo.elite_size(POP)  # Task 8
+    assert counts == {-1: POP, 0: POP - k, **{g: POP for g in range(1, GENERATIONS)}}
     assert int(checkpoint(scrambled_run, GENERATIONS - 1)["evaluations"]) == sum(counts.values())
     initial, first = checkpoint(scrambled_run, -1), checkpoint(scrambled_run, 0)
-    elite = int(np.argmin(initial["intensities"]))
-    assert first["intensities"][elite] == initial["intensities"][elite]
+    elite = fo.elite_members(initial["intensities"], k)
+    np.testing.assert_array_equal(first["intensities"][elite], initial["intensities"][elite])
 
 
 def test_every_candidate_of_a_generation_is_scored_on_its_block(scrambled_run):
@@ -238,7 +239,8 @@ def test_a_generation_s_candidates_are_all_in_flight_before_any_is_collected(tmp
     assert _Spy.workers == [3]
     runs_of = [len(list(group)) for _, group in itertools.groupby(_Spy.events)]
     # initial population, generation 0 without its elite, then every generation
-    assert runs_of == [POP, POP, POP - 1, POP - 1] + [POP, POP] * (GENERATIONS - 1)
+    k = fo.elite_size(POP)  # Task 8
+    assert runs_of == [POP, POP, POP - k, POP - k] + [POP, POP] * (GENERATIONS - 1)
 
 
 # -- a resumed run ---------------------------------------------------------------------------

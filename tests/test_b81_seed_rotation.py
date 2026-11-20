@@ -93,14 +93,17 @@ def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):
 def test_generation_0_starts_from_the_initial_scores_without_rescoring(run):
     """The initial population is scored on block 0, generation 0's block, once only (F7).
 
-    Task 6: generation 0 scores every firefly but the elite, which keeps its block-0 cost.
+    Task 6: generation 0 scores every firefly but the elite, which keeps its block-0 costs;
+    Task 8: an elite of k.
     """
     _, _, path = run
-    assert evaluations_per_generation(path)[0] == POP - 1
+    k = fo.elite_size(POP)
+    assert evaluations_per_generation(path)[0] == POP - k
     with np.load(path / fo.CHECKPOINTS / "initial.npz") as initial, \
             np.load(path / fo.CHECKPOINTS / "generation_0000.npz") as first:  # fmt: skip
-        elite = int(np.argmin(initial["intensities"]))
-        assert first["intensities"][elite] == initial["intensities"][elite]
+        elite = fo.elite_members(initial["intensities"], k)
+        np.testing.assert_array_equal(first["intensities"][elite],
+                                      initial["intensities"][elite])
 
 
 def test_the_whole_population_is_rescored_when_the_block_changes(run):
