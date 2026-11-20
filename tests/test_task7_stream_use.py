@@ -220,3 +220,18 @@ def test_a_failed_age_risk_ratio_leaves_no_earlier_file_to_score(tmp_path):
     out = stages._age_rr(ctx, ss.REPORTING_STREAM, "age_rr_independent", "measure")
     assert out == stale and calls and not stale.exists()  # the measurement wrote nothing
     assert other.exists()
+
+
+def test_a_leftover_that_cannot_be_removed_does_not_stop_the_measurement(tmp_path):
+    """A directory named like a temporary file, say: warned about, and B14 still measured."""
+    from types import SimpleNamespace
+
+    from covsyn.pipeline import stages
+
+    (tmp_path / "age_rr.json.k3j9x.tmp").mkdir()
+    calls, warnings = [], []
+    ctx = SimpleNamespace(layout=SimpleNamespace(tables=tmp_path), candidate=tmp_path / "c",
+                          config=SimpleNamespace(age_rr_cases=20000), warnings=warnings,
+                          may=lambda args, what, output: calls.append(args))  # fmt: skip
+    stages._age_rr(ctx, ss.SELECTION_STREAM, "age_rr", "measure")
+    assert calls and warnings and "age_rr.json.k3j9x.tmp" in warnings[0]
