@@ -287,7 +287,7 @@ def _age_rr(ctx: Context, stream: int, name: str, what: str) -> Path:
         out.unlink(missing_ok=True)
     except OSError as error:
         raise StageFailed(f"{out} could not be removed, and would be scored as this run's B14 "
-                          f"({error}); remove it by hand, then resume") from None
+                          f"({error}); remove it by hand") from None
     for leftover in ctx.layout.tables.glob(f"{name}.json.*.tmp"):
         try:
             leftover.unlink(missing_ok=True)

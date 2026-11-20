@@ -248,6 +248,6 @@ def test_an_earlier_measurement_that_cannot_be_removed_stops_the_stage(tmp_path)
     ctx = SimpleNamespace(layout=SimpleNamespace(tables=tmp_path), candidate=tmp_path / "c",
                           config=SimpleNamespace(age_rr_cases=20000), warnings=[],
                           may=lambda args, what, output: calls.append(args))  # fmt: skip
-    with pytest.raises(stages.StageFailed, match="age_rr.json") as stop:
+    with pytest.raises(stages.StageFailed, match="age_rr.json.*remove it by hand") as stop:
         stages._age_rr(ctx, ss.SELECTION_STREAM, "age_rr", "measure")
     assert stop.value.resumable and not calls

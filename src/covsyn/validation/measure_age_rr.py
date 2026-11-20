@@ -173,14 +173,18 @@ def write_measurement(out, record):
     handle, temporary = tempfile.mkstemp(dir=out.parent, prefix=out.name + '.', suffix='.tmp')
     try:
         with os.fdopen(handle, 'w') as f:  # closes the file however the write ends
-            mask = os.umask(0)  # mkstemp makes it 0600; give it the umask's, as write_text did
+            # mkstemp creates it owner-only; give it 0666 less the process umask, as write_text
+            # did.
+            mask = os.umask(0)
             os.umask(mask)
             try:
                 os.fchmod(f.fileno(), 0o666 & ~mask)
-            except OSError as error:  # a mount that refuses mode changes sets its own
-                # Under covsyn-pipeline this goes to the step's log, tables/<name>.txt.
-                print(f'warning: {out} keeps the mode it was created with, which the umask did '
-                      f'not set ({error})', file=sys.stderr)
+            except OSError as error:
+                # A mount that raises on a mode change keeps the mode it gave the file; one that
+                # ignores the change silently gives no warning. Under covsyn-pipeline this goes
+                # to the step's log, tables/<name>.txt; by hand, to stderr.
+                print(f'warning: {out} keeps the mode the mount gave it, not 0666 less the '
+                      f'process umask ({error})', file=sys.stderr)
             f.write(json.dumps(record, indent=2))
             f.flush()
             os.fsync(f.fileno())
