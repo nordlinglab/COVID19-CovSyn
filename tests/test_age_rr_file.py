@@ -182,8 +182,40 @@ def test_a_measurement_is_as_readable_as_a_plain_write_makes_it(tmp_path):
 
     from covsyn.validation import measure_age_rr as mar
 
-    mask = os.umask(0)
-    os.umask(mask)
-    out = tmp_path / "age_rr.json"
-    mar.write_measurement(out, {"n": 1})
-    assert out.stat().st_mode & 0o777 == 0o666 & ~mask
+    previous = os.umask(0o027)  # one no fixed mode matches by chance
+    try:
+        out = tmp_path / "age_rr.json"
+        mar.write_measurement(out, {"n": 1})
+    finally:
+        os.umask(previous)
+    assert out.stat().st_mode & 0o777 == 0o640
+
+
+def test_a_failed_permission_change_closes_and_removes_the_temporary_file(tmp_path, monkeypatch):
+    """Nothing is left open or on disk when the mode cannot be set."""
+    import os
+
+    from covsyn.validation import measure_age_rr as mar
+
+    closed = []
+    real_fdopen = os.fdopen
+
+    def tracking(fd, *args, **kwargs):
+        f = real_fdopen(fd, *args, **kwargs)
+        real_close = f.close
+
+        def close():
+            closed.append(fd)
+            real_close()
+
+        f.close = close
+        return f
+
+    def refusing(*args, **kwargs):
+        raise PermissionError("mode changes refused")
+
+    monkeypatch.setattr(mar.os, "fdopen", tracking)
+    monkeypatch.setattr(mar.os, "fchmod", refusing)
+    with pytest.raises(PermissionError):
+        mar.write_measurement(tmp_path / "age_rr.json", {"n": 1})
+    assert closed and list(tmp_path.iterdir()) == []
