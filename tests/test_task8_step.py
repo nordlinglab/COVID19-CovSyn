@@ -230,3 +230,9 @@ def test_the_command_refuses_a_plan_longer_than_a_stream(monkeypatch, tmp_path):
                                       "--run-dir", str(tmp_path / "r")])
     with pytest.raises(SystemExit, match="--g-plan"):
         fo.main()
+
+
+def test_the_command_starts_from_the_mode_s_alpha_0_the_pipeline_checks(started, monkeypatch):  # noqa: F811
+    """main() reads step_schedule.MODE_ALPHA_0, the table the pipeline checks against."""
+    monkeypatch.setitem(fo.step_schedule.MODE_ALPHA_0, "test", 0.05)
+    assert started("--mode", "test")["engine"].alpha_0 == 0.05

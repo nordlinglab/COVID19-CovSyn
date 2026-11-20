@@ -2138,7 +2138,8 @@ def main() -> None:
     try:  # Task 8: refused here, before the run directory is claimed
         schedule = step_schedule.checked_schedule(
             args.alpha_0, args.alpha_end, args.g_plan, max_generations,
-            names=('--alpha-0', '--alpha-end', '--g-plan'), alpha_0_default=alpha_0)
+            names=('--alpha-0', '--alpha-end', '--g-plan'),
+            alpha_0_default=step_schedule.MODE_ALPHA_0[mode])  # what the pipeline checks
     except ValueError as error:
         sys.exit(f'step schedule: {error}')
     fa = Firefly(pop_size, schedule[0], betamin, gamma, seed=args.seed, alpha_end=schedule[1],

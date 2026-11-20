@@ -26,24 +26,28 @@ class GrowingSchedule(ValueError):
     """alpha_end above alpha_0: the steps would grow, though the schedule shrinks them."""
 
 
-def step_size(generation: int, alpha_0: float, alpha_end: float, g_plan: int) -> float:
+def step_size(generation: int, alpha_0: float, alpha_end: float, g_plan: int,
+              names: tuple[str, str, str] = ('alpha_0', 'alpha_end', 'G_plan')) -> float:
     """The step size of a generation under the Task 8 schedule.
 
     alpha_0 (alpha_end / alpha_0)^(g / (G_plan - 1)) for g < G_plan, alpha_end after; a
     one-generation plan moves with alpha_0 only at g = 0. It replaces the factor of 0.97 per
     generation, so the steps shrink over the run that was planned, whatever its length.
 
+    The refusals name alpha_0, alpha_end and G_plan as ``names`` does, the caller's names.
+
     Raises:
-        ValueError: A step size that is not positive, alpha_end above alpha_0, which would make
-            the steps grow, or a plan shorter than one generation.
+        ValueError: A step size that is not positive, alpha_end above alpha_0 (GrowingSchedule),
+            which would make the steps grow, or a plan shorter than one generation.
     """
     if not (alpha_0 > 0 and alpha_end > 0 and np.isfinite(alpha_0) and np.isfinite(alpha_end)):
-        raise ValueError(f'step sizes must be positive, not {alpha_0!r} and {alpha_end!r}')
+        raise ValueError(f'{names[0]} and {names[1]} must be positive, not {alpha_0!r} and '
+                         f'{alpha_end!r}')
     if alpha_end > alpha_0:
-        raise GrowingSchedule(f'alpha_end {alpha_end!r} is above alpha_0 {alpha_0!r}: the steps '
-                         f'would grow')
+        raise GrowingSchedule(f'{names[1]} {alpha_end!r} is above {names[0]} {alpha_0!r}: the '
+                              f'steps would grow')
     if isinstance(g_plan, bool) or not isinstance(g_plan, (int, np.integer)) or g_plan < 1:
-        raise ValueError(f'G_plan must be a whole number of generations, at least 1, '
+        raise ValueError(f'{names[2]} must be a whole number of generations, at least 1, '
                          f'not {g_plan!r}')
     if generation >= g_plan:
         return alpha_end
@@ -77,10 +81,9 @@ def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int
                 DEFAULT_ALPHA_END if alpha_end is None else alpha_end,
                 generations if g_plan is None else g_plan)
     try:
-        step_size(0, *schedule)
-    except GrowingSchedule:
-        message = (f'{names[1]} {schedule[1]!r} is above {names[0]} {schedule[0]!r}: the steps '
-                   f'would grow')
+        step_size(0, *schedule, names=names)
+    except GrowingSchedule as error:
+        message = str(error)
         if alpha_0 is None:
             message += (f'; {names[0]} was left at its default, so give {names[0]} too, at '
                         f'least {names[1]}')

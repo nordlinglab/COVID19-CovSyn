@@ -151,10 +151,14 @@ def _check_schedule(values: dict[str, Any], source: str) -> None:
     if all(values.get(field) is None for field in ("alpha_0", "alpha_end", "g_plan")):
         return
     mode = values.get("mode", PipelineConfig.mode)
+    if mode not in step_schedule.MODE_ALPHA_0:  # its alpha_0, and so the schedule, is unknown
+        raise ValueError(f"{source}: [optimise] mode {mode!r} is not one of "
+                         f"{sorted(step_schedule.MODE_ALPHA_0)}, so its step schedule cannot be "
+                         f"checked")
     try:  # the mode's generations are the optimiser's; no check compares G_plan with them
         step_schedule.checked_schedule(
             values.get("alpha_0"), values.get("alpha_end"), values.get("g_plan"), 1,
-            alpha_0_default=step_schedule.MODE_ALPHA_0.get(mode, step_schedule.DEFAULT_ALPHA_0))
+            alpha_0_default=step_schedule.MODE_ALPHA_0[mode])
     except ValueError as error:
         raise ValueError(f"{source}: [optimise] step schedule: {error}") from None
 

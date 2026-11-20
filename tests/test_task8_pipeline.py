@@ -154,3 +154,18 @@ def test_the_schedule_a_run_moves_on():
         0.1, 0.001, 7)  # fmt: skip
     with pytest.raises(ValueError, match="grow"):
         step_schedule.checked_schedule(0.001, 0.2, None, 10)  # both given: no default to blame
+
+
+def test_a_schedule_for_an_unknown_mode_is_refused_when_read():
+    """Its alpha_0 is unknown, so the schedule cannot be checked; nor would the run start."""
+    with pytest.raises(ValueError, match="mode"):
+        pc.parse('[optimise]\nmode = "trian"\nalpha_end = 0.1\n', "t")
+
+
+def test_every_refusal_names_the_caller_s_settings():
+    """Not step_size's own names, whichever check refuses."""
+    names = ("--alpha-0", "--alpha-end", "--g-plan")
+    for given, said in [((-1.0, None, None), "--alpha-0 and --alpha-end must be positive"),
+                        ((None, None, 2.5), "--g-plan must be a whole number")]:  # fmt: skip
+        with pytest.raises(ValueError, match=said):
+            step_schedule.checked_schedule(*given, 10, names=names)
