@@ -259,13 +259,26 @@ def test_the_warning_gives_alpha_end_and_the_last_step(tmp_path, monkeypatch):
 
 
 def test_a_resumed_run_does_not_warn_of_its_plan_again(tmp_path, monkeypatch, recwarn):
-    """Its start warned once; optimiser.log, appended to on each resume, holds it once."""
+    """Its start warned that the plan outlasts the run; the resume, by the same rule, does not."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     with pytest.warns(UserWarning, match="G_plan 1200"):
         _optimise(_engine(alpha_0=0.2, g_plan=1200), 2)
     recwarn.clear()
     _optimise(_engine(alpha_0=0.2, g_plan=1200), 3, resume=True)
-    assert not [w for w in recwarn if "G_plan" in str(w.message)]
+    said = fo.step_schedule.plan_outlasts_run(1200, 3)
+    assert not [w for w in recwarn if said in str(w.message)]
+
+
+def test_a_resume_that_first_outlasts_its_plan_warns(tmp_path, monkeypatch):
+    """Started as long as its plan, resumed shorter: the steps now end above alpha_end."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    _optimise(_engine(alpha_0=0.2, g_plan=4), 1)  # G_plan 4, 1 generation: warned
+    (tmp_path / "config.json").write_text(json.dumps(  # as if started with 4 generations
+        {**json.loads((tmp_path / "config.json").read_text()),
+         "settings": {**json.loads((tmp_path / "config.json").read_text())["settings"],
+                      "max_generations": 4}}))  # fmt: skip
+    with pytest.warns(UserWarning, match="G_plan 4 is longer than the run's 2 generations"):
+        _optimise(_engine(alpha_0=0.2, g_plan=4), 2, resume=True)
 
 
 def test_a_plan_as_long_as_the_run_is_not_warned_about(tmp_path, monkeypatch, recwarn):
@@ -344,9 +357,12 @@ def test_a_resume_of_a_mode_longer_than_a_stream_cannot_be_resumed(monkeypatch, 
     (tmp_path / "checkpoints" / "initial.npz").write_text("x")  # something to continue
     monkeypatch.setattr(fo.seed_streams, "MAX_BLOCKS", 3)
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(tmp_path)])
-    before = {f: f.read_bytes() for f in tmp_path.rglob("*") if f.is_file()}
+    def snapshot():  # directories too, as None
+        return {f: f.read_bytes() if f.is_file() else None for f in tmp_path.rglob("*")}
+
+    before = snapshot()
     with pytest.raises(SystemExit) as stop:
         fo.main()
     assert stop.value.code == fo.runs.NOT_RESUMABLE
     assert "cannot be resumed: the mode's max_generations 10" in capsys.readouterr().err
-    assert {f: f.read_bytes() for f in tmp_path.rglob("*") if f.is_file()} == before  # untouched
+    assert snapshot() == before  # untouched

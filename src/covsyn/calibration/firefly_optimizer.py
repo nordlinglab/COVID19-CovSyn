@@ -1623,8 +1623,11 @@ class Firefly:
                               f'{(self.alpha_0, self.alpha_end, g_plan)}: it started with '
                               f'{recorded}')
         step_size(0, self.alpha_0, self.alpha_end, g_plan, names=SETTING_NAMES)  # out of range?
+        # No cap on G_plan, but it may be a typo: said once, when a run starts or a resume
+        # first makes the plan outlast it (a generations count config.json lacks is 0).
         outlasts = step_schedule.plan_outlasts_run(g_plan, max_generations)
-        if outlasts is not None and checkpoint is None:  # no cap, but maybe a typo; said once
+        if outlasts is not None and (checkpoint is None or step_schedule.plan_outlasts_run(
+                g_plan, recorded_settings(result_path).get('max_generations', 0)) is None):
             last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
             warnings.warn(f'{outlasts} (alpha_end {self.alpha_end!r}, last step {last:.3g})',
                           stacklevel=2)

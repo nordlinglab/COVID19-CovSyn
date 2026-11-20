@@ -198,7 +198,9 @@ def test_a_resumed_pipeline_does_not_warn_of_its_plan_again(tmp_path):
     config = dataclasses.replace(pc.load("default"), g_plan=1200)
     run_pipeline(tmp_path, config, Recorder(fail={"covsyn.calibration.firefly_optimizer"}))
     _, run_dir = run_pipeline(tmp_path, None, Recorder(), resume=True)
-    assert (run_dir / "pipeline.log").read_text().count("WARNING: [optimise] g_plan") == 1
+    log = (run_dir / "pipeline.log").read_text()
+    assert log.count("run directory") == 2  # the resume logged too
+    assert log.count("WARNING: [optimise] g_plan") == 1
 
 
 def test_a_built_configuration_with_an_unknown_mode_gives_no_schedule_warning():
