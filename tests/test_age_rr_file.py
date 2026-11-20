@@ -84,10 +84,11 @@ def test_a_measurement_of_another_vector_is_not_scored(vpd, tmp_path):
 
 
 @pytest.mark.parametrize("same", ["run_a", "./run_a/"])
-def test_a_measurement_of_the_same_vector_is_scored(vpd, tmp_path, monkeypatch, same):
-    """The same parameter directory, however written, is the same vector."""
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "run_a").mkdir()
+def test_a_measurement_of_the_same_vector_is_scored(vpd, tmp_path, same):
+    """The same path, written with or without a leading ./ or trailing /, is the same directory.
+
+    The text is compared, not the file system (see read_age_rr's limits).
+    """
     path = tmp_path / "age_rr.json"
     path.write_text(json.dumps({"parameters_from": same}))
     measurement, problem = vpd.read_age_rr(path, _synthesis(tmp_path, "run_a"))
@@ -159,7 +160,7 @@ def test_a_relative_and_an_absolute_record_are_not_compared(vpd, tmp_path):
 
 
 def test_two_relative_records_of_other_directories_are_not_scored(vpd, tmp_path):
-    """Both relative to the repository root, as the pipeline and its steps record them."""
+    """Two relative paths of other directories, as steps run by hand from the root record."""
     path = tmp_path / "age_rr.json"
     path.write_text(json.dumps({"parameters_from": "results/models/run_b"}))
     measurement, problem = vpd.read_age_rr(path, _synthesis(tmp_path, "results/models/run_a"))

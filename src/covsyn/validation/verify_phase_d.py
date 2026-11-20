@@ -71,10 +71,13 @@ def read_age_rr(path: Path, spread_dir: Path) -> tuple[dict | None, str]:
     """The measurement at ``path`` and "", or None and why it cannot be scored.
 
     A measurement made from another parameter directory than the spread synthesis in spread_dir
-    -- one left by another candidate in the default file, say -- is not scored. The directories
-    are compared, not the vectors in them, and only when both are recorded as paths of the same
-    kind, both relative (to the repository root, where every step runs) or both absolute;
-    otherwise, as for older records that name none, the measurement is scored as before.
+    -- one left by another candidate in the default file, say -- is not scored. The recorded
+    paths are compared as text, after os.path.normpath, and only when both are relative or both
+    absolute; otherwise, as for older records that name none, it is scored as before. The
+    pipeline and its steps record the same absolute path, so the check holds there. By hand it
+    has limits (decision of 2026-11-20): the vectors themselves are not compared, a directory
+    reached through a link or another mount reads as another, and relative paths recorded from
+    different working directories can read as other or as the same.
     """
     if not Path(path).is_file():
         return None, (f'no measurement at {path}: measure_age_rr.py has not run, failed, or '
