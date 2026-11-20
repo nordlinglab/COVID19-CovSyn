@@ -171,6 +171,9 @@ def write_measurement(out, record):
     out.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=out.parent, prefix=out.name + '.', suffix='.tmp')
     try:
+        mask = os.umask(0)  # mkstemp makes it 0600; give it the umask's, as write_text did
+        os.umask(mask)
+        os.chmod(temporary, 0o666 & ~mask)
         with os.fdopen(handle, 'w') as f:
             f.write(json.dumps(record, indent=2))
             f.flush()

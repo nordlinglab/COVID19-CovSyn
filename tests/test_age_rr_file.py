@@ -173,3 +173,16 @@ def test_the_missing_row_keeps_a_fixed_target_and_says_why_in_its_note(vpd, monk
     (row,) = vpd.results
     assert row["decision"] == "B14" and row["target"] == vpd.MISSING_AGE_RR
     assert "/machine/run-1" not in row["target"] and "/machine/run-1" in row["note"]
+
+
+def test_a_measurement_is_as_readable_as_a_plain_write_makes_it(tmp_path):
+    """The file gets the umask's permissions, as write_text gave it, not mkstemp's 0600."""
+    import os
+
+    from covsyn.validation import measure_age_rr as mar
+
+    mask = os.umask(0)
+    os.umask(mask)
+    out = tmp_path / "age_rr.json"
+    mar.write_measurement(out, {"n": 1})
+    assert out.stat().st_mode & 0o777 == 0o666 & ~mask
