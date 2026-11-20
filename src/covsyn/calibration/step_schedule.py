@@ -17,7 +17,8 @@ DEFAULT_ALPHA_0 = 0.2
 DEFAULT_ALPHA_END = 0.001
 # Each optimiser mode's alpha_0 and generations, which main() runs and the pipeline checks its
 # schedule against: an unset alpha_0 is the mode's, and a g_plan longer than its generations is
-# warned about. One table, so the two cannot differ.
+# warned about. Kept here only, so the command and the pipeline cannot differ; the two tables
+# and OPTIMISER_MODES have the same modes (tests/test_task8_pipeline.py).
 MODE_ALPHA_0 = {'train': DEFAULT_ALPHA_0, 'test': DEFAULT_ALPHA_0, 'profile': DEFAULT_ALPHA_0}
 # Task 5: a profile runs 2 generations.
 MODE_GENERATIONS = {'train': 120, 'test': 10, 'profile': 2}
@@ -93,3 +94,16 @@ def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int
                         f'most {names[0]}')
         raise ValueError(message) from None
     return schedule
+
+
+def plan_outlasts_run(g_plan: int, generations: int, name: str = 'G_plan') -> str | None:
+    """Why to warn of a plan longer than its run, or None; the optimiser and the pipeline's rule.
+
+    G_plan takes no seed blocks, so it has no cap, but the steps of a run that ends first stay
+    above alpha_end, as a typed extra zero would make them (decision of 2026-11-20). A run of
+    no generations takes no step, so it gives no warning.
+    """
+    if 1 <= generations < g_plan:
+        return (f"{name} {g_plan} is longer than the run's {generations} generations, so the "
+                f'steps do not reach alpha_end')
+    return None

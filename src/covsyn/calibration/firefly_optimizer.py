@@ -1607,8 +1607,8 @@ class Firefly:
         # 2026-11-20); main() checks before it claims the run directory.
         problem = generations_problem(max_generations)
         if problem is not None:
-            if checkpoint is not None:  # max_generations is the mode's now, not the run's
-                not_resumable(f"{result_path} cannot be resumed: the mode's {problem}")
+            if checkpoint is not None:
+                not_resumable(f'{result_path} cannot be resumed: {problem}')
             raise ValueError(problem)
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
         g_plan = max_generations if self.g_plan is None else self.g_plan
@@ -1623,12 +1623,11 @@ class Firefly:
                               f'{(self.alpha_0, self.alpha_end, g_plan)}: it started with '
                               f'{recorded}')
         step_size(0, self.alpha_0, self.alpha_end, g_plan, names=SETTING_NAMES)  # out of range?
-        # G_plan takes no blocks, so no cap; but it may be a typo. No generation, no step.
-        if 1 <= max_generations < g_plan:
+        outlasts = step_schedule.plan_outlasts_run(g_plan, max_generations)
+        if outlasts is not None:  # no cap on G_plan, but it may be a typo
             last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
-            warnings.warn(f"G_plan {g_plan} is longer than the run's {max_generations} "
-                          f'generations, so the steps end at {last:.3g}, not alpha_end '
-                          f'{self.alpha_end!r}', stacklevel=2)
+            warnings.warn(f'{outlasts} {self.alpha_end!r}: they end at {last:.3g}',
+                          stacklevel=2)
         settings = {'pop_size': self.pop_size, 'alpha_0': self.alpha_0,
                     'alpha_end': self.alpha_end, 'g_plan': g_plan, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
@@ -2165,7 +2164,9 @@ def main() -> None:
     # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
     # config.json (resume_arguments).
     problem = generations_problem(max_generations)  # Task 7: before the claim, as below
-    if problem is not None:
+    if problem is not None:  # a resume's generations are its mode's, as it is now
+        if args.resume is not None:
+            not_resumable(f"{args.resume} cannot be resumed: the mode's {problem}")
         sys.exit(f'mode {mode}: {problem}')
     try:  # Task 8: refused here, before the run directory is claimed
         schedule = step_schedule.checked_schedule(

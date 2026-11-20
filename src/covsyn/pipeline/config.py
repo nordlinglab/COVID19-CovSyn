@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import dataclasses
 import tomllib
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -148,10 +147,9 @@ def parse(text: str, source: str) -> PipelineConfig:
 
 
 def _check_schedule(values: dict[str, Any], source: str) -> None:
-    """Refuse a mode or schedule the optimiser would refuse, unset ends at its defaults.
+    """Refuse a mode or schedule the optimiser would refuse, unset ends at its defaults (Task 8).
 
-    A g_plan longer than the mode's generations runs, as the optimiser does, but is warned
-    about here, before the run, as it may be a typo (Task 8, decision of 2026-11-20).
+    A g_plan longer than the mode's generations is not refused: see schedule_warnings.
     """
     mode = values.get("mode", PipelineConfig.mode)
     if mode not in step_schedule.MODE_GENERATIONS:  # the optimiser's modes
@@ -166,11 +164,20 @@ def _check_schedule(values: dict[str, Any], source: str) -> None:
             alpha_0_default=step_schedule.MODE_ALPHA_0[mode])
     except ValueError as error:
         raise ValueError(f"{source}: [optimise] step schedule: {error}") from None
-    g_plan = values.get("g_plan")
-    if g_plan is not None and g_plan > generations:
-        warnings.warn(f"{source}: [optimise] g_plan {g_plan} is longer than mode {mode!r}'s "
-                      f"{generations} generations, so the steps do not reach alpha_end",
-                      stacklevel=3)
+
+
+def schedule_warnings(config: PipelineConfig) -> list[str]:
+    """What the pipeline's log warns of in the step schedule before a run starts (Task 8).
+
+    A g_plan longer than the mode's generations runs, as the optimiser does, but may be a typo
+    (decision of 2026-11-20); the log keeps it with the run, which a warning from parse() would
+    not reach.
+    """
+    if config.g_plan is None:
+        return []
+    outlasts = step_schedule.plan_outlasts_run(
+        config.g_plan, step_schedule.MODE_GENERATIONS[config.mode], "g_plan")
+    return [] if outlasts is None else [f"[optimise] {outlasts}"]
 
 
 def load(name: str) -> PipelineConfig:

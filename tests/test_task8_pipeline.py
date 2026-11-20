@@ -177,13 +177,23 @@ def test_an_unknown_mode_is_refused_when_read_with_or_without_a_schedule():
         pc.parse('[optimise]\nmode = "trian"\n', "t")
 
 
-def test_a_plan_longer_than_the_mode_s_run_is_warned_about_when_read():
-    """A typed extra zero (1200 for 120) is told before the run, not only in its log."""
-    with pytest.warns(UserWarning, match="g_plan 1200 is longer than mode 'train''s 120"):
-        pc.parse("[optimise]\ng_plan = 1200\n", "t")
+def test_a_plan_longer_than_the_mode_s_run_is_warned_about_in_the_log(tmp_path):
+    """A typed extra zero (1200 for 120) is in pipeline.log, before the optimiser starts."""
+    config = dataclasses.replace(pc.load("default"), g_plan=1200)
+    _, run_dir = run_pipeline(tmp_path, config, Recorder())
+    log = (run_dir / "pipeline.log").read_text()
+    said = "WARNING: [optimise] g_plan 1200 is longer than the run's 120 generations"
+    assert said in log and log.index(said) < log.index("stage optimise")
 
 
-def test_a_plan_as_long_as_the_mode_s_run_is_not_warned_about(recwarn):
+def test_a_plan_as_long_as_the_mode_s_run_is_not_warned_about(tmp_path):
     """The plan's own case: G_plan = G (Task 9, pilot 2)."""
-    pc.parse("[optimise]\ng_plan = 120\n", "t")
+    config = dataclasses.replace(pc.load("default"), g_plan=120)
+    _, run_dir = run_pipeline(tmp_path, config, Recorder())
+    assert "g_plan" not in (run_dir / "pipeline.log").read_text()
+
+
+def test_reading_a_long_plan_raises_no_warning(recwarn):
+    """The log says it, once per run; parse() stays silent, as a resume reads it again."""
+    pc.parse("[optimise]\ng_plan = 1200\n", "t")
     assert not [w for w in recwarn if "g_plan" in str(w.message)]

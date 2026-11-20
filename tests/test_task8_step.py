@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import sys
-import warnings
 
 import numpy as np
 import pytest
@@ -264,7 +263,7 @@ def test_a_run_longer_than_a_stream_is_refused_before_it_starts(tmp_path, monkey
     with pytest.raises(SystemExit) as stop:  # retrying cannot help
         _optimise(_engine(alpha_0=0.2), 4, resume=True)
     assert stop.value.code == fo.runs.NOT_RESUMABLE
-    assert "the mode's max_generations 4" in capsys.readouterr().err  # not the run's record
+    assert "cannot be resumed: max_generations 4" in capsys.readouterr().err  # as given
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     monkeypatch.setattr(fo, "result_path", fresh, raising=False)
@@ -305,14 +304,26 @@ def test_the_help_gives_the_mode_s_alpha_0_as_the_default(monkeypatch, capsys):
     assert "default: the mode's" in " ".join(capsys.readouterr().out.split()).split("--alpha-0")[2]
 
 
-def test_a_run_of_no_generations_gives_no_step_warning(tmp_path, monkeypatch):
-    """No step is taken, so none is reported as where the steps end."""
-    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    engine = _engine(alpha_0=0.2, g_plan=10)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        try:
-            _optimise(engine, 0)
-        except Exception:  # what else a run of no generations does is not this test's
-            pass
-    assert not [w for w in caught if "G_plan" in str(w.message)]
+def test_the_rule_for_a_plan_that_outlasts_its_run():
+    """One rule, which the optimiser and the pipeline both warn by; no generation, no warning."""
+    rule = fo.step_schedule.plan_outlasts_run
+    assert rule(120, 120) is None and rule(50, 120) is None and rule(10, 0) is None
+    assert rule(1200, 120, "g_plan") == ("g_plan 1200 is longer than the run's 120 "
+                                         "generations, so the steps do not reach alpha_end")
+
+
+def test_a_resume_of_a_mode_longer_than_a_stream_cannot_be_resumed(monkeypatch, tmp_path,
+                                                                   capsys):
+    """Through the command: NOT_RESUMABLE, so the pipeline does not retry, blaming the mode."""
+    from tests.test_task4_resume import RESUMABLE
+
+    settings = {"mode": "test", **RESUMABLE}
+    (tmp_path / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": settings}))
+    (tmp_path / "checkpoints").mkdir()
+    (tmp_path / "checkpoints" / "initial.npz").write_text("x")  # something to continue
+    monkeypatch.setattr(fo.seed_streams, "MAX_BLOCKS", 3)
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(tmp_path)])
+    with pytest.raises(SystemExit) as stop:
+        fo.main()
+    assert stop.value.code == fo.runs.NOT_RESUMABLE
+    assert "cannot be resumed: the mode's max_generations 10" in capsys.readouterr().err

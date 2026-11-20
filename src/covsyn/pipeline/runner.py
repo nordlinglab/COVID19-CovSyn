@@ -594,6 +594,9 @@ def _run_stages(
     others = None  # listed and read once, when a stage first needs the memory check
     history: dict[Path, list[dict]] = {}
     report(f"run directory {run_dir}" + (f"; finished: {', '.join(sorted(done))}" if done else ""))
+    if not resume:  # Task 8: once, before the optimiser starts
+        for warning in pc.schedule_warnings(config):
+            report(f"WARNING: {warning}")
     for name, function in ps.STAGES:
         if name in done:
             continue
