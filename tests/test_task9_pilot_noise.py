@@ -431,6 +431,7 @@ def test_a_config_saved_with_a_byte_order_mark_still_reads(tmp_path, monkeypatch
     config = out / "config.json"
     config.write_bytes(b"\xef\xbb\xbf" + config.read_bytes())
     assert pn.main(["--resume", str(out), "--workers", "3"]) == out
+    assert json.loads(config.read_text(encoding="utf-8-sig"))["workers"] == 3  # recorded
 
 
 def test_pilot_1_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog):
