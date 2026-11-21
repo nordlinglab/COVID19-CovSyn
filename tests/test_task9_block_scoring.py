@@ -140,3 +140,69 @@ def test_the_workers_are_written_whole_or_not_at_all(tmp_path, monkeypatch):
         block_scoring.record_workers(tmp_path, 3)
     assert json.loads(path.read_text())["workers"] == 8
     assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json"]  # no temporary left
+
+
+def test_a_read_only_config_is_not_replaced(tmp_path):
+    """Its protection holds: the write is refused, and the file and its mode stay."""
+    import json
+    import os
+    import stat
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    path.chmod(0o444)
+    try:
+        with pytest.raises(PermissionError):
+            block_scoring.record_workers(tmp_path, 3)
+        assert json.loads(path.read_text())["workers"] == 2
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o444
+    finally:
+        path.chmod(0o644)
+
+
+def test_a_linked_config_is_not_replaced_by_a_file(tmp_path):
+    """The link stays a link; the write is refused."""
+    import json
+
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps({"settings": {}, "workers": 2}))
+    out = tmp_path / "run"
+    out.mkdir()
+    (out / "config.json").symlink_to(real)
+    with pytest.raises(PermissionError):
+        block_scoring.record_workers(out, 3)
+    assert (out / "config.json").is_symlink()
+
+
+def test_the_new_config_keeps_the_old_mode(tmp_path):
+    """The replacement takes the file's permissions."""
+    import json
+    import os
+    import stat
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    path.chmod(0o640)
+    block_scoring.record_workers(tmp_path, 3)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o640
+
+
+def test_a_config_that_is_not_an_object_is_a_value_error(tmp_path):
+    """Valid JSON but no object: no workers to record."""
+    (tmp_path / "config.json").write_text("[1, 2]")
+    with pytest.raises(ValueError):
+        block_scoring.record_workers(tmp_path, 3)
+
+
+@settings(max_examples=200, deadline=None)
+@given(text=st.text(max_size=8), recorded=st.integers(min_value=1, max_value=64))
+def test_covsyn_workers_is_used_when_usable_and_the_record_otherwise(text, recorded):
+    """Usable means hardware's own rule: a whole number of at least 1."""
+    from covsyn.runtime import hardware
+
+    try:
+        usable = hardware._override(text, hardware.ENV_VARIABLE)
+    except ValueError:
+        usable = None
+    got = block_scoring.pilot_workers(None, {"COVSYN_WORKERS": text}, recorded)
+    assert got == (recorded if usable is None or not text.strip() else usable)

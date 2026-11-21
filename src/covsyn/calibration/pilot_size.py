@@ -55,7 +55,7 @@ CONFIRM_BLOCKS = range(30, 60)
 OPTIMISER = "covsyn.calibration.firefly_optimizer"
 FINISHED = "firefly_worst.txt"  # the optimiser's main() writes it last
 # A pilot 2's directory name, as runs.make_run_id makes it; its runs share the part before it.
-RUN_ID = re.compile(r"\d{8}-\d{6}_(?:[0-9a-f]{7}|nocommit)(?:-dirty)?_pilot-size")
+RUN_ID = re.compile(r"[0-9]{8}-[0-9]{6}_(?:[0-9a-f]{7}|nocommit)(?:-dirty)?_pilot-size")
 
 CONFIG_FILE = "config.json"
 RUNS_FILE = "runs.csv"

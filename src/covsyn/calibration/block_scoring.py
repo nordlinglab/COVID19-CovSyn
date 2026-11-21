@@ -18,6 +18,7 @@ import logging
 import multiprocessing
 import os
 import pickle
+import shutil
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -120,42 +121,54 @@ def pilot_workers(given: int | None, env: Mapping[str, str], recorded: Any) -> i
         return hardware.resolve_workers(given, env, None)
     if type(recorded) is not int or recorded < 1:
         raise ValueError(f"config.json's workers is {recorded!r}, not a positive whole number")
-    requested = env.get(hardware.ENV_VARIABLE, "").strip()
-    if not requested:  # empty counts as unset, as resolve_workers takes it (B86)
+    requested = env.get(hardware.ENV_VARIABLE, "")
+    if not requested.strip():  # empty counts as unset, as resolve_workers takes it (B86)
         return recorded
     try:
-        count = int(requested)
-    except ValueError:
-        count = 0
-    if count >= 1:
-        return count
-    # Unusable: the record, not the cores, since the run started with it (resolve_workers
-    # would fall to the cores, which record_workers would then write over the record).
-    log.warning("%s=%r is not a positive whole number; using the %d workers the pilot recorded",
-                hardware.ENV_VARIABLE, requested, recorded)
-    return recorded
+        return hardware._override(requested, hardware.ENV_VARIABLE)  # hardware's own rule
+    except ValueError as error:
+        # Unusable: the record, not the cores, since the run started with it (resolve_workers
+        # would fall to the cores, which record_workers would then write over the record).
+        log.warning("%s; using the %d workers the pilot recorded", error, recorded)
+        return recorded
 
 
 def record_workers(out_dir: Path, workers: int) -> None:
     """Write the workers a resume runs with into config.json, which records the run.
 
-    Written whole or not at all: a temporary file replaces it, so a kill or a full disk leaves
-    the old one, which every later resume needs.
+    Written whole or not at all: a temporary file, flushed to disk, replaces it, so a kill, a
+    full disk or a crash leaves the old one, which every later resume needs. The replacement
+    keeps the file's mode; a config.json that is read-only or a link is not replaced.
 
     Raises:
+        PermissionError: config.json is read-only, or a link.
         OSError: config.json cannot be read, or the new one cannot be written.
-        ValueError: config.json is not JSON.
+        ValueError: config.json is not a JSON object.
     """
     path = Path(out_dir) / "config.json"
     config = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError(f"{path} is not a JSON object")
     if config.get("workers") == workers:
         return
+    if path.is_symlink() or not os.access(path, os.W_OK):
+        raise PermissionError(f"{path} is read-only or a link, so its workers stay "
+                              f"{config.get('workers')!r}; give a writable copy to resume with "
+                              f"{workers}")
     config["workers"] = workers
     temporary = path.with_name(path.name + ".tmp")
     try:
-        temporary.write_text(json.dumps(config, indent=1, allow_nan=False) + "\n",
-                             encoding="utf-8")
+        with open(temporary, "w", encoding="utf-8") as f:
+            f.write(json.dumps(config, indent=1, allow_nan=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        shutil.copymode(path, temporary)
         os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)  # the rename itself, on file systems that need it
+        finally:
+            os.close(directory)
     finally:
         temporary.unlink(missing_ok=True)
 

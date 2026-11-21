@@ -114,13 +114,15 @@ A run directory that is a link to other storage is not supported.
 `src/covsyn/pipeline/default.toml` holds the settings, such as the optimisation and validation streams and the previous run's `checks.json` to compare with;
 `--config` also takes another TOML file.
 
-Two pilots size the production run (Task 9), and each writes its command, settings and results into `results/tables/<run-id>/` and resumes with `--resume results/tables/<run-id>`.
-A resume runs with `--workers`, else `COVSYN_WORKERS`, else the worker count in its `config.json`, and writes the count it runs with there:
+Two pilots size the production run (Task 9), and each writes its command, settings and results into `results/tables/<run-id>/`:
 
 ```bash
 uv run covsyn-pilot-noise
 uv run covsyn-pilot-size --noise results/tables/<pilot-1 run-id>
 ```
+
+Each resumes with `--resume results/tables/<run-id>`, its own directory, neither a link nor renamed, since pilot 2 names its runs' directories after it.
+A resume runs with `--workers`, else `COVSYN_WORKERS`, else the worker count in its `config.json`, and writes the count it runs with there.
 
 Pilot 1 scores the literature vector, the run-19 vector and two random rows of the initial population on 30 blocks of validation stream 201 at each S of 300, 1,000, 3,000 and 10,000, and every row on two blocks at S = 10,000 for the cost spread across the population.
 It chooses the smallest S at which the largest SD of a paired difference between the vectors is at most 10% of that spread, and none when no S passes.

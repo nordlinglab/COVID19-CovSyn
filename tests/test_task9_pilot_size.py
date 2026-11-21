@@ -524,3 +524,44 @@ def test_a_config_without_settings_is_named_as_such(tmp_path, monkeypatch, capsy
     with pytest.raises(SystemExit):
         ps.main(["--resume", str(out)])
     assert "KeyError" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", ["latest_pilot-size", "20261121-000000_ABCDEF0_pilot-size",
+                                  "20261121-000000_abcdef0_pilot-noise",
+                                  "\u0662\u0660\u0662\u0666\u0661\u0661\u0662\u0661-000000_abcdef0_pilot-size"])
+def test_a_hand_named_pilot_directory_is_refused(tmp_path, monkeypatch, name):
+    """A real directory, not a link, whose name runs.make_run_id would not give a pilot 2."""
+    out = tmp_path / "results" / "tables" / name
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": 2}))
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(out)])
+
+
+from hypothesis import given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+
+@settings(max_examples=200, deadline=None)
+@given(when=st.datetimes(min_value=__import__("datetime").datetime(2000, 1, 1),
+                         max_value=__import__("datetime").datetime(9999, 12, 31)),
+       commit=st.one_of(st.none(), st.text("0123456789abcdef", min_size=7, max_size=40)),
+       dirty=st.booleans())
+def test_every_pilot_2_run_id_is_recognised(when, commit, dirty):
+    """Whatever time, commit and state runs.make_run_id is given."""
+    from covsyn.runtime import runs
+
+    name = runs.make_run_id("pilot-size", when=when, commit=commit or "", dirty=dirty)
+    assert ps.RUN_ID.fullmatch(name)
+
+
+@settings(max_examples=200, deadline=None)
+@given(name=st.text(max_size=40))
+def test_a_name_runs_would_not_make_is_refused(name):
+    """Anything but <YYYYMMDD-HHMMSS>_<commit7 or nocommit>[-dirty]_pilot-size."""
+    import re
+
+    pattern = r"\d{8}-\d{6}_(?:[0-9a-f]{7}|nocommit)(?:-dirty)?_pilot-size"
+    assert bool(ps.RUN_ID.fullmatch(name)) == bool(re.fullmatch(pattern, name, re.ASCII))
