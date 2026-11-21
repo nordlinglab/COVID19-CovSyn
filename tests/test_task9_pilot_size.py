@@ -719,3 +719,34 @@ def test_a_real_short_write_is_reported_once_with_config_json_kept(tmp_path, mon
     assert err.count(str(out)) == 1
     assert "config.json stays as it was" in err
     assert json.loads((out / "config.json").read_text())["workers"] == 2
+
+
+def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monkeypatch):
+    """write_config writes UTF-8; the reads say so rather than take the locale's encoding.
+
+    The default encoding is set in C, so the test checks the reads ask for UTF-8.
+    """
+    import pathlib
+
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(
+        json.dumps({"settings": {"simulations": 300}, "workers": 2}), encoding="utf-8"
+    )
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
+    encodings = {}
+    real = pathlib.Path.read_text
+
+    def recording(self, *args, **kwargs):
+        if self.name in ("config.json", "choice.json"):
+            encodings[self.name] = kwargs.get("encoding", args[0] if args else None)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", recording)
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    ps.main(["--resume", str(out)])
+    ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+    assert encodings == {"config.json": "utf-8", "choice.json": "utf-8"}

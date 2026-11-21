@@ -367,3 +367,24 @@ def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, monkeypatc
     with pytest.raises(SystemExit) as stop:
         pn.main(["--resume", str(out), "--workers", "3"])
     assert stop.value.code == 2 and "could not record" in capsys.readouterr().err
+
+
+def test_a_resume_reads_config_json_as_utf_8(tmp_path, monkeypatch):
+    """As pilot 2's: the read asks for UTF-8, as write_config writes."""
+    import pathlib
+
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+    encodings = []
+    real = pathlib.Path.read_text
+
+    def recording(self, *args, **kwargs):
+        if self.name == "config.json":
+            encodings.append(kwargs.get("encoding", args[0] if args else None))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", recording)
+    pn.main(["--resume", str(out)])
+    assert encodings and set(encodings) == {"utf-8"}

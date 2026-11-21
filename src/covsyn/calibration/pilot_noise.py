@@ -160,7 +160,7 @@ def write_summary(out_dir: Path) -> dict[str, Any]:
     block_scoring.write_csv(Path(out_dir) / VECTORS_FILE, summary["vectors"])
     block_scoring.write_csv(Path(out_dir) / PAIRS_FILE, summary["pairs"])
     choice = {**summary["choice"], "spread": summary["spread"]}
-    (Path(out_dir) / CHOICE_FILE).write_text(json.dumps(choice, indent=1) + "\n")
+    (Path(out_dir) / CHOICE_FILE).write_text(json.dumps(choice, indent=1) + "\n", encoding="utf-8")
     return summary
 
 
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> Path:
     if args.resume is not None:
         out = args.resume
         try:
-            config = json.loads((out / CONFIG_FILE).read_text())
+            config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8"))
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
         except (OSError, ValueError, TypeError, AttributeError) as error:
