@@ -158,8 +158,9 @@ def record_workers(out_dir: Path, workers: int) -> None:
         PermissionError: config.json is read-only, a link, hard-linked, another user's, in a
             read-only directory, or in a group the user cannot keep.
         OSError: config.json cannot be read, or the new one cannot be written.
-        ValueError: config.json is not UTF-8, not JSON, not a JSON object, or holds a value
-            (NaN, Infinity) that JSON cannot be written back with.
+        ValueError: config.json is not UTF-8, not JSON, not a JSON object, holds an integer
+            too long for Python to read, or a value (NaN, Infinity) JSON cannot be written back
+            with.
     """
     path = Path(out_dir) / "config.json"
     config = json.loads(path.read_text(encoding="utf-8"))

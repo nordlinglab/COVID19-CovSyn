@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> Path:
             block_scoring.record_workers(out, workers)
         except PermissionError as error:  # refused: say what was refused
             parser.error(str(error))
-        except (OSError, ValueError) as error:  # ValueError: contents not writable back as JSON
+        except (OSError, ValueError) as error:  # ValueError: see record_workers' Raises
             # Named once: by the error, when it names its file, else here.
             where = out / CONFIG_FILE if getattr(error, "filename", None) is None else CONFIG_FILE
             parser.error(f"could not record the workers in {where}: {error}")
