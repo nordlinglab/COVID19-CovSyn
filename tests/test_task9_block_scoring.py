@@ -607,6 +607,23 @@ def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
     assert not caplog.text
 
 
+@pytest.fixture
+def socket_path(request):
+    """A path holding a bound AF_UNIX socket, in a short directory: macOS caps it at 104 bytes."""
+    import shutil
+    import socket
+    import tempfile
+    from pathlib import Path
+
+    directory = Path(tempfile.mkdtemp(dir="/tmp", prefix="cs"))
+    path = directory / "t.csv"
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(path))
+    yield path
+    listener.close()
+    shutil.rmtree(directory)
+
+
 def test_a_missing_table_at_the_first_read_reads_as_absent(tmp_path):
     """Missing when a pilot first looks: no rows, no mark, and exists False, so it starts anew."""
     path = tmp_path / "t.csv"
@@ -634,17 +651,13 @@ def test_a_special_file_is_refused_before_a_read_could_block(tmp_path):
 
 
 @pytest.mark.parametrize("what", ["directory", "parent", "socket"])
-def test_a_path_that_cannot_be_a_table_is_named(tmp_path, what):
+def test_a_path_that_cannot_be_a_table_is_named(tmp_path, request, what):
     """A directory or a socket where the table belongs, or a file where its directory belongs."""
-    import socket
-
     if what == "directory":
         path = tmp_path / "t.csv"
         path.mkdir()
     elif what == "socket":
-        path = tmp_path / "t.csv"
-        listener = socket.socket(socket.AF_UNIX)
-        listener.bind(str(path))
+        path = request.getfixturevalue("socket_path")
     else:
         (tmp_path / "out").write_text("a file, not a directory")
         path = tmp_path / "out" / "t.csv"
@@ -697,10 +710,9 @@ def test_a_new_table_s_path_taken_by_another_entry_is_named(tmp_path, entry):
 
 
 @pytest.mark.parametrize("entry", ["directory", "fifo", "parent", "dangling link", "socket"])
-def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry):
+def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, request, entry):
     """The exists=True path: trimmed and appended only as a regular file."""
     import os
-    import socket
 
     path = tmp_path / "t.csv"
     if entry == "directory":
@@ -710,8 +722,7 @@ def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry
     elif entry == "dangling link":  # the table it pointed at is gone
         path.symlink_to(tmp_path / "nowhere.csv")
     elif entry == "socket":
-        listener = socket.socket(socket.AF_UNIX)
-        listener.bind(str(path))
+        path = request.getfixturevalue("socket_path")
     else:
         (tmp_path / "out").write_text("a file")
         path = tmp_path / "out" / "t.csv"
