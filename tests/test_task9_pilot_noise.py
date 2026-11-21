@@ -348,9 +348,10 @@ def test_a_config_whose_rewrite_fails_is_not_called_missing(tmp_path, monkeypatc
         raise OSError(errno.EIO, "short write", str(out_dir / "config.json"))
 
     monkeypatch.setattr(pn.block_scoring, "record_workers", failing)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stop:
         pn.main(["--resume", str(out), "--workers", "3"])
     err = capsys.readouterr().err
+    assert stop.value.code == 2
     assert "could not record" in err and "holds no pilot" not in err
 
 
