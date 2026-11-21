@@ -718,7 +718,7 @@ def test_a_real_short_write_is_reported_once_with_config_json_kept(tmp_path, mon
     monkeypatch.undo()
     err = capsys.readouterr().err
     assert stop.value.code == 2 and "could not record" in err
-    assert err.count(str(out)) == 1
+    assert err.count(out.name) == 1  # the run's own name, however the OS writes paths
     assert "config.json stays as it was" in err
     assert json.loads((out / "config.json").read_text())["workers"] == 2
 
@@ -738,12 +738,13 @@ def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monke
     noise = tmp_path / "noise"
     noise.mkdir()
     (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
-    encodings = {}
+    encodings: dict[str, list] = {}
     real = pathlib.Path.read_text
 
     def recording(self, *args, **kwargs):
-        if self.name in ("config.json", "choice.json"):
-            encodings[self.name] = kwargs.get("encoding", args[0] if args else None)
+        if self.name in ("config.json", "choice.json"):  # every read, main's first among them
+            encodings.setdefault(self.name, []).append(kwargs.get("encoding", args[0] if args
+                                                                  else None))  # fmt: skip
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(pathlib.Path, "read_text", recording)
@@ -751,4 +752,5 @@ def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monke
     monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
     ps.main(["--resume", str(out)])
     ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
-    assert encodings == {"config.json": "utf-8", "choice.json": "utf-8"}
+    assert set(encodings) == {"config.json", "choice.json"}
+    assert all(set(reads) == {"utf-8"} for reads in encodings.values()), encodings
