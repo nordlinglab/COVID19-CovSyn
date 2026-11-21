@@ -61,10 +61,9 @@ class Table(NamedTuple):
 
 # Errors that say the table itself is refused; any other (too many open files, a full disk,
 # an I/O error) is no fault of the table and is raised as it is.
-# ETXTBSY: a running program. EAGAIN (EWOULDBLOCK, the same number): another program holds a
-# lease on it, which O_NONBLOCK reports instead of waiting; said apart, as a wait will do.
+# ETXTBSY: a running program.
 TABLE_REFUSALS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS, errno.ELOOP,
-                            errno.ENAMETOOLONG, errno.ETXTBSY, errno.EAGAIN})  # fmt: skip
+                            errno.ENAMETOOLONG, errno.ETXTBSY})  # fmt: skip
 # A socket, or a device without a driver, fails to open before fstat could say what it is:
 # ENXIO on Linux, EOPNOTSUPP (ENOTSUP) on macOS, where the pilots run.
 NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV, errno.EOPNOTSUPP, errno.ENOTSUP})
@@ -86,11 +85,13 @@ def _raise_refused(path: Path, error: OSError, entry: bool = False) -> None:
         if mode is not None and not stat.S_ISREG(mode):
             raise TableError(f"{path} is not a regular file, so it is no pilot table") from None
         return
+    # EAGAIN (EWOULDBLOCK, the same number), from the non-blocking open only: another program
+    # holds a lease on it, which O_NONBLOCK reports instead of waiting; a wait will do.
     if entry and error.errno == errno.EAGAIN:
         raise TableError(
             f"{path} is held by another program for now; resume when it lets go"
         ) from None
-    if error.errno in TABLE_REFUSALS - {errno.EAGAIN}:
+    if error.errno in TABLE_REFUSALS:
         raise TableError(f"{path}: {error.strerror}") from None
 
 

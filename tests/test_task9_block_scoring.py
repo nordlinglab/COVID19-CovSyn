@@ -1013,3 +1013,8 @@ def test_a_table_another_program_holds_says_to_resume_when_it_lets_go(tmp_path, 
     monkeypatch.setattr(os, "open", leased)
     with pytest.raises(block_scoring.TableError, match="held by another program.*resume"):
         block_scoring.read_table(path)
+
+
+def test_a_busy_table_is_not_among_the_refusals_of_a_create():
+    """EAGAIN means a lease only from the non-blocking open, which handles it on its own."""
+    assert errno.EAGAIN not in block_scoring.TABLE_REFUSALS
