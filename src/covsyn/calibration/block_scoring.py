@@ -70,15 +70,22 @@ NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV, errno.EOPNOTSUPP, errno.ENOT
 
 
 def _reason(error: OSError) -> str:
-    """The error's text, or its errno's when it came without one.
+    """The error's text; else its errno's; else its own words; else its kind (the class name).
 
-    OSError(code) with one argument leaves errno unset and keeps the code in args.
+    OSError(code) with one argument leaves errno unset and keeps the code in args. None, as an
+    errno or a text, is no reason and never shown.
     """
     if error.strerror:
         return error.strerror
     code = error.errno if error.errno is not None else next(
         (a for a in error.args[:1] if isinstance(a, int)), None)  # fmt: skip
-    return os.strerror(code) if code is not None else (str(error) or type(error).__name__)
+    if code is not None:
+        try:
+            return os.strerror(code)
+        except (ValueError, OverflowError):  # a code no C int holds
+            pass
+    words = [a for a in error.args if isinstance(a, str) and a]
+    return words[0] if words else type(error).__name__
 
 
 def _raise_refused(path: Path, error: OSError, entry: bool = False) -> None:

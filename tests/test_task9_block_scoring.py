@@ -1054,7 +1054,15 @@ def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monke
     assert "None" not in str(error.value) and os.strerror(errno.ENOENT) in str(error.value)
 
 
-@pytest.mark.parametrize("bare", [OSError(), OSError("not a number")])
-def test_an_error_with_no_text_at_all_is_named_by_its_kind(bare):
-    """No strerror, no errno, no text: the error's kind, not empty parentheses."""
-    assert block_scoring._reason(bare)
+@pytest.mark.parametrize("bare, said", [
+    (lambda: OSError(), "OSError"),
+    (lambda: OSError(""), "OSError"),
+    (lambda: PermissionError(), "PermissionError"),
+    (lambda: OSError(None), "OSError"),
+    (lambda: OSError(None, None), "OSError"),
+    (lambda: OSError("not a number"), "not a number"),
+    (lambda: OSError(2**40), "OSError"),
+])  # fmt: skip
+def test_an_error_with_no_usable_text_is_named_by_its_kind(bare, said):
+    """No text, no errno, None for both, or a code no C int holds: its kind, never "None"."""
+    assert block_scoring._reason(bare()) == said
