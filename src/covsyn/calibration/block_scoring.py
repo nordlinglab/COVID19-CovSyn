@@ -37,7 +37,11 @@ MakePool = Callable[[int], concurrent.futures.Executor]
 
 
 class TableError(RuntimeError):
-    """A pilot's table went missing, appeared unexpectedly, or is not a regular file.
+    """A pilot's table went missing, appeared, or cannot be one.
+
+    It cannot be one when it is not a regular file, is a symbolic link to nothing where a table
+    would be made, sits under a parent that is not a directory, or the system refuses it
+    (read-only, a link loop).
 
     The pilot stops rather than start the table anew or write into one it has not read: either
     would score every evaluation again, and could append them to the finished ones (decision
@@ -58,15 +62,19 @@ def _open_regular(path: Path, flags: int) -> int:
 
     Raises:
         FileNotFoundError: It does not exist.
-        TableError: It is not a regular file (a directory, a FIFO, a device), or a parent of it
-            is not a directory.
+        TableError: It is not a regular file (a directory, a FIFO, a device), a parent of it is
+            not a directory, or the system refuses it (read-only, a link loop).
     """
     try:  # O_NONBLOCK: opening a FIFO waits for a writer otherwise
         handle = os.open(path, flags | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise
     except NotADirectoryError:
         raise TableError(f"{path}: a parent of it is not a directory") from None
     except IsADirectoryError:
         raise TableError(f"{path} is not a regular file, but a directory") from None
+    except OSError as error:  # read-only, a link loop: the system refuses the table
+        raise TableError(f"{path}: {error.strerror}") from None
     try:
         if not stat.S_ISREG(os.fstat(handle).st_mode):
             raise TableError(f"{path} is not a regular file, so it is no pilot table")
@@ -155,7 +163,8 @@ def score(
 
     Raises:
         TableError: A table that should exist is gone, or one that should not appeared; or it
-            is not a regular file.
+            cannot be one (see TableError). Other errors, such as a full disk while writing or
+            a worker's, are raised as they are.
     """
     todo = list(todo)
     path = Path(path)
@@ -175,12 +184,19 @@ def score(
             raise TableError(_taken(path)) from None
         except NotADirectoryError:
             raise TableError(f"{path}: a parent of it is not a directory") from None
+        except OSError as error:  # a read-only directory, a link loop
+            raise TableError(f"{path}: {error.strerror}") from None
     try:
         # A kill can leave the file empty, before its header: then the header is written now.
         empty = os.fstat(handle).st_size == 0
-        f = open(handle, "w", newline="", encoding="utf-8")
+        raw = io.FileIO(handle, "w")  # owns the descriptor from here on
     except BaseException:
         os.close(handle)  # not handed over yet
+        raise
+    try:
+        f = io.TextIOWrapper(io.BufferedWriter(raw), encoding="utf-8", newline="")
+    except BaseException:
+        raw.close()  # closes the descriptor, once
         raise
     with f:
         writer = csv.DictWriter(f, fieldnames=list(columns))
@@ -208,10 +224,14 @@ def _taken(path: Path) -> str:
         entry = os.lstat(path).st_mode
     except OSError:
         entry = None
-    if entry is not None and stat.S_ISLNK(entry):
-        return (f"{path} is a symbolic link, to {os.readlink(path)}, where the pilot would make "
-                f"its table; remove it or point it at an existing table")
-    if entry is not None and not stat.S_ISREG(entry):
+    if entry is not None and stat.S_ISLNK(entry) and not os.path.exists(path):
+        try:
+            target = f", to {os.readlink(path)},"
+        except OSError:  # gone or changed since lstat
+            target = ""
+        return (f"{path} is a symbolic link{target} to nothing, where the pilot would make its "
+                f"table; remove it or point it at an existing table")
+    if entry is not None and not stat.S_ISREG(entry) and not stat.S_ISLNK(entry):
         return f"{path} is not a regular file, so it is no pilot table"
     return (f"{path} appeared after the pilot looked for it; start it again, so it reads that "
             f"table first")

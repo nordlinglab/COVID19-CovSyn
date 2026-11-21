@@ -685,9 +685,11 @@ def test_a_new_table_s_path_taken_by_another_entry_is_named(tmp_path, entry):
         block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
                             exists=False)  # fmt: skip
     assert "start it again" not in str(error.value) and str(path) in str(error.value)
+    if entry == "dangling link":
+        assert "symbolic link" in str(error.value) and "nowhere" in str(error.value)
 
 
-@pytest.mark.parametrize("entry", ["directory", "fifo", "parent"])
+@pytest.mark.parametrize("entry", ["directory", "fifo", "parent", "dangling link"])
 def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry):
     """The exists=True path: trimmed and appended only as a regular file."""
     import os
@@ -697,6 +699,8 @@ def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry
         path.mkdir()
     elif entry == "fifo":
         os.mkfifo(path)
+    elif entry == "dangling link":  # the table it pointed at is gone
+        path.symlink_to(tmp_path / "nowhere.csv")
     else:
         (tmp_path / "out").write_text("a file")
         path = tmp_path / "out" / "t.csv"
@@ -735,3 +739,67 @@ def test_a_new_table_takes_its_mode_from_the_umask_alone(tmp_path):
     finally:
         os.umask(old)
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o664
+
+
+def test_a_live_link_to_a_table_that_appeared_says_start_again(tmp_path):
+    """The link points at a table now: restarting reads it, so that is the advice."""
+    target = tmp_path / "shared.csv"
+    target.write_text("name,simulations,seed_offset,cost\nb,10,1,2.5\n")
+    path = tmp_path / "t.csv"
+    path.symlink_to(target)
+    with pytest.raises(block_scoring.TableError, match="start it again"):
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+
+
+def test_a_link_removed_while_its_target_is_named_still_gives_a_refusal(tmp_path, monkeypatch):
+    """A link seen, then gone before its target is named: still a TableError, not an OSError."""
+    import os
+
+    path = tmp_path / "t.csv"
+    path.symlink_to(tmp_path / "nowhere.csv")
+
+    def gone(p):
+        raise FileNotFoundError(2, "No such file or directory", str(p))
+
+    monkeypatch.setattr(os, "readlink", gone)
+    with pytest.raises(block_scoring.TableError, match=str(path)):
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+
+
+def test_a_table_the_system_refuses_is_a_table_error(tmp_path, monkeypatch):
+    """PermissionError opening a table becomes a TableError naming it; others stay as they are."""
+    import os
+
+    path = tmp_path / "t.csv"
+    path.write_text("name,simulations,seed_offset,cost\n")
+    real_open = os.open
+
+    def refused(p, flags, *args):
+        if str(p) == str(path):
+            raise PermissionError(13, "Permission denied", str(p))
+        return real_open(p, flags, *args)
+
+    monkeypatch.setattr(os, "open", refused)
+    with pytest.raises(block_scoring.TableError, match=str(path)):
+        block_scoring.read_table(path)
+
+
+def test_a_failure_wrapping_the_descriptor_closes_it_once(tmp_path, monkeypatch):
+    """A text wrapper that fails: the raw file closes the descriptor; nothing closes it again."""
+    import io
+    import os
+
+    closed = []
+    real_close = os.close
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd) or real_close(fd))
+
+    def failing(*args, **kwargs):
+        raise MemoryError
+
+    monkeypatch.setattr(io, "TextIOWrapper", failing)
+    with pytest.raises(MemoryError):
+        block_scoring.score(tmp_path / "t.csv", _task(), COLUMNS, lambda t: np.ones(2),
+                            _evaluate, _threads, exists=False)  # fmt: skip
+    assert closed == []  # FileIO.close closed it, once
