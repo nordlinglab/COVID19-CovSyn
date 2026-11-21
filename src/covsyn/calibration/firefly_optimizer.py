@@ -2055,8 +2055,10 @@ def positive_int(text: str) -> int:
 
 
 def command_size(mode: str, pop_size: int | None, generations: int | None,
-                 simulations: int | None) -> tuple[int, int, int]:
+                 simulations: int | None) -> tuple[int, int | None, int]:
     """A pilot or production run's n, G and S from the command line (Task 9).
+
+    G is the pilot's; production gives None, as it runs to G_max.
 
     Raises:
         SystemExit: One is missing or out of range, naming its flag and the mode.

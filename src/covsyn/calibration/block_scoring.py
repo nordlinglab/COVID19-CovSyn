@@ -13,6 +13,7 @@ from __future__ import annotations
 import concurrent.futures
 import csv
 import io
+import json
 import multiprocessing
 import os
 import pickle
@@ -102,6 +103,30 @@ def _drop_cut_off_line(path: Path) -> None:
         data = f.read()
         if not data.endswith(b"\n"):
             f.truncate(data.rfind(b"\n") + 1)
+
+
+def pilot_workers(given: int | None, env: Mapping[str, str], recorded: Any) -> int:
+    """A pilot's workers: --workers, else COVSYN_WORKERS, else its recorded count, else the default.
+
+    So a resume runs with the count it started with unless told otherwise.
+
+    Raises:
+        ValueError: --workers, or the recorded count, is not a positive whole number.
+    """
+    if given is None and not env.get(hardware.ENV_VARIABLE, "").strip() and recorded is not None:
+        if type(recorded) is not int or recorded < 1:
+            raise ValueError(f"config.json's workers is {recorded!r}, not a positive whole number")
+        return recorded
+    return hardware.resolve_workers(given, env, None)
+
+
+def record_workers(out_dir: Path, workers: int) -> None:
+    """Write the workers a resume runs with into config.json, which records the run."""
+    path = Path(out_dir) / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    if config.get("workers") != workers:
+        config["workers"] = workers
+        path.write_text(json.dumps(config, indent=1, allow_nan=False) + "\n", encoding="utf-8")
 
 
 def objective_pools(workers: int | None) -> tuple[Evaluate, MakePool]:

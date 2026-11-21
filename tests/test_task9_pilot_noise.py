@@ -302,3 +302,16 @@ def test_failed_evaluations_choose_no_s():
     choice = pn.summarise(rows)["choice"]
     assert choice["chosen_simulations"] is None and choice["failed_evaluations"] == 1
     assert not any(line["meets"] for line in choice["per_simulations"])  # no S passes either
+
+
+def test_a_resume_keeps_the_workers_pilot_1_started_with(tmp_path, monkeypatch):
+    """As pilot 2's: --workers, else COVSYN_WORKERS, else config.json's count."""
+    seen = []
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: seen.append(workers)
+                        or (_evaluate, _threads))  # fmt: skip
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "3"])
+    pn.main(["--resume", str(out)])
+    assert seen[-1] == 3

@@ -12,6 +12,7 @@ from __future__ import annotations
 import concurrent.futures
 
 import numpy as np
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -65,22 +66,43 @@ ROWS = [{"name": n, "simulations": 10, "seed_offset": i, "cost": 1.5 + i}
         for i, n in enumerate(["a", "b", "c", "d"])]
 
 
+def _table_bytes():
+    """The bytes write_csv gives ROWS, the same on every call."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        block_scoring.write_csv(Path(d) / "t.csv", ROWS)
+        return (Path(d) / "t.csv").read_bytes()
+
+
 def _written(tmp_path):
     path = tmp_path / "t.csv"
     block_scoring.write_csv(path, ROWS)
     return path, path.read_bytes()
 
 
-@settings(max_examples=200, deadline=None)
-@given(cut=st.integers(min_value=0, max_value=10_000))
+DATA_LENGTH = len(_table_bytes())
+
+
+@pytest.mark.parametrize("cut", range(DATA_LENGTH + 1))
+def test_a_table_cut_at_every_byte_reads_as_its_whole_rows(tmp_path, cut):
+    """Each offset in turn, so none is left to chance."""
+    _check_cut(tmp_path, cut)
+
+
+@settings(max_examples=100, deadline=None)
+@given(cut=st.integers(min_value=0, max_value=DATA_LENGTH))
 def test_a_table_cut_at_any_byte_reads_as_its_whole_rows(tmp_path_factory, cut):
     """Every complete row and no partial one, wherever a kill stopped the write.
 
     The next score then appends a valid table.
     """
-    tmp_path = tmp_path_factory.mktemp("cut")
+    _check_cut(tmp_path_factory.mktemp("cut"), cut)
+
+
+def _check_cut(tmp_path, cut):
     path, data = _written(tmp_path)
-    cut = cut % (len(data) + 1)
     path.write_bytes(data[:cut])
     whole = data[:cut].count(b"\n") - 1  # the header's line ends first
     rows = block_scoring.read_rows(path)

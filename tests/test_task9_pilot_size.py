@@ -414,10 +414,57 @@ def test_a_resume_keeps_the_workers_the_pilot_started_with(tmp_path, monkeypatch
                         or {})  # fmt: skip
     monkeypatch.setattr(ps, "_evaluator", lambda workers: seen.update(pools=workers)
                         or (_evaluate, _threads))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
     ps.main(["--resume", str(out)])
     assert seen["workers"] == 8 and seen["pools"] == 8
     ps.main(["--resume", str(out), "--workers", "3"])
     assert seen["workers"] == 3 and seen["pools"] == 3
+    assert json.loads((out / "config.json").read_text())["workers"] == 3  # recorded
+    monkeypatch.setenv("COVSYN_WORKERS", "5")  # the documented order: before the record
+    ps.main(["--resume", str(out)])
+    assert seen["workers"] == 5
+
+
+@pytest.mark.parametrize("recorded", [True, 0, -2, "8"])
+def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, recorded):
+    """Not a traceback, nor two different counts for the runs and the pools."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": recorded}))
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(out)])
+
+
+def test_a_resume_through_dot_dot_finds_the_results_root(tmp_path, monkeypatch):
+    """results/tables/other/../<run-id>: the runs are still results/models."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (tmp_path / "results" / "tables" / "other").mkdir()
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": 2}))
+    seen = {}
+    monkeypatch.setattr(ps, "run", lambda o, models, prefix, s, *rest, **kw: seen.update(
+        models=models, prefix=prefix) or {})  # fmt: skip
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.chdir(tmp_path / "results" / "tables" / "other")
+    ps.main(["--resume", "../20261121-000000_abcdef0_pilot-size"])
+    assert seen["models"] == tmp_path / "results" / "models"
+    assert seen["prefix"] == "20261121-000000_abcdef0"
+
+
+def test_a_resume_of_a_link_to_the_run_directory_is_refused(tmp_path, monkeypatch):
+    """Its name is not the run's, so its prefix and root would be wrong: refused, not guessed."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": 2}))
+    (tmp_path / "latest").symlink_to(out)
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(tmp_path / "latest")])
 
 
 def test_a_resume_through_a_linked_tables_directory_keeps_the_results_root(tmp_path, monkeypatch):

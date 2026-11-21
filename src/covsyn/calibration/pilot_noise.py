@@ -207,15 +207,21 @@ def main(argv: list[str] | None = None) -> Path:
                         help=argparse.SUPPRESS)  # tests
     hardware.add_workers_argument(parser)
     args = parser.parse_args(argv)
+    workers = None
     if args.resume is not None:
         out = args.resume
-        if not (out / CONFIG_FILE).is_file():
-            parser.error(f"{out} holds no pilot to resume ({CONFIG_FILE})")
+        try:
+            config = json.loads((out / CONFIG_FILE).read_text())
+            workers = block_scoring.pilot_workers(args.workers, os.environ,
+                                                  config.get("workers"))  # fmt: skip
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            parser.error(f"{out} holds no pilot to resume ({error})")
+        block_scoring.record_workers(out, workers)
     else:
         out = runs.run_directory(runs.make_run_id("pilot-noise"), "tables", args.results_root,
                                  new=True)  # fmt: skip
     population, lower, upper = _population_and_bounds()
-    evaluate, make_pool = _evaluator(args.workers)
+    evaluate, make_pool = _evaluator(args.workers if workers is None else workers)
     if args.resume is None:
         settings = {
             "command": shlex.join(["covsyn-pilot-noise", *(sys.argv[1:] if argv is None

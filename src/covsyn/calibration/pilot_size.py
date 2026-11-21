@@ -302,18 +302,21 @@ def main(argv: list[str] | None = None) -> Path:
     args = parser.parse_args(argv)
     if (args.noise is None) == (args.resume is None):
         parser.error("give --noise for a new pilot or --resume for one begun")
-    workers = hardware.resolve_workers(args.workers, os.environ, None)
     if args.resume is not None:
-        # Absolute, as the optimiser runs from the repository root; not resolved, so a linked
-        # tables directory keeps its results/ siblings.
-        out = args.resume.absolute()
+        # Absolute, as the optimiser runs from the repository root, without "..", and not
+        # resolved, so a linked tables directory keeps its results/ siblings.
+        out = Path(os.path.abspath(args.resume))
+        if out.parent.name != "tables" or not out.name.endswith("_pilot-size"):
+            parser.error(f"{args.resume} is not results/tables/<run-id> of a pilot 2, whose "
+                         f"name and place give its runs' names and directory")
         try:
             config = json.loads((out / CONFIG_FILE).read_text())
             simulations = config["settings"]["simulations"]
-        except (OSError, ValueError, KeyError, TypeError) as error:
-            parser.error(f"{out} holds no pilot to resume ({error!r})")
-        if args.workers is None and isinstance(config.get("workers"), int):
-            workers = config["workers"]  # the pilot's own, unless given again
+            workers = block_scoring.pilot_workers(args.workers, os.environ,
+                                                  config.get("workers"))  # fmt: skip
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+            parser.error(f"{out} holds no pilot to resume ({error})")
+        block_scoring.record_workers(out, workers)
         root = out.parent.parent
     else:
         try:
@@ -328,7 +331,8 @@ def main(argv: list[str] | None = None) -> Path:
         if simulations is None:
             parser.error(f"pilot 1 in {args.noise} chose no S: no S met its criterion, which "
                          f"the professor decides first")
-        root = args.results_root.resolve()
+        workers = hardware.resolve_workers(args.workers, os.environ, None)
+        root = Path(os.path.abspath(args.results_root))
         out = runs.run_directory(runs.make_run_id("pilot-size"), "tables", root, new=True)
         runs.write_config(out, {
             "command": shlex.join(["covsyn-pilot-size", *(sys.argv[1:] if argv is None
