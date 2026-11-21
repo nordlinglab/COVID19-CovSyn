@@ -1,0 +1,343 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Task 9, pilot 2: population size and step size, at the S of pilot 1.
+
+From doc/plan_Nordling2026_CovSynFireflyNordlingLab.md, Task 9: n in {24, 48, 96} x alpha_0 in
+{0.05, 0.2}, a budget of n x G = 10,000 evaluations per run, G_plan = G, 2 runs per setting on
+different optimisation streams; re-score each run's best archive candidates on 30 blocks of
+one validation stream, and choose the setting with the lowest mean validated cost whose two
+runs agree within their standard errors.
+
+Decisions of 2026-11-21: G = floor((10,000 - n) / n), counting the initial evaluation; streams
+1 and 2 for every setting; at most 10 distinct archive vectors per run, by ascending archive
+mean, ties by entering the elite first; validation stream 202, blocks 0-29 to pick each run's
+representative (screening) and blocks 30-59 to score the representatives (confirmation); two
+runs agree when the mean of their block-by-block differences d over the confirmation blocks
+is at most SD(d) / sqrt(30); among those, the lowest mean of the two representatives'
+confirmation means; none agreeing chooses none, and the measurements go to the professor.
+"""
+
+from __future__ import annotations
+
+import concurrent.futures
+import csv
+import json
+
+import numpy as np
+import pytest
+
+from covsyn.calibration import pilot_size as ps
+from covsyn.calibration import seed_streams
+from covsyn.calibration.revalidation import ARCHIVE_HEADER
+
+DIM = 3
+
+
+def test_twelve_runs_two_streams_per_setting():
+    """Each n and alpha_0 on streams 1 and 2, in a fixed order."""
+    settings = ps.settings()
+    assert len(settings) == 12
+    assert {(s.pop_size, s.alpha_0) for s in settings} == {
+        (n, a) for n in (24, 48, 96) for a in (0.05, 0.2)}  # fmt: skip
+    assert all({s.stream for s in settings if (s.pop_size, s.alpha_0) == (n, a)} == {1, 2}
+               for n in (24, 48, 96) for a in (0.05, 0.2))  # fmt: skip
+    assert settings == ps.settings()
+
+
+@pytest.mark.parametrize("n, g", [(24, 415), (48, 207), (96, 103)])
+def test_the_generations_spend_the_budget_with_the_initial_evaluation(n, g):
+    """The initial n and n per generation: n + n x G <= 10,000, 9,984 for each n."""
+    assert ps.generations(n) == g
+    assert n + n * g <= 10_000 < n + n * (g + 1)
+
+
+def test_each_run_has_its_own_name_from_its_setting():
+    """One models directory per run, named by its n, alpha_0 and stream."""
+    names = {ps.run_name("20261121-000000_abcdef0", s) for s in ps.settings()}
+    assert len(names) == 12
+    assert "20261121-000000_abcdef0_pilot-size-n24-a0p05-s1" in names
+
+
+def test_a_run_is_the_optimiser_s_pilot_mode_with_its_setting(tmp_path):
+    """G_plan = G by the pilot mode's default; S from pilot 1."""
+    setting = ps.Setting(48, 0.2, 2)
+    args = ps.optimiser_args(setting, 3_000, tmp_path / "r")
+    assert args[:2] == ["-m", "covsyn.calibration.firefly_optimizer"]
+    flags = dict(zip(args[2::2], args[3::2], strict=True))
+    assert flags == {"--mode": "pilot", "--pop-size": "48", "--generations": "207",
+                     "--simulations": "3000", "--alpha-0": "0.2", "--stream": "2",
+                     "--run-dir": str(tmp_path / "r")}  # fmt: skip
+
+
+def _archive(path, rows):
+    """firefly_archive.txt v2: (entered, blocks, params..., mean)."""
+    np.savetxt(path / "firefly_archive.txt", np.array(rows, dtype=float), header=ARCHIVE_HEADER)
+
+
+def test_a_run_s_candidates_are_its_ten_best_distinct_archive_vectors(tmp_path):
+    """By ascending archive mean."""
+    rows = [[g % 4, 1, g, g + 1, g + 2, 50.0 - g] for g in range(15)]
+    _archive(tmp_path, rows)
+    vectors = ps.archive_candidates(tmp_path / "firefly_archive.txt")
+    assert len(vectors) == 10
+    np.testing.assert_array_equal(vectors[0], [14, 15, 16])  # mean 36, the lowest
+    np.testing.assert_array_equal(vectors[-1], [5, 6, 7])
+
+
+def test_a_tie_goes_to_the_vector_that_entered_the_elite_first(tmp_path):
+    """Equal means: the earlier entered generation first."""
+    _archive(tmp_path, [[3, 1, 0.1, 0.1, 0.1, 2.0], [1, 1, 0.2, 0.2, 0.2, 2.0],
+                        [2, 1, 0.3, 0.3, 0.3, 1.0]])  # fmt: skip
+    vectors = ps.archive_candidates(tmp_path / "firefly_archive.txt")
+    np.testing.assert_array_equal(vectors[:, 0], [0.3, 0.2, 0.1])
+
+
+def test_an_archive_of_fewer_than_ten_gives_them_all(tmp_path):
+    """A short run's archive is taken whole."""
+    _archive(tmp_path, [[0, 1, 0.1, 0.2, 0.3, 4.0], [1, 1, 0.3, 0.2, 0.1, 3.0]])
+    assert len(ps.archive_candidates(tmp_path / "firefly_archive.txt")) == 2
+
+
+def test_an_archive_from_before_task_8_is_refused(tmp_path):
+    """Its rows are snapshots, not elite vectors with means: no candidates to rank."""
+    np.savetxt(tmp_path / "firefly_archive.txt", np.array([[0, 0.1, 0.2, 0.3, 4.0]]))
+    with pytest.raises(ValueError, match="v2"):
+        ps.archive_candidates(tmp_path / "firefly_archive.txt")
+
+
+def test_the_screening_and_confirmation_blocks_do_not_share_a_seed():
+    """Blocks 0-29 pick the representative, blocks 30-59 score it, at any S."""
+    assert ps.VALIDATION_STREAM == 202
+    assert (ps.SCREEN_BLOCKS, ps.CONFIRM_BLOCKS) == (range(0, 30), range(30, 60))
+    for s in (300, 3_000, 10_000):
+        screen = seed_streams.block_seeds(202, 29, s)
+        confirm = seed_streams.block_seeds(202, 30, s)
+        assert screen.stop <= confirm.start
+
+
+def _confirmed(means, spread=1.0, seed=0, offsets=None):
+    """Confirmation rows: each run's representative on the 30 blocks around its mean."""
+    rng = np.random.default_rng(seed)
+    shared = rng.normal(0, 3, 30)
+    rows = []
+    for setting in ps.settings():
+        key = (setting.pop_size, setting.alpha_0)
+        mean = means[key] + (offsets or {}).get((*key, setting.stream), 0.0)
+        noise = rng.normal(0, spread, 30)
+        for b, c in zip(ps.CONFIRM_BLOCKS, mean + shared + noise, strict=True):
+            rows.append({"run": ps.run_name("x", setting), "pop_size": setting.pop_size,
+                         "alpha_0": setting.alpha_0, "stream": setting.stream, "block": b,
+                         "cost": float(c)})  # fmt: skip
+    return rows
+
+
+def _means(best=(48, 0.2)):
+    means = {(n, a): 30.0 + n / 10 + a for n in (24, 48, 96) for a in (0.05, 0.2)}
+    means[best] = 10.0
+    return means
+
+
+def test_two_runs_agree_when_their_mean_difference_is_within_its_paired_se():
+    """With d stream 1 minus stream 2 block by block: |mean(d)| <= SD(d) / sqrt(30)."""
+    rows = _confirmed(_means(), spread=1.0)
+    table = ps.compare_settings(rows)
+    assert len(table) == 6
+    for line in table:
+        d = np.array([r["cost"] for r in rows if r["stream"] == 1
+                      and (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])])
+        d -= np.array([r["cost"] for r in rows if r["stream"] == 2
+                       and (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])])
+        assert line["mean_difference"] == pytest.approx(d.mean())
+        assert line["paired_se"] == pytest.approx(d.std(ddof=1) / np.sqrt(30))
+        assert line["agree"] == (abs(d.mean()) <= d.std(ddof=1) / np.sqrt(30))
+
+
+def test_the_setting_s_cost_is_the_mean_of_its_two_representatives():
+    """Over both representatives' 30 confirmation blocks."""
+    rows = _confirmed(_means())
+    for line in ps.compare_settings(rows):
+        costs = [r["cost"] for r in rows
+                 if (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])]
+        assert line["mean_cost"] == pytest.approx(np.mean(costs))
+
+
+def test_the_lowest_agreeing_setting_is_chosen():
+    """With its G as G_plan, which production repeats (Task 8)."""
+    rows = _confirmed(_means(best=(48, 0.2)), spread=1.0)
+    choice = ps.choose(ps.compare_settings(rows))
+    agreeing = [line for line in ps.compare_settings(rows) if line["agree"]]
+    if (48, 0.2) in {(line["pop_size"], line["alpha_0"]) for line in agreeing}:
+        assert (choice["pop_size"], choice["alpha_0"]) == (48, 0.2)
+        assert choice["g_plan"] == ps.generations(48)
+
+
+def test_a_lower_setting_whose_runs_disagree_is_passed_over():
+    """Its two runs differ beyond their paired SE, so it is not chosen."""
+    offsets = {(48, 0.2, 1): -5.0, (48, 0.2, 2): 5.0}  # far apart: they disagree
+    rows = _confirmed(_means(best=(48, 0.2)), spread=0.1, offsets=offsets)
+    table = ps.compare_settings(rows)
+    assert not next(line for line in table if (line["pop_size"], line["alpha_0"]) == (48, 0.2))[
+        "agree"]  # fmt: skip
+    choice = ps.choose(table)
+    assert choice is None or (choice["pop_size"], choice["alpha_0"]) != (48, 0.2)
+
+
+def test_no_setting_agreeing_chooses_none():
+    """Then the measurements go to the professor (decision of 2026-11-21)."""
+    offsets = {(n, a, 1): -5.0 for n in (24, 48, 96) for a in (0.05, 0.2)}
+    rows = _confirmed(_means(), spread=0.1, offsets=offsets)
+    assert ps.choose(ps.compare_settings(rows)) is None
+
+
+# --- the whole pilot, with stand-ins for the optimiser and the objective -----------------------
+
+
+def _evaluate(P, seed_offset):
+    return float(np.sum(P) * 10 + (seed_offset % 101) / 50), {}, {}
+
+
+def _threads(simulations):
+    return concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+
+class _Optimiser:
+    """Stands in for covsyn-optimise: writes a finished run's archive, or fails on request."""
+
+    def __init__(self, fail_on=None, kill_after=None):
+        self.calls, self.fail_on, self.kill_after = [], fail_on, kill_after
+
+    def __call__(self, args, output, append, env):
+        flags = dict(zip(args[2::2], args[3::2], strict=False))
+        self.calls.append(flags)
+        if self.kill_after is not None and len(self.calls) > self.kill_after:
+            raise KeyboardInterrupt
+        run = ps.Path(flags.get("--run-dir") or flags["--resume"])
+        if self.fail_on is not None and self.fail_on in str(run):
+            return 1
+        run.mkdir(parents=True, exist_ok=True)
+        # a resume names only the run; its setting is the run's own
+        n, a, s = (int(flags.get("--pop-size", 24)), float(flags.get("--alpha-0", 0.05)),
+                   int(flags.get("--stream", 1)))  # fmt: skip
+        rng = np.random.default_rng(n * 10 + s)
+        rows = [[g, 1, *rng.random(DIM) * a, 5.0 + rng.random()] for g in range(12)]
+        _archive(run, rows)
+        (run / "config.json").write_text(json.dumps({"settings": {"pop_size": n}}))
+        (run / "firefly_result.txt").write_text("done\n")
+        return 0
+
+
+def _pilot(tmp_path, optimiser, simulations=300):
+    out = tmp_path / "tables" / "p"
+    out.mkdir(parents=True, exist_ok=True)
+    return ps.run(out, tmp_path / "models", "p", simulations, optimiser, _evaluate, _threads), out
+
+
+def test_the_pilot_runs_every_setting_then_screens_and_confirms(tmp_path):
+    """Twelve runs, then 10 candidates x 30 blocks per run, then 30 blocks per representative."""
+    optimiser = _Optimiser()
+    summary, out = _pilot(tmp_path, optimiser)
+    assert len(optimiser.calls) == 12
+    with open(out / ps.SCREEN_FILE, newline="") as f:
+        screen = list(csv.DictReader(f))
+    assert len(screen) == 12 * 10 * 30  # 10 candidates per run, 30 blocks
+    with open(out / ps.CONFIRM_FILE, newline="") as f:
+        confirm = list(csv.DictReader(f))
+    assert len(confirm) == 12 * 30  # one representative per run
+    assert {int(r["block"]) for r in confirm} == set(ps.CONFIRM_BLOCKS)
+    choice = json.loads((out / ps.CHOICE_FILE).read_text())
+    assert "chosen" in choice and choice["simulations"] == 300
+    assert (out / ps.SETTINGS_FILE).is_file()
+
+
+def test_each_run_s_representative_is_its_lowest_screened_candidate(tmp_path):
+    """Lowest screening mean; a tie to the lower candidate index."""
+    summary, out = _pilot(tmp_path, _Optimiser())
+    with open(out / ps.SCREEN_FILE, newline="") as f:
+        screen = list(csv.DictReader(f))
+    with open(out / ps.RUNS_FILE, newline="") as f:
+        runs_table = list(csv.DictReader(f))
+    for line in runs_table:
+        means = {}
+        for r in screen:
+            if r["run"] == line["run"]:
+                means.setdefault(int(r["candidate"]), []).append(float(r["cost"]))
+        best = min(means, key=lambda c: (np.mean(means[c]), c))
+        assert int(line["representative"]) == best
+
+
+def test_a_failed_run_stops_the_pilot_before_any_scoring(tmp_path):
+    """A run that did not finish has no archive to score; the pilot says which."""
+    with pytest.raises(RuntimeError, match="n48-a0p2-s2"):
+        _pilot(tmp_path, _Optimiser(fail_on="n48-a0p2-s2"))
+    assert not (tmp_path / "tables" / "p" / ps.SCREEN_FILE).exists()
+
+
+def test_a_resumed_pilot_skips_finished_runs_and_resumes_checkpointed_ones(tmp_path):
+    """Finished runs are kept; a run with a checkpoint continues from it."""
+    with pytest.raises(KeyboardInterrupt):
+        _pilot(tmp_path, _Optimiser(kill_after=3))
+    # the fourth run was killed after its first checkpoint
+    fourth = tmp_path / "models" / ps.run_name("p", ps.settings()[3])
+    (fourth / "checkpoints").mkdir(parents=True)
+    (fourth / "checkpoints" / "generation_0000.npz").write_text("x")
+    optimiser = _Optimiser()
+    _pilot(tmp_path, optimiser)
+    assert len(optimiser.calls) == 12 - 3
+    assert optimiser.calls[0].get("--resume") == str(fourth)
+
+
+def test_a_run_killed_before_its_first_checkpoint_starts_again(tmp_path):
+    """Its claim would refuse a fresh start, so its partial output goes, as the pipeline does."""
+    first = tmp_path / "models" / ps.run_name("p", ps.settings()[0])
+    first.mkdir(parents=True)
+    (first / "config.json").write_text('{"claimed": true}\n')
+    optimiser = _Optimiser()
+    _pilot(tmp_path, optimiser)
+    assert optimiser.calls[0]["--run-dir"] == str(first)
+
+
+def test_a_resumed_pilot_scores_nothing_twice(tmp_path):
+    """Each scored block is in its table, so a resume skips it."""
+    summary, out = _pilot(tmp_path, _Optimiser())
+    before = {name: (out / name).read_text() for name in (ps.SCREEN_FILE, ps.CONFIRM_FILE)}
+    calls = []
+
+    def counts(P, seed_offset):
+        calls.append(1)
+        return _evaluate(P, seed_offset)
+
+    ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), counts, _threads)
+    assert calls == []
+    assert {name: (out / name).read_text() for name in before} == before
+
+
+def test_the_runs_table_gives_each_run_s_evaluations(tmp_path):
+    """To check the budget: the last checkpoint's count, n + n x G at most."""
+    summary, out = _pilot(tmp_path, _Optimiser())
+    with open(out / ps.RUNS_FILE, newline="") as f:
+        lines = list(csv.DictReader(f))
+    assert {line["generations"] for line in lines} == {"415", "207", "103"}
+    assert all("evaluations" in line for line in lines)
+
+
+def test_the_command_takes_s_from_pilot_1(tmp_path, monkeypatch):
+    """--noise DIR: pilot 1's directory, whose choice.json gives S; config.json records both."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 3000}))
+    seen = {}
+    monkeypatch.setattr(ps, "run", lambda out, models, prefix, s, *rest: seen.update(s=s) or {})
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    out = ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+    assert seen["s"] == 3000
+    config = json.loads((out / "config.json").read_text())["settings"]
+    assert config["simulations"] == 3000 and config["noise"] == str(noise)
+
+
+def test_the_command_refuses_a_pilot_1_that_chose_no_s(tmp_path):
+    """No S met the criterion: the professor decides first (decision of 2026-11-21)."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": None}))
+    with pytest.raises(SystemExit):
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
