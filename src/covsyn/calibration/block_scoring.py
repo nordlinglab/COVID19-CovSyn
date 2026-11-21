@@ -139,14 +139,15 @@ def record_workers(out_dir: Path, workers: int) -> None:
 
     Written whole or not at all: a temporary file, flushed to disk, replaces it, so a kill, a
     full disk or a crash leaves the old one, which every later resume needs. The replacement
-    keeps the file's mode; a config.json that is read-only, a link, hard-linked, owned by
-    another user or in a read-only directory is not replaced. A process killed outright, which
+    keeps the file's mode and group; a config.json that is read-only, a link, hard-linked, owned
+    by another user, in a read-only directory, or in a group the user cannot give a file is not
+    replaced. A process killed outright, which
     runs no clean-up, leaves its config.json.<random>.tmp, a stale copy that can be deleted;
     it is not removed here, as it may be another resume's at work.
 
     Raises:
-        PermissionError: config.json is read-only, a link, hard-linked, another user's, or
-            in a read-only directory.
+        PermissionError: config.json is read-only, a link, hard-linked, another user's, in a
+            read-only directory, or in a group the user cannot keep.
         OSError: config.json cannot be read, or the new one cannot be written.
         ValueError: config.json is not a JSON object.
     """
@@ -178,19 +179,26 @@ def record_workers(out_dir: Path, workers: int) -> None:
     config["workers"] = workers
     # A name of its own, created afresh (O_EXCL, no link followed), so neither a leftover link
     # nor another resume's temporary is written through; private until given config.json's mode.
+    data = (json.dumps(config, indent=1, allow_nan=False) + "\n").encode("utf-8")
+    group = path.stat().st_gid
     handle, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     temporary = Path(name)
     try:
-        try:
-            f = os.fdopen(handle, "w", encoding="utf-8")
-        except BaseException:
-            os.close(handle)  # fdopen never took it; once it has, only the file closes it
-            raise
-        with f:
-            os.fchmod(f.fileno(), mode)
-            f.write(json.dumps(config, indent=1, allow_nan=False) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        try:  # the raw descriptor only, closed once below, whatever happens here
+            os.fchmod(handle, mode)
+            if os.fstat(handle).st_gid != group:  # a new file takes the user's group
+                try:
+                    os.fchown(handle, -1, group)
+                except PermissionError:
+                    raise PermissionError(
+                        f"{path} is in group {group}, which a replacement written by this user "
+                        f"cannot keep, so its workers stay {config.get('workers')!r}") from None
+            view = memoryview(data)
+            while view:
+                view = view[os.write(handle, view):]
+            os.fsync(handle)
+        finally:
+            os.close(handle)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)

@@ -308,7 +308,7 @@ def test_a_link_left_at_a_temporary_path_is_not_followed(tmp_path):
                                          ("directory", "read-only directory"),
                                          ("owner", "owned by another user")])
 def test_the_refusal_names_its_cause(tmp_path, monkeypatch, setup, cause):
-    """A hard-linked config.json is writable; the user must be told why it is refused."""
+    """Each refusal says why, a writable but hard-linked config.json included."""
     import json
     import os
 
@@ -324,6 +324,8 @@ def test_the_refusal_names_its_cause(tmp_path, monkeypatch, setup, cause):
     if setup == "hard":
         os.link(path, tmp_path / "backup.json")
     elif setup == "directory":
+        if os.geteuid() == 0:
+            pytest.skip("root writes into a read-only directory, so there is nothing to refuse")
         run.chmod(0o555)
     elif setup == "owner":
         monkeypatch.setattr(os, "geteuid", lambda: os.stat(path).st_uid + 1)
@@ -338,8 +340,8 @@ def test_the_refusal_names_its_cause(tmp_path, monkeypatch, setup, cause):
             path.chmod(0o644)
 
 
-def test_a_failed_rename_closes_no_descriptor_twice(tmp_path, monkeypatch):
-    """Once the file object owns it, only it closes it; a reused number stays open."""
+def test_a_failed_rename_closes_the_descriptor_once(tmp_path, monkeypatch):
+    """The temporary's descriptor is closed exactly once, however the write ends."""
     import json
     import os
 
@@ -354,4 +356,59 @@ def test_a_failed_rename_closes_no_descriptor_twice(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "replace", failing)
     with pytest.raises(OSError):
         block_scoring.record_workers(tmp_path, 3)
-    assert closed == []  # the with block closed the file, not os.close
+    assert len(closed) == len(set(closed)) and closed  # each once
+    assert not list(tmp_path.glob("config.json.*.tmp"))
+
+
+def test_a_failed_write_closes_the_descriptor_and_leaves_no_temporary(tmp_path, monkeypatch):
+    """A full disk mid-write: the old config.json stays, and nothing is left open or behind."""
+    import json
+    import os
+
+    (tmp_path / "config.json").write_text(json.dumps({"settings": {}, "workers": 2}))
+    closed = []
+    real_close = os.close
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd) or real_close(fd))
+
+    def full(fd, data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "write", full)
+    with pytest.raises(OSError):
+        block_scoring.record_workers(tmp_path, 3)
+    assert len(closed) == 1
+    assert not list(tmp_path.glob("config.json.*.tmp"))
+    assert json.loads((tmp_path / "config.json").read_text())["workers"] == 2
+
+
+def test_a_group_that_cannot_be_kept_is_refused(tmp_path, monkeypatch):
+    """The replacement would take the user's group, and lab members their access with it."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    real_stat = os.stat
+    group = real_stat(path).st_gid + 1
+
+    class Stat:
+        def __init__(self, st):
+            self.st = st
+
+        def __getattr__(self, name):
+            return group if name == "st_gid" else getattr(self.st, name)
+
+    def stat_with_group(p, *a, **kw):
+        st = real_stat(p, *a, **kw)
+        return Stat(st) if str(p) == str(path) else st
+
+    def refused(fd, uid, gid):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "stat", stat_with_group)
+    monkeypatch.setattr(os, "fchown", refused)
+    with pytest.raises(PermissionError, match="group"):
+        block_scoring.record_workers(tmp_path, 3)
+    monkeypatch.setattr(os, "stat", real_stat)
+    assert json.loads(path.read_text())["workers"] == 2
+    assert not list(tmp_path.glob("config.json.*.tmp"))

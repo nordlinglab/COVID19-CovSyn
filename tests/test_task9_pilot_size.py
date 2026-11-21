@@ -543,7 +543,7 @@ def test_a_hand_named_pilot_directory_is_refused(tmp_path, monkeypatch, capsys, 
     assert "is not results/tables/<run-id> of a pilot 2" in capsys.readouterr().err
 
 
-from hypothesis import given, settings  # noqa: E402
+from hypothesis import example, given, settings  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
 
 
@@ -588,12 +588,18 @@ def _could_make(name):
 @settings(max_examples=500, deadline=None)
 @given(base=st.sampled_from(VALID), at=st.integers(min_value=0, max_value=60),
        change=st.sampled_from(CHANGES), how=st.sampled_from(["swap", "insert", "delete"]))
+# Always tried: the separator in the config name, an uppercase commit, a non-ASCII digit.
+@example(base=VALID[0], at=VALID[0].index("-size"), change="x", how="swap")
+@example(base=VALID[0], at=VALID[0].index("_") + 1, change="A", how="swap")
+@example(base=VALID[0], at=0, change="\u0663", how="swap")
 def test_a_name_one_edit_off_is_refused(base, at, change, how):
     """A valid name with one character swapped, inserted (the end included) or deleted.
 
     Refused unless runs.make_run_id could still have made it; a stamp that is no date may pass,
     since the name check guards against hand-made names, not impossible times.
     """
+    import re
+
     at = at % (len(base) + (how == "insert"))
     name = {"swap": base[:at] + change + base[at + 1:], "insert": base[:at] + change + base[at:],
             "delete": base[:at] + base[at + 1:]}[how]
@@ -602,8 +608,9 @@ def test_a_name_one_edit_off_is_refused(base, at, change, how):
     elif not ps.RUN_ID.fullmatch(name):
         return
     else:  # accepted though make_run_id could not make it: only a stamp that is no date
-        stamp = name.split("_")[0]
-        assert len(stamp) == 15 and stamp[8] == "-" and (stamp[:8] + stamp[9:]).isdigit()
+        stamp, _, rest = name.partition("_")
+        assert re.fullmatch(r"[0-9]{8}-[0-9]{6}", stamp), name
+        assert _could_make("20261121-093015_" + rest), name  # the stamp is its only defect
 
 
 def test_make_run_id_s_names_are_recognised_by_the_independent_reading():
