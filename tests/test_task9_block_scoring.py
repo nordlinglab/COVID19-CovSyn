@@ -1046,3 +1046,9 @@ def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monke
         block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
                             exists=False)  # fmt: skip
     assert "None" not in str(error.value) and os.strerror(errno.ENOENT) in str(error.value)
+
+
+@pytest.mark.parametrize("bare", [OSError(), OSError("not a number")])
+def test_an_error_with_no_text_at_all_is_named_by_its_kind(bare):
+    """No strerror, no errno, no text: the error's kind, not empty parentheses."""
+    assert block_scoring._reason(bare)

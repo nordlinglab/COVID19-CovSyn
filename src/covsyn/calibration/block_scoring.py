@@ -78,7 +78,7 @@ def _reason(error: OSError) -> str:
         return error.strerror
     code = error.errno if error.errno is not None else next(
         (a for a in error.args[:1] if isinstance(a, int)), None)  # fmt: skip
-    return os.strerror(code) if code is not None else str(error)
+    return os.strerror(code) if code is not None else (str(error) or type(error).__name__)
 
 
 def _raise_refused(path: Path, error: OSError, entry: bool = False) -> None:
