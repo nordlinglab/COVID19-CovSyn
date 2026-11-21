@@ -19,9 +19,12 @@ DEFAULT_ALPHA_END = 0.001
 # schedule against: an unset alpha_0 is the mode's, and a g_plan longer than its generations is
 # warned about. Kept here only, so the command and the pipeline cannot differ; the two tables
 # and OPTIMISER_MODES have the same modes (tests/test_task8_pipeline.py).
-MODE_ALPHA_0 = {'train': DEFAULT_ALPHA_0, 'test': DEFAULT_ALPHA_0, 'profile': DEFAULT_ALPHA_0}
+# Task 9: a pilot run's alpha_0 and generations are the pilot's, given on the command line, so
+# its entries are None.
+MODE_ALPHA_0 = {'train': DEFAULT_ALPHA_0, 'test': DEFAULT_ALPHA_0, 'profile': DEFAULT_ALPHA_0,
+                'pilot': None}
 # Task 5: a profile runs 2 generations.
-MODE_GENERATIONS = {'train': 120, 'test': 10, 'profile': 2}
+MODE_GENERATIONS = {'train': 120, 'test': 10, 'profile': 2, 'pilot': None}
 
 
 class GrowingSchedule(ValueError):
@@ -61,7 +64,8 @@ def step_size(generation: int, alpha_0: float, alpha_end: float, g_plan: int,
 def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int | None,
                      generations: int,
                      names: tuple[str, str, str] = ('alpha_0', 'alpha_end', 'g_plan'),
-                     alpha_0_default: float = DEFAULT_ALPHA_0) -> tuple[float, float, int]:
+                     alpha_0_default: float | None = DEFAULT_ALPHA_0
+                     ) -> tuple[float, float, int]:
     """The schedule a run moves on, each unset end at its default and G_plan at generations.
 
     The command line and the pipeline both check theirs here, so they refuse the same ones.
@@ -72,13 +76,16 @@ def checked_schedule(alpha_0: float | None, alpha_end: float | None, g_plan: int
         g_plan: As given; None when not given.
         generations: The run's generations, G_plan when none is given.
         names: How the caller names alpha_0, alpha_end and g_plan, for the refusal.
-        alpha_0_default: alpha_0 when none is given, the mode's (MODE_ALPHA_0).
+        alpha_0_default: alpha_0 when none is given, the mode's (MODE_ALPHA_0); None when the
+            mode has none, so alpha_0 must be given.
 
     Raises:
         ValueError: As step_size; for steps that would grow, naming an end left at its default
             and the range the other must be in. G_plan has no upper bound: it takes no seed
             blocks, and the optimiser warns when it outlasts the run (decision of 2026-11-20).
     """
+    if alpha_0 is None and alpha_0_default is None:
+        raise ValueError(f'{names[0]} must be given: this mode has no default')
     schedule = (alpha_0_default if alpha_0 is None else alpha_0,
                 DEFAULT_ALPHA_END if alpha_end is None else alpha_end,
                 generations if g_plan is None else g_plan)

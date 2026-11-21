@@ -155,6 +155,9 @@ def _check_schedule(values: dict[str, Any], source: str) -> None:
     if mode not in step_schedule.MODE_GENERATIONS:  # the optimiser's modes
         raise ValueError(f"{source}: [optimise] mode {mode!r} is not one of "
                          f"{sorted(step_schedule.MODE_GENERATIONS)}")
+    if step_schedule.MODE_GENERATIONS[mode] is None:  # Task 9: its size is the pilot's to give
+        raise ValueError(f"{source}: [optimise] mode {mode!r} is run by covsyn-pilot-size, "
+                         f"not the pipeline")
     if all(values.get(field) is None for field in ("alpha_0", "alpha_end", "g_plan")):
         return
     generations = step_schedule.MODE_GENERATIONS[mode]

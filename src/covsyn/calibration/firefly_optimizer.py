@@ -1867,7 +1867,11 @@ OPTIMISER_MODES = {
     # Task 5: the population is the worker count, set in main(), and S comes from the command
     # line; a profile is run again, never resumed.
     'profile': (None, 1, 0.01),
+    # Task 9: pilot 2's runs, whose n, generations, S and alpha_0 the pilot gives (main()).
+    'pilot': (None, 1, 0.03),
 }
+# Task 9: a pilot run's n, within the population's rows and above 1, so one firefly moves.
+PILOT_POP_SIZES = range(2, initial_population.N_MAX + 1)
 PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
 
 
@@ -2032,6 +2036,45 @@ def positive_int(text: str) -> int:
     return value
 
 
+def pilot_size(pop_size: int | None, generations: int | None,
+               simulations: int | None) -> tuple[int, int, int]:
+    """A pilot run's n, G and S from the command line, each required and in range (Task 9).
+
+    Raises:
+        SystemExit: One is missing or out of range, naming its flag.
+    """
+    limits = (('--pop-size', pop_size, PILOT_POP_SIZES),
+              ('--generations', generations, range(1, seed_streams.MAX_BLOCKS + 1)),
+              ('--simulations', simulations, range(1, seed_streams.MAX_SIMULATIONS + 1)))
+    for flag, value, allowed in limits:
+        if value is None:
+            sys.exit(f'--mode pilot needs {flag}, which no default stands in for')
+        if value not in allowed:
+            sys.exit(f'{flag} must be {allowed.start} to {allowed.stop - 1}, not {value}')
+    return pop_size, generations, simulations
+
+
+def recorded_size(run_dir: Path) -> tuple[int, int, int]:
+    """The n, G and S a pilot run recorded in its config.json, to resume it with (Task 9).
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when one is missing or out of range, naming it; see
+            recorded_settings for a config.json that cannot be read.
+    """
+    settings = recorded_settings(run_dir)
+    limits = (('pop_size', PILOT_POP_SIZES),
+              ('max_generations', range(1, seed_streams.MAX_BLOCKS + 1)),
+              ('simulations', range(1, seed_streams.MAX_SIMULATIONS + 1)))
+    found = []
+    for key, allowed in limits:
+        value = settings.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value not in allowed:
+            not_resumable(f'{run_dir} cannot be resumed: its config.json {key} is {value!r}, '
+                          f'not {allowed.start} to {allowed.stop - 1}')
+        found.append(value)
+    return tuple(found)
+
+
 def recorded_schedule(run_dir: Path) -> tuple[float, float, int]:
     """The step schedule a run recorded in its config.json, to resume it with (Task 8).
 
@@ -2081,6 +2124,8 @@ def resume_arguments(args: argparse.Namespace) -> str:
                                       ('--alpha-0', getattr(args, 'alpha_0', None)),
                                       ('--alpha-end', getattr(args, 'alpha_end', None)),
                                       ('--g-plan', getattr(args, 'g_plan', None)),
+                                      ('--pop-size', getattr(args, 'pop_size', None)),
+                                      ('--generations', getattr(args, 'generations', None)),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
@@ -2135,8 +2180,13 @@ def main() -> None:
                              f'(default {DEFAULT_RNG_SEED})')
     # Task 5
     parser.add_argument('--simulations', type=int, default=None,
-                        help=f'profile mode: simulations per evaluation, S '
-                             f'(default {PROFILE_SIMULATIONS})')
+                        help=f'profile and pilot modes: simulations per evaluation, S '
+                             f'(profile default {PROFILE_SIMULATIONS})')
+    # Task 9: checked in main(), so a refusal names the flag
+    parser.add_argument('--pop-size', type=int, default=None,
+                        help='pilot mode: number of fireflies, n')
+    parser.add_argument('--generations', type=int, default=None,
+                        help='pilot mode: number of generations, G')
     parser.add_argument('--stream', type=optimisation_stream, default=None,
                         help='optimisation stream, 1 to 99, whose block g scores generation g '
                              f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
@@ -2177,10 +2227,18 @@ def main() -> None:
         if not 1 <= simulations <= seed_streams.MAX_SIMULATIONS:  # Task 7: one block's seeds
             sys.exit(f'--simulations must be 1 to {seed_streams.MAX_SIMULATIONS}, '
                      f'not {simulations}')
+    elif mode == 'pilot':  # Task 9: the pilot's n, G and S; a resume's from its config.json
+        pop_size, max_generations, simulations = (
+            pilot_size(args.pop_size, args.generations, args.simulations)
+            if args.resume is None else recorded_size(args.resume))
     elif args.simulations is not None:
-        sys.exit('--simulations changes the objective, so it is for --mode profile only')
+        sys.exit('--simulations changes the objective, so it is for --mode profile or pilot '
+                 'only')
     else:
         simulations = SIMULATIONS_PER_EVALUATION
+    for flag, value in (('--pop-size', args.pop_size), ('--generations', args.generations)):
+        if value is not None and mode != 'pilot':  # every other mode fixes them
+            sys.exit(f'{flag} is for --mode pilot only; --mode {mode} fixes it')
 
     # Firefly
     # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
