@@ -1028,3 +1028,18 @@ def test_the_command_reports_a_table_error_as_a_refusal(tmp_path, monkeypatch, c
     with pytest.raises(SystemExit) as stop:
         ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
     assert stop.value.code == 2 and "screening.csv went missing" in capsys.readouterr().err
+
+
+def test_pilot_2_keeps_the_traceback_of_an_error_outside_the_tables(tmp_path, monkeypatch):
+    """A full disk, a worker's error: the error itself, not a usage refusal."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
+
+    def full(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(ps, "run", full)
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    with pytest.raises(OSError, match="No space left"):
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])

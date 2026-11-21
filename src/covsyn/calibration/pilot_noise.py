@@ -160,7 +160,7 @@ def write_summary(out_dir: Path, warn: bool = True) -> dict[str, Any]:
     warn: as read_table's; run() warns here only about a mark added since its first read.
 
     Raises:
-        block_scoring.TableError: blocks.csv is gone, or not a regular file.
+        block_scoring.TableError: blocks.csv is gone, or cannot be a table (see TableError).
     """
     rows = block_scoring.read_table(Path(out_dir) / BLOCKS_FILE, warn=warn, required=True).rows
     summary = summarise(rows)

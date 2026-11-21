@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import errno
+import re
 
 import numpy as np
 import pytest
@@ -618,7 +619,7 @@ def test_a_missing_table_at_the_first_read_reads_as_absent(tmp_path):
 def test_a_table_known_to_exist_that_went_missing_is_an_error(tmp_path):
     """A later read, after the pilot saw it: stop, naming it, rather than start anew."""
     path = tmp_path / "t.csv"
-    with pytest.raises(block_scoring.TableError, match=str(path)):
+    with pytest.raises(block_scoring.TableError, match=re.escape(str(path))):
         block_scoring.read_table(path, required=True)
 
 
@@ -641,14 +642,14 @@ def test_a_path_that_cannot_be_a_table_is_named(tmp_path, what):
     else:
         (tmp_path / "out").write_text("a file, not a directory")
         path = tmp_path / "out" / "t.csv"
-    with pytest.raises(block_scoring.TableError, match=str(path)):
+    with pytest.raises(block_scoring.TableError, match=re.escape(str(path))):
         block_scoring.read_table(path)
 
 
 def test_a_table_known_to_exist_is_not_recreated_when_it_went_missing(tmp_path):
     """Appending to a table the pilot read: if it is gone, stop; do not create an empty one."""
     path = tmp_path / "t.csv"
-    with pytest.raises(block_scoring.TableError, match=str(path)):
+    with pytest.raises(block_scoring.TableError, match=re.escape(str(path))):
         block_scoring.score(path, [{"name": "a", "simulations": 10, "seed_offset": 0}], COLUMNS,
                             lambda t: np.ones(2), _evaluate, _threads, exists=True)  # fmt: skip
     assert not path.exists()
@@ -704,7 +705,7 @@ def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry
     else:
         (tmp_path / "out").write_text("a file")
         path = tmp_path / "out" / "t.csv"
-    with pytest.raises(block_scoring.TableError, match=str(path)):
+    with pytest.raises(block_scoring.TableError, match=re.escape(str(path))):
         block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
                             exists=True)  # fmt: skip
 
@@ -763,7 +764,7 @@ def test_a_link_removed_while_its_target_is_named_still_gives_a_refusal(tmp_path
         raise FileNotFoundError(2, "No such file or directory", str(p))
 
     monkeypatch.setattr(os, "readlink", gone)
-    with pytest.raises(block_scoring.TableError, match=str(path)):
+    with pytest.raises(block_scoring.TableError, match=re.escape(str(path))):
         block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
                             exists=False)  # fmt: skip
 
@@ -782,18 +783,20 @@ def test_a_table_the_system_refuses_is_a_table_error(tmp_path, monkeypatch):
         return real_open(p, flags, *args)
 
     monkeypatch.setattr(os, "open", refused)
-    with pytest.raises(block_scoring.TableError, match=str(path)):
+    with pytest.raises(block_scoring.TableError, match=re.escape(str(path))):
         block_scoring.read_table(path)
 
 
 def test_a_failure_wrapping_the_descriptor_closes_it_once(tmp_path, monkeypatch):
-    """A text wrapper that fails: the raw file closes the descriptor; nothing closes it again."""
+    """A text wrapper that fails: the raw file is closed, and os.close is not called again."""
     import io
     import os
 
-    closed = []
-    real_close = os.close
+    closed, raws = [], []
+    real_close, real_fileio = os.close, io.FileIO
     monkeypatch.setattr(os, "close", lambda fd: closed.append(fd) or real_close(fd))
+    monkeypatch.setattr(io, "FileIO", lambda *a, **kw: raws.append(real_fileio(*a, **kw))
+                        or raws[-1])  # fmt: skip
 
     def failing(*args, **kwargs):
         raise MemoryError
@@ -802,4 +805,73 @@ def test_a_failure_wrapping_the_descriptor_closes_it_once(tmp_path, monkeypatch)
     with pytest.raises(MemoryError):
         block_scoring.score(tmp_path / "t.csv", _task(), COLUMNS, lambda t: np.ones(2),
                             _evaluate, _threads, exists=False)  # fmt: skip
-    assert closed == []  # FileIO.close closed it, once
+    assert len(raws) == 1 and raws[0].closed and closed == []  # closed once, by the raw file
+
+
+
+
+@pytest.mark.parametrize("code", [errno.EMFILE, errno.ENOSPC, errno.EIO])
+def test_an_error_that_is_not_the_table_s_stays_as_it_is(tmp_path, monkeypatch, code):
+    """Too many open files, a full disk, an I/O error: raised as such, not as a TableError."""
+    import os
+
+    path = tmp_path / "t.csv"
+    path.write_text("name,simulations,seed_offset,cost\n")
+
+    def failing(p, flags, *args):
+        raise OSError(code, os.strerror(code), str(p))
+
+    monkeypatch.setattr(os, "open", failing)
+    with pytest.raises(OSError) as error:
+        block_scoring.read_table(path)
+    assert not isinstance(error.value, block_scoring.TableError) and error.value.errno == code
+    with pytest.raises(OSError) as error:
+        block_scoring.score(tmp_path / "new.csv", _task(), COLUMNS, lambda t: np.ones(2),
+                            _evaluate, _threads, exists=False)  # fmt: skip
+    assert not isinstance(error.value, block_scoring.TableError)
+
+
+def test_a_new_table_in_a_read_only_directory_is_a_table_error(tmp_path):
+    """The create path names the refusal, as the read path does."""
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root writes into a read-only directory")
+    run = tmp_path / "run"
+    run.mkdir()
+    run.chmod(0o555)
+    try:
+        with pytest.raises(block_scoring.TableError, match=re.escape(str(run / "t.csv"))):
+            block_scoring.score(run / "t.csv", _task(), COLUMNS, lambda t: np.ones(2),
+                                _evaluate, _threads, exists=False)  # fmt: skip
+    finally:
+        run.chmod(0o755)
+
+
+@pytest.mark.parametrize("target", ["directory", "loop"])
+def test_a_link_to_what_cannot_be_a_table_says_what_it_leads_to(tmp_path, target):
+    """A live link to a directory is no table; a link loop leads to no file at all."""
+    path = tmp_path / "t.csv"
+    if target == "directory":
+        (tmp_path / "d").mkdir()
+        path.symlink_to(tmp_path / "d")
+        said = "not a regular file"
+    else:
+        path.symlink_to(path)
+        said = "leads to no file"
+    with pytest.raises(block_scoring.TableError, match=said):
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+
+
+def test_a_path_whose_existence_cannot_be_checked_is_a_table_error(tmp_path, monkeypatch):
+    """exists=None checks the path; a refused check is the table's refusal too."""
+    from pathlib import Path
+
+    def refused(self, *a, **kw):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "exists", refused)
+    with pytest.raises(block_scoring.TableError):
+        block_scoring.score(tmp_path / "t.csv", _task(), COLUMNS, lambda t: np.ones(2),
+                            _evaluate, _threads)  # fmt: skip

@@ -57,6 +57,19 @@ class Table(NamedTuple):
     exists: bool
 
 
+# Errors that say the table itself is refused; any other (too many open files, a full disk,
+# an I/O error) is no fault of the table and is raised as it is.
+TABLE_REFUSALS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS, errno.ELOOP,
+                            errno.ENAMETOOLONG})  # fmt: skip
+
+
+def _refused(path: Path, error: OSError) -> Exception:
+    """A TableError naming path for an error that refuses the table; else the error itself."""
+    if error.errno in TABLE_REFUSALS:
+        return TableError(f"{path}: {error.strerror}")
+    return error
+
+
 def _open_regular(path: Path, flags: int) -> int:
     """A descriptor of path, refused unless it is a regular file, before any read could block.
 
@@ -73,8 +86,11 @@ def _open_regular(path: Path, flags: int) -> int:
         raise TableError(f"{path}: a parent of it is not a directory") from None
     except IsADirectoryError:
         raise TableError(f"{path} is not a regular file, but a directory") from None
-    except OSError as error:  # read-only, a link loop: the system refuses the table
-        raise TableError(f"{path}: {error.strerror}") from None
+    except OSError as error:  # read-only, a link loop: the table refused; else as it is
+        refusal = _refused(path, error)
+        if refusal is error:
+            raise
+        raise refusal from None
     try:
         if not stat.S_ISREG(os.fstat(handle).st_mode):
             raise TableError(f"{path} is not a regular file, so it is no pilot table")
@@ -99,7 +115,7 @@ def read_table(path: Path, warn: bool = True, required: bool = False) -> Table:
     no mark, such as plain "CSV", shortens the costs just the same and is not detected.
 
     Raises:
-        TableError: ``required`` and it is missing; or it is not a regular file.
+        TableError: ``required`` and it is missing; or it cannot be one (see TableError).
     """
     try:
         handle = _open_regular(Path(path), os.O_RDONLY)
@@ -169,7 +185,13 @@ def score(
     todo = list(todo)
     path = Path(path)
     if exists is None:
-        exists = path.exists()
+        try:
+            exists = path.exists()
+        except OSError as error:  # Path.exists raises a search permission refused, for one
+            refusal = _refused(path, error)
+            if refusal is error:
+                raise
+            raise refusal from None
     if exists:
         _drop_cut_off_line(path)
         try:  # no O_CREAT: append mode would quietly create an empty table
@@ -184,8 +206,11 @@ def score(
             raise TableError(_taken(path)) from None
         except NotADirectoryError:
             raise TableError(f"{path}: a parent of it is not a directory") from None
-        except OSError as error:  # a read-only directory, a link loop
-            raise TableError(f"{path}: {error.strerror}") from None
+        except OSError as error:  # a read-only directory, a link loop; else as it is
+            refusal = _refused(path, error)
+            if refusal is error:
+                raise
+            raise refusal from None
     try:
         # A kill can leave the file empty, before its header: then the header is written now.
         empty = os.fstat(handle).st_size == 0
@@ -224,14 +249,20 @@ def _taken(path: Path) -> str:
         entry = os.lstat(path).st_mode
     except OSError:
         entry = None
-    if entry is not None and stat.S_ISLNK(entry) and not os.path.exists(path):
+    if entry is not None and stat.S_ISLNK(entry):
         try:
-            target = f", to {os.readlink(path)},"
-        except OSError:  # gone or changed since lstat
-            target = ""
-        return (f"{path} is a symbolic link{target} to nothing, where the pilot would make its "
-                f"table; remove it or point it at an existing table")
-    if entry is not None and not stat.S_ISREG(entry) and not stat.S_ISLNK(entry):
+            leads_to = os.stat(path).st_mode  # what the link leads to
+        except OSError:  # to nothing, or round in a loop
+            leads_to = None
+        if leads_to is None:
+            try:
+                target = f", to {os.readlink(path)},"
+            except OSError:  # gone or changed since lstat
+                target = ""
+            return (f"{path} is a symbolic link{target} that leads to no file, where the pilot "
+                    f"would make its table; remove it or point it at an existing table")
+        entry = leads_to
+    if entry is not None and not stat.S_ISREG(entry):
         return f"{path} is not a regular file, so it is no pilot table"
     return (f"{path} appeared after the pilot looked for it; start it again, so it reads that "
             f"table first")
@@ -243,8 +274,8 @@ def _drop_cut_off_line(path: Path) -> None:
     It holds no finished evaluation (read_rows leaves it out), only part of one.
 
     Raises:
-        TableError: The table, which the pilot has read, went missing; or it is not a regular
-            file.
+        TableError: The table, which the pilot has read, went missing; or it cannot be one
+            (see TableError).
     """
     try:
         handle = _open_regular(path, os.O_RDWR)
