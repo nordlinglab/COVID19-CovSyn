@@ -217,3 +217,11 @@ def test_every_size_refusal_says_a_whole_number_from_its_range():
         run_size.from_command("pilot", 300, 10, 3000)
     with pytest.raises(ValueError, match="pop_size is 2.5, not a whole number from 2 to 256"):
         run_size.from_settings({"pop_size": 2.5, "max_generations": 3, "simulations": 300})
+
+
+def test_the_profile_s_refusal_has_the_same_wording(monkeypatch, tmp_path):
+    """--mode profile reads S by run_size's rule too."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "profile", "--simulations",
+                                      "20000", "--run-dir", str(tmp_path / "r")])  # fmt: skip
+    with pytest.raises(SystemExit, match="a whole number from 1 to 10000"):
+        fo.main()

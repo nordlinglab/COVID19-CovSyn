@@ -2244,9 +2244,10 @@ def main() -> None:
     if mode == 'profile':
         pop_size = max_workers
         simulations = PROFILE_SIMULATIONS if args.simulations is None else args.simulations
-        if not 1 <= simulations <= seed_streams.MAX_SIMULATIONS:  # Task 7: one block's seeds
-            sys.exit(f'--simulations must be 1 to {seed_streams.MAX_SIMULATIONS}, '
-                     f'not {simulations}')
+        try:  # Task 7: one block's seeds; Task 9: by the rule every S is read by
+            run_size.check_simulations(simulations, '--simulations')
+        except ValueError as error:
+            sys.exit(str(error))
     elif mode == 'pilot':  # Task 9: the pilot's n, G and S; a resume's from its config.json
         pop_size, max_generations, simulations = (
             command_size(mode, args.pop_size, args.generations, args.simulations)
