@@ -1089,19 +1089,32 @@ def _errno_changed():
         (lambda: OSError(True), "OSError"),
         (lambda: OSError(0), "OSError"),
         (lambda: OSError(0, None), "OSError"),
-        (lambda: OSError(1, True), os.strerror(1)),
-        (lambda: OSError(1, 3.5), os.strerror(1)),
         (lambda: OSError(-1), "OSError"),
-        (lambda: OSError(_Code.ENOENT), os.strerror(errno.ENOENT)),
-        (_errno_changed, os.strerror(errno.ENOENT)),
     ],
 )
 def test_an_error_without_a_usable_reason_gives_its_words_else_its_kind(bare, said):
     """No usable strerror or code: the error's own words, else its class name.
 
-    A text counts only as a non-empty string. A code counts only as a positive int, an int
-    subclass such as an IntEnum included, but not a bool, and one a C int holds; 0 ("Success"),
-    a negative code ("Unknown error -1") or a float is not converted. A string argument may
-    still be shown, as the error's own words.
+    A text counts only as a non-empty string; a code only as a positive int that is no bool,
+    so 0, a negative code or a float is not converted. A string argument may still be shown,
+    as the error's own words.
     """
     assert block_scoring._reason(bare()) == said
+
+
+@pytest.mark.parametrize(
+    "bare, code",
+    [
+        (lambda: OSError(1, True), 1),
+        (lambda: OSError(1, 3.5), 1),
+        (lambda: OSError(_Code.ENOENT), errno.ENOENT),
+        (_errno_changed, errno.ENOENT),
+    ],
+    ids=["text-true", "text-float", "int-enum", "errno-overflows"],
+)
+def test_a_usable_code_gives_its_text(bare, code):
+    """A positive int code, an IntEnum's too, gives its text when the strerror is no string.
+
+    A code no C int holds in errno falls to the one args[0] keeps.
+    """
+    assert block_scoring._reason(bare()) == os.strerror(code)

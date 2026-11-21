@@ -74,8 +74,8 @@ def _reason(error: OSError) -> str:
 
     A text counts only as a non-empty string. A code counts only as a positive int, an int
     subclass included but not a bool, that a C int holds: errno, else args[0], where
-    OSError(code) with one argument keeps it. 0 reads "Success" and a negative code "Unknown
-    error", so neither is a reason; nothing else is shown.
+    OSError(code) with one argument keeps it. Error codes are positive, so 0 and a negative
+    code name no error and are not shown; nor is anything else.
     """
     if isinstance(error.strerror, str) and error.strerror:
         return error.strerror
