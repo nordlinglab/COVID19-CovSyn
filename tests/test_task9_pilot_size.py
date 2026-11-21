@@ -28,7 +28,6 @@ import pytest
 
 from covsyn.calibration import pilot_size as ps
 from covsyn.calibration import seed_streams
-from covsyn.calibration.revalidation import ARCHIVE_HEADER
 
 DIM = 3
 
@@ -70,9 +69,10 @@ def test_a_run_is_the_optimiser_s_pilot_mode_with_its_setting(tmp_path):
 
 
 def _archive(path, rows):
-    """firefly_archive.txt v2: (entered, blocks, params..., mean), as the optimiser writes it."""
-    np.savetxt(path / "firefly_archive.txt", np.array(rows, dtype=float), header=ARCHIVE_HEADER,
-               encoding="utf-8")  # fmt: skip
+    """firefly_archive.txt v2: (entered, blocks, params..., mean), written as the optimiser does."""
+    from covsyn.calibration import firefly_optimizer as fo
+
+    fo.write_archive(path / "firefly_archive.txt", np.array(rows, dtype=float))
 
 
 def test_a_run_s_candidates_are_its_ten_best_distinct_archive_vectors(tmp_path):
@@ -824,15 +824,34 @@ def test_the_optimiser_writes_the_archive_as_utf_8(tmp_path):
                                [[0, 1, 0.1, 0.2, 4.0]])  # fmt: skip
 
 
-@pytest.mark.parametrize("workers", [None, "3"])
-def test_a_config_nested_too_deep_to_read_is_a_command_error(tmp_path, capsys, workers):
+def test_a_config_nested_too_deep_to_read_is_a_command_error(tmp_path):
     """json.loads raises RecursionError, not ValueError: still exit 2, not a traceback."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
     (out / "config.json").write_text("[" * 100_000 + "]" * 100_000)
     with pytest.raises(SystemExit) as stop:
-        ps.main(["--resume", str(out), *(["--workers", workers] if workers else [])])
+        ps.main(["--resume", str(out)])
     assert stop.value.code == 2
+
+
+def test_a_config_nested_too_deep_by_the_second_read_is_a_command_error(
+    tmp_path, monkeypatch, capsys
+):
+    """Rewritten between the reads: the record step's RecursionError, the run named once."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(
+        json.dumps({"settings": {"simulations": 300}, "workers": 2})
+    )
+
+    def too_deep(out_dir, workers):
+        raise RecursionError("maximum recursion depth exceeded while decoding a JSON array")
+
+    monkeypatch.setattr(ps.block_scoring, "record_workers", too_deep)
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--resume", str(out), "--workers", "3"])
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and err.count(out.name) == 1
 
 
 def test_a_pilot_1_choice_nested_too_deep_is_a_command_error(tmp_path):
@@ -843,3 +862,20 @@ def test_a_pilot_1_choice_nested_too_deep_is_a_command_error(tmp_path):
     with pytest.raises(SystemExit) as stop:
         ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
     assert stop.value.code == 2
+
+
+def test_the_optimiser_s_run_writes_its_archive_through_write_archive(tmp_path, monkeypatch):
+    """So the run's archive is UTF-8, as write_archive writes it."""
+    from covsyn.calibration import firefly_optimizer as fo
+    from tests import firefly_standins as standins
+
+    written = []
+    real = fo.write_archive
+    monkeypatch.setattr(fo, "write_archive", lambda path, rows, *a, **kw: written.append(path)
+                        or real(path, rows, *a, **kw))  # fmt: skip
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    engine = fo.Firefly(pop_size=3, alpha_0=0.2, betamin=1, gamma=0.03, seed=1)
+    engine.firefly(function=standins.objective, dim=208, lb=np.zeros(208), ub=np.ones(208),
+                   demographic_parameters=None, max_generations=2, max_workers=2,
+                   Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)  # fmt: skip
+    assert written == [tmp_path / "firefly_archive.txt"]

@@ -398,3 +398,23 @@ def test_a_config_nested_too_deep_to_read_is_a_command_error(tmp_path):
     with pytest.raises(SystemExit) as stop:
         pn.main(["--resume", str(tmp_path)])
     assert stop.value.code == 2
+
+
+def test_a_config_nested_too_deep_by_the_second_read_is_a_command_error(
+    tmp_path, monkeypatch, capsys
+):
+    """As pilot 2's: the record step's RecursionError, exit 2, the run named once."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+
+    def too_deep(out_dir, workers):
+        raise RecursionError("maximum recursion depth exceeded while decoding a JSON array")
+
+    monkeypatch.setattr(pn.block_scoring, "record_workers", too_deep)
+    with pytest.raises(SystemExit) as stop:
+        pn.main(["--resume", str(out), "--workers", "3"])
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and err.count(out.name) == 1
