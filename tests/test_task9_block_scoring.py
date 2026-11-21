@@ -936,17 +936,23 @@ def test_a_refusal_at_open_names_a_socket_but_not_a_regular_file(tmp_path, monke
 
     regular = tmp_path / "t.csv"
     regular.write_text("")
+    link = tmp_path / "link.csv"  # a link to a regular table is a table too
+    link.symlink_to(regular)
 
     def refused(p, flags, *args, **kwargs):
         raise OSError(code, os.strerror(code), str(p))
 
     monkeypatch.setattr(os, "open", refused)
-    with pytest.raises(block_scoring.TableError, match="not a regular file"):
-        block_scoring.read_table(socket_path)
-    with pytest.raises(OSError) as error:
-        block_scoring.read_table(regular)
-    monkeypatch.undo()  # before the socket's clean-up, which opens files too
-    assert not isinstance(error.value, block_scoring.TableError) and error.value.errno == code
+    try:
+        with pytest.raises(block_scoring.TableError, match="not a regular file"):
+            block_scoring.read_table(socket_path)
+        for path in (regular, link):
+            with pytest.raises(OSError) as error:
+                block_scoring.read_table(path)
+            assert not isinstance(error.value, block_scoring.TableError), path
+            assert error.value.errno == code
+    finally:
+        monkeypatch.undo()  # before the socket's clean-up, which opens files too
 
 
 @pytest.mark.parametrize("code", sorted({errno.EOPNOTSUPP, errno.ENOTSUP, errno.EAGAIN}))

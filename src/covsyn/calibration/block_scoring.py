@@ -75,12 +75,12 @@ def _raise_refused(path: Path, error: OSError, entry: bool = False) -> None:
 
     Called in an ``except`` block, whose bare ``raise`` then re-raises any other error as it is.
     ``entry``: the error came from opening what is at path (non-blocking), where a refusal can
-    be a socket or a device (NOT_REGULAR, if lstat shows one) or a lease (EAGAIN); elsewhere,
+    be a socket or a device (NOT_REGULAR, if stat shows one) or a lease (EAGAIN); elsewhere,
     as when creating a new table, those errors are no sign of either and stay as they are.
     """
     if entry and error.errno in NOT_REGULAR:
-        try:
-            mode = os.lstat(path).st_mode
+        try:  # stat, not lstat: the open followed a link, so does this
+            mode = os.stat(path).st_mode
         except OSError:
             mode = None
         if mode is not None and not stat.S_ISREG(mode):
