@@ -18,7 +18,7 @@ import logging
 import multiprocessing
 import os
 import pickle
-import shutil
+import stat
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -125,7 +125,7 @@ def pilot_workers(given: int | None, env: Mapping[str, str], recorded: Any) -> i
     if not requested.strip():  # empty counts as unset, as resolve_workers takes it (B86)
         return recorded
     try:
-        return hardware._override(requested, hardware.ENV_VARIABLE)  # hardware's own rule
+        return hardware.parse_workers(requested, hardware.ENV_VARIABLE)  # hardware's rule
     except ValueError as error:
         # Unusable: the record, not the cores, since the run started with it (resolve_workers
         # would fall to the cores, which record_workers would then write over the record).
@@ -138,10 +138,11 @@ def record_workers(out_dir: Path, workers: int) -> None:
 
     Written whole or not at all: a temporary file, flushed to disk, replaces it, so a kill, a
     full disk or a crash leaves the old one, which every later resume needs. The replacement
-    keeps the file's mode; a config.json that is read-only or a link is not replaced.
+    keeps the file's mode; a config.json that is read-only, a link or hard-linked is not
+    replaced.
 
     Raises:
-        PermissionError: config.json is read-only, or a link.
+        PermissionError: config.json is read-only, a link, or hard-linked.
         OSError: config.json cannot be read, or the new one cannot be written.
         ValueError: config.json is not a JSON object.
     """
@@ -151,26 +152,35 @@ def record_workers(out_dir: Path, workers: int) -> None:
         raise ValueError(f"{path} is not a JSON object")
     if config.get("workers") == workers:
         return
-    if path.is_symlink() or not os.access(path, os.W_OK):
+    mode = stat.S_IMODE(path.lstat().st_mode)
+    # Replacing a link, a hard-linked file or a read-only one would undo what it was made for;
+    # the mode bits count too, since os.access says yes to everything for root.
+    if (path.is_symlink() or path.stat().st_nlink > 1 or not os.access(path, os.W_OK)
+            or not mode & 0o222):
         raise PermissionError(f"{path} is read-only or a link, so its workers stay "
                               f"{config.get('workers')!r}; give a writable copy to resume with "
                               f"{workers}")
     config["workers"] = workers
     temporary = path.with_name(path.name + ".tmp")
     try:
-        with open(temporary, "w", encoding="utf-8") as f:
+        # Created with config.json's mode, so a private record has no readable copy.
+        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with open(handle, "w", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), mode)  # whatever the umask took off
             f.write(json.dumps(config, indent=1, allow_nan=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
-        shutil.copymode(path, temporary)
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)  # the rename itself, on file systems that need it
-        finally:
-            os.close(directory)
     finally:
         temporary.unlink(missing_ok=True)
+    try:  # the rename itself, on file systems that need it; some refuse a directory fsync
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError:
+        pass
 
 
 def objective_pools(workers: int | None) -> tuple[Evaluate, MakePool]:

@@ -121,8 +121,10 @@ uv run covsyn-pilot-noise
 uv run covsyn-pilot-size --noise results/tables/<pilot-1 run-id>
 ```
 
-Each resumes with `--resume results/tables/<run-id>`, its own directory, neither a link nor renamed, since pilot 2 names its runs' directories after it.
-A resume runs with `--workers`, else `COVSYN_WORKERS`, else the worker count in its `config.json`, and writes the count it runs with there.
+Each resumes with `--resume results/tables/<run-id>`;
+pilot 2's must be its own directory, neither a link nor renamed, since its runs' directories are named after it.
+A resume runs with `--workers`, else `COVSYN_WORKERS`, else the worker count in its `config.json`, and writes the count it runs with there;
+a `config.json` that is read-only or a link stops a resume with another count.
 
 Pilot 1 scores the literature vector, the run-19 vector and two random rows of the initial population on 30 blocks of validation stream 201 at each S of 300, 1,000, 3,000 and 10,000, and every row on two blocks at S = 10,000 for the cost spread across the population.
 It chooses the smallest S at which the largest SD of a paired difference between the vectors is at most 10% of that spread, and none when no S passes.

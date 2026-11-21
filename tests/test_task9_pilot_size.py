@@ -513,7 +513,8 @@ def test_a_config_that_cannot_be_written_is_a_command_error(tmp_path, monkeypatc
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
     with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out), "--workers", "3"])
-    assert stop.value.code == 2 and "PermissionError" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and "Permission denied" in err and "holds no pilot" not in err
 
 
 def test_a_config_without_settings_is_named_as_such(tmp_path, monkeypatch, capsys):
@@ -529,15 +530,17 @@ def test_a_config_without_settings_is_named_as_such(tmp_path, monkeypatch, capsy
 @pytest.mark.parametrize("name", ["latest_pilot-size", "20261121-000000_ABCDEF0_pilot-size",
                                   "20261121-000000_abcdef0_pilot-noise",
                                   "\u0662\u0660\u0662\u0666\u0661\u0661\u0662\u0661-000000_abcdef0_pilot-size"])
-def test_a_hand_named_pilot_directory_is_refused(tmp_path, monkeypatch, name):
+def test_a_hand_named_pilot_directory_is_refused(tmp_path, monkeypatch, capsys, name):
     """A real directory, not a link, whose name runs.make_run_id would not give a pilot 2."""
     out = tmp_path / "results" / "tables" / name
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
                                                  "workers": 2}))
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out)])
+    assert stop.value.code == 2
+    assert "is not results/tables/<run-id> of a pilot 2" in capsys.readouterr().err
 
 
 from hypothesis import given, settings  # noqa: E402
@@ -557,11 +560,35 @@ def test_every_pilot_2_run_id_is_recognised(when, commit, dirty):
     assert ps.RUN_ID.fullmatch(name)
 
 
-@settings(max_examples=200, deadline=None)
-@given(name=st.text(max_size=40))
-def test_a_name_runs_would_not_make_is_refused(name):
-    """Anything but <YYYYMMDD-HHMMSS>_<commit7 or nocommit>[-dirty]_pilot-size."""
-    import re
+VALID = "20261121-093015_0123abc_pilot-size"
 
-    pattern = r"\d{8}-\d{6}_(?:[0-9a-f]{7}|nocommit)(?:-dirty)?_pilot-size"
-    assert bool(ps.RUN_ID.fullmatch(name)) == bool(re.fullmatch(pattern, name, re.ASCII))
+
+@settings(max_examples=300, deadline=None)
+@given(at=st.integers(min_value=0, max_value=len(VALID) - 1),
+       swap=st.sampled_from(["\u0663", "\uff13", "A", "F", "_", "-", " ", "x"]))
+def test_a_name_one_character_off_is_refused(at, swap):
+    """A valid name with one character changed: a non-ASCII digit, uppercase hex, and so on."""
+    name = VALID[:at] + swap + VALID[at + 1:]
+    if name == VALID:
+        return
+    hex_part = VALID.index("_") + 1
+    if hex_part <= at < hex_part + 7 and swap in "0123456789abcdef":
+        return  # still a commit
+    assert not ps.RUN_ID.fullmatch(name), name
+
+
+def test_a_read_only_config_says_so_not_that_the_pilot_is_missing(tmp_path, monkeypatch, capsys):
+    """The pilot is there; only its config.json cannot record the new workers."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": 2}))
+    (out / "config.json").chmod(0o444)
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    try:
+        with pytest.raises(SystemExit):
+            ps.main(["--resume", str(out), "--workers", "3"])
+    finally:
+        (out / "config.json").chmod(0o644)
+    err = capsys.readouterr().err
+    assert "read-only" in err and "holds no pilot" not in err

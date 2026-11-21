@@ -201,8 +201,90 @@ def test_covsyn_workers_is_used_when_usable_and_the_record_otherwise(text, recor
     from covsyn.runtime import hardware
 
     try:
-        usable = hardware._override(text, hardware.ENV_VARIABLE)
+        usable = hardware.parse_workers(text, hardware.ENV_VARIABLE)
     except ValueError:
         usable = None
     got = block_scoring.pilot_workers(None, {"COVSYN_WORKERS": text}, recorded)
     assert got == (recorded if usable is None or not text.strip() else usable)
+
+
+def test_a_read_only_config_is_refused_by_its_mode_bits(tmp_path, monkeypatch):
+    """As root os.access says yes to everything; the mode still marks it read-only."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    path.chmod(0o444)
+    monkeypatch.setattr(os, "access", lambda *a, **kw: True)  # as root
+    try:
+        with pytest.raises(PermissionError):
+            block_scoring.record_workers(tmp_path, 3)
+    finally:
+        path.chmod(0o644)
+
+
+def test_a_hard_linked_config_is_not_split(tmp_path):
+    """Replacing it would leave the other name with the old workers."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    os.link(path, tmp_path / "backup.json")
+    with pytest.raises(PermissionError):
+        block_scoring.record_workers(tmp_path, 3)
+    assert json.loads((tmp_path / "backup.json").read_text())["workers"] == 2
+
+
+def test_a_directory_that_cannot_be_synced_does_not_undo_a_written_config(tmp_path,
+                                                                           monkeypatch):
+    """The rename has happened; a file system that refuses a directory fsync is no failure."""
+    import json
+    import os
+    import stat
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    real_fsync = os.fsync
+
+    def no_directory_fsync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(22, "Invalid argument")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", no_directory_fsync)
+    block_scoring.record_workers(tmp_path, 3)
+    assert json.loads(path.read_text())["workers"] == 3
+
+
+def test_the_temporary_is_never_more_readable_than_the_config(tmp_path, monkeypatch):
+    """Created with the config's mode, so a private record has no world-readable copy."""
+    import json
+    import os
+    import stat
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    path.chmod(0o600)
+    modes = []
+    real_fsync = os.fsync
+
+    def watching(fd):
+        tmp = tmp_path / "config.json.tmp"
+        if tmp.exists():
+            modes.append(stat.S_IMODE(os.stat(tmp).st_mode))
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", watching)
+    block_scoring.record_workers(tmp_path, 3)
+    assert modes and all(m == 0o600 for m in modes)
+
+
+def test_the_workers_parser_is_hardware_s_public_one():
+    """Not a private helper of another module."""
+    from covsyn.runtime import hardware
+
+    assert hardware.parse_workers("4", "x") == 4
+    with pytest.raises(ValueError):
+        hardware.parse_workers("0", "x")
