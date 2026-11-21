@@ -443,7 +443,8 @@ def test_a_resume_keeps_the_workers_the_pilot_started_with(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("recorded", [True, 0, -2, "8"])
-def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, recorded):
+def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, capsys,
+                                                         recorded):
     """Not a traceback, nor two different counts for the runs and the pools."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
@@ -454,6 +455,8 @@ def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, 
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
     with pytest.raises(SystemExit):
         ps.main(["--resume", str(out)])
+    err = capsys.readouterr().err
+    assert "workers" in err and "holds no pilot" not in err  # the pilot is there
 
 
 def test_a_resume_through_dot_dot_finds_the_results_root(tmp_path, monkeypatch):

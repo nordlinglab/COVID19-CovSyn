@@ -461,3 +461,19 @@ def test_a_mark_added_while_pilot_1_runs_is_warned_about(tmp_path, caplog, monke
     with caplog.at_level(logging.WARNING, logger=pn.block_scoring.log.name):
         pn.run(tmp_path, _population(), np.zeros(DIM), np.ones(DIM), _evaluate, _threads)
     assert caplog.text.count(str(blocks)) == 1
+
+
+def test_a_recorded_worker_count_out_of_range_names_pilot_1(tmp_path, monkeypatch, capsys):
+    """The pilot is there; one recorded value is wrong, and the refusal says so."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+    config = json.loads((out / "config.json").read_text())
+    config["workers"] = "8"
+    (out / "config.json").write_text(json.dumps(config))
+    with pytest.raises(SystemExit) as stop:
+        pn.main(["--resume", str(out)])
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and "pilot 1 in" in err and "holds no pilot" not in err

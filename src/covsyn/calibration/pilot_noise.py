@@ -218,11 +218,14 @@ def main(argv: list[str] | None = None) -> Path:
         out = args.resume
         try:
             config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8-sig"))
-            workers = block_scoring.pilot_workers(args.workers, os.environ,
-                                                  config.get("workers"))  # fmt: skip
+            recorded_workers = config.get("workers")
         # RecursionError: JSON nested too deep for json.loads
         except (OSError, ValueError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
+        try:  # the pilot is there; its recorded count may be wrong
+            workers = block_scoring.pilot_workers(args.workers, os.environ, recorded_workers)
+        except ValueError as error:
+            parser.error(f"pilot 1 in {out}: {error}")
         try:  # the pilot is there; only its record of the workers is at stake
             block_scoring.record_workers(out, workers)
         except PermissionError as error:  # refused: say what was refused
