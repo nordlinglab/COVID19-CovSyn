@@ -321,7 +321,14 @@ def _capped(
 
 
 def parse_workers(value: str | int, source: str) -> int:
-    """A worker count given as --workers or COVSYN_WORKERS; ``source`` names it in the error.
+    """A worker count given as --workers or COVSYN_WORKERS.
+
+    Args:
+        value: The count, as given: an int, or text with surrounding space allowed.
+        source: What gave it, named in the error.
+
+    Returns:
+        The count.
 
     Raises:
         ValueError: Not a whole number of at least 1.

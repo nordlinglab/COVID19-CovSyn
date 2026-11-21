@@ -217,8 +217,8 @@ def main(argv: list[str] | None = None) -> Path:
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
             block_scoring.record_workers(out, workers)
-        except PermissionError as error:  # the pilot is there; its record stays as it was
-            parser.error(f"{out}: {error}")
+        except PermissionError as error:  # refused, not missing: say what was refused
+            parser.error(str(error))
         except (OSError, ValueError, TypeError, AttributeError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
     else:

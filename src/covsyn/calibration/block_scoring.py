@@ -11,6 +11,7 @@ per S, since a worker's S is set when it starts.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import csv
 import io
 import json
@@ -19,6 +20,7 @@ import multiprocessing
 import os
 import pickle
 import stat
+import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -155,22 +157,34 @@ def record_workers(out_dir: Path, workers: int) -> None:
     mode = stat.S_IMODE(path.lstat().st_mode)
     # Replacing a link, a hard-linked file or a read-only one would undo what it was made for;
     # the mode bits count too, since os.access says yes to everything for root.
-    if (path.is_symlink() or path.stat().st_nlink > 1 or not os.access(path, os.W_OK)
-            or not mode & 0o222):
-        raise PermissionError(f"{path} is read-only or a link, so its workers stay "
-                              f"{config.get('workers')!r}; give a writable copy to resume with "
-                              f"{workers}")
+    if path.is_symlink():
+        cause = "a symbolic link"
+    elif path.stat().st_nlink > 1:
+        cause = f"hard-linked, with {path.stat().st_nlink} names"
+    elif not os.access(path, os.W_OK) or not mode & 0o222:
+        cause = "read-only"
+    else:
+        cause = ""
+    if cause:
+        raise PermissionError(f"{path} is {cause}, so its workers stay "
+                              f"{config.get('workers')!r}; give a writable copy of its own to "
+                              f"resume with {workers}")
     config["workers"] = workers
-    temporary = path.with_name(path.name + ".tmp")
+    # A name of its own, created afresh (O_EXCL, no link followed), so neither a leftover link
+    # nor another resume's temporary is written through; private until given config.json's mode.
+    handle, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    temporary = Path(name)
     try:
-        # Created with config.json's mode, so a private record has no readable copy.
-        handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-        with open(handle, "w", encoding="utf-8") as f:
-            os.fchmod(f.fileno(), mode)  # whatever the umask took off
+        with os.fdopen(handle, "w", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), mode)
             f.write(json.dumps(config, indent=1, allow_nan=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
         os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(handle)  # if fdopen never took it
+        raise
     finally:
         temporary.unlink(missing_ok=True)
     try:  # the rename itself, on file systems that need it; some refuse a directory fsync

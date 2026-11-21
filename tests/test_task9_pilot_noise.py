@@ -315,3 +315,20 @@ def test_a_resume_keeps_the_workers_pilot_1_started_with(tmp_path, monkeypatch):
     out = pn.main(["--results-root", str(tmp_path), "--workers", "3"])
     pn.main(["--resume", str(out)])
     assert seen[-1] == 3
+
+
+def test_a_read_only_config_says_so_not_that_pilot_1_is_missing(tmp_path, monkeypatch, capsys):
+    """As pilot 2's: the record cannot take the new workers, and the message says that."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+    (out / "config.json").chmod(0o444)
+    try:
+        with pytest.raises(SystemExit) as stop:
+            pn.main(["--resume", str(out), "--workers", "3"])
+    finally:
+        (out / "config.json").chmod(0o644)
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and "read-only" in err and "holds no pilot" not in err

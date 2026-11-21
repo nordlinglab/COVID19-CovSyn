@@ -560,21 +560,27 @@ def test_every_pilot_2_run_id_is_recognised(when, commit, dirty):
     assert ps.RUN_ID.fullmatch(name)
 
 
-VALID = "20261121-093015_0123abc_pilot-size"
+VALID = ("20261121-093015_0123abc_pilot-size", "20261121-093015_nocommit_pilot-size",
+         "20261121-093015_0123abc-dirty_pilot-size")
+CHANGES = ["\u0663", "\uff13", "A", "F", "_", "-", " ", "x", "0", "a", "-dirty"]
 
 
-@settings(max_examples=300, deadline=None)
-@given(at=st.integers(min_value=0, max_value=len(VALID) - 1),
-       swap=st.sampled_from(["\u0663", "\uff13", "A", "F", "_", "-", " ", "x"]))
-def test_a_name_one_character_off_is_refused(at, swap):
-    """A valid name with one character changed: a non-ASCII digit, uppercase hex, and so on."""
-    name = VALID[:at] + swap + VALID[at + 1:]
-    if name == VALID:
-        return
-    hex_part = VALID.index("_") + 1
-    if hex_part <= at < hex_part + 7 and swap in "0123456789abcdef":
-        return  # still a commit
-    assert not ps.RUN_ID.fullmatch(name), name
+@settings(max_examples=500, deadline=None)
+@given(base=st.sampled_from(VALID), at=st.integers(min_value=0, max_value=40),
+       change=st.sampled_from(CHANGES), how=st.sampled_from(["swap", "insert", "delete"]))
+def test_a_name_one_edit_off_is_refused(base, at, change, how):
+    """A valid name with one character swapped, inserted or deleted, unless it is still valid.
+
+    Still valid means runs.make_run_id could have made it, as the reference pattern says.
+    """
+    import re
+
+    at = at % len(base)
+    name = {"swap": base[:at] + change + base[at + 1:], "insert": base[:at] + change + base[at:],
+            "delete": base[:at] + base[at + 1:]}[how]
+    valid = re.fullmatch(r"[0-9]{8}-[0-9]{6}_(?:[0-9a-f]{7}|nocommit)(?:-dirty)?_pilot-size",
+                         name)  # fmt: skip
+    assert bool(ps.RUN_ID.fullmatch(name)) == bool(valid), name
 
 
 def test_a_read_only_config_says_so_not_that_the_pilot_is_missing(tmp_path, monkeypatch, capsys):

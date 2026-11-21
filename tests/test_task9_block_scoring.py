@@ -271,8 +271,7 @@ def test_the_temporary_is_never_more_readable_than_the_config(tmp_path, monkeypa
     real_fsync = os.fsync
 
     def watching(fd):
-        tmp = tmp_path / "config.json.tmp"
-        if tmp.exists():
+        for tmp in tmp_path.glob("config.json.*.tmp"):  # its own name, made afresh
             modes.append(stat.S_IMODE(os.stat(tmp).st_mode))
         return real_fsync(fd)
 
@@ -288,3 +287,36 @@ def test_the_workers_parser_is_hardware_s_public_one():
     assert hardware.parse_workers("4", "x") == 4
     with pytest.raises(ValueError):
         hardware.parse_workers("0", "x")
+
+
+def test_a_link_left_at_a_temporary_path_is_not_followed(tmp_path):
+    """No fixed temporary name: a file it might point to stays untouched."""
+    import json
+
+    notes = tmp_path / "notes.txt"
+    notes.write_text("mine\n")
+    (tmp_path / "config.json").write_text(json.dumps({"settings": {}, "workers": 2}))
+    (tmp_path / "config.json.tmp").symlink_to(notes)
+    block_scoring.record_workers(tmp_path, 3)
+    assert notes.read_text() == "mine\n"
+    assert not (tmp_path / "config.json").is_symlink()
+    assert json.loads((tmp_path / "config.json").read_text())["workers"] == 3
+
+
+@pytest.mark.parametrize("links, cause", [(0o444, "read-only"), ("hard", "hard-linked")])
+def test_the_refusal_names_its_cause(tmp_path, links, cause):
+    """A hard-linked config.json is writable; the user must be told why it is refused."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    if links == "hard":
+        os.link(path, tmp_path / "backup.json")
+    else:
+        path.chmod(links)
+    try:
+        with pytest.raises(PermissionError, match=cause):
+            block_scoring.record_workers(tmp_path, 3)
+    finally:
+        path.chmod(0o644)
