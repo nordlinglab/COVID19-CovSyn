@@ -10,6 +10,7 @@ per S, since a worker's S is set when it starts.
 
 from __future__ import annotations
 
+import codecs
 import concurrent.futures
 import csv
 import errno
@@ -39,13 +40,17 @@ def read_rows(path: Path) -> list[dict[str, str]]:
     """The finished rows of a CSV written by :func:`score`; none when it does not exist yet.
 
     A last line without its newline, which a kill cut off, and a row short of a value are not
-    finished evaluations and are left out.
+    finished evaluations and are left out. A leading UTF-8 byte order mark, which a spreadsheet
+    adds when it saves the table again, is skipped, with a warning: it may have shortened the
+    costs it wrote back.
     """
     if not Path(path).is_file():
         return []
     # Cut before decoding: the kill may have split a character, which only that line holds.
     data = Path(path).read_bytes()
-    # utf-8-sig: a spreadsheet saving it as "CSV UTF-8" adds a byte order mark.
+    if data.startswith(codecs.BOM_UTF8):  # utf-8-sig below skips it
+        log.warning("%s starts with a byte order mark: another program, such as a spreadsheet, "
+                    "rewrote it, and may have shortened its costs", path)
     text = data[: data.rfind(b"\n") + 1].decode("utf-8-sig")
     return [
         row

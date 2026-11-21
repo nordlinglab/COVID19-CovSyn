@@ -570,8 +570,26 @@ def test_a_row_cut_inside_a_character_still_reads_the_finished_rows(tmp_path):
     assert [r["name"] for r in block_scoring.read_rows(path)] == ["a", "\u00e9t\u00e9"]
 
 
-def test_a_table_saved_with_a_byte_order_mark_reads_its_header(tmp_path):
-    """A spreadsheet's "CSV UTF-8" adds EF BB BF; the first column keeps its name."""
+def test_a_table_saved_with_a_byte_order_mark_reads_its_header(tmp_path, caplog):
+    """A spreadsheet's "CSV UTF-8" adds EF BB BF; the first column keeps its name.
+
+    It is read, with a warning naming the file: a spreadsheet may have shortened the costs.
+    """
+    import logging
+
     path = tmp_path / "t.csv"
     path.write_bytes(b"\xef\xbb\xbfname,simulations,seed_offset,cost\na,10,0,1.5\n")
-    assert [r["name"] for r in block_scoring.read_rows(path)] == ["a"]
+    with caplog.at_level(logging.WARNING, logger=block_scoring.log.name):
+        assert [r["name"] for r in block_scoring.read_rows(path)] == ["a"]
+    assert str(path) in caplog.text and "rewrote" in caplog.text
+
+
+def test_a_table_without_a_byte_order_mark_gives_no_warning(tmp_path, caplog):
+    """The pilots' own tables, as they write them, read quietly."""
+    import logging
+
+    path = tmp_path / "t.csv"
+    path.write_bytes(b"name,simulations,seed_offset,cost\na,10,0,1.5\n")
+    with caplog.at_level(logging.WARNING, logger=block_scoring.log.name):
+        block_scoring.read_rows(path)
+    assert not caplog.text
