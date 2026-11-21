@@ -609,9 +609,9 @@ def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
 
 @pytest.fixture
 def socket_path():
-    """A path holding a bound AF_UNIX socket, in a short directory under $TMPDIR.
+    """A path holding a bound AF_UNIX socket, in a short directory: $TMPDIR, else /tmp.
 
-    pytest's own tmp_path can pass macOS's 104-byte cap on a socket's path.
+    pytest's own tmp_path, or a long $TMPDIR, can pass macOS's 104-byte cap on a socket's path.
     """
     import shutil
     import socket
@@ -619,6 +619,9 @@ def socket_path():
     from pathlib import Path
 
     directory = Path(tempfile.mkdtemp(prefix="cs"))
+    if len(str(directory / "t.csv")) > 100:  # a long $TMPDIR: macOS caps the path at 104 bytes
+        directory.rmdir()
+        directory = Path(tempfile.mkdtemp(prefix="cs", dir="/tmp"))
     listener = socket.socket(socket.AF_UNIX)
     try:
         path = directory / "t.csv"
@@ -1018,3 +1021,28 @@ def test_a_table_another_program_holds_says_to_resume_when_it_lets_go(tmp_path, 
 def test_a_busy_table_is_not_among_the_refusals_of_a_create():
     """EAGAIN means a lease only from the non-blocking open, which handles it on its own."""
     assert errno.EAGAIN not in block_scoring.TABLE_REFUSALS
+
+
+def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monkeypatch):
+    """An OSError with an errno but no strerror: the message gives the errno's own text."""
+    import os
+
+    path = tmp_path / "t.csv"
+    real_open, real_lstat = os.open, os.lstat
+
+    def exists(p, flags, *args, **kwargs):
+        if flags & os.O_EXCL:
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(p))
+        return real_open(p, flags, *args, **kwargs)
+
+    def bare(p, *a, **kw):
+        if str(p) == str(path):
+            raise OSError(errno.ENOENT)
+        return real_lstat(p, *a, **kw)
+
+    monkeypatch.setattr(os, "open", exists)
+    monkeypatch.setattr(os, "lstat", bare)
+    with pytest.raises(block_scoring.TableError) as error:
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+    assert "None" not in str(error.value) and os.strerror(errno.ENOENT) in str(error.value)

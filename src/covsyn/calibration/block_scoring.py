@@ -69,6 +69,18 @@ TABLE_REFUSALS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS, errno.ELOOP,
 NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV, errno.EOPNOTSUPP, errno.ENOTSUP})
 
 
+def _reason(error: OSError) -> str:
+    """The error's text, or its errno's when it came without one.
+
+    OSError(code) with one argument leaves errno unset and keeps the code in args.
+    """
+    if error.strerror:
+        return error.strerror
+    code = error.errno if error.errno is not None else next(
+        (a for a in error.args[:1] if isinstance(a, int)), None)  # fmt: skip
+    return os.strerror(code) if code is not None else str(error)
+
+
 def _raise_refused(path: Path, error: OSError, entry: bool = False) -> None:
     """Raise a TableError naming path for an error that refuses the table; else return.
 
@@ -92,7 +104,7 @@ def _raise_refused(path: Path, error: OSError, entry: bool = False) -> None:
             f"{path} is held by another program for now; resume when it lets go"
         ) from None
     if error.errno in TABLE_REFUSALS:
-        raise TableError(f"{path}: {error.strerror}") from None
+        raise TableError(f"{path}: {_reason(error)}") from None
 
 
 def _open_regular(path: Path, flags: int) -> int:
@@ -274,7 +286,7 @@ def _taken(path: Path) -> str:
     try:
         entry = os.lstat(path).st_mode
     except OSError as error:  # gone again, or refused: what was there cannot be said
-        return (f"{path} changed while the pilot looked at it ({error.strerror}); check it, "
+        return (f"{path} changed while the pilot looked at it ({_reason(error)}); check it, "
                 f"then start the pilot again")
     if stat.S_ISLNK(entry):
         try:
@@ -286,7 +298,7 @@ def _taken(path: Path) -> str:
         except OSError as error:
             if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):  # there, unreachable
                 return (f"{path} is a symbolic link{target} whose target cannot be reached: "
-                        f"{error.strerror}")
+                        f"{_reason(error)}")
             return (f"{path} is a symbolic link{target} that leads to no file, where the pilot "
                     f"would make its table; remove it or point it at an existing table")
         entry = leads_to
