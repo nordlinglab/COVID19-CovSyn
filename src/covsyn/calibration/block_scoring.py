@@ -45,7 +45,8 @@ def read_rows(path: Path) -> list[dict[str, str]]:
         return []
     # Cut before decoding: the kill may have split a character, which only that line holds.
     data = Path(path).read_bytes()
-    text = data[: data.rfind(b"\n") + 1].decode("utf-8")
+    # utf-8-sig: a spreadsheet saving it as "CSV UTF-8" adds a byte order mark.
+    text = data[: data.rfind(b"\n") + 1].decode("utf-8-sig")
     return [
         row
         for row in csv.DictReader(io.StringIO(text, newline=""))
