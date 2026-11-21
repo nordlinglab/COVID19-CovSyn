@@ -604,3 +604,17 @@ def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger=block_scoring.log.name):
         assert [r["name"] for r in block_scoring.read_rows(path, warn=False)] == ["a"]
     assert not caplog.text
+
+
+def test_a_table_gone_between_the_check_and_the_read_is_not_started_yet(tmp_path, monkeypatch):
+    """Removed or replaced (a save-as-rename) mid-read: no rows, no mark, no traceback."""
+    from pathlib import Path
+
+    path = tmp_path / "t.csv"
+    path.write_text("name,simulations,seed_offset,cost\na,10,0,1.5\n")
+
+    def gone(self):
+        raise FileNotFoundError(2, "No such file or directory", str(self))
+
+    monkeypatch.setattr(Path, "read_bytes", gone)
+    assert block_scoring.read_table(path) == ([], False)

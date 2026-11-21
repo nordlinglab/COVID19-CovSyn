@@ -48,10 +48,11 @@ def read_table(path: Path, warn: bool = True) -> tuple[list[dict[str, str]], boo
     save that adds no mark, such as plain "CSV", shortens the costs just the same and is not
     detected.
     """
-    if not Path(path).is_file():
-        return [], False
     # Cut before decoding: the kill may have split a character, which only that line holds.
-    data = Path(path).read_bytes()
+    try:  # one step, so a table removed or replaced meanwhile reads as not yet started
+        data = Path(path).read_bytes()
+    except (FileNotFoundError, IsADirectoryError):
+        return [], False
     marked = data.startswith(codecs.BOM_UTF8)
     if warn and marked:  # utf-8-sig below skips it
         log.warning("%s starts with a byte order mark: another program, such as a spreadsheet, "
