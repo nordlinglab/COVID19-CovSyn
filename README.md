@@ -114,6 +114,22 @@ A run directory that is a link to other storage is not supported.
 `src/covsyn/pipeline/default.toml` holds the settings, such as the optimisation and validation streams and the previous run's `checks.json` to compare with;
 `--config` also takes another TOML file.
 
+Two pilots size the production run (Task 9), and each writes its command, settings and results into `results/tables/<run-id>/` and resumes with `--resume results/tables/<run-id>`:
+
+```bash
+uv run covsyn-pilot-noise
+uv run covsyn-pilot-size --noise results/tables/<pilot-1 run-id>
+```
+
+Pilot 1 scores the literature vector, the run-19 vector and two random rows of the initial population on 30 blocks of validation stream 201 at each S of 300, 1,000, 3,000 and 10,000, and every row on two blocks at S = 10,000 for the cost spread across the population.
+It chooses the smallest S at which the largest SD of a paired difference between the vectors is at most 10% of that spread, and none when no S passes.
+Pilot 2 runs `--mode pilot` for n of 24, 48 and 96 and α_0 of 0.05 and 0.2, each on optimisation streams 1 and 2, for G = ⌊(10,000 − n) / n⌋ generations with G_plan = G, at pilot 1's S.
+It scores each run's 10 best distinct archive vectors on blocks 0 to 29 of validation stream 202, takes the lowest as the run's representative, and scores the representatives on blocks 30 to 59.
+It chooses the setting with the lowest mean cost whose two runs agree, the mean of their block-by-block differences being at most its SD / √30, and none when no setting's runs agree.
+The production run, `--mode production` or `mode = "production"` in `[optimise]`, takes pilot 2's n (`pop_size`), S (`simulations`), α_0, α_end, G_plan and run id (`pilot`), all required.
+It scores each new elite vector on blocks 0 to 4 of monitoring stream 100, and stops when the best monitored vector has improved by no more than one paired standard error over 5 generations, or at G_max = 1,000 generations;
+the reason goes into `run.log`, and the monitoring's cost into `monitoring.json` beside `progress.csv`.
+
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.
 The pipeline warns as soon as available memory falls below 10% of the total.
 A stage is refused when the latest earlier run with the same `pipeline.toml` that measured the stage whole shows it needs more than the available memory: its steps' peak plus the workers times the peak per worker.
