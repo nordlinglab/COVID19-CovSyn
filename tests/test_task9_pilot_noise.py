@@ -418,3 +418,4 @@ def test_a_config_nested_too_deep_by_the_second_read_is_a_command_error(
         pn.main(["--resume", str(out), "--workers", "3"])
     err = capsys.readouterr().err
     assert stop.value.code == 2 and err.count(out.name) == 1
+    assert "could not record the workers" in err  # the record step's, not the first read's
