@@ -26,22 +26,17 @@ resumes where it stopped), and the summaries vectors.csv, pairs.csv and choice.j
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
-import csv
 import itertools
 import json
-import multiprocessing
 import os
-import pickle
 import shlex
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import numpy as np
 
-from covsyn.calibration import initial_population, parameter_space, seed_streams
+from covsyn.calibration import block_scoring, initial_population, parameter_space, seed_streams
 from covsyn.runtime import hardware, runs
 
 STREAM = 201
@@ -154,37 +149,19 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "failed_evaluations": failed}
 
 
-def _read_blocks(path: Path) -> list[dict[str, str]]:
-    if not path.is_file():
-        return []
-    with open(path, newline="") as f:
-        return list(csv.DictReader(f))
-
-
-def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def write_summary(out_dir: Path) -> dict[str, Any]:
     """Summarise out_dir's blocks.csv into vectors.csv, pairs.csv and choice.json."""
-    summary = summarise(_read_blocks(Path(out_dir) / BLOCKS_FILE))
-    _write_csv(Path(out_dir) / VECTORS_FILE, summary["vectors"])
-    _write_csv(Path(out_dir) / PAIRS_FILE, summary["pairs"])
+    summary = summarise(block_scoring.read_rows(Path(out_dir) / BLOCKS_FILE))
+    block_scoring.write_csv(Path(out_dir) / VECTORS_FILE, summary["vectors"])
+    block_scoring.write_csv(Path(out_dir) / PAIRS_FILE, summary["pairs"])
     choice = {**summary["choice"], "spread": summary["spread"],
               "failed_evaluations": summary["failed_evaluations"]}
     (Path(out_dir) / CHOICE_FILE).write_text(json.dumps(choice, indent=1) + "\n")
     return summary
 
 
-Evaluate = Callable[[np.ndarray, int], tuple]
-MakePool = Callable[[int], concurrent.futures.Executor]
-
-
 def run(out_dir: Path, population: np.ndarray, lower: np.ndarray, upper: np.ndarray,
-        evaluate: Evaluate, make_pool: MakePool) -> dict[str, Any]:
+        evaluate: block_scoring.Evaluate, make_pool: block_scoring.MakePool) -> dict[str, Any]:
     """Score every evaluation not yet in out_dir/blocks.csv, then write the summaries.
 
     Args:
@@ -198,29 +175,10 @@ def run(out_dir: Path, population: np.ndarray, lower: np.ndarray, upper: np.ndar
     """
     path = Path(out_dir) / BLOCKS_FILE
     done = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
-            for r in _read_blocks(path)}  # fmt: skip
-    todo = [t for t in tasks(pilot_rows(), len(population)) if t.key not in done]
+            for r in block_scoring.read_rows(path)}  # fmt: skip
+    todo = [t._asdict() for t in tasks(pilot_rows(), len(population)) if t.key not in done]
     parameters = np.asarray(population, dtype=float) * (upper - lower) + lower
-    new_file = not path.is_file()
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        if new_file:
-            writer.writeheader()
-            f.flush()
-        for simulations in dict.fromkeys(t.simulations for t in todo):
-            group = [t for t in todo if t.simulations == simulations]
-            with make_pool(simulations) as pool:
-                futures = {pool.submit(evaluate, parameters[t.row], t.seed_offset): t
-                           for t in group}  # fmt: skip
-                try:
-                    for future in concurrent.futures.as_completed(futures):
-                        t = futures[future]
-                        writer.writerow({**t._asdict(), "cost": float(future.result()[0])})
-                        f.flush()  # a killed pilot keeps every finished evaluation
-                except BaseException:
-                    for future in futures:
-                        future.cancel()
-                    raise
+    block_scoring.score(path, todo, COLUMNS, lambda t: parameters[t["row"]], evaluate, make_pool)
     return write_summary(out_dir)
 
 
@@ -233,25 +191,9 @@ def _population_and_bounds() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return population, space.lower, space.upper
 
 
-def _evaluator(workers: int | None) -> tuple[Evaluate, MakePool]:
-    """The objective, and a spawned pool per S whose workers hold its inputs (Task 6)."""
-    from covsyn.calibration import fast_cost
-
-    count = hardware.resolve_workers(workers, os.environ, None)
-    with open("./variable/demographic_parameters.pkl", "rb") as f:
-        demo = pickle.load(f)
-    with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
-        ct = pickle.load(f)
-    cheng = (ct["Cheng_contact_array"], ct["Cheng_attack_rate"], ct["norm_weights"])
-    taiwan = np.load("./variable/Taiwan_data_matrix.npy")
-
-    def make_pool(simulations: int) -> concurrent.futures.Executor:
-        return concurrent.futures.ProcessPoolExecutor(
-            max_workers=count, mp_context=multiprocessing.get_context("spawn"),
-            initializer=fast_cost.init_worker,
-            initargs=(demo, taiwan.shape[1], False, None, cheng, simulations, taiwan))
-
-    return fast_cost.evaluate_candidate, make_pool
+def _evaluator(workers: int | None) -> tuple[block_scoring.Evaluate, block_scoring.MakePool]:
+    """The objective and its pools; replaced in the tests."""
+    return block_scoring.objective_pools(workers)
 
 
 def main(argv: list[str] | None = None) -> Path:
