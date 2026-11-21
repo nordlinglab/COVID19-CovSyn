@@ -320,7 +320,19 @@ def _capped(
     return workers
 
 
-def _override(value: str | int, source: str) -> int:
+def parse_workers(value: str | int, source: str) -> int:
+    """A worker count given as --workers or COVSYN_WORKERS.
+
+    Args:
+        value: The count, as given: an int, or text with surrounding space allowed.
+        source: What gave it, named in the error.
+
+    Returns:
+        The count.
+
+    Raises:
+        ValueError: Not a whole number of at least 1.
+    """
     try:
         workers = int(value) if isinstance(value, int) else int(value.strip())
     except ValueError:
@@ -352,12 +364,14 @@ def resolve_workers(
         ValueError: ``--workers`` is not a positive whole number.
     """
     if cli is not None:
-        return _capped(_override(cli, "--workers"), "--workers", memory_per_worker_gb, available_gb)
+        return _capped(
+            parse_workers(cli, "--workers"), "--workers", memory_per_worker_gb, available_gb
+        )
     # Spelled out, not ENV_VARIABLE, so test_b86's scan of environment reads finds it.
     requested = env.get("COVSYN_WORKERS", "")
     if requested.strip():
         try:
-            workers = _override(requested, ENV_VARIABLE)
+            workers = parse_workers(requested, ENV_VARIABLE)
         except ValueError as error:
             log.warning("%s; using the default instead", error)
         else:
@@ -368,7 +382,7 @@ def resolve_workers(
 def positive_int(text: str) -> int:
     """An argparse type for a worker count, so a bad ``--workers`` fails at parsing."""
     try:
-        return _override(text, "--workers")
+        return parse_workers(text, "--workers")
     except ValueError:
         # argparse names the option itself, so the message leaves it out.
         raise argparse.ArgumentTypeError(f"must be a positive whole number, got {text!r}") from None

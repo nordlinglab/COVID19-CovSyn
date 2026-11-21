@@ -19,8 +19,8 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration import (initial_population, parameter_space, revalidation, seed_streams,
-                                step_schedule)
+from covsyn.calibration import (initial_population, monitoring, parameter_space, revalidation,
+                                run_size, seed_streams, step_schedule)
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1567,12 +1567,17 @@ class Firefly:
         self.profile_dir = None
         # Task 7: the run's optimisation stream, whose block g generation g is scored on.
         self.stream = seed_streams.DEFAULT_OPTIMISATION_STREAM
+        # Task 9: a production run monitors its new elite members and stops by their scores.
+        self.monitor = False
 
     @staticmethod
     def _state(normalized, fireflies, intensities, cost_parts, elite_records, worst_fireflies,
-               worst_intensities, worst_iteration, evaluations, alpha, dim):
-        """What a checkpoint holds: everything the next generation reads (Task 4)."""
-        return {'normalized': np.asarray(normalized, dtype=float),
+               worst_intensities, worst_iteration, evaluations, alpha, dim, monitored=None):
+        """What a checkpoint holds: everything the next generation reads (Task 4).
+
+        monitored: a production run's monitoring state and stop (Task 9), None otherwise.
+        """
+        return {**(monitored or {}), 'normalized': np.asarray(normalized, dtype=float),
                 'fireflies': np.asarray(fireflies, dtype=float),
                 'intensities': np.asarray(intensities, dtype=float),
                 'cost_parts': np.array(json.dumps(cost_parts)),
@@ -1753,6 +1758,11 @@ class Firefly:
                 start = next_generation(checkpoint)
                 for table in (progress_table, evaluation_table, generation_table):
                     drop_progress_after(table.path, start - 1)
+            # Task 9: a production run's monitored scores and stop, kept in its checkpoints.
+            watch = monitoring.Watch(self.monitor, dim, checkpoint)
+            if watch.stopped():  # a stopped run resumed: nothing to run; log it if lost
+                watch.log_stop(result_path, start - 1)
+                start = max_generations
 
             # Task 8: the elite the next generation keeps, from the costs it starts with; each
             # generation's costs choose the one after, so it is chosen once.
@@ -1801,6 +1811,9 @@ class Firefly:
                 elite_records = record_elite(elite_records, fireflies, intensities,
                                              set(elite) | set(next_elite), generation)
                 elite = next_elite
+                if self.monitor:  # Task 9: score the new members, then apply the rule
+                    watch.score(executor, function, fireflies[next_elite], self.simulations)
+                    watch.judge(generation, max_generations)
                 row = {'generation': generation, 'seed_offset': offset,
                        'best_cost': float(np.min(intensities))}
                 row.update(cost_parts[best_idx])
@@ -1814,8 +1827,13 @@ class Firefly:
                 finish_generation(self._state(
                     normalized_fireflies, fireflies, intensities, cost_parts, elite_records,
                     worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
-                    dim))
+                    dim, watch.state()))
+                if watch.stopped():  # Task 9: after its checkpoint, so a resume knows it
+                    watch.log_stop(result_path, generation)
+                    break
 
+            if self.monitor:
+                watch.write_summary(tables, self.simulations)
             executor.shutdown()  # the workers write their profiles as they exit
         except BaseException:
             # A failed or stopped run cancels the tasks not yet started and waits for the rest:
@@ -1843,8 +1861,7 @@ class Firefly:
         # firefly_txt_to_csv require the four result files to have equal row counts -- so the
         # final population fills it, and the elite vectors go to firefly_archive.txt, which
         # revalidation.load_candidates adds to the candidate pool when it exists (Task 8).
-        np.savetxt(result_path/'firefly_archive.txt', archive_rows(elite_records), fmt='%.7f',
-                   header=ARCHIVE_HEADER)
+        write_archive(result_path/'firefly_archive.txt', archive_rows(elite_records))
         best_iteration = np.full(self.pop_size, float(evaluations))
         return (np.array(fireflies, dtype=float), np.array(intensities, dtype=float),
                 best_iteration, worst_fireflies, worst_intensities, worst_iteration,
@@ -1867,6 +1884,10 @@ OPTIMISER_MODES = {
     # Task 5: the population is the worker count, set in main(), and S comes from the command
     # line; a profile is run again, never resumed.
     'profile': (None, 1, 0.01),
+    # Task 9: pilot 2's runs, whose n, generations, S and alpha_0 the pilot gives (main()),
+    # and the production run, whose n, S and step schedule pilot 2 chose.
+    'pilot': (None, 1, 0.03),
+    'production': (None, 1, 0.03),
 }
 PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
 
@@ -1890,6 +1911,14 @@ def started_as_long_as_plan(run_dir: Path, g_plan: int) -> bool:
 def next_generation(checkpoint: dict) -> int:
     """The generation a resume runs first, after the checkpoint's (the initial one's is -1)."""
     return int(checkpoint['generation']) + 1
+
+
+def write_archive(path: Path, rows: np.ndarray, header: str = ARCHIVE_HEADER) -> None:
+    """firefly_archive.txt: its header, then one row per elite vector (Task 8), as UTF-8.
+
+    UTF-8, as revalidation and pilot 2 read it; np.savetxt's own default is latin1.
+    """
+    np.savetxt(path, rows, fmt='%.7f', header=header, encoding='utf-8')
 
 
 def generations_problem(max_generations: int) -> str | None:
@@ -1920,7 +1949,7 @@ def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
             pass.
     """
     try:
-        config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
+        config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8-sig'))
         seed, mode = config['rng_seed'], config['settings']['mode']
         stage_timing = config['settings'].get('stage_timing') is True
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
@@ -1953,7 +1982,7 @@ def recorded_settings(run_dir: Path) -> dict:
             (status 1) for any other read error, which may pass, as in resumed_settings.
     """
     try:
-        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
+        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8-sig'))[
             'settings']
         if not isinstance(settings, dict):
             raise TypeError(f'settings is {settings!r}')
@@ -2032,6 +2061,34 @@ def positive_int(text: str) -> int:
     return value
 
 
+def command_size(mode: str, pop_size: int | None, generations: int | None,
+                 simulations: int | None) -> tuple[int, int | None, int]:
+    """A pilot or production run's n, G and S from the command line (Task 9).
+
+    G is the pilot's; production gives None, as it runs to G_max.
+
+    Raises:
+        SystemExit: One is missing or out of range, naming its flag and the mode.
+    """
+    try:
+        return run_size.from_command(mode, pop_size, generations, simulations)
+    except ValueError as error:
+        sys.exit(str(error))
+
+
+def recorded_size(run_dir: Path) -> tuple[int, int, int]:
+    """The n, G and S a pilot or production run recorded, to resume it with (Task 9).
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when one is missing or out of range, naming it; see
+            recorded_settings for a config.json that cannot be read.
+    """
+    try:
+        return run_size.from_settings(recorded_settings(run_dir))
+    except ValueError as error:
+        not_resumable(f'{run_dir} cannot be resumed: its config.json {error}')
+
+
 def recorded_schedule(run_dir: Path) -> tuple[float, float, int]:
     """The step schedule a run recorded in its config.json, to resume it with (Task 8).
 
@@ -2070,7 +2127,8 @@ def resume_arguments(args: argparse.Namespace) -> str:
 
     Raises:
         SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations,
-            --stream, --alpha-0, --alpha-end, --g-plan or --stage-timings.
+            --stream, --alpha-0, --alpha-end, --g-plan, --pop-size, --generations, --pilot or
+            --stage-timings.
     """
     if args.resume is None:
         return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
@@ -2081,6 +2139,9 @@ def resume_arguments(args: argparse.Namespace) -> str:
                                       ('--alpha-0', getattr(args, 'alpha_0', None)),
                                       ('--alpha-end', getattr(args, 'alpha_end', None)),
                                       ('--g-plan', getattr(args, 'g_plan', None)),
+                                      ('--pop-size', getattr(args, 'pop_size', None)),
+                                      ('--generations', getattr(args, 'generations', None)),
+                                      ('--pilot', getattr(args, 'pilot', None)),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
@@ -2115,7 +2176,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Firefly optimization')
     # parser.add_argument('--result_path', type=str, default='./Firefly_result/')
     parser.add_argument('--mode', type=str, default=None,
-                        help='train (default), test or profile; a resumed run keeps its own')
+                        help='train (default), test, profile, pilot (Task 9 pilot 2) or '
+                             'production (Task 9); a resumed run keeps its own')
     # parser.add_argument('--shift_percentage', type=float, default=0.3)
     hardware.add_workers_argument(parser)  # Task 2: was --max_workers, os.cpu_count() (D3)
     # B49: firefly_best.txt files of earlier runs seeded fireflies 1..; since Task 7 the warm
@@ -2135,15 +2197,23 @@ def main() -> None:
                              f'(default {DEFAULT_RNG_SEED})')
     # Task 5
     parser.add_argument('--simulations', type=int, default=None,
-                        help=f'profile mode: simulations per evaluation, S '
-                             f'(default {PROFILE_SIMULATIONS})')
+                        help=f'profile and pilot modes: simulations per evaluation, S '
+                             f'(profile default {PROFILE_SIMULATIONS})')
+    # Task 9: checked in main(), so a refusal names the flag
+    parser.add_argument('--pop-size', type=int, default=None,
+                        help='pilot and production modes: number of fireflies, n')
+    parser.add_argument('--generations', type=int, default=None,
+                        help='pilot mode: number of generations, G')
+    parser.add_argument('--pilot', default=None,
+                        help="production mode: pilot 2's run id, whose choice it runs")
     parser.add_argument('--stream', type=optimisation_stream, default=None,
                         help='optimisation stream, 1 to 99, whose block g scores generation g '
                              f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
     # Task 8: the step schedule, which pilot 2 (Task 9) chooses
     parser.add_argument('--alpha-0', type=positive_float, default=None,
                         help="step size of generation 0 (default: the mode's, "
-                             f'{DEFAULT_ALPHA_0} for every mode until pilot 2)')
+                             f'{DEFAULT_ALPHA_0} for train, test and profile; required for '
+                             'pilot and production)')
     parser.add_argument('--alpha-end', type=positive_float, default=None,
                         help=f'step size from generation G_plan - 1 on, at most --alpha-0 '
                              f'(default {DEFAULT_ALPHA_END})')
@@ -2174,13 +2244,35 @@ def main() -> None:
     if mode == 'profile':
         pop_size = max_workers
         simulations = PROFILE_SIMULATIONS if args.simulations is None else args.simulations
-        if not 1 <= simulations <= seed_streams.MAX_SIMULATIONS:  # Task 7: one block's seeds
-            sys.exit(f'--simulations must be 1 to {seed_streams.MAX_SIMULATIONS}, '
-                     f'not {simulations}')
+        try:  # Task 7: one block's seeds; Task 9: in the pilot and production modes' words
+            run_size.check_command(mode, '--simulations', simulations, run_size.SIMULATIONS)
+        except ValueError as error:
+            sys.exit(str(error))
+    elif mode == 'pilot':  # Task 9: the pilot's n, G and S; a resume's from its config.json
+        pop_size, max_generations, simulations = (
+            command_size(mode, args.pop_size, args.generations, args.simulations)
+            if args.resume is None else recorded_size(args.resume))
+    elif mode == 'production':  # Task 9: pilot 2's n, S and schedule, to G_max
+        if args.resume is None:
+            pop_size, _, simulations = command_size(mode, args.pop_size, None,
+                                                    args.simulations)
+            for flag, value in (('--g-plan', args.g_plan), ('--alpha-end', args.alpha_end),
+                                ('--pilot', args.pilot)):
+                if value is None:
+                    sys.exit(f"--mode production needs {flag}, pilot 2's choice")
+        else:
+            pop_size, _, simulations = recorded_size(args.resume)
+            args.pilot = recorded_settings(args.resume).get('pilot')
     elif args.simulations is not None:
-        sys.exit('--simulations changes the objective, so it is for --mode profile only')
+        sys.exit('--simulations changes the objective, so it is for --mode profile, pilot or '
+                 'production only')
     else:
         simulations = SIMULATIONS_PER_EVALUATION
+    for flag, value, modes in (('--pop-size', args.pop_size, ('pilot', 'production')),
+                               ('--generations', args.generations, ('pilot',)),
+                               ('--pilot', args.pilot, ('production',))):
+        if value is not None and mode not in modes:  # every other mode fixes them
+            sys.exit(f'{flag} is for --mode {" or ".join(modes)} only, not --mode {mode}')
 
     # Firefly
     # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
@@ -2200,6 +2292,9 @@ def main() -> None:
     fa = Firefly(pop_size, schedule[0], betamin, gamma, seed=args.seed, alpha_end=schedule[1],
                  g_plan=schedule[2])
     fa.run_settings = {'mode': mode}
+    if mode == 'production':  # Task 9: traced to pilot 2's choice, and stopped by its rule
+        fa.run_settings['pilot'] = args.pilot
+        fa.monitor = True
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
     fa.stream = (seed_streams.DEFAULT_OPTIMISATION_STREAM if args.stream is None

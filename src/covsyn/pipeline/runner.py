@@ -26,7 +26,6 @@ import argparse
 import contextlib
 import fcntl
 import functools
-import json
 import math
 import os
 import subprocess
@@ -112,20 +111,8 @@ class Reporter:
                 sys.stdout.flush()
 
 
-def json_lines(path: Path) -> list[dict]:
-    """The JSON objects of a JSON-lines file; a line cut off by a kill, or no object, is skipped."""
-    path = Path(path)
-    if not path.exists():
-        return []
-    lines = []
-    for text in path.read_text(errors="replace").splitlines():
-        try:
-            line = json.loads(text)
-        except ValueError:
-            continue
-        if isinstance(line, dict):
-            lines.append(line)
-    return lines
+# The run.log reader, shared with the optimiser, which writes its stop there (Task 9).
+json_lines = runs.json_lines
 
 
 def finished_stages(run_dir: Path) -> list[str]:
@@ -438,15 +425,8 @@ def record_stage(
         "partial": peaks.get("partial", False),
         "warnings": list(warnings),
     }
-    path = Path(run_dir) / RUN_LOG
-    # A kill while writing leaves a line without its newline; start after it, not on it.
-    cut_off = False
-    if path.exists() and path.stat().st_size > 0:
-        with open(path, "rb") as f:
-            f.seek(-1, os.SEEK_END)
-            cut_off = f.read(1) != b"\n"
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(("\n" if cut_off else "") + json.dumps(line) + "\n")
+    # A kill while writing leaves a line without its newline; it starts after it, not on it.
+    runs.append_json_line(Path(run_dir) / RUN_LOG, line)
 
 
 class NoPipelineRun(FileNotFoundError):

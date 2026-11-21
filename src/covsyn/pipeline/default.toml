@@ -11,6 +11,11 @@ stream = 1                # Task 7: the optimisation stream, 1 to 99, one per ru
 # alpha_0 = 0.2
 # alpha_end = 0.001
 # g_plan = 120
+# Task 9: mode = "production" runs pilot 2's choice and needs all of alpha_0, alpha_end and
+# g_plan above and pop_size, simulations and pilot below; every other mode refuses these three.
+# pop_size = 48
+# simulations = 3000
+# pilot = "<pilot 2's run id>"
 # B49's warm starts (run 10, and run 19) are rows of variable/initial_population_v1.npz since
 # Task 7; the warm_start setting is gone.
 
