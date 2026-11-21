@@ -54,12 +54,22 @@ def from_command(mode: str, pop_size: int | None, generations: int | None,
     for flag, value, allowed in checks:
         if value is None:
             raise ValueError(f"--mode {mode} needs {flag}, which no default stands in for")
-        if value not in allowed:
-            raise ValueError(
-                f"--mode {mode}: {flag} must be a whole number from {_within(allowed)}, not {value}"
-            )
+        check_command(mode, flag, value, allowed)
     assert pop_size is not None and simulations is not None  # checked above
     return pop_size, generations, simulations
+
+
+def check_command(mode: str, flag: str, value: int, allowed: range) -> int:
+    """A size given on the command line, in its range; every mode refuses it in these words.
+
+    Raises:
+        ValueError: Out of range, naming the mode and the flag.
+    """
+    if value not in allowed:
+        raise ValueError(
+            f"--mode {mode}: {flag} must be a whole number from {_within(allowed)}, not {value}"
+        )
+    return value
 
 
 def from_settings(settings: dict[str, Any]) -> tuple[int, int, int]:

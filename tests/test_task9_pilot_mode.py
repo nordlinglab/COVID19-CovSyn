@@ -223,5 +223,7 @@ def test_the_profile_s_refusal_has_the_same_wording(monkeypatch, tmp_path):
     """--mode profile reads S by run_size's rule too."""
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", "profile", "--simulations",
                                       "20000", "--run-dir", str(tmp_path / "r")])  # fmt: skip
-    with pytest.raises(SystemExit, match="a whole number from 1 to 10000"):
+    with pytest.raises(SystemExit) as stop:
         fo.main()
+    assert str(stop.value) == ("--mode profile: --simulations must be a whole number from 1 to "
+                               "10000, not 20000")  # word for word the pilot mode's

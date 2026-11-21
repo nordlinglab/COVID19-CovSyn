@@ -2244,8 +2244,8 @@ def main() -> None:
     if mode == 'profile':
         pop_size = max_workers
         simulations = PROFILE_SIMULATIONS if args.simulations is None else args.simulations
-        try:  # Task 7: one block's seeds; Task 9: by the rule every S is read by
-            run_size.check_simulations(simulations, '--simulations')
+        try:  # Task 7: one block's seeds; Task 9: in the pilot and production modes' words
+            run_size.check_command(mode, '--simulations', simulations, run_size.SIMULATIONS)
         except ValueError as error:
             sys.exit(str(error))
     elif mode == 'pilot':  # Task 9: the pilot's n, G and S; a resume's from its config.json
