@@ -197,3 +197,13 @@ def test_reading_the_pipeline_configuration_loads_no_scipy():
                            "print('scipy' in sys.modules)"], capture_output=True, text=True,
                           check=True)  # fmt: skip
     assert done.stdout.strip() == "False"
+
+
+def test_a_run_whose_config_an_editor_saved_with_a_byte_order_mark_resumes(monkeypatch,
+                                                                           tmp_path):
+    """The optimiser reads its config.json past a BOM, as the pilots read theirs."""
+    run = _pilot_run(tmp_path)
+    config = run / "config.json"
+    config.write_bytes(b"\xef\xbb\xbf" + config.read_bytes())
+    seen = _resume(monkeypatch, run)
+    assert seen["engine"].pop_size == 4

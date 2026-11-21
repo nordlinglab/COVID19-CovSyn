@@ -1949,7 +1949,7 @@ def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
             pass.
     """
     try:
-        config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))
+        config = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8-sig'))
         seed, mode = config['rng_seed'], config['settings']['mode']
         stage_timing = config['settings'].get('stage_timing') is True
     except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
@@ -1982,7 +1982,7 @@ def recorded_settings(run_dir: Path) -> dict:
             (status 1) for any other read error, which may pass, as in resumed_settings.
     """
     try:
-        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
+        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8-sig'))[
             'settings']
         if not isinstance(settings, dict):
             raise TypeError(f'settings is {settings!r}')
