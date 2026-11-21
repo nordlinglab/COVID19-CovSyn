@@ -117,7 +117,7 @@ def archive_candidates(path: Path, k: int = CANDIDATES) -> np.ndarray:
     with open(path, encoding="utf-8") as f:
         if f.readline().strip() != f"# {ARCHIVE_HEADER}":
             raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
-    rows = np.loadtxt(path, ndmin=2)
+    rows = np.loadtxt(path, ndmin=2, encoding="utf-8")
     order = np.lexsort((np.arange(len(rows)), rows[:, 0], rows[:, -1]))
     chosen: list[np.ndarray] = []
     for i in order:

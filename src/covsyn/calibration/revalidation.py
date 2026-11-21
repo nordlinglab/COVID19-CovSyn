@@ -89,7 +89,7 @@ def read_archive(path: Path) -> tuple[np.ndarray, np.ndarray]:
         version_2 = f.readline().startswith("# " + ARCHIVE_HEADER)
     with warnings.catch_warnings():  # a file of no rows is an empty archive, not a mistake
         warnings.simplefilter("ignore", UserWarning)
-        rows = np.loadtxt(path, ndmin=2)  # the header is a comment
+        rows = np.loadtxt(path, ndmin=2, encoding="utf-8")  # the header is a comment
     if rows.size == 0:
         return np.empty((0, 0)), np.empty(0)
     first = 2 if version_2 else 1

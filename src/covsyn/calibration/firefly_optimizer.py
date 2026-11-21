@@ -1862,7 +1862,7 @@ class Firefly:
         # final population fills it, and the elite vectors go to firefly_archive.txt, which
         # revalidation.load_candidates adds to the candidate pool when it exists (Task 8).
         np.savetxt(result_path/'firefly_archive.txt', archive_rows(elite_records), fmt='%.7f',
-                   header=ARCHIVE_HEADER)
+                   header=ARCHIVE_HEADER, encoding='utf-8')
         best_iteration = np.full(self.pop_size, float(evaluations))
         return (np.array(fireflies, dtype=float), np.array(intensities, dtype=float),
                 best_iteration, worst_fireflies, worst_intensities, worst_iteration,

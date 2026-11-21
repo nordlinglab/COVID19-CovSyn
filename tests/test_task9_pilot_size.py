@@ -774,3 +774,39 @@ def test_a_config_turned_into_a_list_is_named_once(tmp_path, monkeypatch, capsys
         ps.main(["--resume", str(out), "--workers", "3"])
     err = capsys.readouterr().err
     assert "not a JSON object" in err and err.count(out.name) == 1
+
+
+def test_the_archive_is_read_as_utf_8_header_and_rows(tmp_path, monkeypatch):
+    """Both the header check and np.loadtxt, as the optimiser writes it (Task 9 review)."""
+    _archive(tmp_path, [[0, 1, 0.1, 0.2, 0.3, 4.0]])
+    seen = []
+    real = np.loadtxt
+    monkeypatch.setattr(np, "loadtxt", lambda *a, **kw: seen.append(kw.get("encoding"))
+                        or real(*a, **kw))  # fmt: skip
+    ps.archive_candidates(tmp_path / "firefly_archive.txt")
+    assert seen == ["utf-8"]
+
+
+def test_revalidation_reads_the_archive_as_utf_8(tmp_path, monkeypatch):
+    """The other reader of the archive, the same way."""
+    from covsyn.calibration import revalidation
+
+    _archive(tmp_path, [[0, 1, 0.1, 0.2, 0.3, 4.0]])
+    seen = []
+    real = np.loadtxt
+    monkeypatch.setattr(np, "loadtxt", lambda *a, **kw: seen.append(kw.get("encoding"))
+                        or real(*a, **kw))  # fmt: skip
+    revalidation.read_archive(tmp_path / "firefly_archive.txt")
+    assert seen == ["utf-8"]
+
+
+def test_the_optimiser_writes_the_archive_as_utf_8():
+    """np.savetxt's default is latin1; the readers read UTF-8."""
+    import inspect
+
+    from covsyn.calibration import firefly_optimizer as fo
+
+    source = inspect.getsource(fo.Firefly.firefly)
+    call = source[source.index("np.savetxt(result_path/'firefly_archive.txt'"):]
+    call = call[: call.index(")\n") + 1]
+    assert "encoding='utf-8'" in call or 'encoding="utf-8"' in call
