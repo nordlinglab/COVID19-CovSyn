@@ -10,6 +10,7 @@ then still write a header, and start its rows on a line of their own.
 from __future__ import annotations
 
 import concurrent.futures
+import errno
 
 import numpy as np
 import pytest
@@ -391,32 +392,17 @@ def test_a_failed_write_closes_the_descriptor_and_leaves_no_temporary(tmp_path, 
 def test_a_group_that_cannot_be_kept_is_refused(tmp_path, monkeypatch):
     """The replacement would take the user's group, and lab members their access with it."""
     import json
-    import os
 
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"settings": {}, "workers": 2}))
-    real_stat = os.stat
-    group = real_stat(path).st_gid + 1
-
-    class Stat:
-        def __init__(self, st):
-            self.st = st
-
-        def __getattr__(self, name):
-            return group if name == "st_gid" else getattr(self.st, name)
-
-    def stat_with_group(p, *a, **kw):
-        st = real_stat(p, *a, **kw)
-        return Stat(st) if str(p) == str(path) else st
 
     def refused(fd, uid, gid):
         raise PermissionError(1, "Operation not permitted")
 
-    monkeypatch.setattr(os, "stat", stat_with_group)
-    monkeypatch.setattr(os, "fchown", refused)
+    _other_group(monkeypatch, path, refused)
     with pytest.raises(PermissionError, match="group.*workers stay 2.*resume with 3"):
         block_scoring.record_workers(tmp_path, 3)
-    monkeypatch.setattr(os, "stat", real_stat)
+    monkeypatch.undo()
     assert json.loads(path.read_text())["workers"] == 2
     assert not list(tmp_path.glob("config.json.*.tmp"))
 
@@ -448,29 +434,41 @@ def test_the_group_is_given_to_the_replacement(tmp_path, monkeypatch):
 
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"settings": {}, "workers": 2}))
-    calls = []
+    calls, handles = [], []
     group = _other_group(monkeypatch, path, lambda fd, uid, gid: calls.append((fd, uid, gid)))
+    real_mkstemp = block_scoring.tempfile.mkstemp
+
+    def recording(*args, **kwargs):
+        handle, name = real_mkstemp(*args, **kwargs)
+        handles.append(handle)
+        return handle, name
+
+    monkeypatch.setattr(block_scoring.tempfile, "mkstemp", recording)
     block_scoring.record_workers(tmp_path, 3)
-    assert len(calls) == 1 and calls[0][1:] == (-1, group)
+    assert calls == [(handles[0], -1, group)]  # the temporary's descriptor
     monkeypatch.undo()
     assert json.loads(path.read_text())["workers"] == 3
     assert os.path.exists(path)
 
 
-@pytest.mark.parametrize("errno_", [22, 95])
+@pytest.mark.parametrize("errno_", [errno.EINVAL, errno.EOPNOTSUPP])
 def test_a_file_system_that_cannot_set_the_group_is_a_refusal(tmp_path, monkeypatch, errno_):
     """EINVAL or EOPNOTSUPP from fchown is a refusal naming the group, not a missing pilot."""
     import json
+    import os
 
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"settings": {}, "workers": 2}))
 
     def refused(fd, uid, gid):
-        raise OSError(errno_, "Operation not supported")
+        raise OSError(errno_, os.strerror(errno_))
 
     _other_group(monkeypatch, path, refused)
-    with pytest.raises(PermissionError, match="group"):
+    with pytest.raises(PermissionError, match="group.*workers stay 2.*resume with 3"):
         block_scoring.record_workers(tmp_path, 3)
+    monkeypatch.undo()
+    assert json.loads(path.read_text())["workers"] == 2
+    assert not list(tmp_path.glob("config.json.*.tmp"))
 
 
 def test_the_group_is_set_before_the_mode(tmp_path, monkeypatch):
@@ -501,3 +499,18 @@ def test_short_writes_still_write_the_whole_record(tmp_path, monkeypatch):
     block_scoring.record_workers(tmp_path, 3)
     monkeypatch.undo()
     assert json.loads(path.read_text()) == {"settings": {"simulations": 300}, "workers": 3}
+
+
+def test_a_write_that_takes_nothing_fails_rather_than_spins(tmp_path, monkeypatch):
+    """A file system whose write returns 0 for a non-empty buffer: an error, not a hang."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    monkeypatch.setattr(os, "write", lambda fd, data: 0)
+    with pytest.raises(OSError, match="short write"):
+        block_scoring.record_workers(tmp_path, 3)
+    monkeypatch.undo()
+    assert json.loads(path.read_text())["workers"] == 2
+    assert not list(tmp_path.glob("config.json.*.tmp"))

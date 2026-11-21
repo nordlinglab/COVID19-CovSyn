@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import csv
+import errno
 import io
 import json
 import logging
@@ -165,6 +166,7 @@ def record_workers(out_dir: Path, workers: int) -> None:
         raise ValueError(f"{path} is not a JSON object")
     if config.get("workers") == workers:
         return
+    kept = config.get("workers")
     mode = stat.S_IMODE(path.lstat().st_mode)
     # Replacing a link, a hard-linked file or a read-only one would undo what it was made for;
     # the mode bits count too, since os.access says yes to everything for root.
@@ -183,10 +185,9 @@ def record_workers(out_dir: Path, workers: int) -> None:
     if cause:
         raise PermissionError(
             f"{path} is {cause}, so its workers stay "
-            f"{config.get('workers')!r}; give a writable copy of its own to "
+            f"{kept!r}; give a writable copy of its own to "
             f"resume with {workers}"
         )
-    kept = config.get("workers")
     config["workers"] = workers
     data = (json.dumps(config, indent=1, allow_nan=False) + "\n").encode("utf-8")
     # A name of its own, created afresh (O_EXCL, no link followed), so neither a leftover link
@@ -209,7 +210,10 @@ def record_workers(out_dir: Path, workers: int) -> None:
             os.fchmod(handle, mode)
             view = memoryview(data)
             while view:
-                view = view[os.write(handle, view) :]
+                written = os.write(handle, view)
+                if not written:  # a file system that takes nothing would spin here forever
+                    raise OSError(errno.EIO, f"short write to {temporary}: 0 bytes taken")
+                view = view[written:]
             os.fsync(handle)
         finally:
             os.close(handle)
