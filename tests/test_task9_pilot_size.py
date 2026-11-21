@@ -697,9 +697,25 @@ def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, capsys):
     """NaN reads but does not write as JSON: an exit-2 refusal, not a traceback."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(
-        '{"settings": {"simulations": 300, "x": NaN}, "workers": 2}'
-    )
+    (out / "config.json").write_text('{"settings": {"simulations": 300, "x": NaN}, "workers": 2}')
     with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out), "--workers", "3"])
     assert stop.value.code == 2 and "could not record" in capsys.readouterr().err
+
+
+def test_a_real_short_write_is_reported_once_with_config_json_kept(tmp_path, monkeypatch, capsys):
+    """Through main and the real record step: exit 2, the path once, config.json unchanged."""
+    import os
+
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
+    monkeypatch.setattr(os, "write", lambda fd, data: 0)
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--resume", str(out), "--workers", "3"])
+    monkeypatch.undo()
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and "could not record" in err
+    assert err.count(str(out)) == 1
+    assert "config.json stays as it was" in err
+    assert json.loads((out / "config.json").read_text())["workers"] == 2

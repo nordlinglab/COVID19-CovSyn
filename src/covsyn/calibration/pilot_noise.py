@@ -223,7 +223,8 @@ def main(argv: list[str] | None = None) -> Path:
         except PermissionError as error:  # refused: say what was refused
             parser.error(str(error))
         except (OSError, ValueError) as error:  # ValueError: a NaN read, not writable as JSON
-            parser.error(f"{out}: could not record the workers in its config.json ({error})")
+            # The error names the file; the message adds what was being done.
+            parser.error(f"could not record the workers in {CONFIG_FILE}: {error}")
     else:
         out = runs.run_directory(runs.make_run_id("pilot-noise"), "tables", args.results_root,
                                  new=True)  # fmt: skip

@@ -214,8 +214,8 @@ def record_workers(out_dir: Path, workers: int) -> None:
                 if not written:  # a file system that takes nothing would spin here forever
                     raise OSError(
                         errno.EIO,
-                        "short write: the file system took 0 bytes of the "
-                        "new config.json, which stays as it was",
+                        "short write: the file system took 0 bytes of the new contents; "
+                        "config.json stays as it was",
                         str(path),
                     )
                 view = view[written:]
