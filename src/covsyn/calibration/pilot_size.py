@@ -39,7 +39,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from covsyn.calibration import block_scoring, seed_streams
+from covsyn.calibration import block_scoring, seed_streams, step_schedule
 from covsyn.calibration.revalidation import ARCHIVE_HEADER
 from covsyn.runtime import hardware, runs
 
@@ -52,6 +52,7 @@ VALIDATION_STREAM = 202
 SCREEN_BLOCKS = range(0, 30)
 CONFIRM_BLOCKS = range(30, 60)
 OPTIMISER = "covsyn.calibration.firefly_optimizer"
+FINISHED = "firefly_worst.txt"  # the optimiser's main() writes it last
 
 CONFIG_FILE = "config.json"
 RUNS_FILE = "runs.csv"
@@ -154,7 +155,8 @@ def choose(table: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
     best = min(agreeing, key=lambda line: line["mean_cost"])
     return {"pop_size": best["pop_size"], "alpha_0": best["alpha_0"],
             "generations": best["generations"], "g_plan": best["generations"],
-            "alpha_end": 0.001, "mean_cost": best["mean_cost"]}  # fmt: skip
+            "alpha_end": step_schedule.DEFAULT_ALPHA_END,  # the pilot mode's
+            "mean_cost": best["mean_cost"]}  # fmt: skip
 
 
 def _evaluations(run_dir: Path) -> int | None:
@@ -172,13 +174,18 @@ def _evaluations(run_dir: Path) -> int | None:
         return None
 
 
-def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute) -> None:
-    """Run each setting not yet finished: afresh, or from its checkpoint (as the pipeline)."""
+def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute,
+              workers: int | None) -> None:
+    """Run each setting not yet finished: afresh, or from its checkpoint (as the pipeline).
+
+    Each run takes the pilot's workers through COVSYN_WORKERS, which a resume reads too.
+    """
+    env = {} if workers is None else {hardware.ENV_VARIABLE: str(workers)}
     from covsyn.pipeline import stages
 
     for setting in settings():
         run_dir = Path(models_root) / run_name(prefix, setting)
-        if (run_dir / "firefly_result.txt").is_file():  # written last: the run finished
+        if (run_dir / FINISHED).is_file():  # the optimiser's last file: the run finished
             continue
         resume = stages.has_checkpoint(run_dir)
         if resume:
@@ -188,7 +195,7 @@ def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute
                 stages.discard_optimiser_output(run_dir)
             args = optimiser_args(setting, simulations, run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
-        status = execute(args, run_dir / "optimiser.log", resume, {})
+        status = execute(args, run_dir / "optimiser.log", resume, env)
         if status != 0:
             raise RuntimeError(f"run {run_dir.name} failed with status {status}; see "
                                f"{run_dir / 'optimiser.log'}, then resume the pilot")
@@ -219,10 +226,14 @@ def representatives(rows: Sequence[Mapping[str, Any]]) -> dict[str, int]:
 
 
 def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute: Execute,
-        evaluate: block_scoring.Evaluate, make_pool: block_scoring.MakePool) -> dict[str, Any]:
-    """Run, screen and confirm whatever is not yet done, then write the summaries."""
+        evaluate: block_scoring.Evaluate, make_pool: block_scoring.MakePool,
+        workers: int | None = None) -> dict[str, Any]:
+    """Run, screen and confirm whatever is not yet done, then write the summaries.
+
+    workers: the optimiser runs' workers; None leaves them to COVSYN_WORKERS or the cores.
+    """
     out_dir = Path(out_dir)
-    _optimise(models_root, prefix, simulations, execute)
+    _optimise(models_root, prefix, simulations, execute, workers)
 
     screen_path = out_dir / SCREEN_FILE
     done = {(r["run"], int(r["candidate"]), int(r["block"]))
@@ -289,8 +300,9 @@ def main(argv: list[str] | None = None) -> Path:
     args = parser.parse_args(argv)
     if (args.noise is None) == (args.resume is None):
         parser.error("give --noise for a new pilot or --resume for one begun")
+    workers = hardware.resolve_workers(args.workers, os.environ, None)
     if args.resume is not None:
-        out = args.resume
+        out = args.resume.resolve()  # the optimiser runs from the repository root
         try:
             recorded = json.loads((out / CONFIG_FILE).read_text())["settings"]
             simulations = recorded["simulations"]
@@ -299,16 +311,19 @@ def main(argv: list[str] | None = None) -> Path:
         root = out.parent.parent
     else:
         try:
-            simulations = json.loads((args.noise / "choice.json").read_text())[
-                "chosen_simulations"]  # fmt: skip
-        except (OSError, ValueError, KeyError) as error:
+            noise = json.loads((args.noise / "choice.json").read_text())
+            simulations = noise["chosen_simulations"]
+            failed = noise.get("failed_evaluations", 0)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             parser.error(f"{args.noise} holds no pilot 1 choice ({error!r})")
+        if failed:
+            parser.error(f"pilot 1 in {args.noise} had {failed} failed evaluations, whose "
+                         f"1e6 is no cost; its S is not pilot 2's to run")
         if simulations is None:
             parser.error(f"pilot 1 in {args.noise} chose no S: no S met its criterion, which "
                          f"the professor decides first")
-        root = args.results_root
+        root = args.results_root.resolve()
         out = runs.run_directory(runs.make_run_id("pilot-size"), "tables", root, new=True)
-        workers = hardware.resolve_workers(args.workers, os.environ, None)
         runs.write_config(out, {
             "command": shlex.join(["covsyn-pilot-size", *(sys.argv[1:] if argv is None
                                                           else argv)]),
@@ -323,7 +338,8 @@ def main(argv: list[str] | None = None) -> Path:
     prefix = out.name.rsplit("_", 1)[0]  # <stamp>_<commit>, shared by its runs
     evaluate, make_pool = _evaluator(args.workers)
     execute = functools.partial(run_module, keep_fds=())
-    summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool)
+    summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool,
+                  workers=workers)
     print(json.dumps(summary, indent=1))
     return out
 

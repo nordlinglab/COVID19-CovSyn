@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from covsyn.calibration import seed_streams, step_schedule
+from covsyn.calibration import run_size, seed_streams, step_schedule
 
 PACKAGED = Path(__file__).resolve().parent
 
@@ -60,7 +60,7 @@ REMOVED = {
 MAXIMA = {
     "monte_carlo": seed_streams.MAX_SIMULATIONS,
     "simulations": seed_streams.MAX_SIMULATIONS,  # Task 9: one block's seeds
-    "pop_size": 256,  # Task 9: the initial population's rows (initial_population.N_MAX)
+    "pop_size": run_size.POP_SIZES.stop - 1,  # Task 9: the initial population's rows
     "revalidation_blocks": seed_streams.MAX_BLOCKS,
     "age_rr_cases": seed_streams.STREAM_SPAN,
 }

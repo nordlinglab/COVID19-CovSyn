@@ -292,3 +292,12 @@ def test_resuming_a_directory_without_a_pilot_is_refused(tmp_path):
     """No config.json of a pilot: nothing to continue."""
     with pytest.raises(SystemExit):
         pn.main(["--resume", str(tmp_path)])
+
+
+def test_failed_evaluations_choose_no_s():
+    """A failed evaluation's 1e6 swamps the spread, so every S would pass: none is chosen."""
+    rows = _synthetic({300: 5.0, 1_000: 2.5, 3_000: 0.4, 10_000: 0.2}, 10.0)
+    spread = next(r for r in rows if r["kind"] == "spread")
+    spread["cost"] = pn.FAILED_EVALUATION_COST
+    choice = pn.summarise(rows)["choice"]
+    assert choice["chosen_simulations"] is None and choice["failed_evaluations"] == 1

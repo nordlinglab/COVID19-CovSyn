@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import csv
+import io
 import multiprocessing
 import os
 import pickle
@@ -28,11 +29,18 @@ MakePool = Callable[[int], concurrent.futures.Executor]
 
 
 def read_rows(path: Path) -> list[dict[str, str]]:
-    """The rows of a CSV written by :func:`score`; none when it does not exist yet."""
+    """The finished rows of a CSV written by :func:`score`; none when it does not exist yet.
+
+    A last line without its newline, which a kill cut off, and a row short of a value are not
+    finished evaluations and are left out.
+    """
     if not Path(path).is_file():
         return []
-    with open(path, newline="") as f:
-        return list(csv.DictReader(f))
+    text = Path(path).read_text(newline="")
+    if text and not text.endswith("\n"):
+        text = text[:text.rfind("\n") + 1]
+    return [row for row in csv.DictReader(io.StringIO(text, newline=""))
+            if None not in row and None not in row.values()]
 
 
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
@@ -59,10 +67,13 @@ def score(path: Path, todo: Iterable[Mapping[str, Any]], columns: Sequence[str],
         make_pool: The pool for one S, whose workers run S simulations per evaluation.
     """
     todo = list(todo)
-    new_file = not Path(path).is_file()
+    path = Path(path)
+    _drop_cut_off_line(path)
+    # A kill can leave the file empty, before its header: then the header is written now.
+    empty = not path.is_file() or path.stat().st_size == 0
     with open(path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(columns))
-        if new_file:
+        if empty:
             writer.writeheader()
             f.flush()
         for simulations in dict.fromkeys(t["simulations"] for t in todo):
@@ -78,6 +89,19 @@ def score(path: Path, todo: Iterable[Mapping[str, Any]], columns: Sequence[str],
                     for future in futures:
                         future.cancel()
                     raise
+
+
+def _drop_cut_off_line(path: Path) -> None:
+    """Remove a last line a kill cut off, so the next row starts on a line of its own.
+
+    It holds no finished evaluation (read_rows leaves it out), only part of one.
+    """
+    if not path.is_file() or path.stat().st_size == 0:
+        return
+    with open(path, "rb+") as f:
+        data = f.read()
+        if not data.endswith(b"\n"):
+            f.truncate(data.rfind(b"\n") + 1)
 
 
 def objective_pools(workers: int | None) -> tuple[Evaluate, MakePool]:

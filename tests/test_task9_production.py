@@ -317,3 +317,53 @@ def test_pilot_is_for_a_production_run_only(monkeypatch, tmp_path):
                                       "--run-dir", str(tmp_path / "r")])  # fmt: skip
     with pytest.raises(SystemExit, match="--pilot"):
         fo.main()
+
+
+def test_a_missing_size_is_named_for_the_production_mode(monkeypatch, tmp_path):
+    """Not as the pilot mode's: the user asked for production."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", *_without("--pop-size"),
+                                      "--run-dir", str(tmp_path / "r")])  # fmt: skip
+    with pytest.raises(SystemExit, match="--mode production needs --pop-size"):
+        fo.main()
+
+
+def test_the_help_names_every_mode_and_where_alpha_0_is_required(monkeypatch, capsys):
+    """--help lists pilot and production, and that they require --alpha-0."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--help"])
+    with pytest.raises(SystemExit):
+        fo.main()
+    text = " ".join(capsys.readouterr().out.split())
+    assert "pilot" in text.split("--mode")[2] and "production" in text.split("--mode")[2]
+    assert "required" in text.split("--alpha-0")[2].split("--alpha-end")[0]
+
+
+class _Future:
+    def __init__(self, events, value):
+        self.events, self.value = events, value
+
+    def result(self):
+        self.events.append("result")
+        return self.value
+
+
+class _Executor:
+    """Records the order of submissions and waits."""
+
+    def __init__(self):
+        self.events = []
+
+    def submit(self, function, vector, offset):
+        self.events.append("submit")
+        return _Future(self.events, function(vector, offset))
+
+
+def test_the_new_members_are_all_submitted_before_any_is_awaited():
+    """So the pool scores every new member's blocks at once, not one member at a time."""
+    watch = monitoring.Watch(True, 3, None)
+    executor = _Executor()
+    members = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+    watch.score(executor, standins.objective, members, 300)
+    assert executor.events == ["submit"] * 15 + ["result"] * 15
+    for vector, costs in zip(watch.monitor.vectors, watch.monitor.scores, strict=True):
+        np.testing.assert_array_equal(costs, [standins.cost(vector, o)
+                                              for o in monitoring.offsets(300)])  # fmt: skip

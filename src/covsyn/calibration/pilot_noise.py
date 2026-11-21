@@ -107,7 +107,8 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         the mean and SD of their difference block by block; spread: the SD across rows of each
         row's mean over the spread blocks, and each block's own; choice: per S the largest
         paired SD, its ratio to the spread and whether it is within THRESHOLD of it, and the
-        smallest S that is (None when none); failed_evaluations: costs of a failed simulation.
+        smallest S that is (None when none, or when any evaluation failed); failed_evaluations:
+        costs of a failed simulation.
     """
     cost = {(r["kind"], r["label"], int(r["row"]), int(r["simulations"]), int(r["block"])):
             float(r["cost"]) for r in rows}  # fmt: skip
@@ -141,10 +142,13 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         per_simulations.append({"simulations": simulations, "max_pair_sd": largest,
                                 "ratio": largest / spread["sd"],
                                 "meets": bool(largest <= threshold)})  # fmt: skip
-    chosen = next((line["simulations"] for line in per_simulations if line["meets"]), None)
-    choice = {"threshold_fraction": THRESHOLD, "spread_sd": spread["sd"], "threshold": threshold,
-              "per_simulations": per_simulations, "chosen_simulations": chosen}
+    # A failed evaluation's 1e6 is no cost: it would swamp the spread, so none is chosen.
     failed = sum(c >= FAILED_EVALUATION_COST for c in cost.values())
+    chosen = None if failed else next(
+        (line["simulations"] for line in per_simulations if line["meets"]), None)
+    choice = {"threshold_fraction": THRESHOLD, "spread_sd": spread["sd"], "threshold": threshold,
+              "per_simulations": per_simulations, "chosen_simulations": chosen,
+              "failed_evaluations": failed}
     return {"vectors": vectors, "pairs": pairs, "spread": spread, "choice": choice,
             "failed_evaluations": failed}
 
@@ -154,8 +158,7 @@ def write_summary(out_dir: Path) -> dict[str, Any]:
     summary = summarise(block_scoring.read_rows(Path(out_dir) / BLOCKS_FILE))
     block_scoring.write_csv(Path(out_dir) / VECTORS_FILE, summary["vectors"])
     block_scoring.write_csv(Path(out_dir) / PAIRS_FILE, summary["pairs"])
-    choice = {**summary["choice"], "spread": summary["spread"],
-              "failed_evaluations": summary["failed_evaluations"]}
+    choice = {**summary["choice"], "spread": summary["spread"]}
     (Path(out_dir) / CHOICE_FILE).write_text(json.dumps(choice, indent=1) + "\n")
     return summary
 

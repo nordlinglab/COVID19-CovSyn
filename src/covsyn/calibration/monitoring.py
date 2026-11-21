@@ -18,9 +18,15 @@ the archive keep the optimisation stream's costs.
 
 from __future__ import annotations
 
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+
 import numpy as np
 
 from covsyn.calibration import seed_streams
+from covsyn.runtime import runs
 
 STREAM = seed_streams.MONITORING_STREAM
 BLOCKS = range(0, 5)
@@ -97,3 +103,68 @@ class Monitor:
             monitor.add(row[:dim], row[dim:])
         monitor.history = [int(i) for i in np.asarray(state["monitor_best"])]
         return monitor
+
+
+class Watch:
+    """A production run's monitoring in firefly(): Task 9's stopping rule and its records.
+
+    Unmonitored, it holds nothing and changes nothing, so other runs are as before.
+    """
+
+    def __init__(self, on: bool, dim: int, checkpoint: dict | None) -> None:
+        """Monitoring when on, from the checkpoint's state when resuming one."""
+        self.on = on
+        resumed = on and checkpoint is not None and 'monitored' in checkpoint
+        self.monitor = (Monitor.from_state(checkpoint, dim) if resumed
+                        else Monitor(dim))
+        self.reason = str(checkpoint['stop_reason']) if resumed else ''
+        self.evaluations = int(checkpoint['monitor_evaluations']) if resumed else 0
+        self.seconds = float(checkpoint['monitor_seconds']) if resumed else 0.0
+
+    def stopped(self) -> bool:
+        """Whether the rule, or G_max, has stopped the run."""
+        return bool(self.reason)
+
+    def score(self, executor, function, members: np.ndarray, simulations: int) -> None:
+        """Score the members not yet monitored on the monitoring blocks, one task each."""
+        started = time.perf_counter()
+        new = self.monitor.new_vectors(members)
+        # Every task first, then the results in order, so the pool scores them all at once.
+        futures = [[executor.submit(function, vector, offset) for offset in offsets(simulations)]
+                   for vector in new]
+        for vector, tasks in zip(new, futures, strict=True):
+            self.monitor.add(vector, np.array([float(f.result()[0]) for f in tasks]))
+            self.evaluations += len(tasks)
+        self.seconds += time.perf_counter() - started
+
+    def judge(self, generation: int, max_generations: int) -> None:
+        """Record the generation's best, and the reason to stop, if any."""
+        self.monitor.record_generation()
+        reason = self.monitor.stop_reason()
+        if reason is None and generation == max_generations - 1:
+            reason = f'reached G_max = {max_generations} generations'
+        self.reason = reason or ''
+
+    def state(self) -> dict | None:
+        """The checkpoint's monitoring entries; None when not monitoring."""
+        if not self.on:
+            return None
+        return {**self.monitor.state(), 'stop_reason': np.array(self.reason),
+                'monitor_evaluations': self.evaluations, 'monitor_seconds': self.seconds}
+
+    def log_stop(self, run_dir: Path, generation: int) -> None:
+        """Append the stop to run.log, unless a line already records it (Task 9)."""
+        path = Path(run_dir) / 'run.log'
+        if any(line.get('event') == EVENT and line.get('generation') == generation
+               for line in runs.json_lines(path)):
+            return
+        runs.append_json_line(path, {'event': EVENT, 'generation': generation,
+                                     'reason': self.reason,
+                                     'time': datetime.now().isoformat(timespec='seconds')})
+
+    def write_summary(self, tables: Path, simulations: int) -> None:
+        """monitoring.json: what the monitoring cost, apart from the optimisation's."""
+        summary = {'vectors': len(self.monitor.vectors), 'evaluations': self.evaluations,
+                   'simulations': self.evaluations * simulations, 'seconds': self.seconds,
+                   'stop_reason': self.reason}
+        (Path(tables) / SUMMARY_FILE).write_text(json.dumps(summary, indent=1) + '\n')

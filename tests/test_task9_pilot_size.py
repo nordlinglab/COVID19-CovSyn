@@ -205,6 +205,7 @@ class _Optimiser:
 
     def __init__(self, fail_on=None, kill_after=None):
         self.calls, self.fail_on, self.kill_after = [], fail_on, kill_after
+        self.envs = []
 
     def __call__(self, args, output, append, env):
         flags = dict(zip(args[2::2], args[3::2], strict=False))
@@ -223,13 +224,16 @@ class _Optimiser:
         _archive(run, rows)
         (run / "config.json").write_text(json.dumps({"settings": {"pop_size": n}}))
         (run / "firefly_result.txt").write_text("done\n")
+        (run / "firefly_worst.txt").write_text("done\n")  # the optimiser's last file
+        self.envs.append(dict(env))
         return 0
 
 
-def _pilot(tmp_path, optimiser, simulations=300):
+def _pilot(tmp_path, optimiser, simulations=300, workers=2):
     out = tmp_path / "tables" / "p"
     out.mkdir(parents=True, exist_ok=True)
-    return ps.run(out, tmp_path / "models", "p", simulations, optimiser, _evaluate, _threads), out
+    return ps.run(out, tmp_path / "models", "p", simulations, optimiser, _evaluate, _threads,
+                  workers=workers), out
 
 
 def test_the_pilot_runs_every_setting_then_screens_and_confirms(tmp_path):
@@ -306,7 +310,7 @@ def test_a_resumed_pilot_scores_nothing_twice(tmp_path):
         calls.append(1)
         return _evaluate(P, seed_offset)
 
-    ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), counts, _threads)
+    ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), counts, _threads, workers=2)
     assert calls == []
     assert {name: (out / name).read_text() for name in before} == before
 
@@ -326,7 +330,8 @@ def test_the_command_takes_s_from_pilot_1(tmp_path, monkeypatch):
     noise.mkdir()
     (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 3000}))
     seen = {}
-    monkeypatch.setattr(ps, "run", lambda out, models, prefix, s, *rest: seen.update(s=s) or {})
+    monkeypatch.setattr(ps, "run", lambda out, models, prefix, s, *rest, **kw: seen.update(s=s)
+                        or {})  # fmt: skip
     monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
     out = ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
     assert seen["s"] == 3000
@@ -341,3 +346,58 @@ def test_the_command_refuses_a_pilot_1_that_chose_no_s(tmp_path):
     (noise / "choice.json").write_text(json.dumps({"chosen_simulations": None}))
     with pytest.raises(SystemExit):
         ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+
+
+def test_every_run_uses_the_pilot_s_workers(tmp_path):
+    """--workers reaches the optimiser runs too, as COVSYN_WORKERS, resumed ones included."""
+    from covsyn.runtime import hardware
+
+    optimiser = _Optimiser()
+    _pilot(tmp_path, optimiser, workers=3)
+    assert optimiser.envs and all(env == {hardware.ENV_VARIABLE: "3"} for env in optimiser.envs)
+
+
+def test_a_run_without_its_last_file_is_not_finished(tmp_path):
+    """firefly_worst.txt comes last; a run killed before it is continued, not skipped."""
+    optimiser = _Optimiser()
+    _pilot(tmp_path, optimiser)
+    first = tmp_path / "models" / ps.run_name("p", ps.settings()[0])
+    (first / "firefly_worst.txt").unlink()
+    (first / "checkpoints").mkdir()
+    (first / "checkpoints" / "generation_0000.npz").write_text("x")
+    again = _Optimiser()
+    _pilot(tmp_path, again)
+    assert [c.get("--resume") for c in again.calls] == [str(first)]
+
+
+def test_a_relative_resume_runs_the_optimiser_on_whole_paths(tmp_path, monkeypatch):
+    """The optimiser runs from the repository root, so a relative path would point elsewhere."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}}))
+    seen = {}
+    monkeypatch.setattr(ps, "run", lambda o, models, prefix, s, *rest, **kw: seen.update(
+        out=o, models=models) or {})  # fmt: skip
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.chdir(tmp_path)
+    ps.main(["--resume", "results/tables/20261121-000000_abcdef0_pilot-size"])
+    assert seen["out"].is_absolute() and seen["models"] == tmp_path / "results" / "models"
+
+
+def test_the_command_refuses_a_pilot_1_with_failed_evaluations(tmp_path):
+    """A failed evaluation's 1e6 is no cost, so its S is not pilot 2's to run."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300,
+                                                   "failed_evaluations": 2}))
+    with pytest.raises(SystemExit):
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+
+
+def test_the_choice_reports_the_alpha_end_the_runs_used():
+    """The optimiser's default, which the pilot mode leaves in place."""
+    from covsyn.calibration import step_schedule
+
+    rows = _confirmed(_means(), spread=1.0)
+    table = [dict(line, agree=True) for line in ps.compare_settings(rows)]
+    assert ps.choose(table)["alpha_end"] == step_schedule.DEFAULT_ALPHA_END
