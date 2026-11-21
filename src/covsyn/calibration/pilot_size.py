@@ -241,16 +241,18 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
     _optimise(models_root, prefix, simulations, execute, workers)
 
     screen_path = out_dir / SCREEN_FILE
-    screened, screen_marked = block_scoring.read_table(screen_path)  # warns if marked now
-    done = {(r["run"], int(r["candidate"]), int(r["block"])) for r in screened}
+    screened = block_scoring.read_table(screen_path)  # warns if marked now
+    done = {(r["run"], int(r["candidate"]), int(r["block"])) for r in screened.rows}
     todo, candidates = _screen_tasks(models_root, prefix, simulations, done)
     block_scoring.score(screen_path, todo, SCREEN_COLUMNS,
-                        lambda t: candidates[t["run"]][t["candidate"]], evaluate, make_pool)
-    chosen = representatives(block_scoring.read_rows(screen_path, warn=not screen_marked))
+                        lambda t: candidates[t["run"]][t["candidate"]], evaluate, make_pool,
+                        exists=screened.exists)  # appended to as found, or created afresh
+    chosen = representatives(block_scoring.read_table(
+        screen_path, warn=not screened.marked, required=True).rows)  # fmt: skip
 
     confirm_path = out_dir / CONFIRM_FILE
-    confirmations, confirm_marked = block_scoring.read_table(confirm_path)  # warns if marked
-    confirmed = {(r["run"], int(r["block"])) for r in confirmations}
+    confirmations = block_scoring.read_table(confirm_path)  # warns if marked now
+    confirmed = {(r["run"], int(r["block"])) for r in confirmations.rows}
     todo = []
     for setting in settings():
         name = run_name(prefix, setting)
@@ -262,9 +264,11 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
                              "seed_offset": seed_streams.block_seeds(
                                  VALIDATION_STREAM, b, simulations).start})  # fmt: skip
     block_scoring.score(confirm_path, todo, CONFIRM_COLUMNS,
-                        lambda t: candidates[t["run"]][t["candidate"]], evaluate, make_pool)
+                        lambda t: candidates[t["run"]][t["candidate"]], evaluate, make_pool,
+                        exists=confirmations.exists)  # appended to as found, or created afresh
 
-    table = compare_settings(block_scoring.read_rows(confirm_path, warn=not confirm_marked))
+    table = compare_settings(block_scoring.read_table(
+        confirm_path, warn=not confirmations.marked, required=True).rows)  # fmt: skip
     choice = choose(table)
     runs_table = []
     for setting in settings():
@@ -376,8 +380,11 @@ def main(argv: list[str] | None = None) -> Path:
     prefix = out.name.rsplit("_", 1)[0]  # <stamp>_<commit>, shared by its runs
     evaluate, make_pool = _evaluator(workers)
     execute = functools.partial(run_module, keep_fds=())
-    summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool,
-                  workers=workers)
+    try:
+        summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool,
+                      workers=workers)
+    except block_scoring.TableError as error:  # a table gone or out of place: say which
+        parser.error(str(error))
     print(json.dumps(summary, indent=1))
     return out
 

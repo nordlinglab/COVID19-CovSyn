@@ -606,15 +606,60 @@ def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
     assert not caplog.text
 
 
-def test_a_table_gone_between_the_check_and_the_read_is_not_started_yet(tmp_path, monkeypatch):
-    """Removed or replaced (a save-as-rename) mid-read: no rows, no mark, no traceback."""
-    from pathlib import Path
+def test_a_table_gone_at_the_first_read_reads_as_absent(tmp_path, monkeypatch):
+    """Missing when a pilot first looks: no rows, no mark, and exists False, so it starts anew."""
+    path = tmp_path / "t.csv"
+    table = block_scoring.read_table(path)
+    assert (table.rows, table.marked, table.exists) == ([], False, False)
+    path.write_text("name,simulations,seed_offset,cost\na,10,0,1.5\n")
+    assert block_scoring.read_table(path).exists
+
+
+def test_a_table_known_to_exist_that_went_missing_is_an_error(tmp_path):
+    """A later read, after the pilot saw it: stop, naming it, rather than start anew."""
+    path = tmp_path / "t.csv"
+    with pytest.raises(block_scoring.TableError, match=str(path)):
+        block_scoring.read_table(path, required=True)
+
+
+def test_a_special_file_is_refused_before_a_read_could_block(tmp_path):
+    """A FIFO at the table's path: refused at once, not read forever."""
+    import os
 
     path = tmp_path / "t.csv"
-    path.write_text("name,simulations,seed_offset,cost\na,10,0,1.5\n")
+    os.mkfifo(path)
+    with pytest.raises(block_scoring.TableError, match="not a regular file"):
+        block_scoring.read_table(path)
 
-    def gone(self):
-        raise FileNotFoundError(2, "No such file or directory", str(self))
 
-    monkeypatch.setattr(Path, "read_bytes", gone)
-    assert block_scoring.read_table(path) == ([], False)
+@pytest.mark.parametrize("what", ["directory", "parent"])
+def test_a_path_that_cannot_be_a_table_is_named(tmp_path, what):
+    """A directory where the table belongs, or a file where its directory belongs."""
+    if what == "directory":
+        path = tmp_path / "t.csv"
+        path.mkdir()
+    else:
+        (tmp_path / "out").write_text("a file, not a directory")
+        path = tmp_path / "out" / "t.csv"
+    with pytest.raises(block_scoring.TableError, match=str(path)):
+        block_scoring.read_table(path)
+
+
+def test_a_table_known_to_exist_is_not_recreated_when_it_went_missing(tmp_path):
+    """Appending to a table the pilot read: if it is gone, stop; do not create an empty one."""
+    path = tmp_path / "t.csv"
+    with pytest.raises(block_scoring.TableError, match=str(path)):
+        block_scoring.score(path, [{"name": "a", "simulations": 10, "seed_offset": 0}], COLUMNS,
+                            lambda t: np.ones(2), _evaluate, _threads, exists=True)  # fmt: skip
+    assert not path.exists()
+
+
+def test_a_new_table_that_appeared_meanwhile_is_not_appended_to(tmp_path):
+    """Absent at the first read, there now: stop, so a restart reads what it holds."""
+    path = tmp_path / "t.csv"
+    path.write_text("name,simulations,seed_offset,cost\nb,10,1,2.5\n")
+    before = path.read_bytes()
+    with pytest.raises(block_scoring.TableError, match="start it again"):
+        block_scoring.score(path, [{"name": "a", "simulations": 10, "seed_offset": 0}], COLUMNS,
+                            lambda t: np.ones(2), _evaluate, _threads, exists=False)  # fmt: skip
+    assert path.read_bytes() == before

@@ -480,3 +480,31 @@ def test_a_recorded_worker_count_out_of_range_names_pilot_1(tmp_path, monkeypatc
     err = capsys.readouterr().err
     assert stop.value.code == 2 and "pilot 1 in" in err and "config.json's workers is" in err
     assert "holds no pilot" not in err
+
+
+def test_a_table_gone_during_pilot_1_stops_it_naming_the_table(tmp_path, monkeypatch):
+    """Removed between the scoring and the summary: stop, naming blocks.csv."""
+    real_score = pn.block_scoring.score
+
+    def removed_after_scoring(path, *args, **kwargs):
+        real_score(path, *args, **kwargs)
+        path.unlink()
+
+    monkeypatch.setattr(pn.block_scoring, "score", removed_after_scoring)
+    with pytest.raises(pn.block_scoring.TableError, match=pn.BLOCKS_FILE):
+        pn.run(tmp_path, _population(), np.zeros(DIM), np.ones(DIM), _evaluate, _threads)
+
+
+def test_pilot_1_reports_a_table_error_as_a_refusal(tmp_path, monkeypatch, capsys):
+    """Exit 2 with the table's path, not a traceback."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+
+    def gone(*args, **kwargs):
+        raise pn.block_scoring.TableError("/x/blocks.csv went missing; restore it")
+
+    monkeypatch.setattr(pn, "run", gone)
+    with pytest.raises(SystemExit) as stop:
+        pn.main(["--results-root", str(tmp_path)])
+    assert stop.value.code == 2 and "blocks.csv went missing" in capsys.readouterr().err

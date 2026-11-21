@@ -990,8 +990,41 @@ def test_a_table_s_mark_is_judged_from_the_bytes_it_is_read_from(tmp_path, caplo
     path = tmp_path / "t.csv"
     path.write_bytes(b"\xef\xbb\xbfname,simulations,seed_offset,cost\na,10,0,1.5\n")
     with caplog.at_level(logging.WARNING, logger=ps.block_scoring.log.name):
-        rows, marked = ps.block_scoring.read_table(path)
-    assert marked and [r["name"] for r in rows] == ["a"] and caplog.text
+        rows, marked, exists = ps.block_scoring.read_table(path)
+    assert marked and exists and [r["name"] for r in rows] == ["a"] and caplog.text
     path.write_bytes(b"name,simulations,seed_offset,cost\na,10,0,1.5\n")
-    assert ps.block_scoring.read_table(path)[1] is False
-    assert ps.block_scoring.read_table(tmp_path / "missing.csv") == ([], False)
+    assert ps.block_scoring.read_table(path).marked is False
+    assert ps.block_scoring.read_table(tmp_path / "missing.csv") == ([], False, False)
+
+
+@pytest.mark.parametrize("table", [ps.SCREEN_FILE, ps.CONFIRM_FILE])
+def test_a_table_gone_during_pilot_2_stops_it_naming_the_table(tmp_path, monkeypatch, table):
+    """Removed after its scoring: the later read stops the pilot, not a fresh empty table."""
+    out = tmp_path / "tables" / "p"
+    out.mkdir(parents=True)
+    real_score = ps.block_scoring.score
+
+    def removed_after_scoring(path, *args, **kwargs):
+        real_score(path, *args, **kwargs)
+        if path.name == table:
+            path.unlink()
+
+    monkeypatch.setattr(ps.block_scoring, "score", removed_after_scoring)
+    with pytest.raises(ps.block_scoring.TableError, match=str(out / table)):
+        ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), _evaluate, _threads, workers=2)
+
+
+def test_the_command_reports_a_table_error_as_a_refusal(tmp_path, monkeypatch, capsys):
+    """Exit 2 with the table's path, not a traceback."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
+
+    def gone(*args, **kwargs):
+        raise ps.block_scoring.TableError("/x/screening.csv went missing; restore it")
+
+    monkeypatch.setattr(ps, "run", gone)
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+    assert stop.value.code == 2 and "screening.csv went missing" in capsys.readouterr().err

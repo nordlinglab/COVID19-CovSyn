@@ -157,9 +157,13 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def write_summary(out_dir: Path, warn: bool = True) -> dict[str, Any]:
     """Summarise out_dir's blocks.csv into vectors.csv, pairs.csv and choice.json.
 
-    warn: as read_rows'; run() warns here only about a mark added since its first read.
+    warn: as read_table's; run() warns here only about a mark added since its first read.
+
+    Raises:
+        block_scoring.TableError: blocks.csv is gone, or not a regular file.
     """
-    summary = summarise(block_scoring.read_rows(Path(out_dir) / BLOCKS_FILE, warn=warn))
+    rows = block_scoring.read_table(Path(out_dir) / BLOCKS_FILE, warn=warn, required=True).rows
+    summary = summarise(rows)
     block_scoring.write_csv(Path(out_dir) / VECTORS_FILE, summary["vectors"])
     block_scoring.write_csv(Path(out_dir) / PAIRS_FILE, summary["pairs"])
     choice = {**summary["choice"], "spread": summary["spread"]}
@@ -181,13 +185,14 @@ def run(out_dir: Path, population: np.ndarray, lower: np.ndarray, upper: np.ndar
         make_pool: The pool for one S, whose workers run S simulations per evaluation.
     """
     path = Path(out_dir) / BLOCKS_FILE
-    finished, marked = block_scoring.read_table(path)  # warns about a mark found now
+    first = block_scoring.read_table(path)  # warns about a mark found now
     done = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
-            for r in finished}  # fmt: skip
+            for r in first.rows}  # fmt: skip
     todo = [t._asdict() for t in tasks(pilot_rows(), len(population)) if t.key not in done]
     parameters = np.asarray(population, dtype=float) * (upper - lower) + lower
-    block_scoring.score(path, todo, COLUMNS, lambda t: parameters[t["row"]], evaluate, make_pool)
-    return write_summary(out_dir, warn=not marked)  # a mark added since: warned now
+    block_scoring.score(path, todo, COLUMNS, lambda t: parameters[t["row"]], evaluate, make_pool,
+                        exists=first.exists)  # appended to as found, or created afresh
+    return write_summary(out_dir, warn=not first.marked)  # a mark added since: warned now
 
 
 def _population_and_bounds() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -256,7 +261,10 @@ def main(argv: list[str] | None = None) -> Path:
         workers = hardware.resolve_workers(args.workers, os.environ, None)
         runs.write_config(out, settings, rng_seed=None, workers=workers,
                           initial_population=population)
-    summary = run(out, population, lower, upper, evaluate, make_pool)
+    try:
+        summary = run(out, population, lower, upper, evaluate, make_pool)
+    except block_scoring.TableError as error:  # a table gone or out of place: say which
+        parser.error(str(error))
     print(json.dumps(summary["choice"], indent=1))
     return out
 

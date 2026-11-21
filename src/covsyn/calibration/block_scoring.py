@@ -24,7 +24,7 @@ import stat
 import tempfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -36,23 +36,70 @@ Evaluate = Callable[[np.ndarray, int], tuple]
 MakePool = Callable[[int], concurrent.futures.Executor]
 
 
-def read_table(path: Path, warn: bool = True) -> tuple[list[dict[str, str]], bool]:
-    """The finished rows of a CSV written by :func:`score`, and whether it has a byte order mark.
+class TableError(RuntimeError):
+    """A pilot's table went missing, appeared unexpectedly, or is not a regular file.
 
-    Nothing and False when it does not exist yet. A last line without its newline, which a kill
-    cut off, and a row short of a value are not finished evaluations and are left out. A
-    leading UTF-8 byte order mark, which a spreadsheet adds when it saves the table as
-    "CSV UTF-8", is skipped, with a warning unless ``warn`` is False: it may have shortened the
-    costs it wrote back. The mark is judged from the bytes the rows come from, so a pilot's
-    later reads in a run can pass ``warn=not marked`` and warn only about a mark added since. A
-    save that adds no mark, such as plain "CSV", shortens the costs just the same and is not
-    detected.
+    The pilot stops rather than start the table anew or write into one it has not read: either
+    would score every evaluation again, and could append them to the finished ones (decision
+    of 2026-11-21).
     """
+
+
+class Table(NamedTuple):
+    """What a read of a pilot's table found."""
+
+    rows: list[dict[str, str]]
+    marked: bool  # it starts with a UTF-8 byte order mark
+    exists: bool
+
+
+def _open_regular(path: Path, flags: int) -> int:
+    """A descriptor of path, refused unless it is a regular file, before any read could block.
+
+    Raises:
+        FileNotFoundError: It does not exist.
+        TableError: It is not a regular file (a directory, a FIFO, a device), or a parent of it
+            is not a directory.
+    """
+    try:  # O_NONBLOCK: opening a FIFO waits for a writer otherwise
+        handle = os.open(path, flags | os.O_NONBLOCK)
+    except NotADirectoryError:
+        raise TableError(f"{path}: a parent of it is not a directory") from None
+    except IsADirectoryError:
+        raise TableError(f"{path} is not a regular file, but a directory") from None
+    if not stat.S_ISREG(os.fstat(handle).st_mode):
+        os.close(handle)
+        raise TableError(f"{path} is not a regular file, so it is no pilot table")
+    os.set_blocking(handle, True)
+    return handle
+
+
+def read_table(path: Path, warn: bool = True, required: bool = False) -> Table:
+    """The finished rows of a CSV written by :func:`score`, its byte order mark, and if it exists.
+
+    Nothing, no mark and exists False when it does not exist: a pilot's first read, which then
+    starts the table. ``required`` is for its later reads, of a table it has seen: one gone
+    meanwhile stops the pilot instead. A last line without its newline, which a kill cut off,
+    and a row short of a value are not finished evaluations and are left out. A leading UTF-8
+    byte order mark, which a spreadsheet adds when it saves the table as "CSV UTF-8", is
+    skipped, with a warning unless ``warn`` is False: it may have shortened the costs it wrote
+    back. The mark is judged from the bytes the rows come from, so a pilot's later reads in a
+    run can pass ``warn=not marked`` and warn only about a mark added since. A save that adds
+    no mark, such as plain "CSV", shortens the costs just the same and is not detected.
+
+    Raises:
+        TableError: ``required`` and it is missing; or it is not a regular file.
+    """
+    try:
+        handle = _open_regular(Path(path), os.O_RDONLY)
+    except FileNotFoundError:
+        if required:
+            raise TableError(f"{path} went missing while the pilot ran; restore it, then "
+                             f"resume") from None
+        return Table([], False, False)
+    with os.fdopen(handle, "rb") as f:
+        data = f.read()
     # Cut before decoding: the kill may have split a character, which only that line holds.
-    try:  # one step, so a table removed or replaced meanwhile reads as not yet started
-        data = Path(path).read_bytes()
-    except (FileNotFoundError, IsADirectoryError):
-        return [], False
     marked = data.startswith(codecs.BOM_UTF8)
     if warn and marked:  # utf-8-sig below skips it
         log.warning("%s starts with a byte order mark: another program, such as a spreadsheet, "
@@ -63,12 +110,12 @@ def read_table(path: Path, warn: bool = True) -> tuple[list[dict[str, str]], boo
         for row in csv.DictReader(io.StringIO(text, newline=""))
         if None not in row and None not in row.values()
     ]
-    return rows, marked
+    return Table(rows, marked, True)
 
 
 def read_rows(path: Path, warn: bool = True) -> list[dict[str, str]]:
     """The finished rows of a CSV written by :func:`score`, as :func:`read_table` reads them."""
-    return read_table(path, warn)[0]
+    return read_table(path, warn).rows
 
 
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
@@ -86,11 +133,15 @@ def score(
     vector_of: Callable[[Mapping[str, Any]], np.ndarray],
     evaluate: Evaluate,
     make_pool: MakePool,
+    exists: bool | None = None,
 ) -> None:
     """Score each task and append it, with its cost, to the CSV at path.
 
     Args:
-        path: The table; created with its header when missing.
+        path: The table.
+        exists: Whether the pilot's first read found it (Table.exists): a table it found is
+            appended to, and must still exist; one it did not is created, and must still not
+            exist, or a restart reads it first. None decides by what is there now.
         todo: The tasks still to score, each with ``simulations`` and ``seed_offset`` and the
             other columns but ``cost``.
         columns: The table's columns, ``cost`` last.
@@ -98,13 +149,33 @@ def score(
         evaluate: ``evaluate(P, seed_offset)`` returning the cost first, run in the pool, as
             fast_cost.evaluate_candidate.
         make_pool: The pool for one S, whose workers run S simulations per evaluation.
+
+    Raises:
+        TableError: A table that should exist is gone, or one that should not appeared; or it
+            is not a regular file.
     """
     todo = list(todo)
     path = Path(path)
-    _drop_cut_off_line(path)
+    if exists is None:
+        exists = path.exists()
+    if exists:
+        _drop_cut_off_line(path)
+        try:  # no O_CREAT: append mode would quietly create an empty table
+            handle = _open_regular(path, os.O_WRONLY | os.O_APPEND)
+        except FileNotFoundError:
+            raise TableError(f"{path} went missing while the pilot ran; restore it, then "
+                             f"resume") from None
+    else:
+        try:  # only if it is still absent; else its rows are unread
+            handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            raise TableError(f"{path} appeared after the pilot looked for it; start it again, "
+                             f"so it reads that table first") from None
+        except NotADirectoryError:
+            raise TableError(f"{path}: a parent of it is not a directory") from None
     # A kill can leave the file empty, before its header: then the header is written now.
-    empty = not path.is_file() or path.stat().st_size == 0
-    with open(path, "a", newline="", encoding="utf-8") as f:
+    empty = os.fstat(handle).st_size == 0
+    with open(handle, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(columns))
         if empty:
             writer.writeheader()
@@ -128,12 +199,19 @@ def _drop_cut_off_line(path: Path) -> None:
     """Remove a last line a kill cut off, so the next row starts on a line of its own.
 
     It holds no finished evaluation (read_rows leaves it out), only part of one.
+
+    Raises:
+        TableError: The table, which the pilot has read, went missing; or it is not a regular
+            file.
     """
-    if not path.is_file() or path.stat().st_size == 0:
-        return
-    with open(path, "rb+") as f:
+    try:
+        handle = _open_regular(path, os.O_RDWR)
+    except FileNotFoundError:
+        raise TableError(f"{path} went missing while the pilot ran; restore it, then "
+                         f"resume") from None
+    with os.fdopen(handle, "rb+") as f:
         data = f.read()
-        if not data.endswith(b"\n"):
+        if data and not data.endswith(b"\n"):
             f.truncate(data.rfind(b"\n") + 1)
 
 
