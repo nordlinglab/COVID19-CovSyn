@@ -813,13 +813,12 @@ def test_revalidation_reads_the_archive_as_utf_8(tmp_path, monkeypatch):
     assert seen == ["utf-8"]
 
 
-def test_the_optimiser_writes_the_archive_as_utf_8():
-    """np.savetxt's default is latin1; the readers read UTF-8."""
-    import inspect
-
+def test_the_optimiser_writes_the_archive_as_utf_8(tmp_path):
+    """np.savetxt's default is latin1, which cannot hold a header the readers read as UTF-8."""
     from covsyn.calibration import firefly_optimizer as fo
 
-    source = inspect.getsource(fo.Firefly.firefly)
-    call = source[source.index("np.savetxt(result_path/'firefly_archive.txt'"):]
-    call = call[: call.index(")\n") + 1]
-    assert "encoding='utf-8'" in call or 'encoding="utf-8"' in call
+    path = tmp_path / "firefly_archive.txt"
+    fo.write_archive(path, np.array([[0, 1, 0.1, 0.2, 4.0]]), header="archive \u03c3 \u2265")
+    assert path.read_text(encoding="utf-8").startswith("# archive \u03c3 \u2265")
+    np.testing.assert_allclose(np.loadtxt(path, ndmin=2, encoding="utf-8"),
+                               [[0, 1, 0.1, 0.2, 4.0]])  # fmt: skip
