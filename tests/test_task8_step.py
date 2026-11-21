@@ -273,7 +273,7 @@ def _record_generations(path, generations):
     """config.json as if the run had started with ``generations``; MISSING drops the count."""
     config = json.loads((path / "config.json").read_text())
     if generations is MISSING:
-        config["settings"].pop("max_generations", None)
+        del config["settings"]["max_generations"]  # a KeyError if the run did not record it
     else:
         config["settings"]["max_generations"] = generations
     (path / "config.json").write_text(json.dumps(config))
@@ -307,8 +307,9 @@ MISSING = object()
 
 @pytest.mark.parametrize("recorded", [None, "4", True, MISSING],
                          ids=["null", "string", "bool", "missing"])  # fmt: skip
-def test_a_recorded_generations_count_missing_or_not_a_number_still_warns(tmp_path, monkeypatch,
-                                                                          recorded):
+def test_a_recorded_generations_count_missing_or_not_a_number_still_warns(
+    tmp_path, monkeypatch, recorded
+):
     """Only a warning hangs on it, so it is read as unknown rather than stopping the resume."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     _optimise(_engine(alpha_0=0.2, g_plan=4), 1)
