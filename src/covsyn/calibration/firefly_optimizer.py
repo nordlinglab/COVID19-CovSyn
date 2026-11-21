@@ -1628,7 +1628,7 @@ class Firefly:
         # left to run (config.json keeps the generations the run started with).
         outlasts = step_schedule.plan_outlasts_run(g_plan, max_generations)
         if outlasts is not None and (checkpoint is None or (
-                started_generations(result_path, g_plan)
+                started_as_long_as_plan(result_path, g_plan)
                 and next_generation(checkpoint) < max_generations)):
             last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
             warnings.warn(f'{outlasts} (alpha_end {self.alpha_end!r}, last step {last:.3g})',
@@ -1875,7 +1875,7 @@ PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
 SETTING_NAMES = ('alpha_0', 'alpha_end', 'g_plan')
 
 
-def started_generations(run_dir: Path, g_plan: int) -> bool:
+def started_as_long_as_plan(run_dir: Path, g_plan: int) -> bool:
     """Whether the run started no shorter than its plan, by config.json (Task 8).
 
     Only a warning hangs on it, so a count that is missing or not a whole number reads as yes,

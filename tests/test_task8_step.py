@@ -270,9 +270,11 @@ def test_a_resumed_run_does_not_warn_of_its_plan_again(tmp_path, monkeypatch, re
 
 
 def _record_generations(path, generations):
-    """config.json as if the run had started with ``generations``."""
+    """config.json as if the run had started with ``generations``; MISSING drops the count."""
     config = json.loads((path / "config.json").read_text())
     config["settings"]["max_generations"] = generations
+    if generations is MISSING:
+        del config["settings"]["max_generations"]
     (path / "config.json").write_text(json.dumps(config))
 
 
@@ -299,7 +301,10 @@ def test_a_resume_with_nothing_left_to_run_gives_no_warning(tmp_path, monkeypatc
     assert not [w for w in recwarn if said in str(w.message)]
 
 
-@pytest.mark.parametrize("recorded", [None, "4", True])
+MISSING = object()
+
+
+@pytest.mark.parametrize("recorded", [None, "4", True, MISSING])
 def test_a_recorded_generations_count_not_a_number_still_warns(tmp_path, monkeypatch, recorded):
     """Only a warning hangs on it, so it is read as unknown rather than stopping the resume."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
