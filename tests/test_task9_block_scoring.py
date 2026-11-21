@@ -933,3 +933,18 @@ def test_every_os_s_refusal_of_a_socket_is_not_a_regular_file(tmp_path, monkeypa
     monkeypatch.setattr(os, "open", socket_like)
     with pytest.raises(block_scoring.TableError, match="not a regular file"):
         block_scoring.read_table(path)
+
+
+def test_a_table_another_program_holds_says_to_resume_when_it_lets_go(tmp_path, monkeypatch):
+    """A lease (EAGAIN) only means wait: the refusal says so."""
+    import os
+
+    path = tmp_path / "t.csv"
+    path.write_text("")
+
+    def leased(p, flags, *args, **kwargs):
+        raise OSError(errno.EAGAIN, os.strerror(errno.EAGAIN), str(p))
+
+    monkeypatch.setattr(os, "open", leased)
+    with pytest.raises(block_scoring.TableError, match="held by another program.*resume"):
+        block_scoring.read_table(path)
