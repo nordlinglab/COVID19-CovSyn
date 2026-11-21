@@ -1114,8 +1114,9 @@ def test_an_error_without_a_usable_reason_gives_its_words_else_its_kind(bare, sa
     ids=["text-true", "text-float", "int-enum", "errno-overflows", "text-empty"],
 )
 def test_a_usable_code_gives_its_text(bare, code):
-    """A positive int code, an IntEnum's too, gives its text when no non-empty strerror does.
+    """A positive int code, an IntEnum's too, gives its text when no strerror is a text.
 
+    A text counts only as a non-empty string, as in _reason's rule: True, 3.5 and "" are none.
     A code no C int holds in errno falls to the one args[0] keeps.
     """
     assert block_scoring._reason(bare()) == os.strerror(code)
