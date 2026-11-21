@@ -269,16 +269,44 @@ def test_a_resumed_run_does_not_warn_of_its_plan_again(tmp_path, monkeypatch, re
     assert not [w for w in recwarn if said in str(w.message)]
 
 
-def test_a_resume_that_first_outlasts_its_plan_warns(tmp_path, monkeypatch):
-    """Started as long as its plan, resumed shorter: the steps now end above alpha_end."""
+def _record_generations(path, generations):
+    """config.json as if the run had started with ``generations``."""
+    config = json.loads((path / "config.json").read_text())
+    config["settings"]["max_generations"] = generations
+    (path / "config.json").write_text(json.dumps(config))
+
+
+def test_each_resume_shorter_than_its_plan_warns(tmp_path, monkeypatch):
+    """Started as long as its plan, resumed shorter: the steps end above alpha_end.
+
+    config.json keeps the generations the run started with, so each such resume warns.
+    """
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    _optimise(_engine(alpha_0=0.2, g_plan=4), 1)  # G_plan 4, 1 generation: warned
-    (tmp_path / "config.json").write_text(json.dumps(  # as if started with 4 generations
-        {**json.loads((tmp_path / "config.json").read_text()),
-         "settings": {**json.loads((tmp_path / "config.json").read_text())["settings"],
-                      "max_generations": 4}}))  # fmt: skip
-    with pytest.warns(UserWarning, match="G_plan 4 is longer than the run's 2 generations"):
-        _optimise(_engine(alpha_0=0.2, g_plan=4), 2, resume=True)
+    _optimise(_engine(alpha_0=0.2, g_plan=4), 1)
+    _record_generations(tmp_path, 4)
+    for _ in range(2):
+        with pytest.warns(UserWarning, match="G_plan 4 is longer than the run's 3 generations"):
+            _optimise(_engine(alpha_0=0.2, g_plan=4), 3, resume=True)
+        (tmp_path / fo.CHECKPOINTS / "generation_0002.npz").unlink()  # generation 2 to come
+
+
+def test_a_resume_with_nothing_left_to_run_gives_no_warning(tmp_path, monkeypatch, recwarn):
+    """Its steps were all taken, down to alpha_end; none is left to end above it."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    _optimise(_engine(alpha_0=0.2, g_plan=4), 4)
+    _optimise(_engine(alpha_0=0.2, g_plan=4), 2, resume=True)
+    said = fo.step_schedule.plan_outlasts_run(4, 2)
+    assert not [w for w in recwarn if said in str(w.message)]
+
+
+@pytest.mark.parametrize("recorded", [None, "4", True])
+def test_a_recorded_generations_count_not_a_number_still_warns(tmp_path, monkeypatch, recorded):
+    """Only a warning hangs on it, so it is read as unknown rather than stopping the resume."""
+    monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
+    _optimise(_engine(alpha_0=0.2, g_plan=4), 1)
+    _record_generations(tmp_path, recorded)
+    with pytest.warns(UserWarning, match="G_plan 4 is longer than the run's 3 generations"):
+        _optimise(_engine(alpha_0=0.2, g_plan=4), 3, resume=True)
 
 
 def test_a_plan_as_long_as_the_run_is_not_warned_about(tmp_path, monkeypatch, recwarn):

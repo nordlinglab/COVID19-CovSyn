@@ -1623,11 +1623,13 @@ class Firefly:
                               f'{(self.alpha_0, self.alpha_end, g_plan)}: it started with '
                               f'{recorded}')
         step_size(0, self.alpha_0, self.alpha_end, g_plan, names=SETTING_NAMES)  # out of range?
-        # No cap on G_plan, but it may be a typo: said once, when a run starts or a resume
-        # first makes the plan outlast it (a generations count config.json lacks is 0).
+        # No cap on G_plan, but it may be a typo: said when a run starts, and on each resume
+        # that makes the plan outlast a run that started as long as it, while generations are
+        # left to run (config.json keeps the generations the run started with).
         outlasts = step_schedule.plan_outlasts_run(g_plan, max_generations)
-        if outlasts is not None and (checkpoint is None or step_schedule.plan_outlasts_run(
-                g_plan, recorded_settings(result_path).get('max_generations', 0)) is None):
+        if outlasts is not None and (checkpoint is None or (
+                started_generations(result_path, g_plan)
+                and next_generation(checkpoint) < max_generations)):
             last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
             warnings.warn(f'{outlasts} (alpha_end {self.alpha_end!r}, last step {last:.3g})',
                           stacklevel=2)
@@ -1748,7 +1750,7 @@ class Firefly:
                 worst_intensities = checkpoint['worst_intensities'].copy()
                 worst_iteration = checkpoint['worst_iteration'].copy()
                 evaluations = int(checkpoint['evaluations'])
-                start = int(checkpoint['generation']) + 1
+                start = next_generation(checkpoint)
                 for table in (progress_table, evaluation_table, generation_table):
                     drop_progress_after(table.path, start - 1)
 
@@ -1871,6 +1873,23 @@ PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
 
 # Task 8: the step schedule's names in config.json, for a refusal of a recorded schedule.
 SETTING_NAMES = ('alpha_0', 'alpha_end', 'g_plan')
+
+
+def started_generations(run_dir: Path, g_plan: int) -> bool:
+    """Whether the run started no shorter than its plan, by config.json (Task 8).
+
+    Only a warning hangs on it, so a count that is missing or not a whole number reads as yes,
+    which warns, rather than stopping the resume.
+    """
+    recorded = recorded_settings(run_dir).get('max_generations')
+    if isinstance(recorded, bool) or not isinstance(recorded, int):
+        return True
+    return step_schedule.plan_outlasts_run(g_plan, recorded) is None
+
+
+def next_generation(checkpoint: dict) -> int:
+    """The generation a resume runs first, after the checkpoint's (the initial one's is -1)."""
+    return int(checkpoint['generation']) + 1
 
 
 def generations_problem(max_generations: int) -> str | None:
