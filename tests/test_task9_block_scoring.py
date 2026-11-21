@@ -10,7 +10,9 @@ then still write a header, and start its rows on a line of their own.
 from __future__ import annotations
 
 import concurrent.futures
+import enum
 import errno
+import os
 import re
 
 import numpy as np
@@ -621,8 +623,8 @@ def socket_path():
     import tempfile
     from pathlib import Path
 
-    # Bytes of an AF_UNIX path, with its NUL: 108 on Linux; 104 elsewhere (macOS, the BSDs),
-    # the smallest common cap, so other platforms only fall back to /tmp a little sooner.
+    # Bytes of an AF_UNIX path, with its NUL: 108 on Linux, 104 on macOS and the BSDs, where
+    # the pilots run; any other platform is held to 104 too.
     cap = 108 if sys.platform.startswith("linux") else 104
     directory = Path(tempfile.mkdtemp(prefix="cs"))
     if len(os.fsencode(directory / "t.csv")) >= cap:  # a long $TMPDIR
@@ -1061,6 +1063,17 @@ def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monke
     assert "None" not in str(error.value) and os.strerror(errno.ENOENT) in str(error.value)
 
 
+class _Code(enum.IntEnum):
+    ENOENT = errno.ENOENT
+
+
+def _errno_changed():
+    """An error whose errno was set later to a code no C int holds; args[0] keeps a good one."""
+    error = OSError(errno.ENOENT)
+    error.errno = 2**40
+    return error
+
+
 @pytest.mark.parametrize(
     "bare, said",
     [
@@ -1076,12 +1089,19 @@ def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monke
         (lambda: OSError(True), "OSError"),
         (lambda: OSError(0), "OSError"),
         (lambda: OSError(0, None), "OSError"),
+        (lambda: OSError(1, True), os.strerror(1)),
+        (lambda: OSError(1, 3.5), os.strerror(1)),
+        (lambda: OSError(-1), "OSError"),
+        (lambda: OSError(_Code.ENOENT), os.strerror(errno.ENOENT)),
+        (_errno_changed, os.strerror(errno.ENOENT)),
     ],
 )
 def test_an_error_without_a_usable_reason_gives_its_words_else_its_kind(bare, said):
-    """No strerror and no usable errno: the error's own words, else its class name.
+    """No usable strerror or code: the error's own words, else its class name.
 
-    A usable errno is a non-zero int other than a bool; None, a float, a string, 0 ("Success")
-    or a code no C int holds are not, and none of them is ever shown as the reason.
+    A text counts only as a non-empty string. A code counts only as a positive int, an int
+    subclass such as an IntEnum included, but not a bool, and one a C int holds; 0 ("Success"),
+    a negative code ("Unknown error -1") or a float is not converted. A string argument may
+    still be shown, as the error's own words.
     """
     assert block_scoring._reason(bare()) == said

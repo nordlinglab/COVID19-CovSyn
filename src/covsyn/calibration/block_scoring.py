@@ -70,20 +70,21 @@ NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV, errno.EOPNOTSUPP, errno.ENOT
 
 
 def _reason(error: OSError) -> str:
-    """The error's text; else its errno's; else its own words; else its kind (the class name).
+    """The error's text; else its code's; else its own words; else its kind (the class name).
 
-    OSError(code) with one argument leaves errno unset and keeps the code in args. None, 0, a
-    bool or anything else that is no int, as an errno or a text, is no reason and never shown.
+    A text counts only as a non-empty string. A code counts only as a positive int, an int
+    subclass included but not a bool, that a C int holds: errno, else args[0], where
+    OSError(code) with one argument keeps it. 0 reads "Success" and a negative code "Unknown
+    error", so neither is a reason; nothing else is shown.
     """
-    if error.strerror:
+    if isinstance(error.strerror, str) and error.strerror:
         return error.strerror
-    # A usable code: a non-zero int, not a bool (0 reads "Success"); errno, else args[0].
     for code in (error.errno, *error.args[:1]):
-        if type(code) is int and code:
+        if isinstance(code, int) and not isinstance(code, bool) and code > 0:
             try:
                 return os.strerror(code)
-            except (ValueError, OverflowError):  # a code no C int holds
-                break
+            except (ValueError, OverflowError):  # a code no C int holds: try the next
+                continue
     words = [a for a in error.args if isinstance(a, str) and a]
     return words[0] if words else type(error).__name__
 
