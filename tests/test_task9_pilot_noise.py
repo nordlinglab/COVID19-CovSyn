@@ -390,3 +390,11 @@ def test_a_resume_reads_config_json_as_utf_8(tmp_path, monkeypatch):
     monkeypatch.setattr(pathlib.Path, "read_text", recording)
     pn.main(["--resume", str(out)])
     assert encodings and set(encodings) == {"utf-8"}
+
+
+def test_a_config_nested_too_deep_to_read_is_a_command_error(tmp_path):
+    """As pilot 2's: exit 2, not a traceback."""
+    (tmp_path / "config.json").write_text("[" * 100_000 + "]" * 100_000)
+    with pytest.raises(SystemExit) as stop:
+        pn.main(["--resume", str(tmp_path)])
+    assert stop.value.code == 2

@@ -822,3 +822,14 @@ def test_the_optimiser_writes_the_archive_as_utf_8(tmp_path):
     assert path.read_text(encoding="utf-8").startswith("# archive \u03c3 \u2265")
     np.testing.assert_allclose(np.loadtxt(path, ndmin=2, encoding="utf-8"),
                                [[0, 1, 0.1, 0.2, 4.0]])  # fmt: skip
+
+
+@pytest.mark.parametrize("workers", [None, "3"])
+def test_a_config_nested_too_deep_to_read_is_a_command_error(tmp_path, capsys, workers):
+    """json.loads raises RecursionError, not ValueError: still exit 2, not a traceback."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text("[" * 100_000 + "]" * 100_000)
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--resume", str(out), *(["--workers", workers] if workers else [])])
+    assert stop.value.code == 2

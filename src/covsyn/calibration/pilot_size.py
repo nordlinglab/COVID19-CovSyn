@@ -318,13 +318,14 @@ def main(argv: list[str] | None = None) -> Path:
             simulations = config["settings"]["simulations"]
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
-        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        # RecursionError: JSON nested too deep for json.loads
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
         try:  # the pilot is there; only its record of the workers is at stake
             block_scoring.record_workers(out, workers)
         except PermissionError as error:  # refused: say what was refused
             parser.error(str(error))
-        except (OSError, ValueError) as error:  # ValueError: see record_workers' Raises
+        except (OSError, ValueError, RecursionError) as error:  # see record_workers' Raises
             # Named once: by the error, when it names its file, else here.
             where = out / CONFIG_FILE if getattr(error, "filename", None) is None else CONFIG_FILE
             parser.error(f"could not record the workers in {where}: {error}")
