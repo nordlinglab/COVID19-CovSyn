@@ -26,6 +26,17 @@ def _within(allowed: range) -> str:
     return f"{allowed.start} to {allowed.stop - 1}"
 
 
+def check_simulations(value: Any, name: str) -> int:
+    """S as recorded or chosen: a whole number of simulations one block holds.
+
+    Raises:
+        ValueError: Anything else, naming it as ``name``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value not in SIMULATIONS:
+        raise ValueError(f"{name} is {value!r}, not {_within(SIMULATIONS)}")
+    return value
+
+
 def from_command(mode: str, pop_size: int | None, generations: int | None,
                  simulations: int | None) -> tuple[int, int | None, int]:
     """n, G and S as given on the command line, each required and in range.
@@ -56,10 +67,9 @@ def from_settings(settings: dict[str, Any]) -> tuple[int, int, int]:
         ValueError: One is missing, not a whole number, or out of range, naming its key.
     """
     found = []
-    for key, allowed in (("pop_size", POP_SIZES), ("max_generations", GENERATIONS),
-                         ("simulations", SIMULATIONS)):
+    for key, allowed in (("pop_size", POP_SIZES), ("max_generations", GENERATIONS)):
         value = settings.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value not in allowed:
             raise ValueError(f"{key} is {value!r}, not {_within(allowed)}")
         found.append(value)
-    return found[0], found[1], found[2]
+    return found[0], found[1], check_simulations(settings.get("simulations"), "simulations")

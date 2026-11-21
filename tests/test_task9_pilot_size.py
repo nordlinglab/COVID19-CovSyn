@@ -917,3 +917,28 @@ def test_a_pilot_1_choice_of_the_wrong_kind_is_refused_before_any_run(tmp_path, 
         ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
     assert stop.value.code == 2
     assert not (tmp_path / "tables").exists() or not list((tmp_path / "tables").iterdir())
+
+
+@pytest.mark.parametrize("simulations", [300.0, "300", True, 0, 10_001, None])
+def test_a_resumed_pilot_s_recorded_s_of_the_wrong_kind_is_refused(tmp_path, monkeypatch,
+                                                                   simulations):
+    """The resume's S passes the same rule as pilot 1's choice: else exit 2, no run."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(
+        json.dumps({"settings": {"simulations": simulations}, "workers": 2})
+    )
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: pytest.fail("a run started"))
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--resume", str(out)])
+    assert stop.value.code == 2
+
+
+def test_one_rule_checks_s_wherever_it_is_read():
+    """run_size's, which the optimiser's resume, pilot 1's choice and pilot 2's resume use."""
+    from covsyn.calibration import run_size
+
+    assert run_size.check_simulations(300, "S") == 300
+    for bad in (300.0, "300", True, 0, 10_001, None):
+        with pytest.raises(ValueError, match="S"):
+            run_size.check_simulations(bad, "S")

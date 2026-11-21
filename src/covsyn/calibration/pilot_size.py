@@ -315,7 +315,9 @@ def main(argv: list[str] | None = None) -> Path:
                          f"name and place give its runs' names and directory")
         try:
             config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8-sig"))
-            simulations = config["settings"]["simulations"]
+            # The rule pilot 1's choice and the optimiser's resume pass (run_size).
+            simulations = run_size.check_simulations(config["settings"]["simulations"],
+                                                     "settings.simulations")  # fmt: skip
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
         # RecursionError: JSON nested too deep for json.loads
@@ -342,10 +344,11 @@ def main(argv: list[str] | None = None) -> Path:
         if type(failed) is not int or failed < 0:
             parser.error(f"pilot 1 in {args.noise} gives failed_evaluations {failed!r}, not a "
                          f"count")
-        if simulations is not None and (type(simulations) is not int
-                                        or simulations not in run_size.SIMULATIONS):
-            parser.error(f"pilot 1 in {args.noise} gives chosen_simulations {simulations!r}, "
-                         f"not a whole number of 1 to {seed_streams.MAX_SIMULATIONS}")
+        if simulations is not None:
+            try:
+                run_size.check_simulations(simulations, "chosen_simulations")
+            except ValueError as error:
+                parser.error(f"pilot 1 in {args.noise}: {error}")
         if failed:
             parser.error(f"pilot 1 in {args.noise} had {failed} failed evaluations, whose "
                          f"1e6 is no cost; its S is not pilot 2's to run")
