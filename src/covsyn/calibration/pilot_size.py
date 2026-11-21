@@ -241,14 +241,16 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
     _optimise(models_root, prefix, simulations, execute, workers)
 
     screen_path = out_dir / SCREEN_FILE
+    screen_marked = block_scoring.starts_with_mark(screen_path)  # warned about just below
     done = {(r["run"], int(r["candidate"]), int(r["block"]))
             for r in block_scoring.read_rows(screen_path)}  # fmt: skip
     todo, candidates = _screen_tasks(models_root, prefix, simulations, done)
     block_scoring.score(screen_path, todo, SCREEN_COLUMNS,
                         lambda t: candidates[t["run"]][t["candidate"]], evaluate, make_pool)
-    chosen = representatives(block_scoring.read_rows(screen_path, warn=False))  # warned
+    chosen = representatives(block_scoring.read_rows(screen_path, warn=not screen_marked))
 
     confirm_path = out_dir / CONFIRM_FILE
+    confirm_marked = block_scoring.starts_with_mark(confirm_path)  # warned about just below
     confirmed = {(r["run"], int(r["block"])) for r in block_scoring.read_rows(confirm_path)}
     todo = []
     for setting in settings():
@@ -263,7 +265,7 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
     block_scoring.score(confirm_path, todo, CONFIRM_COLUMNS,
                         lambda t: candidates[t["run"]][t["candidate"]], evaluate, make_pool)
 
-    table = compare_settings(block_scoring.read_rows(confirm_path, warn=False))  # warned
+    table = compare_settings(block_scoring.read_rows(confirm_path, warn=not confirm_marked))
     choice = choose(table)
     runs_table = []
     for setting in settings():

@@ -42,9 +42,9 @@ def read_rows(path: Path, warn: bool = True) -> list[dict[str, str]]:
     A last line without its newline, which a kill cut off, and a row short of a value are not
     finished evaluations and are left out. A leading UTF-8 byte order mark, which a spreadsheet
     adds when it saves the table as "CSV UTF-8", is skipped, with a warning unless ``warn`` is
-    False, as on a pilot's later reads of a table in one run: it may have shortened the costs it
-    wrote back. A save that adds no mark, such as plain "CSV", shortens them just the same and
-    is not detected.
+    False, as on a pilot's later reads of a table whose mark it has warned about in this run
+    (starts_with_mark): it may have shortened the costs it wrote back. A save that adds no
+    mark, such as plain "CSV", shortens them just the same and is not detected.
     """
     if not Path(path).is_file():
         return []
@@ -59,6 +59,19 @@ def read_rows(path: Path, warn: bool = True) -> list[dict[str, str]]:
         for row in csv.DictReader(io.StringIO(text, newline=""))
         if None not in row and None not in row.values()
     ]
+
+
+def starts_with_mark(path: Path) -> bool:
+    """Whether a table starts with a UTF-8 byte order mark, which read_rows warns about.
+
+    A pilot notes it before its first read of a table in a run, and asks its later reads to
+    warn only if the mark was not there then, so one added mid-run is still reported.
+    """
+    try:
+        with open(path, "rb") as f:
+            return f.read(len(codecs.BOM_UTF8)) == codecs.BOM_UTF8
+    except FileNotFoundError:
+        return False
 
 
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:

@@ -444,3 +444,20 @@ def test_pilot_1_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog
     with caplog.at_level(logging.WARNING, logger=pn.block_scoring.log.name):
         pn.run(tmp_path, _population(), np.zeros(DIM), np.ones(DIM), _evaluate, _threads)
     assert caplog.text.count(str(blocks)) == 1
+
+
+def test_a_mark_added_while_pilot_1_runs_is_warned_about(tmp_path, caplog, monkeypatch):
+    """Saved by a spreadsheet after the first read: the summary's read, the choice's, warns."""
+    import logging
+
+    blocks = tmp_path / pn.BLOCKS_FILE
+    real_summary = pn.write_summary
+
+    def saved_meanwhile(out_dir, warn=True):  # between the scoring and the summary
+        blocks.write_bytes(b"\xef\xbb\xbf" + blocks.read_bytes())
+        return real_summary(out_dir, warn=warn)
+
+    monkeypatch.setattr(pn, "write_summary", saved_meanwhile)
+    with caplog.at_level(logging.WARNING, logger=pn.block_scoring.log.name):
+        pn.run(tmp_path, _population(), np.zeros(DIM), np.ones(DIM), _evaluate, _threads)
+    assert caplog.text.count(str(blocks)) == 1

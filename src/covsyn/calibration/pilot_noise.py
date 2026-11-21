@@ -157,7 +157,7 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def write_summary(out_dir: Path, warn: bool = True) -> dict[str, Any]:
     """Summarise out_dir's blocks.csv into vectors.csv, pairs.csv and choice.json.
 
-    warn: as read_rows'; run() has read blocks.csv already, and warned if need be.
+    warn: as read_rows'; run() warns here only about a mark added since its first read.
     """
     summary = summarise(block_scoring.read_rows(Path(out_dir) / BLOCKS_FILE, warn=warn))
     block_scoring.write_csv(Path(out_dir) / VECTORS_FILE, summary["vectors"])
@@ -181,12 +181,13 @@ def run(out_dir: Path, population: np.ndarray, lower: np.ndarray, upper: np.ndar
         make_pool: The pool for one S, whose workers run S simulations per evaluation.
     """
     path = Path(out_dir) / BLOCKS_FILE
+    marked = block_scoring.starts_with_mark(path)  # the first read below warns about it
     done = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
             for r in block_scoring.read_rows(path)}  # fmt: skip
     todo = [t._asdict() for t in tasks(pilot_rows(), len(population)) if t.key not in done]
     parameters = np.asarray(population, dtype=float) * (upper - lower) + lower
     block_scoring.score(path, todo, COLUMNS, lambda t: parameters[t["row"]], evaluate, make_pool)
-    return write_summary(out_dir, warn=False)
+    return write_summary(out_dir, warn=not marked)  # a mark added since: warned now
 
 
 def _population_and_bounds() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
