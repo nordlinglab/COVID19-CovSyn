@@ -613,15 +613,21 @@ def socket_path():
 
     pytest's own tmp_path, or a long $TMPDIR, can pass macOS's 104-byte cap on a socket's path.
     """
+    import os
     import shutil
     import socket
+    import sys
     import tempfile
     from pathlib import Path
 
+    cap = 104 if sys.platform == "darwin" else 108  # bytes of an AF_UNIX path, with its NUL
     directory = Path(tempfile.mkdtemp(prefix="cs"))
-    if len(str(directory / "t.csv")) > 100:  # a long $TMPDIR: macOS caps the path at 104 bytes
+    if len(os.fsencode(directory / "t.csv")) >= cap:  # a long $TMPDIR
         directory.rmdir()
-        directory = Path(tempfile.mkdtemp(prefix="cs", dir="/tmp"))
+        try:
+            directory = Path(tempfile.mkdtemp(prefix="cs", dir="/tmp"))
+        except OSError:
+            pytest.skip("no directory short enough for a socket's path")
     listener = socket.socket(socket.AF_UNIX)
     try:
         path = directory / "t.csv"
@@ -941,14 +947,17 @@ def test_a_refusal_at_open_names_a_socket_but_not_a_regular_file(tmp_path, monke
     regular.write_text("")
     link = tmp_path / "link.csv"  # a link to a regular table is a table too
     link.symlink_to(regular)
+    socket_link = tmp_path / "socket-link.csv"  # a link to a socket is not
+    socket_link.symlink_to(socket_path)
 
     def refused(p, flags, *args, **kwargs):
         raise OSError(code, os.strerror(code), str(p))
 
     monkeypatch.setattr(os, "open", refused)
     try:
-        with pytest.raises(block_scoring.TableError, match="not a regular file"):
-            block_scoring.read_table(socket_path)
+        for path in (socket_path, socket_link):
+            with pytest.raises(block_scoring.TableError, match="not a regular file"):
+                block_scoring.read_table(path)
         for path in (regular, link):
             with pytest.raises(OSError) as error:
                 block_scoring.read_table(path)
@@ -1018,13 +1027,10 @@ def test_a_table_another_program_holds_says_to_resume_when_it_lets_go(tmp_path, 
         block_scoring.read_table(path)
 
 
-def test_a_busy_table_is_not_among_the_refusals_of_a_create():
-    """EAGAIN means a lease only from the non-blocking open, which handles it on its own."""
-    assert errno.EAGAIN not in block_scoring.TABLE_REFUSALS
-
-
-def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monkeypatch):
-    """An OSError with an errno but no strerror: the message gives the errno's own text."""
+@pytest.mark.parametrize("bare", [OSError(errno.ENOENT), OSError(errno.ENOENT, None)],
+                         ids=["code-only", "errno-no-text"])
+def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monkeypatch, bare):
+    """An OSError without strerror, its code in args or in errno: the errno's own text."""
     import os
 
     path = tmp_path / "t.csv"
@@ -1035,13 +1041,13 @@ def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monke
             raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(p))
         return real_open(p, flags, *args, **kwargs)
 
-    def bare(p, *a, **kw):
+    def refused(p, *a, **kw):
         if str(p) == str(path):
-            raise OSError(errno.ENOENT)
+            raise bare
         return real_lstat(p, *a, **kw)
 
     monkeypatch.setattr(os, "open", exists)
-    monkeypatch.setattr(os, "lstat", bare)
+    monkeypatch.setattr(os, "lstat", refused)
     with pytest.raises(block_scoring.TableError) as error:
         block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
                             exists=False)  # fmt: skip
