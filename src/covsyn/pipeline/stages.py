@@ -150,8 +150,11 @@ def optimise(ctx: Context, resume: bool) -> None:
         str(ctx.config.stream),
     ]
     # Task 8: the step schedule given, pilot 2's in production; a resume uses the run's own
+    # Task 9: production's n, S and pilot 2's run id
     for flag, value in (("--alpha-0", ctx.config.alpha_0), ("--alpha-end", ctx.config.alpha_end),
-                        ("--g-plan", ctx.config.g_plan)):
+                        ("--g-plan", ctx.config.g_plan), ("--pop-size", ctx.config.pop_size),
+                        ("--simulations", ctx.config.simulations),
+                        ("--pilot", ctx.config.pilot)):
         if value is not None:
             args += [flag, str(value)]
     ctx.must(args, "the optimiser", output=log)

@@ -31,6 +31,10 @@ class PipelineConfig:
     alpha_0: float | None = None
     alpha_end: float | None = None
     g_plan: int | None = None
+    # Task 9: production's n, S and pilot 2's run id; None in every other mode
+    pop_size: int | None = None
+    simulations: int | None = None
+    pilot: str | None = None
     revalidate: bool = True
     revalidation_blocks: int = 10
     validation_stream: int = seed_streams.DEFAULT_VALIDATION_STREAM  # Task 7
@@ -55,6 +59,8 @@ REMOVED = {
 # is read rather than when the stage starts.
 MAXIMA = {
     "monte_carlo": seed_streams.MAX_SIMULATIONS,
+    "simulations": seed_streams.MAX_SIMULATIONS,  # Task 9: one block's seeds
+    "pop_size": 256,  # Task 9: the initial population's rows (initial_population.N_MAX)
     "revalidation_blocks": seed_streams.MAX_BLOCKS,
     "age_rr_cases": seed_streams.STREAM_SPAN,
 }
@@ -74,6 +80,9 @@ SCHEMA: dict[str, dict[str, tuple[str, type, Any]]] = {
         "alpha_0": ("alpha_0", float, None),
         "alpha_end": ("alpha_end", float, None),
         "g_plan": ("g_plan", int, 1),
+        "pop_size": ("pop_size", int, 2),  # Task 9: at least one firefly moves
+        "simulations": ("simulations", int, 1),
+        "pilot": ("pilot", str, None),
     },
     "revalidate": {
         "enabled": ("revalidate", bool, None),
@@ -143,7 +152,27 @@ def parse(text: str, source: str) -> PipelineConfig:
             field, value = _value(section, key, raw)
             values[field] = value
     _check_schedule(values, source)
+    _check_production(values, source)
     return PipelineConfig(**values)
+
+
+# Task 9: what production takes from pilot 2, which no default stands in for.
+PRODUCTION_SETTINGS = ("pop_size", "simulations", "pilot", "alpha_0", "alpha_end", "g_plan")
+
+
+def _check_production(values: dict[str, Any], source: str) -> None:
+    """Production needs pilot 2's choice whole; every other mode fixes n and S (Task 9)."""
+    mode = values.get("mode", PipelineConfig.mode)
+    if mode == "production":
+        missing = [key for key in PRODUCTION_SETTINGS if values.get(key) is None]
+        if missing:
+            raise ValueError(f"{source}: [optimise] mode \"production\" needs "
+                             f"{', '.join(missing)}, pilot 2's choice")
+        return
+    given = [key for key in ("pop_size", "simulations", "pilot") if values.get(key) is not None]
+    if given:
+        raise ValueError(f"{source}: [optimise] {', '.join(given)} is for mode \"production\" "
+                         f"only; mode {mode!r} fixes it")
 
 
 def _check_schedule(values: dict[str, Any], source: str) -> None:
