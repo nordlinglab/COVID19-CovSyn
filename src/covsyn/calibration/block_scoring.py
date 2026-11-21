@@ -170,7 +170,7 @@ def record_workers(out_dir: Path, workers: int) -> None:
         RecursionError: config.json is nested too deep for json.loads.
     """
     path = Path(out_dir) / "config.json"
-    config = json.loads(path.read_text(encoding="utf-8"))
+    config = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(config, dict):
         raise ValueError("not a JSON object")  # the caller names the file
     if config.get("workers") == workers:

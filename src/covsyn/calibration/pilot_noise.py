@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> Path:
     if args.resume is not None:
         out = args.resume
         try:
-            config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8"))
+            config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8-sig"))
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
         # RecursionError: JSON nested too deep for json.loads

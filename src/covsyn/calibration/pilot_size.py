@@ -314,7 +314,7 @@ def main(argv: list[str] | None = None) -> Path:
             parser.error(f"{args.resume} is not results/tables/<run-id> of a pilot 2, whose "
                          f"name and place give its runs' names and directory")
         try:
-            config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8"))
+            config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8-sig"))
             simulations = config["settings"]["simulations"]
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
@@ -332,7 +332,7 @@ def main(argv: list[str] | None = None) -> Path:
         root = out.parent.parent
     else:
         try:
-            noise = json.loads((args.noise / "choice.json").read_text(encoding="utf-8"))
+            noise = json.loads((args.noise / "choice.json").read_text(encoding="utf-8-sig"))
             simulations = noise["chosen_simulations"]
             failed = noise.get("failed_evaluations", 0)
         except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:

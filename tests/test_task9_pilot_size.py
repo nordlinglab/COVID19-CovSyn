@@ -754,7 +754,8 @@ def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monke
     ps.main(["--resume", str(out)])
     ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
     assert set(encodings) == {"config.json", "choice.json"}
-    assert all(set(reads) == {"utf-8"} for reads in encodings.values()), encodings
+    # utf-8-sig: UTF-8, with a byte order mark an editor may add skipped
+    assert all(set(reads) == {"utf-8-sig"} for reads in encodings.values()), encodings
 
 
 def test_a_config_turned_into_a_list_is_named_once(tmp_path, monkeypatch, capsys):
@@ -880,3 +881,21 @@ def test_the_optimiser_s_run_writes_its_archive_through_write_archive(tmp_path, 
                    demographic_parameters=None, max_generations=2, max_workers=2,
                    Cheng_contact_array=None, Cheng_attack_rate=None, norm_weights=None)  # fmt: skip
     assert written == [tmp_path / "firefly_archive.txt"]
+
+
+def test_json_saved_with_a_byte_order_mark_still_reads(tmp_path, monkeypatch):
+    """An editor's UTF-8 with BOM: choice.json and config.json read as their contents."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_bytes(b"\xef\xbb\xbf" + json.dumps(
+        {"chosen_simulations": 300}).encode())  # fmt: skip
+    seen = {}
+    monkeypatch.setattr(ps, "run", lambda o, models, prefix, s, *rest, **kw: seen.update(
+        s=s, out=o) or {})  # fmt: skip
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    out = ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+    assert seen["s"] == 300
+    config = out / "config.json"
+    config.write_bytes(b"\xef\xbb\xbf" + config.read_bytes())
+    ps.main(["--resume", str(out), "--workers", "3"])  # the record step reads it too
+    assert json.loads(config.read_text(encoding="utf-8-sig"))["workers"] == 3

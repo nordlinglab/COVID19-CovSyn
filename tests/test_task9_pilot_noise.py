@@ -389,7 +389,7 @@ def test_a_resume_reads_config_json_as_utf_8(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pathlib.Path, "read_text", recording)
     pn.main(["--resume", str(out)])
-    assert encodings and set(encodings) == {"utf-8"}
+    assert encodings and set(encodings) == {"utf-8-sig"}  # UTF-8, a byte order mark skipped
 
 
 def test_a_config_nested_too_deep_to_read_is_a_command_error(tmp_path):
@@ -419,3 +419,15 @@ def test_a_config_nested_too_deep_by_the_second_read_is_a_command_error(
     err = capsys.readouterr().err
     assert stop.value.code == 2 and err.count(out.name) == 1
     assert "could not record the workers" in err  # the record step's, not the first read's
+
+
+def test_a_config_saved_with_a_byte_order_mark_still_reads(tmp_path, monkeypatch):
+    """As pilot 2's: an editor's UTF-8 with BOM does not make the pilot look missing."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+    config = out / "config.json"
+    config.write_bytes(b"\xef\xbb\xbf" + config.read_bytes())
+    assert pn.main(["--resume", str(out), "--workers", "3"]) == out
