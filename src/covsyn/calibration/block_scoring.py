@@ -161,7 +161,8 @@ def record_workers(out_dir: Path, workers: int) -> None:
         OSError: config.json cannot be read, or the new one cannot be written.
         ValueError: config.json is not UTF-8, not JSON, not a JSON object, holds an integer
             too long for Python to read, or a value (NaN, Infinity) JSON cannot be written back
-            with.
+            with. Its message does not name the file, which the caller adds.
+        RecursionError: config.json is nested too deep for json.loads.
     """
     path = Path(out_dir) / "config.json"
     config = json.loads(path.read_text(encoding="utf-8"))
