@@ -544,6 +544,9 @@ def test_the_tables_are_utf_8_whatever_the_locale(tmp_path, monkeypatch):
 
     monkeypatch.setattr(builtins, "open", recording)
     monkeypatch.setattr(io_module, "open", recording)
+    # Without an encoding of its own, an open gets io.text_encoding's: "utf-8" in UTF-8 mode,
+    # which would hide a missing one, so it gives "locale" here.
+    monkeypatch.setattr(io_module, "text_encoding", lambda encoding, *a: encoding or "locale")
     path = tmp_path / "t.csv"
     block_scoring.write_csv(path, [{"name": "\u0141\u00f3d\u017a", "simulations": 10,
                                     "seed_offset": 0, "cost": 1.5}])  # fmt: skip
@@ -552,7 +555,6 @@ def test_the_tables_are_utf_8_whatever_the_locale(tmp_path, monkeypatch):
     monkeypatch.undo()
     assert [r["name"] for r in rows] == ["\u0141\u00f3d\u017a", "\u00e9t\u00e9"]
     assert encodings and set(encodings) == {"utf-8"}
-    assert path.read_bytes().decode("utf-8")  # the bytes are UTF-8
 
 
 def test_a_row_cut_inside_a_character_still_reads_the_finished_rows(tmp_path):

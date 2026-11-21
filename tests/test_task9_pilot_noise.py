@@ -366,7 +366,9 @@ def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, monkeypatc
     (out / "config.json").write_text(text.replace('"settings": {', '"settings": {"x": NaN, ', 1))
     with pytest.raises(SystemExit) as stop:
         pn.main(["--resume", str(out), "--workers", "3"])
-    assert stop.value.code == 2 and "could not record" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and "could not record" in err
+    assert out.name in err  # the error names no file, so the message names the run
 
 
 def test_a_resume_reads_config_json_as_utf_8(tmp_path, monkeypatch):
