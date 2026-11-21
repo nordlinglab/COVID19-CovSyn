@@ -916,6 +916,7 @@ def test_a_link_to_a_table_out_of_reach_is_named_as_refused(tmp_path, monkeypatc
         block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
                             exists=False)  # fmt: skip
     assert "Permission denied" in str(error.value) and "leads to no file" not in str(error.value)
+    assert "symbolic link" in str(error.value) and "locked" in str(error.value)  # which, where
 
 
 @pytest.mark.parametrize("code", sorted({errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENXIO,

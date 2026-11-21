@@ -39,9 +39,10 @@ MakePool = Callable[[int], concurrent.futures.Executor]
 class TableError(RuntimeError):
     """A pilot's table went missing, appeared, or cannot be one.
 
-    It cannot be one when it is not a regular file, is a symbolic link to nothing where a table
-    would be made, sits under a parent that is not a directory, or the system refuses it
-    (read-only, a link loop).
+    It cannot be one when it is not a regular file (a directory, a FIFO, a socket, a device), is
+    a symbolic link that leads to no file or out of reach where a table would be made, sits
+    under a parent that is not a directory, is held by another program for now, or the system
+    refuses it (TABLE_REFUSALS: read-only, a link loop, a running program).
 
     The pilot stops rather than start the table anew or write into one it has not read: either
     would score every evaluation again, and could append them to the finished ones (decision
@@ -264,20 +265,17 @@ def _taken(path: Path) -> str:
         entry = None
     if entry is not None and stat.S_ISLNK(entry):
         try:
+            target = f", to {os.readlink(path)},"
+        except OSError:  # gone or changed since lstat
+            target = ""
+        try:
             leads_to = os.stat(path).st_mode  # what the link leads to
         except OSError as error:
-            if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):
-                return f"{path}: {error.strerror}"  # there, but out of reach
-            leads_to = None  # to nothing, or round in a loop
-        if leads_to is None:
-            try:
-                target = f", to {os.readlink(path)},"
-            except OSError:  # gone or changed since lstat
-                target = ""
-            return (
-                f"{path} is a symbolic link{target} that leads to no file, where the pilot "
-                f"would make its table; remove it or point it at an existing table"
-            )
+            if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):  # there, unreachable
+                return (f"{path} is a symbolic link{target} whose target cannot be reached: "
+                        f"{error.strerror}")
+            return (f"{path} is a symbolic link{target} that leads to no file, where the pilot "
+                    f"would make its table; remove it or point it at an existing table")
         entry = leads_to
     if entry is not None and not stat.S_ISREG(entry):
         return f"{path} is not a regular file, so it is no pilot table"
