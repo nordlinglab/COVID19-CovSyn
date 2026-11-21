@@ -114,7 +114,8 @@ A run directory that is a link to other storage is not supported.
 `src/covsyn/pipeline/default.toml` holds the settings, such as the optimisation and validation streams and the previous run's `checks.json` to compare with;
 `--config` also takes another TOML file.
 
-Two pilots size the production run (Task 9), and each writes its command, settings and results into `results/tables/<run-id>/` and resumes with `--resume results/tables/<run-id>`:
+Two pilots size the production run (Task 9), and each writes its command, settings and results into `results/tables/<run-id>/` and resumes with `--resume results/tables/<run-id>`.
+A resume runs with `--workers`, else `COVSYN_WORKERS`, else the worker count in its `config.json`, and writes the count it runs with there:
 
 ```bash
 uv run covsyn-pilot-noise

@@ -482,3 +482,45 @@ def test_a_resume_through_a_linked_tables_directory_keeps_the_results_root(tmp_p
     ps.main(["--resume", str(tmp_path / "results" / "tables" /
                              "20261121-000000_abcdef0_pilot-size")])  # fmt: skip
     assert seen["models"] == tmp_path / "results" / "models"
+
+
+@pytest.mark.parametrize("name", ["latest_pilot-size", "20261121-000000_abcdef0_pilot-size"])
+def test_a_resume_that_is_not_a_pilot_s_own_directory_is_refused(tmp_path, monkeypatch, name):
+    """A hand-made name, or a link in another tables directory: its runs' place is unknown."""
+    real = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    real.mkdir(parents=True)
+    (real / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": 2}))
+    other = tmp_path / "backup" / "tables"
+    other.mkdir(parents=True)
+    (other / name).symlink_to(real)
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(other / name)])
+
+
+def test_a_config_that_cannot_be_written_is_a_command_error(tmp_path, monkeypatch, capsys):
+    """Read-only config.json, new workers: refused with a message, not a traceback."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": 2}))
+
+    def refused(out_dir, workers):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(ps.block_scoring, "record_workers", refused)
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--resume", str(out), "--workers", "3"])
+    assert stop.value.code == 2 and "PermissionError" in capsys.readouterr().err
+
+
+def test_a_config_without_settings_is_named_as_such(tmp_path, monkeypatch, capsys):
+    """The refusal names the missing key by its exception, not only its name."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"workers": 2}))
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(out)])
+    assert "KeyError" in capsys.readouterr().err

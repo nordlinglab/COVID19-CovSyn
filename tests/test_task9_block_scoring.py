@@ -110,3 +110,33 @@ def _check_cut(tmp_path, cut):
     _score(path, ["z"])
     again = block_scoring.read_rows(path)
     assert [r["name"] for r in again] == [r["name"] for r in ROWS[:max(whole, 0)]] + ["z"]
+
+
+def test_an_unusable_covsyn_workers_falls_back_to_the_recorded_count():
+    """Not to the cores, which record_workers would then write over the record."""
+    for typo in ("abc", "0", "-1"):
+        assert block_scoring.pilot_workers(None, {"COVSYN_WORKERS": typo}, 3) == 3
+
+
+def test_a_usable_covsyn_workers_comes_before_the_record():
+    """--workers, else COVSYN_WORKERS, else the record."""
+    assert block_scoring.pilot_workers(None, {"COVSYN_WORKERS": "5"}, 3) == 5
+    assert block_scoring.pilot_workers(2, {"COVSYN_WORKERS": "5"}, 3) == 2
+
+
+def test_the_workers_are_written_whole_or_not_at_all(tmp_path, monkeypatch):
+    """A kill or a full disk while writing leaves the old config.json, not a cut-off one."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {"simulations": 300}, "workers": 8}))
+
+    def full_disk(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", full_disk)
+    with pytest.raises(OSError):
+        block_scoring.record_workers(tmp_path, 3)
+    assert json.loads(path.read_text())["workers"] == 8
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["config.json"]  # no temporary left

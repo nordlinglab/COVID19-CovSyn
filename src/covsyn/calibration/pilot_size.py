@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import re
 import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -53,6 +54,8 @@ SCREEN_BLOCKS = range(0, 30)
 CONFIRM_BLOCKS = range(30, 60)
 OPTIMISER = "covsyn.calibration.firefly_optimizer"
 FINISHED = "firefly_worst.txt"  # the optimiser's main() writes it last
+# A pilot 2's directory name, as runs.make_run_id makes it; its runs share the part before it.
+RUN_ID = re.compile(r"\d{8}-\d{6}_(?:[0-9a-f]{7}|nocommit)(?:-dirty)?_pilot-size")
 
 CONFIG_FILE = "config.json"
 RUNS_FILE = "runs.csv"
@@ -246,12 +249,12 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
     chosen = representatives(block_scoring.read_rows(screen_path))
 
     confirm_path = out_dir / CONFIRM_FILE
-    done = {(r["run"], int(r["block"])) for r in block_scoring.read_rows(confirm_path)}
+    confirmed = {(r["run"], int(r["block"])) for r in block_scoring.read_rows(confirm_path)}
     todo = []
     for setting in settings():
         name = run_name(prefix, setting)
         for b in CONFIRM_BLOCKS:
-            if (name, b) not in done:
+            if (name, b) not in confirmed:
                 todo.append({"run": name, "pop_size": setting.pop_size,
                              "alpha_0": setting.alpha_0, "stream": setting.stream,
                              "candidate": chosen[name], "simulations": simulations, "block": b,
@@ -306,7 +309,8 @@ def main(argv: list[str] | None = None) -> Path:
         # Absolute, as the optimiser runs from the repository root, without "..", and not
         # resolved, so a linked tables directory keeps its results/ siblings.
         out = Path(os.path.abspath(args.resume))
-        if out.parent.name != "tables" or not out.name.endswith("_pilot-size"):
+        if (out.is_symlink() or out.parent.name != "tables"
+                or not RUN_ID.fullmatch(out.name)):
             parser.error(f"{args.resume} is not results/tables/<run-id> of a pilot 2, whose "
                          f"name and place give its runs' names and directory")
         try:
@@ -314,9 +318,9 @@ def main(argv: list[str] | None = None) -> Path:
             simulations = config["settings"]["simulations"]
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
+            block_scoring.record_workers(out, workers)
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-            parser.error(f"{out} holds no pilot to resume ({error})")
-        block_scoring.record_workers(out, workers)
+            parser.error(f"{out} holds no pilot to resume ({error!r})")
         root = out.parent.parent
     else:
         try:

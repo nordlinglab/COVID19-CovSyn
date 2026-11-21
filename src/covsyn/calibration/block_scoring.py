@@ -14,6 +14,7 @@ import concurrent.futures
 import csv
 import io
 import json
+import logging
 import multiprocessing
 import os
 import pickle
@@ -24,6 +25,8 @@ from typing import Any
 import numpy as np
 
 from covsyn.runtime import hardware
+
+log = logging.getLogger(__name__)
 
 Evaluate = Callable[[np.ndarray, int], tuple]
 MakePool = Callable[[int], concurrent.futures.Executor]
@@ -113,20 +116,48 @@ def pilot_workers(given: int | None, env: Mapping[str, str], recorded: Any) -> i
     Raises:
         ValueError: --workers, or the recorded count, is not a positive whole number.
     """
-    if given is None and not env.get(hardware.ENV_VARIABLE, "").strip() and recorded is not None:
-        if type(recorded) is not int or recorded < 1:
-            raise ValueError(f"config.json's workers is {recorded!r}, not a positive whole number")
+    if given is not None or recorded is None:
+        return hardware.resolve_workers(given, env, None)
+    if type(recorded) is not int or recorded < 1:
+        raise ValueError(f"config.json's workers is {recorded!r}, not a positive whole number")
+    requested = env.get(hardware.ENV_VARIABLE, "").strip()
+    if not requested:  # empty counts as unset, as resolve_workers takes it (B86)
         return recorded
-    return hardware.resolve_workers(given, env, None)
+    try:
+        count = int(requested)
+    except ValueError:
+        count = 0
+    if count >= 1:
+        return count
+    # Unusable: the record, not the cores, since the run started with it (resolve_workers
+    # would fall to the cores, which record_workers would then write over the record).
+    log.warning("%s=%r is not a positive whole number; using the %d workers the pilot recorded",
+                hardware.ENV_VARIABLE, requested, recorded)
+    return recorded
 
 
 def record_workers(out_dir: Path, workers: int) -> None:
-    """Write the workers a resume runs with into config.json, which records the run."""
+    """Write the workers a resume runs with into config.json, which records the run.
+
+    Written whole or not at all: a temporary file replaces it, so a kill or a full disk leaves
+    the old one, which every later resume needs.
+
+    Raises:
+        OSError: config.json cannot be read, or the new one cannot be written.
+        ValueError: config.json is not JSON.
+    """
     path = Path(out_dir) / "config.json"
     config = json.loads(path.read_text(encoding="utf-8"))
-    if config.get("workers") != workers:
-        config["workers"] = workers
-        path.write_text(json.dumps(config, indent=1, allow_nan=False) + "\n", encoding="utf-8")
+    if config.get("workers") == workers:
+        return
+    config["workers"] = workers
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        temporary.write_text(json.dumps(config, indent=1, allow_nan=False) + "\n",
+                             encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def objective_pools(workers: int | None) -> tuple[Evaluate, MakePool]:

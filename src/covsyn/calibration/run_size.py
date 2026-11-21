@@ -45,6 +45,7 @@ def from_command(mode: str, pop_size: int | None, generations: int | None,
             raise ValueError(f"--mode {mode} needs {flag}, which no default stands in for")
         if value not in allowed:
             raise ValueError(f"--mode {mode}: {flag} must be {_within(allowed)}, not {value}")
+    assert pop_size is not None and simulations is not None  # checked above
     return pop_size, generations, simulations
 
 

@@ -114,12 +114,11 @@ class Watch:
     def __init__(self, on: bool, dim: int, checkpoint: dict | None) -> None:
         """Monitoring when on, from the checkpoint's state when resuming one."""
         self.on = on
-        resumed = on and checkpoint is not None and 'monitored' in checkpoint
-        self.monitor = (Monitor.from_state(checkpoint, dim) if resumed
-                        else Monitor(dim))
-        self.reason = str(checkpoint['stop_reason']) if resumed else ''
-        self.evaluations = int(checkpoint['monitor_evaluations']) if resumed else 0
-        self.seconds = float(checkpoint['monitor_seconds']) if resumed else 0.0
+        state = checkpoint if on and checkpoint is not None and 'monitored' in checkpoint else None
+        self.monitor = Monitor(dim) if state is None else Monitor.from_state(state, dim)
+        self.reason = '' if state is None else str(state['stop_reason'])
+        self.evaluations = 0 if state is None else int(state['monitor_evaluations'])
+        self.seconds = 0.0 if state is None else float(state['monitor_seconds'])
 
     def stopped(self) -> bool:
         """Whether the rule, or G_max, has stopped the run."""

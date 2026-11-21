@@ -115,7 +115,8 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
     present = {label for kind, label, *_ in cost if kind == "vector"}
     labels = [label for label in pilot_rows() if label in present]  # not the finishing order
     labels += sorted(present - set(labels))
-    vectors, pairs = [], []
+    vectors: list[dict[str, Any]] = []
+    pairs: list[dict[str, Any]] = []
     for simulations in BLOCKS:
         by = {(label, block): c for (kind, label, _, s, block), c in cost.items()
               if kind == "vector" and s == simulations}  # fmt: skip
@@ -132,7 +133,8 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
                    if kind == "spread"}  # fmt: skip
     row_ids = sorted({row for row, _ in spread_cost})
     means = [float(np.mean([spread_cost[(row, b)] for b in SPREAD_BLOCKS])) for row in row_ids]
-    spread = {"rows": len(row_ids), "simulations": SPREAD_SIMULATIONS, "sd": _sd(means),
+    spread: dict[str, Any] = {"rows": len(row_ids), "simulations": SPREAD_SIMULATIONS,
+                              "sd": _sd(means),
               **{f"sd_block_{b}": _sd([spread_cost[(row, b)] for row in row_ids])
                  for b in SPREAD_BLOCKS}}  # fmt: skip
     threshold = THRESHOLD * spread["sd"]
@@ -214,9 +216,9 @@ def main(argv: list[str] | None = None) -> Path:
             config = json.loads((out / CONFIG_FILE).read_text())
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
+            block_scoring.record_workers(out, workers)
         except (OSError, ValueError, TypeError, AttributeError) as error:
-            parser.error(f"{out} holds no pilot to resume ({error})")
-        block_scoring.record_workers(out, workers)
+            parser.error(f"{out} holds no pilot to resume ({error!r})")
     else:
         out = runs.run_directory(runs.make_run_id("pilot-noise"), "tables", args.results_root,
                                  new=True)  # fmt: skip
