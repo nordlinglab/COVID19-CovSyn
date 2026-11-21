@@ -620,7 +620,8 @@ def socket_path():
     import tempfile
     from pathlib import Path
 
-    cap = 104 if sys.platform == "darwin" else 108  # bytes of an AF_UNIX path, with its NUL
+    # Bytes of an AF_UNIX path, with its NUL: 108 on Linux, 104 on macOS and the BSDs.
+    cap = 108 if sys.platform.startswith("linux") else 104
     directory = Path(tempfile.mkdtemp(prefix="cs"))
     if len(os.fsencode(directory / "t.csv")) >= cap:  # a long $TMPDIR
         directory.rmdir()
@@ -933,10 +934,12 @@ def test_a_link_to_a_table_out_of_reach_is_named_as_refused(tmp_path, monkeypatc
     assert "symbolic link" in str(error.value) and "locked" in str(error.value)  # which, where
 
 
-@pytest.mark.parametrize("code", sorted({errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENXIO,
-                                         errno.ENODEV}))
-def test_a_refusal_at_open_names_a_socket_but_not_a_regular_file(tmp_path, monkeypatch,
-                                                                 socket_path, code):
+@pytest.mark.parametrize(
+    "code", sorted({errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENXIO, errno.ENODEV})
+)
+def test_a_refusal_at_open_names_a_socket_but_not_a_regular_file(
+    tmp_path, monkeypatch, socket_path, code
+):
     """A socket refused at open (EOPNOTSUPP on macOS, ENXIO on Linux): what is there decides.
 
     A socket is "not a regular file"; a regular file refused the same way keeps the error.
@@ -986,8 +989,7 @@ def test_a_new_table_s_unsupported_or_busy_create_keeps_its_error(tmp_path, monk
     assert not isinstance(error.value, block_scoring.TableError) and error.value.errno == code
 
 
-def test_an_entry_gone_again_before_it_is_named_is_not_said_to_have_appeared(tmp_path,
-                                                                             monkeypatch):
+def test_an_entry_gone_again_before_it_is_named_is_not_said_to_have_appeared(tmp_path, monkeypatch):
     """EEXIST, then nothing there: the refusal says it changed, not "start it again"."""
     import os
 
@@ -1027,8 +1029,11 @@ def test_a_table_another_program_holds_says_to_resume_when_it_lets_go(tmp_path, 
         block_scoring.read_table(path)
 
 
-@pytest.mark.parametrize("bare", [OSError(errno.ENOENT), OSError(errno.ENOENT, None)],
-                         ids=["code-only", "errno-no-text"])
+@pytest.mark.parametrize(
+    "bare",
+    [lambda: OSError(errno.ENOENT), lambda: OSError(errno.ENOENT, None)],
+    ids=["code-only", "errno-no-text"],
+)
 def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monkeypatch, bare):
     """An OSError without strerror, its code in args or in errno: the errno's own text."""
     import os
@@ -1043,7 +1048,7 @@ def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monke
 
     def refused(p, *a, **kw):
         if str(p) == str(path):
-            raise bare
+            raise bare()  # a new error each run, holding no earlier traceback
         return real_lstat(p, *a, **kw)
 
     monkeypatch.setattr(os, "open", exists)
