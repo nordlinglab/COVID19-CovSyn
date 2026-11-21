@@ -899,3 +899,21 @@ def test_json_saved_with_a_byte_order_mark_still_reads(tmp_path, monkeypatch):
     config.write_bytes(b"\xef\xbb\xbf" + config.read_bytes())
     ps.main(["--resume", str(out), "--workers", "3"])  # the record step reads it too
     assert json.loads(config.read_text(encoding="utf-8-sig"))["workers"] == 3
+
+
+@pytest.mark.parametrize("choice", [{"chosen_simulations": 300.0}, {"chosen_simulations": "300"},
+                                    {"chosen_simulations": True}, {"chosen_simulations": 0},
+                                    {"chosen_simulations": 10_001},
+                                    {"chosen_simulations": 300, "failed_evaluations": "0"},
+                                    {"chosen_simulations": 300, "failed_evaluations": -1}])
+def test_a_pilot_1_choice_of_the_wrong_kind_is_refused_before_any_run(tmp_path, monkeypatch,
+                                                                      choice):
+    """S a whole number of simulations a block holds, failures a count: else exit 2, no run."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps(choice))
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: pytest.fail("a run started"))
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+    assert stop.value.code == 2
+    assert not (tmp_path / "tables").exists() or not list((tmp_path / "tables").iterdir())

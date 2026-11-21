@@ -40,7 +40,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from covsyn.calibration import block_scoring, seed_streams, step_schedule
+from covsyn.calibration import block_scoring, run_size, seed_streams, step_schedule
 from covsyn.calibration.revalidation import ARCHIVE_HEADER
 from covsyn.runtime import hardware, runs
 
@@ -337,6 +337,15 @@ def main(argv: list[str] | None = None) -> Path:
             failed = noise.get("failed_evaluations", 0)
         except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{args.noise} holds no pilot 1 choice ({error!r})")
+        # Values as pilot 1 writes them: a count of failures, and S a whole number of
+        # simulations a block holds, or None; anything else is refused before any run.
+        if type(failed) is not int or failed < 0:
+            parser.error(f"pilot 1 in {args.noise} gives failed_evaluations {failed!r}, not a "
+                         f"count")
+        if simulations is not None and (type(simulations) is not int
+                                        or simulations not in run_size.SIMULATIONS):
+            parser.error(f"pilot 1 in {args.noise} gives chosen_simulations {simulations!r}, "
+                         f"not a whole number of 1 to {seed_streams.MAX_SIMULATIONS}")
         if failed:
             parser.error(f"pilot 1 in {args.noise} had {failed} failed evaluations, whose "
                          f"1e6 is no cost; its S is not pilot 2's to run")
