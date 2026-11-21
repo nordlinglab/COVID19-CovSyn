@@ -383,7 +383,9 @@ def main(argv: list[str] | None = None) -> Path:
     try:
         summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool,
                       workers=workers)
-    except block_scoring.TableError as error:  # a table gone or out of place: say which
+    # A table gone or out of place, or one the system refuses (read-only, a link loop): say
+    # which, with its path, rather than a traceback.
+    except (block_scoring.TableError, OSError) as error:
         parser.error(str(error))
     print(json.dumps(summary, indent=1))
     return out

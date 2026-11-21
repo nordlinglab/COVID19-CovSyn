@@ -508,3 +508,29 @@ def test_pilot_1_reports_a_table_error_as_a_refusal(tmp_path, monkeypatch, capsy
     with pytest.raises(SystemExit) as stop:
         pn.main(["--results-root", str(tmp_path)])
     assert stop.value.code == 2 and "blocks.csv went missing" in capsys.readouterr().err
+
+
+def test_a_read_only_table_is_a_refusal_not_a_traceback(tmp_path, monkeypatch, capsys):
+    """A blocks.csv set read-only: the resume stops with its path and the reason."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+
+    def stops(P, seed_offset):
+        raise KeyboardInterrupt
+
+    out_dir = tmp_path / "tables"
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (stops, _threads))
+    with pytest.raises(KeyboardInterrupt):
+        pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+    out = next(out_dir.iterdir())
+    (out / pn.BLOCKS_FILE).chmod(0o444)
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    try:
+        with pytest.raises(SystemExit) as stop:
+            pn.main(["--resume", str(out)])
+    finally:
+        (out / pn.BLOCKS_FILE).chmod(0o644)
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and pn.BLOCKS_FILE in err
