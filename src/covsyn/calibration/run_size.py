@@ -33,7 +33,7 @@ def check_simulations(value: Any, name: str) -> int:
         ValueError: Anything else, naming it as ``name``.
     """
     if isinstance(value, bool) or not isinstance(value, int) or value not in SIMULATIONS:
-        raise ValueError(f"{name} is {value!r}, not a whole number of {_within(SIMULATIONS)}")
+        raise ValueError(f"{name} is {value!r}, not a whole number from {_within(SIMULATIONS)}")
     return value
 
 
@@ -55,7 +55,9 @@ def from_command(mode: str, pop_size: int | None, generations: int | None,
         if value is None:
             raise ValueError(f"--mode {mode} needs {flag}, which no default stands in for")
         if value not in allowed:
-            raise ValueError(f"--mode {mode}: {flag} must be {_within(allowed)}, not {value}")
+            raise ValueError(
+                f"--mode {mode}: {flag} must be a whole number from {_within(allowed)}, not {value}"
+            )
     assert pop_size is not None and simulations is not None  # checked above
     return pop_size, generations, simulations
 
@@ -70,6 +72,6 @@ def from_settings(settings: dict[str, Any]) -> tuple[int, int, int]:
     for key, allowed in (("pop_size", POP_SIZES), ("max_generations", GENERATIONS)):
         value = settings.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value not in allowed:
-            raise ValueError(f"{key} is {value!r}, not a whole number of {_within(allowed)}")
+            raise ValueError(f"{key} is {value!r}, not a whole number from {_within(allowed)}")
         found.append(value)
     return found[0], found[1], check_simulations(settings.get("simulations"), "simulations")

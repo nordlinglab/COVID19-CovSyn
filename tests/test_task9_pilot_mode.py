@@ -207,3 +207,13 @@ def test_a_run_whose_config_an_editor_saved_with_a_byte_order_mark_resumes(monke
     config.write_bytes(b"\xef\xbb\xbf" + config.read_bytes())
     seen = _resume(monkeypatch, run)
     assert seen["engine"].pop_size == 4
+
+
+def test_every_size_refusal_says_a_whole_number_from_its_range():
+    """One wording, from the command line or config.json."""
+    from covsyn.calibration import run_size
+
+    with pytest.raises(ValueError, match="--pop-size must be a whole number from 2 to 256"):
+        run_size.from_command("pilot", 300, 10, 3000)
+    with pytest.raises(ValueError, match="pop_size is 2.5, not a whole number from 2 to 256"):
+        run_size.from_settings({"pop_size": 2.5, "max_generations": 3, "simulations": 300})

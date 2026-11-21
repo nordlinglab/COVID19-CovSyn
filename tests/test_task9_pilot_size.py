@@ -945,7 +945,7 @@ def test_one_rule_checks_s_wherever_it_is_read():
 
     assert run_size.check_simulations(300, "S") == 300
     for bad in (300.0, "300", True, 0, 10_001, None):
-        with pytest.raises(ValueError, match="S is .*, not a whole number of 1 to 10000"):
+        with pytest.raises(ValueError, match="S is .*, not a whole number from 1 to 10000"):
             run_size.check_simulations(bad, "S")
 
 
