@@ -553,3 +553,12 @@ def test_the_tables_are_utf_8_whatever_the_locale(tmp_path, monkeypatch):
     assert [r["name"] for r in rows] == ["\u0141\u00f3d\u017a", "\u00e9t\u00e9"]
     assert encodings and set(encodings) == {"utf-8"}
     assert path.read_bytes().decode("utf-8")  # the bytes are UTF-8
+
+
+def test_a_row_cut_inside_a_character_still_reads_the_finished_rows(tmp_path):
+    """The kill split a multi-byte character; the finished rows before it are read."""
+    path = tmp_path / "t.csv"
+    path.write_bytes(
+        b"name,simulations,seed_offset,cost\na,10,0,1.5\n\xc3\xa9t\xc3\xa9,10,1,2.5\n\xc3"
+    )
+    assert [r["name"] for r in block_scoring.read_rows(path)] == ["a", "\u00e9t\u00e9"]

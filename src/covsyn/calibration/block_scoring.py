@@ -43,9 +43,9 @@ def read_rows(path: Path) -> list[dict[str, str]]:
     """
     if not Path(path).is_file():
         return []
-    text = Path(path).read_text(encoding="utf-8", newline="")
-    if text and not text.endswith("\n"):
-        text = text[: text.rfind("\n") + 1]
+    # Cut before decoding: the kill may have split a character, which only that line holds.
+    data = Path(path).read_bytes()
+    text = data[: data.rfind(b"\n") + 1].decode("utf-8")
     return [
         row
         for row in csv.DictReader(io.StringIO(text, newline=""))
