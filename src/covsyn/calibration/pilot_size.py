@@ -324,9 +324,10 @@ def main(argv: list[str] | None = None) -> Path:
             block_scoring.record_workers(out, workers)
         except PermissionError as error:  # refused: say what was refused
             parser.error(str(error))
-        except (OSError, ValueError) as error:  # ValueError: a NaN read, not writable as JSON
-            # The error names the file; the message adds what was being done.
-            parser.error(f"could not record the workers in {CONFIG_FILE}: {error}")
+        except (OSError, ValueError) as error:  # ValueError: contents not writable back as JSON
+            # Named once: by the error, when it names its file, else here.
+            where = out / CONFIG_FILE if getattr(error, "filename", None) is None else CONFIG_FILE
+            parser.error(f"could not record the workers in {where}: {error}")
         root = out.parent.parent
     else:
         try:

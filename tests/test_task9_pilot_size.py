@@ -700,7 +700,9 @@ def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, capsys):
     (out / "config.json").write_text('{"settings": {"simulations": 300, "x": NaN}, "workers": 2}')
     with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out), "--workers", "3"])
-    assert stop.value.code == 2 and "could not record" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and "could not record" in err
+    assert out.name in err  # the error names no file, so the message names the run
 
 
 def test_a_real_short_write_is_reported_once_with_config_json_kept(tmp_path, monkeypatch, capsys):
