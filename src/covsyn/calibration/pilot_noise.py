@@ -181,9 +181,9 @@ def run(out_dir: Path, population: np.ndarray, lower: np.ndarray, upper: np.ndar
         make_pool: The pool for one S, whose workers run S simulations per evaluation.
     """
     path = Path(out_dir) / BLOCKS_FILE
-    marked = block_scoring.starts_with_mark(path)  # the first read below warns about it
+    finished, marked = block_scoring.read_table(path)  # warns about a mark found now
     done = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
-            for r in block_scoring.read_rows(path)}  # fmt: skip
+            for r in finished}  # fmt: skip
     todo = [t._asdict() for t in tasks(pilot_rows(), len(population)) if t.key not in done]
     parameters = np.asarray(population, dtype=float) * (upper - lower) + lower
     block_scoring.score(path, todo, COLUMNS, lambda t: parameters[t["row"]], evaluate, make_pool)

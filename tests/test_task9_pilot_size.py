@@ -956,3 +956,37 @@ def test_a_pilot_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog
     with caplog.at_level(logging.WARNING, logger=ps.block_scoring.log.name):
         ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), _evaluate, _threads, workers=2)
     assert caplog.text.count(str(screen)) == 1
+
+
+@pytest.mark.parametrize("table", [ps.SCREEN_FILE, ps.CONFIRM_FILE])
+def test_a_mark_added_while_pilot_2_runs_is_warned_about(tmp_path, caplog, monkeypatch, table):
+    """Saved by a spreadsheet after a table's first read: its later read warns, once."""
+    import logging
+
+    out = tmp_path / "tables" / "p"
+    out.mkdir(parents=True)
+    real_score = ps.block_scoring.score
+
+    def saved_after_scoring(path, *args, **kwargs):  # between the scoring and the later read
+        real_score(path, *args, **kwargs)
+        if path.name == table:
+            path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes())
+
+    monkeypatch.setattr(ps.block_scoring, "score", saved_after_scoring)
+    with caplog.at_level(logging.WARNING, logger=ps.block_scoring.log.name):
+        ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), _evaluate, _threads, workers=2)
+    assert caplog.text.count(str(out / table)) == 1
+
+
+def test_a_table_s_mark_is_judged_from_the_bytes_it_is_read_from(tmp_path, caplog):
+    """read_table reports the mark of the very bytes it read, so no second open can differ."""
+    import logging
+
+    path = tmp_path / "t.csv"
+    path.write_bytes(b"\xef\xbb\xbfname,simulations,seed_offset,cost\na,10,0,1.5\n")
+    with caplog.at_level(logging.WARNING, logger=ps.block_scoring.log.name):
+        rows, marked = ps.block_scoring.read_table(path)
+    assert marked and [r["name"] for r in rows] == ["a"] and caplog.text
+    path.write_bytes(b"name,simulations,seed_offset,cost\na,10,0,1.5\n")
+    assert ps.block_scoring.read_table(path)[1] is False
+    assert ps.block_scoring.read_table(tmp_path / "missing.csv") == ([], False)

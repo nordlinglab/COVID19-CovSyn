@@ -36,42 +36,38 @@ Evaluate = Callable[[np.ndarray, int], tuple]
 MakePool = Callable[[int], concurrent.futures.Executor]
 
 
-def read_rows(path: Path, warn: bool = True) -> list[dict[str, str]]:
-    """The finished rows of a CSV written by :func:`score`; none when it does not exist yet.
+def read_table(path: Path, warn: bool = True) -> tuple[list[dict[str, str]], bool]:
+    """The finished rows of a CSV written by :func:`score`, and whether it has a byte order mark.
 
-    A last line without its newline, which a kill cut off, and a row short of a value are not
-    finished evaluations and are left out. A leading UTF-8 byte order mark, which a spreadsheet
-    adds when it saves the table as "CSV UTF-8", is skipped, with a warning unless ``warn`` is
-    False, as on a pilot's later reads of a table whose mark it has warned about in this run
-    (starts_with_mark): it may have shortened the costs it wrote back. A save that adds no
-    mark, such as plain "CSV", shortens them just the same and is not detected.
+    Nothing and False when it does not exist yet. A last line without its newline, which a kill
+    cut off, and a row short of a value are not finished evaluations and are left out. A
+    leading UTF-8 byte order mark, which a spreadsheet adds when it saves the table as
+    "CSV UTF-8", is skipped, with a warning unless ``warn`` is False: it may have shortened the
+    costs it wrote back. The mark is judged from the bytes the rows come from, so a pilot's
+    later reads in a run can pass ``warn=not marked`` and warn only about a mark added since. A
+    save that adds no mark, such as plain "CSV", shortens the costs just the same and is not
+    detected.
     """
     if not Path(path).is_file():
-        return []
+        return [], False
     # Cut before decoding: the kill may have split a character, which only that line holds.
     data = Path(path).read_bytes()
-    if warn and data.startswith(codecs.BOM_UTF8):  # utf-8-sig below skips it
+    marked = data.startswith(codecs.BOM_UTF8)
+    if warn and marked:  # utf-8-sig below skips it
         log.warning("%s starts with a byte order mark: another program, such as a spreadsheet, "
                     "rewrote it, and may have shortened its costs", path)
     text = data[: data.rfind(b"\n") + 1].decode("utf-8-sig")
-    return [
+    rows = [
         row
         for row in csv.DictReader(io.StringIO(text, newline=""))
         if None not in row and None not in row.values()
     ]
+    return rows, marked
 
 
-def starts_with_mark(path: Path) -> bool:
-    """Whether a table starts with a UTF-8 byte order mark, which read_rows warns about.
-
-    A pilot notes it before its first read of a table in a run, and asks its later reads to
-    warn only if the mark was not there then, so one added mid-run is still reported.
-    """
-    try:
-        with open(path, "rb") as f:
-            return f.read(len(codecs.BOM_UTF8)) == codecs.BOM_UTF8
-    except FileNotFoundError:
-        return False
+def read_rows(path: Path, warn: bool = True) -> list[dict[str, str]]:
+    """The finished rows of a CSV written by :func:`score`, as :func:`read_table` reads them."""
+    return read_table(path, warn)[0]
 
 
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
