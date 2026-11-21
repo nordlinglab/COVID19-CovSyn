@@ -633,12 +633,18 @@ def test_a_special_file_is_refused_before_a_read_could_block(tmp_path):
         block_scoring.read_table(path)
 
 
-@pytest.mark.parametrize("what", ["directory", "parent"])
+@pytest.mark.parametrize("what", ["directory", "parent", "socket"])
 def test_a_path_that_cannot_be_a_table_is_named(tmp_path, what):
-    """A directory where the table belongs, or a file where its directory belongs."""
+    """A directory or a socket where the table belongs, or a file where its directory belongs."""
+    import socket
+
     if what == "directory":
         path = tmp_path / "t.csv"
         path.mkdir()
+    elif what == "socket":
+        path = tmp_path / "t.csv"
+        listener = socket.socket(socket.AF_UNIX)
+        listener.bind(str(path))
     else:
         (tmp_path / "out").write_text("a file, not a directory")
         path = tmp_path / "out" / "t.csv"
@@ -690,10 +696,11 @@ def test_a_new_table_s_path_taken_by_another_entry_is_named(tmp_path, entry):
         assert "symbolic link" in str(error.value) and "nowhere" in str(error.value)
 
 
-@pytest.mark.parametrize("entry", ["directory", "fifo", "parent", "dangling link"])
+@pytest.mark.parametrize("entry", ["directory", "fifo", "parent", "dangling link", "socket"])
 def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry):
     """The exists=True path: trimmed and appended only as a regular file."""
     import os
+    import socket
 
     path = tmp_path / "t.csv"
     if entry == "directory":
@@ -702,6 +709,9 @@ def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry
         os.mkfifo(path)
     elif entry == "dangling link":  # the table it pointed at is gone
         path.symlink_to(tmp_path / "nowhere.csv")
+    elif entry == "socket":
+        listener = socket.socket(socket.AF_UNIX)
+        listener.bind(str(path))
     else:
         (tmp_path / "out").write_text("a file")
         path = tmp_path / "out" / "t.csv"
@@ -808,8 +818,6 @@ def test_a_failure_wrapping_the_descriptor_closes_it_once(tmp_path, monkeypatch)
     assert len(raws) == 1 and raws[0].closed and closed == []  # closed once, by the raw file
 
 
-
-
 @pytest.mark.parametrize("code", [errno.EMFILE, errno.ENOSPC, errno.EIO])
 def test_an_error_that_is_not_the_table_s_stays_as_it_is(tmp_path, monkeypatch, code):
     """Too many open files, a full disk, an I/O error: raised as such, not as a TableError."""
@@ -825,10 +833,12 @@ def test_an_error_that_is_not_the_table_s_stays_as_it_is(tmp_path, monkeypatch, 
     with pytest.raises(OSError) as error:
         block_scoring.read_table(path)
     assert not isinstance(error.value, block_scoring.TableError) and error.value.errno == code
-    with pytest.raises(OSError) as error:
-        block_scoring.score(tmp_path / "new.csv", _task(), COLUMNS, lambda t: np.ones(2),
-                            _evaluate, _threads, exists=False)  # fmt: skip
-    assert not isinstance(error.value, block_scoring.TableError)
+    for path_, exists in ((tmp_path / "new.csv", False), (path, True)):  # create, append
+        with pytest.raises(OSError) as error:
+            block_scoring.score(path_, _task(), COLUMNS, lambda t: np.ones(2), _evaluate,
+                                _threads, exists=exists)  # fmt: skip
+        assert not isinstance(error.value, block_scoring.TableError)
+        assert error.value.errno == code
 
 
 def test_a_new_table_in_a_read_only_directory_is_a_table_error(tmp_path):
@@ -875,3 +885,23 @@ def test_a_path_whose_existence_cannot_be_checked_is_a_table_error(tmp_path, mon
     with pytest.raises(block_scoring.TableError):
         block_scoring.score(tmp_path / "t.csv", _task(), COLUMNS, lambda t: np.ones(2),
                             _evaluate, _threads)  # fmt: skip
+
+
+def test_a_link_to_a_table_out_of_reach_is_named_as_refused(tmp_path, monkeypatch):
+    """The target exists but cannot be reached: refused, not "leads to no file"."""
+    import os
+
+    path = tmp_path / "t.csv"
+    path.symlink_to(tmp_path / "locked" / "blocks.csv")
+    real_stat = os.stat
+
+    def refused(p, *a, **kw):
+        if str(p) == str(path) and kw.get("follow_symlinks", True):  # following the link
+            raise PermissionError(13, "Permission denied", str(p))
+        return real_stat(p, *a, **kw)
+
+    monkeypatch.setattr(os, "stat", refused)
+    with pytest.raises(block_scoring.TableError) as error:
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+    assert "Permission denied" in str(error.value) and "leads to no file" not in str(error.value)

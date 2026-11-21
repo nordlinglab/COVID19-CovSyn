@@ -59,15 +59,23 @@ class Table(NamedTuple):
 
 # Errors that say the table itself is refused; any other (too many open files, a full disk,
 # an I/O error) is no fault of the table and is raised as it is.
+# ETXTBSY: a running program; EAGAIN/EWOULDBLOCK: a lease, which O_NONBLOCK reports.
 TABLE_REFUSALS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS, errno.ELOOP,
-                            errno.ENAMETOOLONG})  # fmt: skip
+                            errno.ENAMETOOLONG, errno.ETXTBSY, errno.EAGAIN,
+                            errno.EWOULDBLOCK})  # fmt: skip
+# A socket, or a device without a driver, fails to open before fstat could say what it is.
+NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV})
 
 
-def _refused(path: Path, error: OSError) -> Exception:
-    """A TableError naming path for an error that refuses the table; else the error itself."""
+def _raise_refused(path: Path, error: OSError) -> None:
+    """Raise a TableError naming path for an error that refuses the table; else return.
+
+    Called in an ``except`` block, whose bare ``raise`` then re-raises any other error as it is.
+    """
+    if error.errno in NOT_REGULAR:
+        raise TableError(f"{path} is not a regular file, so it is no pilot table") from None
     if error.errno in TABLE_REFUSALS:
-        return TableError(f"{path}: {error.strerror}")
-    return error
+        raise TableError(f"{path}: {error.strerror}") from None
 
 
 def _open_regular(path: Path, flags: int) -> int:
@@ -75,8 +83,9 @@ def _open_regular(path: Path, flags: int) -> int:
 
     Raises:
         FileNotFoundError: It does not exist.
-        TableError: It is not a regular file (a directory, a FIFO, a device), a parent of it is
-            not a directory, or the system refuses it (read-only, a link loop).
+        TableError: It is not a regular file (a directory, a FIFO, a socket, a device), a
+            parent of it is not a directory, or the system refuses it (TABLE_REFUSALS).
+        OSError: Any other error, as it is: too many open files, a full disk, an I/O error.
     """
     try:  # O_NONBLOCK: opening a FIFO waits for a writer otherwise
         handle = os.open(path, flags | os.O_NONBLOCK)
@@ -87,10 +96,8 @@ def _open_regular(path: Path, flags: int) -> int:
     except IsADirectoryError:
         raise TableError(f"{path} is not a regular file, but a directory") from None
     except OSError as error:  # read-only, a link loop: the table refused; else as it is
-        refusal = _refused(path, error)
-        if refusal is error:
-            raise
-        raise refusal from None
+        _raise_refused(path, error)
+        raise
     try:
         if not stat.S_ISREG(os.fstat(handle).st_mode):
             raise TableError(f"{path} is not a regular file, so it is no pilot table")
@@ -121,16 +128,20 @@ def read_table(path: Path, warn: bool = True, required: bool = False) -> Table:
         handle = _open_regular(Path(path), os.O_RDONLY)
     except FileNotFoundError:
         if required:
-            raise TableError(f"{path} went missing while the pilot ran; restore it, then "
-                             f"resume") from None
+            raise TableError(
+                f"{path} went missing while the pilot ran; restore it, then resume"
+            ) from None
         return Table([], False, False)
     with os.fdopen(handle, "rb") as f:
         data = f.read()
     # Cut before decoding: the kill may have split a character, which only that line holds.
     marked = data.startswith(codecs.BOM_UTF8)
     if warn and marked:  # utf-8-sig below skips it
-        log.warning("%s starts with a byte order mark: another program, such as a spreadsheet, "
-                    "rewrote it, and may have shortened its costs", path)
+        log.warning(
+            "%s starts with a byte order mark: another program, such as a spreadsheet, "
+            "rewrote it, and may have shortened its costs",
+            path,
+        )
     text = data[: data.rfind(b"\n") + 1].decode("utf-8-sig")
     rows = [
         row
@@ -188,17 +199,16 @@ def score(
         try:
             exists = path.exists()
         except OSError as error:  # Path.exists raises a search permission refused, for one
-            refusal = _refused(path, error)
-            if refusal is error:
-                raise
-            raise refusal from None
+            _raise_refused(path, error)
+            raise
     if exists:
         _drop_cut_off_line(path)
         try:  # no O_CREAT: append mode would quietly create an empty table
             handle = _open_regular(path, os.O_WRONLY | os.O_APPEND)
         except FileNotFoundError:
-            raise TableError(f"{path} went missing while the pilot ran; restore it, then "
-                             f"resume") from None
+            raise TableError(
+                f"{path} went missing while the pilot ran; restore it, then resume"
+            ) from None
     else:
         try:  # only if it is still absent; else its rows are unread. 0o666: the umask decides
             handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
@@ -207,10 +217,8 @@ def score(
         except NotADirectoryError:
             raise TableError(f"{path}: a parent of it is not a directory") from None
         except OSError as error:  # a read-only directory, a link loop; else as it is
-            refusal = _refused(path, error)
-            if refusal is error:
-                raise
-            raise refusal from None
+            _raise_refused(path, error)
+            raise
     try:
         # A kill can leave the file empty, before its header: then the header is written now.
         empty = os.fstat(handle).st_size == 0
@@ -252,20 +260,26 @@ def _taken(path: Path) -> str:
     if entry is not None and stat.S_ISLNK(entry):
         try:
             leads_to = os.stat(path).st_mode  # what the link leads to
-        except OSError:  # to nothing, or round in a loop
-            leads_to = None
+        except OSError as error:
+            if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):
+                return f"{path}: {error.strerror}"  # there, but out of reach
+            leads_to = None  # to nothing, or round in a loop
         if leads_to is None:
             try:
                 target = f", to {os.readlink(path)},"
             except OSError:  # gone or changed since lstat
                 target = ""
-            return (f"{path} is a symbolic link{target} that leads to no file, where the pilot "
-                    f"would make its table; remove it or point it at an existing table")
+            return (
+                f"{path} is a symbolic link{target} that leads to no file, where the pilot "
+                f"would make its table; remove it or point it at an existing table"
+            )
         entry = leads_to
     if entry is not None and not stat.S_ISREG(entry):
         return f"{path} is not a regular file, so it is no pilot table"
-    return (f"{path} appeared after the pilot looked for it; start it again, so it reads that "
-            f"table first")
+    return (
+        f"{path} appeared after the pilot looked for it; start it again, so it reads that "
+        f"table first"
+    )
 
 
 def _drop_cut_off_line(path: Path) -> None:
@@ -280,8 +294,9 @@ def _drop_cut_off_line(path: Path) -> None:
     try:
         handle = _open_regular(path, os.O_RDWR)
     except FileNotFoundError:
-        raise TableError(f"{path} went missing while the pilot ran; restore it, then "
-                         f"resume") from None
+        raise TableError(
+            f"{path} went missing while the pilot ran; restore it, then resume"
+        ) from None
     with os.fdopen(handle, "rb+") as f:
         data = f.read()
         if data and not data.endswith(b"\n"):

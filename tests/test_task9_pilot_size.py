@@ -1043,3 +1043,24 @@ def test_pilot_2_keeps_the_traceback_of_an_error_outside_the_tables(tmp_path, mo
     monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
     with pytest.raises(OSError, match="No space left"):
         ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+
+
+def test_a_full_disk_in_pilot_2_s_tables_keeps_its_traceback(tmp_path, monkeypatch):
+    """Through the real run and block_scoring: ENOSPC creating a table stays an OSError."""
+    import errno
+    import os
+
+    out = tmp_path / "tables" / "p"
+    out.mkdir(parents=True)
+    real_open = os.open
+
+    def full(p, flags, *args):
+        if str(p).endswith(ps.SCREEN_FILE) and flags & os.O_CREAT:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(p))
+        return real_open(p, flags, *args)
+
+    monkeypatch.setattr(os, "open", full)
+    with pytest.raises(OSError) as error:
+        ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), _evaluate, _threads, workers=2)
+    assert not isinstance(error.value, ps.block_scoring.TableError)
+    assert error.value.errno == errno.ENOSPC
