@@ -608,20 +608,25 @@ def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
 
 
 @pytest.fixture
-def socket_path(request):
-    """A path holding a bound AF_UNIX socket, in a short directory: macOS caps it at 104 bytes."""
+def socket_path():
+    """A path holding a bound AF_UNIX socket, in a short directory under $TMPDIR.
+
+    pytest's own tmp_path can pass macOS's 104-byte cap on a socket's path.
+    """
     import shutil
     import socket
     import tempfile
     from pathlib import Path
 
-    directory = Path(tempfile.mkdtemp(dir="/tmp", prefix="cs"))
-    path = directory / "t.csv"
+    directory = Path(tempfile.mkdtemp(prefix="cs"))
     listener = socket.socket(socket.AF_UNIX)
-    listener.bind(str(path))
-    yield path
-    listener.close()
-    shutil.rmtree(directory)
+    try:
+        path = directory / "t.csv"
+        listener.bind(str(path))
+        yield path
+    finally:
+        listener.close()
+        shutil.rmtree(directory)
 
 
 def test_a_missing_table_at_the_first_read_reads_as_absent(tmp_path):
@@ -921,19 +926,72 @@ def test_a_link_to_a_table_out_of_reach_is_named_as_refused(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("code", sorted({errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENXIO,
                                          errno.ENODEV}))
-def test_every_os_s_refusal_of_a_socket_is_not_a_regular_file(tmp_path, monkeypatch, code):
-    """A socket refused at open, by macOS with EOPNOTSUPP, by Linux with ENXIO: both name it."""
+def test_a_refusal_at_open_names_a_socket_but_not_a_regular_file(tmp_path, monkeypatch,
+                                                                 socket_path, code):
+    """A socket refused at open (EOPNOTSUPP on macOS, ENXIO on Linux): what is there decides.
+
+    A socket is "not a regular file"; a regular file refused the same way keeps the error.
+    """
+    import os
+
+    regular = tmp_path / "t.csv"
+    regular.write_text("")
+
+    def refused(p, flags, *args, **kwargs):
+        raise OSError(code, os.strerror(code), str(p))
+
+    monkeypatch.setattr(os, "open", refused)
+    with pytest.raises(block_scoring.TableError, match="not a regular file"):
+        block_scoring.read_table(socket_path)
+    with pytest.raises(OSError) as error:
+        block_scoring.read_table(regular)
+    monkeypatch.undo()  # before the socket's clean-up, which opens files too
+    assert not isinstance(error.value, block_scoring.TableError) and error.value.errno == code
+
+
+@pytest.mark.parametrize("code", sorted({errno.EOPNOTSUPP, errno.ENOTSUP, errno.EAGAIN}))
+def test_a_new_table_s_unsupported_or_busy_create_keeps_its_error(tmp_path, monkeypatch, code):
+    """Nothing is there: neither "not a regular file" nor "held by another program"."""
+    import os
+
+    real_open = os.open
+
+    def refused(p, flags, *args, **kwargs):
+        if flags & os.O_CREAT:
+            raise OSError(code, os.strerror(code), str(p))
+        return real_open(p, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", refused)
+    with pytest.raises(OSError) as error:
+        block_scoring.score(tmp_path / "t.csv", _task(), COLUMNS, lambda t: np.ones(2),
+                            _evaluate, _threads, exists=False)  # fmt: skip
+    assert not isinstance(error.value, block_scoring.TableError) and error.value.errno == code
+
+
+def test_an_entry_gone_again_before_it_is_named_is_not_said_to_have_appeared(tmp_path,
+                                                                             monkeypatch):
+    """EEXIST, then nothing there: the refusal says it changed, not "start it again"."""
     import os
 
     path = tmp_path / "t.csv"
-    path.write_text("")
+    real_open, real_lstat = os.open, os.lstat
 
-    def socket_like(p, flags, *args, **kwargs):
-        raise OSError(code, os.strerror(code), str(p))
+    def exists_then_gone(p, flags, *args, **kwargs):
+        if flags & os.O_EXCL:
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(p))
+        return real_open(p, flags, *args, **kwargs)
 
-    monkeypatch.setattr(os, "open", socket_like)
-    with pytest.raises(block_scoring.TableError, match="not a regular file"):
-        block_scoring.read_table(path)
+    def gone(p, *a, **kw):
+        if str(p) == str(path):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(p))
+        return real_lstat(p, *a, **kw)
+
+    monkeypatch.setattr(os, "open", exists_then_gone)
+    monkeypatch.setattr(os, "lstat", gone)
+    with pytest.raises(block_scoring.TableError) as error:
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+    assert "start it again" not in str(error.value) and "changed" in str(error.value)
 
 
 def test_a_table_another_program_holds_says_to_resume_when_it_lets_go(tmp_path, monkeypatch):

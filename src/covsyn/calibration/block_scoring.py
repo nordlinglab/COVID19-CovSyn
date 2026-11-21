@@ -42,7 +42,8 @@ class TableError(RuntimeError):
     It cannot be one when it is not a regular file (a directory, a FIFO, a socket, a device), is
     a symbolic link that leads to no file or out of reach where a table would be made, sits
     under a parent that is not a directory, is held by another program for now, or the system
-    refuses it (TABLE_REFUSALS: read-only, a link loop, a running program).
+    refuses it (TABLE_REFUSALS: read-only, not permitted, a link loop, a name too long, a
+    running program).
 
     The pilot stops rather than start the table anew or write into one it has not read: either
     would score every evaluation again, and could append them to the finished ones (decision
@@ -69,18 +70,27 @@ TABLE_REFUSALS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS, errno.ELOOP,
 NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV, errno.EOPNOTSUPP, errno.ENOTSUP})
 
 
-def _raise_refused(path: Path, error: OSError) -> None:
+def _raise_refused(path: Path, error: OSError, entry: bool = False) -> None:
     """Raise a TableError naming path for an error that refuses the table; else return.
 
     Called in an ``except`` block, whose bare ``raise`` then re-raises any other error as it is.
+    ``entry``: the error came from opening what is at path (non-blocking), where a refusal can
+    be a socket or a device (NOT_REGULAR, if lstat shows one) or a lease (EAGAIN); elsewhere,
+    as when creating a new table, those errors are no sign of either and stay as they are.
     """
-    if error.errno in NOT_REGULAR:
-        raise TableError(f"{path} is not a regular file, so it is no pilot table") from None
-    if error.errno == errno.EAGAIN:
+    if entry and error.errno in NOT_REGULAR:
+        try:
+            mode = os.lstat(path).st_mode
+        except OSError:
+            mode = None
+        if mode is not None and not stat.S_ISREG(mode):
+            raise TableError(f"{path} is not a regular file, so it is no pilot table") from None
+        return
+    if entry and error.errno == errno.EAGAIN:
         raise TableError(
             f"{path} is held by another program for now; resume when it lets go"
         ) from None
-    if error.errno in TABLE_REFUSALS:
+    if error.errno in TABLE_REFUSALS - {errno.EAGAIN}:
         raise TableError(f"{path}: {error.strerror}") from None
 
 
@@ -90,7 +100,8 @@ def _open_regular(path: Path, flags: int) -> int:
     Raises:
         FileNotFoundError: It does not exist.
         TableError: It is not a regular file (a directory, a FIFO, a socket, a device), a
-            parent of it is not a directory, or the system refuses it (TABLE_REFUSALS).
+            parent of it is not a directory, another program holds it for now, or the system
+            refuses it (TABLE_REFUSALS).
         OSError: Any other error, as it is: too many open files, a full disk, an I/O error.
     """
     try:  # O_NONBLOCK: opening a FIFO waits for a writer otherwise
@@ -102,7 +113,7 @@ def _open_regular(path: Path, flags: int) -> int:
     except IsADirectoryError:
         raise TableError(f"{path} is not a regular file, but a directory") from None
     except OSError as error:  # read-only, a link loop: the table refused; else as it is
-        _raise_refused(path, error)
+        _raise_refused(path, error, entry=True)
         raise
     try:
         if not stat.S_ISREG(os.fstat(handle).st_mode):
@@ -261,9 +272,10 @@ def _taken(path: Path) -> str:
     """Why a new table cannot be created at path: something is there now, said as what it is."""
     try:
         entry = os.lstat(path).st_mode
-    except OSError:
-        entry = None
-    if entry is not None and stat.S_ISLNK(entry):
+    except OSError as error:  # gone again, or refused: what was there cannot be said
+        return (f"{path} changed while the pilot looked at it ({error.strerror}); check it, "
+                f"then start the pilot again")
+    if stat.S_ISLNK(entry):
         try:
             target = f", to {os.readlink(path)},"
         except OSError:  # gone or changed since lstat
@@ -277,7 +289,7 @@ def _taken(path: Path) -> str:
             return (f"{path} is a symbolic link{target} that leads to no file, where the pilot "
                     f"would make its table; remove it or point it at an existing table")
         entry = leads_to
-    if entry is not None and not stat.S_ISREG(entry):
+    if not stat.S_ISREG(entry):
         return f"{path} is not a regular file, so it is no pilot table"
     return (
         f"{path} appeared after the pilot looked for it; start it again, so it reads that "
