@@ -43,7 +43,7 @@ def read_rows(path: Path) -> list[dict[str, str]]:
     """
     if not Path(path).is_file():
         return []
-    text = Path(path).read_text(newline="")
+    text = Path(path).read_text(encoding="utf-8", newline="")
     if text and not text.endswith("\n"):
         text = text[: text.rfind("\n") + 1]
     return [
@@ -55,7 +55,7 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     """Write rows, all with the first row's keys, to path."""
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
@@ -86,7 +86,7 @@ def score(
     _drop_cut_off_line(path)
     # A kill can leave the file empty, before its header: then the header is written now.
     empty = not path.is_file() or path.stat().st_size == 0
-    with open(path, "a", newline="") as f:
+    with open(path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(columns))
         if empty:
             writer.writeheader()

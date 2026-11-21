@@ -526,3 +526,30 @@ def test_a_write_that_takes_nothing_fails_rather_than_spins(tmp_path, monkeypatc
     monkeypatch.undo()
     assert json.loads(path.read_text())["workers"] == 2
     assert not list(tmp_path.glob("config.json.*.tmp"))
+
+
+def test_the_tables_are_utf_8_whatever_the_locale(tmp_path, monkeypatch):
+    """A non-ASCII value round-trips through write_csv, score and read_rows as UTF-8."""
+    import builtins
+    import io as io_module
+
+    encodings = []
+    real_open = builtins.open
+
+    def recording(file, mode="r", *args, **kwargs):
+        if str(file).endswith(".csv") and "b" not in mode:  # text opens; bytes have none
+            # Path.open passes it by position, after buffering
+            encodings.append(kwargs.get("encoding", args[1] if len(args) > 1 else None))
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", recording)
+    monkeypatch.setattr(io_module, "open", recording)
+    path = tmp_path / "t.csv"
+    block_scoring.write_csv(path, [{"name": "\u0141\u00f3d\u017a", "simulations": 10,
+                                    "seed_offset": 0, "cost": 1.5}])  # fmt: skip
+    _score(path, ["\u00e9t\u00e9"])
+    rows = block_scoring.read_rows(path)
+    monkeypatch.undo()
+    assert [r["name"] for r in rows] == ["\u0141\u00f3d\u017a", "\u00e9t\u00e9"]
+    assert encodings and set(encodings) == {"utf-8"}
+    assert path.read_bytes().decode("utf-8")  # the bytes are UTF-8

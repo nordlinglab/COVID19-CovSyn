@@ -114,7 +114,7 @@ def archive_candidates(path: Path, k: int = CANDIDATES) -> np.ndarray:
         ValueError: The archive is not Task 8's (v2): its rows are not elite vectors with
             their means.
     """
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         if f.readline().strip() != f"# {ARCHIVE_HEADER}":
             raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
     rows = np.loadtxt(path, ndmin=2)
