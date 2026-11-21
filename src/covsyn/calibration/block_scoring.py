@@ -293,8 +293,10 @@ def _taken(path: Path) -> str:
     try:
         entry = os.lstat(path).st_mode
     except OSError as error:  # gone again, or refused: what was there cannot be said
-        return (f"{path} changed while the pilot looked at it ({_reason(error)}); check it, "
-                f"then start the pilot again")
+        return (
+            f"{path} changed while the pilot looked at it ({_reason(error)}); check it, "
+            f"then start the pilot again"
+        )
     if stat.S_ISLNK(entry):
         try:
             target = f", to {os.readlink(path)},"
@@ -304,10 +306,14 @@ def _taken(path: Path) -> str:
             leads_to = os.stat(path).st_mode  # what the link leads to
         except OSError as error:
             if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):  # there, unreachable
-                return (f"{path} is a symbolic link{target} whose target cannot be reached: "
-                        f"{_reason(error)}")
-            return (f"{path} is a symbolic link{target} that leads to no file, where the pilot "
-                    f"would make its table; remove it or point it at an existing table")
+                return (
+                    f"{path} is a symbolic link{target} whose target cannot be reached: "
+                    f"{_reason(error)}"
+                )
+            return (
+                f"{path} is a symbolic link{target} that leads to no file, where the pilot "
+                f"would make its table; remove it or point it at an existing table"
+            )
         entry = leads_to
     if not stat.S_ISREG(entry):
         return f"{path} is not a regular file, so it is no pilot table"
