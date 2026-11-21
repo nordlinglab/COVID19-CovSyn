@@ -249,8 +249,8 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
     chosen = representatives(block_scoring.read_rows(screen_path, warn=not screen_marked))
 
     confirm_path = out_dir / CONFIRM_FILE
-    rows, confirm_marked = block_scoring.read_table(confirm_path)  # warns if marked now
-    confirmed = {(r["run"], int(r["block"])) for r in rows}
+    confirmations, confirm_marked = block_scoring.read_table(confirm_path)  # warns if marked
+    confirmed = {(r["run"], int(r["block"])) for r in confirmations}
     todo = []
     for setting in settings():
         name = run_name(prefix, setting)
