@@ -921,7 +921,7 @@ def test_a_pilot_1_choice_of_the_wrong_kind_is_refused_before_any_run(tmp_path, 
 
 @pytest.mark.parametrize("simulations", [300.0, "300", True, 0, 10_001, None])
 def test_a_resumed_pilot_s_recorded_s_of_the_wrong_kind_is_refused(tmp_path, monkeypatch,
-                                                                   simulations):
+                                                                   capsys, simulations):
     """The resume's S passes the same rule as pilot 1's choice: else exit 2, no run."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
@@ -931,7 +931,9 @@ def test_a_resumed_pilot_s_recorded_s_of_the_wrong_kind_is_refused(tmp_path, mon
     monkeypatch.setattr(ps, "run", lambda *a, **kw: pytest.fail("a run started"))
     with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out)])
-    assert stop.value.code == 2
+    err = capsys.readouterr().err
+    assert stop.value.code == 2 and "settings.simulations" in err
+    assert "holds no pilot" not in err  # the pilot is there; one value is wrong
 
 
 def test_one_rule_checks_s_wherever_it_is_read():
@@ -940,7 +942,7 @@ def test_one_rule_checks_s_wherever_it_is_read():
 
     assert run_size.check_simulations(300, "S") == 300
     for bad in (300.0, "300", True, 0, 10_001, None):
-        with pytest.raises(ValueError, match="S"):
+        with pytest.raises(ValueError, match="S is .*, not a whole number of 1 to 10000"):
             run_size.check_simulations(bad, "S")
 
 

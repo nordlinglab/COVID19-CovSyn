@@ -33,7 +33,7 @@ def check_simulations(value: Any, name: str) -> int:
         ValueError: Anything else, naming it as ``name``.
     """
     if isinstance(value, bool) or not isinstance(value, int) or value not in SIMULATIONS:
-        raise ValueError(f"{name} is {value!r}, not {_within(SIMULATIONS)}")
+        raise ValueError(f"{name} is {value!r}, not a whole number of {_within(SIMULATIONS)}")
     return value
 
 
@@ -70,6 +70,6 @@ def from_settings(settings: dict[str, Any]) -> tuple[int, int, int]:
     for key, allowed in (("pop_size", POP_SIZES), ("max_generations", GENERATIONS)):
         value = settings.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value not in allowed:
-            raise ValueError(f"{key} is {value!r}, not {_within(allowed)}")
+            raise ValueError(f"{key} is {value!r}, not a whole number of {_within(allowed)}")
         found.append(value)
     return found[0], found[1], check_simulations(settings.get("simulations"), "simulations")

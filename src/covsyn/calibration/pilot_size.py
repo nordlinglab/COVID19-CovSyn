@@ -317,14 +317,16 @@ def main(argv: list[str] | None = None) -> Path:
                          f"name and place give its runs' names and directory")
         try:
             config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8-sig"))
-            # The rule pilot 1's choice and the optimiser's resume pass (run_size).
-            simulations = run_size.check_simulations(config["settings"]["simulations"],
-                                                     "settings.simulations")  # fmt: skip
+            recorded_simulations = config["settings"]["simulations"]
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
         # RecursionError: JSON nested too deep for json.loads
         except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
+        try:  # the rule pilot 1's choice and the optimiser's resume pass (run_size)
+            simulations = run_size.check_simulations(recorded_simulations, "settings.simulations")
+        except ValueError as error:  # the pilot is there; one recorded value is wrong
+            parser.error(f"pilot 2 in {out}: {error}")
         try:  # the pilot is there; only its record of the workers is at stake
             block_scoring.record_workers(out, workers)
         except PermissionError as error:  # refused: say what was refused
