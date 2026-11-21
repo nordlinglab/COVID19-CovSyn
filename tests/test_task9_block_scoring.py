@@ -529,7 +529,11 @@ def test_a_write_that_takes_nothing_fails_rather_than_spins(tmp_path, monkeypatc
 
 
 def test_the_tables_are_utf_8_whatever_the_locale(tmp_path, monkeypatch):
-    """A non-ASCII value round-trips through write_csv, score and read_rows as UTF-8."""
+    """write_csv and score open their tables as UTF-8, and a non-ASCII value round-trips.
+
+    read_rows decodes bytes, which no open records; its UTF-8 decoding is what the round trip
+    and test_a_row_cut_inside_a_character_still_reads_the_finished_rows show.
+    """
     import builtins
     import io as io_module
 

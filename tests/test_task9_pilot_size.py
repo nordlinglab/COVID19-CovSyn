@@ -70,8 +70,9 @@ def test_a_run_is_the_optimiser_s_pilot_mode_with_its_setting(tmp_path):
 
 
 def _archive(path, rows):
-    """firefly_archive.txt v2: (entered, blocks, params..., mean)."""
-    np.savetxt(path / "firefly_archive.txt", np.array(rows, dtype=float), header=ARCHIVE_HEADER)
+    """firefly_archive.txt v2: (entered, blocks, params..., mean), as the optimiser writes it."""
+    np.savetxt(path / "firefly_archive.txt", np.array(rows, dtype=float), header=ARCHIVE_HEADER,
+               encoding="utf-8")  # fmt: skip
 
 
 def test_a_run_s_candidates_are_its_ten_best_distinct_archive_vectors(tmp_path):
@@ -770,21 +771,33 @@ def test_a_config_turned_into_a_list_is_named_once(tmp_path, monkeypatch, capsys
         return real(out_dir, workers)
 
     monkeypatch.setattr(ps.block_scoring, "record_workers", changed_meanwhile)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out), "--workers", "3"])
     err = capsys.readouterr().err
+    assert stop.value.code == 2
     assert "not a JSON object" in err and err.count(out.name) == 1
 
 
 def test_the_archive_is_read_as_utf_8_header_and_rows(tmp_path, monkeypatch):
     """Both the header check and np.loadtxt, as the optimiser writes it (Task 9 review)."""
+    import builtins
+
     _archive(tmp_path, [[0, 1, 0.1, 0.2, 0.3, 4.0]])
-    seen = []
+    seen, opened = [], []
     real = np.loadtxt
     monkeypatch.setattr(np, "loadtxt", lambda *a, **kw: seen.append(kw.get("encoding"))
                         or real(*a, **kw))  # fmt: skip
+    real_open = builtins.open
+
+    def recording(file, mode="r", *args, **kwargs):
+        if str(file).endswith("firefly_archive.txt") and "b" not in mode:
+            opened.append(kwargs.get("encoding", args[1] if len(args) > 1 else None))
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", recording)
     ps.archive_candidates(tmp_path / "firefly_archive.txt")
-    assert seen == ["utf-8"]
+    monkeypatch.undo()
+    assert seen == ["utf-8"] and opened and set(opened) == {"utf-8"}  # rows and header
 
 
 def test_revalidation_reads_the_archive_as_utf_8(tmp_path, monkeypatch):
