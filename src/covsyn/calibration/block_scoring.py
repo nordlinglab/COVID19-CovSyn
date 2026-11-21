@@ -44,9 +44,12 @@ def read_rows(path: Path) -> list[dict[str, str]]:
         return []
     text = Path(path).read_text(newline="")
     if text and not text.endswith("\n"):
-        text = text[:text.rfind("\n") + 1]
-    return [row for row in csv.DictReader(io.StringIO(text, newline=""))
-            if None not in row and None not in row.values()]
+        text = text[: text.rfind("\n") + 1]
+    return [
+        row
+        for row in csv.DictReader(io.StringIO(text, newline=""))
+        if None not in row and None not in row.values()
+    ]
 
 
 def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
@@ -57,9 +60,14 @@ def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         writer.writerows(rows)
 
 
-def score(path: Path, todo: Iterable[Mapping[str, Any]], columns: Sequence[str],
-          vector_of: Callable[[Mapping[str, Any]], np.ndarray], evaluate: Evaluate,
-          make_pool: MakePool) -> None:
+def score(
+    path: Path,
+    todo: Iterable[Mapping[str, Any]],
+    columns: Sequence[str],
+    vector_of: Callable[[Mapping[str, Any]], np.ndarray],
+    evaluate: Evaluate,
+    make_pool: MakePool,
+) -> None:
     """Score each task and append it, with its cost, to the CSV at path.
 
     Args:
@@ -139,11 +147,11 @@ def record_workers(out_dir: Path, workers: int) -> None:
 
     Written whole or not at all: a temporary file, flushed to disk, replaces it, so a kill, a
     full disk or a crash leaves the old one, which every later resume needs. The replacement
-    keeps the file's mode and group; a config.json that is read-only, a link, hard-linked, owned
-    by another user, in a read-only directory, or in a group the user cannot give a file is not
-    replaced. A process killed outright, which
-    runs no clean-up, leaves its config.json.<random>.tmp, a stale copy that can be deleted;
-    it is not removed here, as it may be another resume's at work.
+    keeps the file's mode and group. A config.json that is read-only, a link, hard-linked,
+    another user's, in a read-only directory, or in a group the user cannot keep is not
+    replaced. A process killed outright, which runs no clean-up, leaves its
+    config.json.<random>.tmp, a stale copy that can be deleted; it is not removed here, as it
+    may be another resume's at work.
 
     Raises:
         PermissionError: config.json is read-only, a link, hard-linked, another user's, in a
@@ -173,29 +181,35 @@ def record_workers(out_dir: Path, workers: int) -> None:
     else:
         cause = ""
     if cause:
-        raise PermissionError(f"{path} is {cause}, so its workers stay "
-                              f"{config.get('workers')!r}; give a writable copy of its own to "
-                              f"resume with {workers}")
+        raise PermissionError(
+            f"{path} is {cause}, so its workers stay "
+            f"{config.get('workers')!r}; give a writable copy of its own to "
+            f"resume with {workers}"
+        )
+    kept = config.get("workers")
     config["workers"] = workers
+    data = (json.dumps(config, indent=1, allow_nan=False) + "\n").encode("utf-8")
     # A name of its own, created afresh (O_EXCL, no link followed), so neither a leftover link
     # nor another resume's temporary is written through; private until given config.json's mode.
-    data = (json.dumps(config, indent=1, allow_nan=False) + "\n").encode("utf-8")
     group = path.stat().st_gid
     handle, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     temporary = Path(name)
     try:
         try:  # the raw descriptor only, closed once below, whatever happens here
-            os.fchmod(handle, mode)
+            # The group first: changing it clears setuid and setgid, which the mode then sets.
             if os.fstat(handle).st_gid != group:  # a new file takes the user's group
                 try:
                     os.fchown(handle, -1, group)
-                except PermissionError:
+                except OSError as error:  # not allowed, or not supported by the file system
                     raise PermissionError(
-                        f"{path} is in group {group}, which a replacement written by this user "
-                        f"cannot keep, so its workers stay {config.get('workers')!r}") from None
+                        f"{path} is in group {group}, which this user cannot keep ({error}), "
+                        f"so its workers stay {kept!r}; give a writable copy of its own to "
+                        f"resume with {workers}"
+                    ) from None
+            os.fchmod(handle, mode)
             view = memoryview(data)
             while view:
-                view = view[os.write(handle, view):]
+                view = view[os.write(handle, view) :]
             os.fsync(handle)
         finally:
             os.close(handle)
@@ -226,8 +240,10 @@ def objective_pools(workers: int | None) -> tuple[Evaluate, MakePool]:
 
     def make_pool(simulations: int) -> concurrent.futures.Executor:
         return concurrent.futures.ProcessPoolExecutor(
-            max_workers=count, mp_context=multiprocessing.get_context("spawn"),
+            max_workers=count,
+            mp_context=multiprocessing.get_context("spawn"),
             initializer=fast_cost.init_worker,
-            initargs=(demo, taiwan.shape[1], False, None, cheng, simulations, taiwan))
+            initargs=(demo, taiwan.shape[1], False, None, cheng, simulations, taiwan),
+        )
 
     return fast_cost.evaluate_candidate, make_pool

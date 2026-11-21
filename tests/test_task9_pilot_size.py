@@ -143,10 +143,22 @@ def test_two_runs_agree_when_their_mean_difference_is_within_its_paired_se():
     table = ps.compare_settings(rows)
     assert len(table) == 6
     for line in table:
-        d = np.array([r["cost"] for r in rows if r["stream"] == 1
-                      and (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])])
-        d -= np.array([r["cost"] for r in rows if r["stream"] == 2
-                       and (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])])
+        d = np.array(
+            [
+                r["cost"]
+                for r in rows
+                if r["stream"] == 1
+                and (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])
+            ]
+        )
+        d -= np.array(
+            [
+                r["cost"]
+                for r in rows
+                if r["stream"] == 2
+                and (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])
+            ]
+        )
         assert line["mean_difference"] == pytest.approx(d.mean())
         assert line["paired_se"] == pytest.approx(d.std(ddof=1) / np.sqrt(30))
         assert line["agree"] == (abs(d.mean()) <= d.std(ddof=1) / np.sqrt(30))
@@ -156,8 +168,11 @@ def test_the_setting_s_cost_is_the_mean_of_its_two_representatives():
     """Over both representatives' 30 confirmation blocks."""
     rows = _confirmed(_means())
     for line in ps.compare_settings(rows):
-        costs = [r["cost"] for r in rows
-                 if (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])]
+        costs = [
+            r["cost"]
+            for r in rows
+            if (r["pop_size"], r["alpha_0"]) == (line["pop_size"], line["alpha_0"])
+        ]
         assert line["mean_cost"] == pytest.approx(np.mean(costs))
 
 
@@ -232,8 +247,9 @@ class _Optimiser:
 def _pilot(tmp_path, optimiser, simulations=300, workers=2):
     out = tmp_path / "tables" / "p"
     out.mkdir(parents=True, exist_ok=True)
-    return ps.run(out, tmp_path / "models", "p", simulations, optimiser, _evaluate, _threads,
-                  workers=workers), out
+    return ps.run(
+        out, tmp_path / "models", "p", simulations, optimiser, _evaluate, _threads, workers=workers
+    ), out
 
 
 def test_the_pilot_runs_every_setting_then_screens_and_confirms(tmp_path):
@@ -388,8 +404,9 @@ def test_the_command_refuses_a_pilot_1_with_failed_evaluations(tmp_path):
     """A failed evaluation's 1e6 is no cost, so its S is not pilot 2's to run."""
     noise = tmp_path / "noise"
     noise.mkdir()
-    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300,
-                                                   "failed_evaluations": 2}))
+    (noise / "choice.json").write_text(
+        json.dumps({"chosen_simulations": 300, "failed_evaluations": 2})
+    )
     with pytest.raises(SystemExit):
         ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
 
@@ -407,8 +424,7 @@ def test_a_resume_keeps_the_workers_the_pilot_started_with(tmp_path, monkeypatch
     """config.json's workers, unless --workers is given again."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": 8}))
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 8}))
     seen = {}
     monkeypatch.setattr(ps, "run", lambda o, models, prefix, s, *rest, **kw: seen.update(kw)
                         or {})  # fmt: skip
@@ -430,8 +446,9 @@ def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, 
     """Not a traceback, nor two different counts for the runs and the pools."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": recorded}))
+    (out / "config.json").write_text(
+        json.dumps({"settings": {"simulations": 300}, "workers": recorded})
+    )
     monkeypatch.delenv("COVSYN_WORKERS", raising=False)
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
     with pytest.raises(SystemExit):
@@ -443,8 +460,7 @@ def test_a_resume_through_dot_dot_finds_the_results_root(tmp_path, monkeypatch):
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
     (tmp_path / "results" / "tables" / "other").mkdir()
-    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": 2}))
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
     seen = {}
     monkeypatch.setattr(ps, "run", lambda o, models, prefix, s, *rest, **kw: seen.update(
         models=models, prefix=prefix) or {})  # fmt: skip
@@ -459,8 +475,7 @@ def test_a_resume_of_a_link_to_the_run_directory_is_refused(tmp_path, monkeypatc
     """Its name is not the run's, so its prefix and root would be wrong: refused, not guessed."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": 2}))
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
     (tmp_path / "latest").symlink_to(out)
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
     with pytest.raises(SystemExit):
@@ -472,7 +487,8 @@ def test_a_resume_through_a_linked_tables_directory_keeps_the_results_root(tmp_p
     elsewhere = tmp_path / "elsewhere"
     (elsewhere / "20261121-000000_abcdef0_pilot-size").mkdir(parents=True)
     (elsewhere / "20261121-000000_abcdef0_pilot-size" / "config.json").write_text(
-        json.dumps({"settings": {"simulations": 300}, "workers": 2}))
+        json.dumps({"settings": {"simulations": 300}, "workers": 2})
+    )
     (tmp_path / "results").mkdir()
     (tmp_path / "results" / "tables").symlink_to(elsewhere)
     seen = {}
@@ -489,8 +505,7 @@ def test_a_resume_that_is_not_a_pilot_s_own_directory_is_refused(tmp_path, monke
     """A hand-made name, or a link in another tables directory: its runs' place is unknown."""
     real = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     real.mkdir(parents=True)
-    (real / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": 2}))
+    (real / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
     other = tmp_path / "backup" / "tables"
     other.mkdir(parents=True)
     (other / name).symlink_to(real)
@@ -503,8 +518,7 @@ def test_a_config_that_cannot_be_written_is_a_command_error(tmp_path, monkeypatc
     """Read-only config.json, new workers: refused with a message, not a traceback."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": 2}))
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
 
     def refused(out_dir, workers):
         raise PermissionError(13, "Permission denied")
@@ -527,15 +541,20 @@ def test_a_config_without_settings_is_named_as_such(tmp_path, monkeypatch, capsy
     assert "KeyError" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("name", ["latest_pilot-size", "20261121-000000_ABCDEF0_pilot-size",
-                                  "20261121-000000_abcdef0_pilot-noise",
-                                  "\u0662\u0660\u0662\u0666\u0661\u0661\u0662\u0661-000000_abcdef0_pilot-size"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "latest_pilot-size",
+        "20261121-000000_ABCDEF0_pilot-size",
+        "20261121-000000_abcdef0_pilot-noise",
+        "\u0662\u0660\u0662\u0666\u0661\u0661\u0662\u0661-000000_abcdef0_pilot-size",
+    ],
+)
 def test_a_hand_named_pilot_directory_is_refused(tmp_path, monkeypatch, capsys, name):
     """A real directory, not a link, whose name runs.make_run_id would not give a pilot 2."""
     out = tmp_path / "results" / "tables" / name
     out.mkdir(parents=True)
-    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": 2}))
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
     with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out)])
@@ -548,10 +567,14 @@ from hypothesis import strategies as st  # noqa: E402
 
 
 @settings(max_examples=200, deadline=None)
-@given(when=st.datetimes(min_value=__import__("datetime").datetime(2000, 1, 1),
-                         max_value=__import__("datetime").datetime(9999, 12, 31)),
-       commit=st.one_of(st.none(), st.text("0123456789abcdef", min_size=7, max_size=40)),
-       dirty=st.booleans())
+@given(
+    when=st.datetimes(
+        min_value=__import__("datetime").datetime(2000, 1, 1),
+        max_value=__import__("datetime").datetime(9999, 12, 31),
+    ),
+    commit=st.one_of(st.none(), st.text("0123456789abcdef", min_size=7, max_size=40)),
+    dirty=st.booleans(),
+)
 def test_every_pilot_2_run_id_is_recognised(when, commit, dirty):
     """Whatever time, commit and state runs.make_run_id is given."""
     from covsyn.runtime import runs
@@ -560,8 +583,11 @@ def test_every_pilot_2_run_id_is_recognised(when, commit, dirty):
     assert ps.RUN_ID.fullmatch(name)
 
 
-VALID = ("20261121-093015_0123abc_pilot-size", "20261121-093015_nocommit_pilot-size",
-         "20261121-093015_0123abc-dirty_pilot-size")
+VALID = (
+    "20261121-093015_0123abc_pilot-size",
+    "20261121-093015_nocommit_pilot-size",
+    "20261121-093015_0123abc-dirty_pilot-size",
+)
 CHANGES = ["\u0663", "\uff13", "A", "F", "_", "-", " ", "x", "0", "a", "-dirty"]
 
 
@@ -586,8 +612,12 @@ def _could_make(name):
 
 
 @settings(max_examples=500, deadline=None)
-@given(base=st.sampled_from(VALID), at=st.integers(min_value=0, max_value=60),
-       change=st.sampled_from(CHANGES), how=st.sampled_from(["swap", "insert", "delete"]))
+@given(
+    base=st.sampled_from(VALID),
+    at=st.integers(min_value=0, max_value=60),
+    change=st.sampled_from(CHANGES),
+    how=st.sampled_from(["swap", "insert", "delete"]),
+)
 # Always tried: the separator in the config name, an uppercase commit, a non-ASCII digit.
 @example(base=VALID[0], at=VALID[0].index("-size"), change="x", how="swap")
 @example(base=VALID[0], at=VALID[0].index("_") + 1, change="A", how="swap")
@@ -601,8 +631,11 @@ def test_a_name_one_edit_off_is_refused(base, at, change, how):
     import re
 
     at = at % (len(base) + (how == "insert"))
-    name = {"swap": base[:at] + change + base[at + 1:], "insert": base[:at] + change + base[at:],
-            "delete": base[:at] + base[at + 1:]}[how]
+    name = {
+        "swap": base[:at] + change + base[at + 1 :],
+        "insert": base[:at] + change + base[at:],
+        "delete": base[:at] + base[at + 1 :],
+    }[how]
     if _could_make(name):
         assert ps.RUN_ID.fullmatch(name), name
     elif not ps.RUN_ID.fullmatch(name):
@@ -629,8 +662,7 @@ def test_a_read_only_config_says_so_not_that_the_pilot_is_missing(tmp_path, monk
     """The pilot is there; only its config.json cannot record the new workers."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
-                                                 "workers": 2}))
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
     (out / "config.json").chmod(0o444)
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
     try:

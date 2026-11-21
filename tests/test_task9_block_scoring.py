@@ -62,8 +62,10 @@ def test_read_rows_skips_a_cut_off_row(tmp_path):
     assert [r["name"] for r in block_scoring.read_rows(path)] == ["a"]
 
 
-ROWS = [{"name": n, "simulations": 10, "seed_offset": i, "cost": 1.5 + i}
-        for i, n in enumerate(["a", "b", "c", "d"])]
+ROWS = [
+    {"name": n, "simulations": 10, "seed_offset": i, "cost": 1.5 + i}
+    for i, n in enumerate(["a", "b", "c", "d"])
+]
 
 
 def _table_bytes():
@@ -106,10 +108,10 @@ def _check_cut(tmp_path, cut):
     path.write_bytes(data[:cut])
     whole = data[:cut].count(b"\n") - 1  # the header's line ends first
     rows = block_scoring.read_rows(path)
-    assert [r["name"] for r in rows] == [r["name"] for r in ROWS[:max(whole, 0)]]
+    assert [r["name"] for r in rows] == [r["name"] for r in ROWS[: max(whole, 0)]]
     _score(path, ["z"])
     again = block_scoring.read_rows(path)
-    assert [r["name"] for r in again] == [r["name"] for r in ROWS[:max(whole, 0)]] + ["z"]
+    assert [r["name"] for r in again] == [r["name"] for r in ROWS[: max(whole, 0)]] + ["z"]
 
 
 def test_an_unusable_covsyn_workers_falls_back_to_the_recorded_count():
@@ -237,8 +239,7 @@ def test_a_hard_linked_config_is_not_split(tmp_path):
     assert json.loads((tmp_path / "backup.json").read_text())["workers"] == 2
 
 
-def test_a_directory_that_cannot_be_synced_does_not_undo_a_written_config(tmp_path,
-                                                                           monkeypatch):
+def test_a_directory_that_cannot_be_synced_does_not_undo_a_written_config(tmp_path, monkeypatch):
     """The rename has happened; a file system that refuses a directory fsync is no failure."""
     import json
     import os
@@ -303,10 +304,16 @@ def test_a_link_left_at_a_temporary_path_is_not_followed(tmp_path):
     assert json.loads((tmp_path / "config.json").read_text())["workers"] == 3
 
 
-@pytest.mark.parametrize("setup, cause", [(0o444, "read-only"), ("hard", "hard-linked"),
-                                         ("symbolic", "a symbolic link"),
-                                         ("directory", "read-only directory"),
-                                         ("owner", "owned by another user")])
+@pytest.mark.parametrize(
+    "setup, cause",
+    [
+        (0o444, "read-only"),
+        ("hard", "hard-linked"),
+        ("symbolic", "a symbolic link"),
+        ("directory", "read-only directory"),
+        ("owner", "owned by another user"),
+    ],
+)
 def test_the_refusal_names_its_cause(tmp_path, monkeypatch, setup, cause):
     """Each refusal says why, a writable but hard-linked config.json included."""
     import json
@@ -407,8 +414,90 @@ def test_a_group_that_cannot_be_kept_is_refused(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "stat", stat_with_group)
     monkeypatch.setattr(os, "fchown", refused)
-    with pytest.raises(PermissionError, match="group"):
+    with pytest.raises(PermissionError, match="group.*workers stay 2.*resume with 3"):
         block_scoring.record_workers(tmp_path, 3)
     monkeypatch.setattr(os, "stat", real_stat)
     assert json.loads(path.read_text())["workers"] == 2
     assert not list(tmp_path.glob("config.json.*.tmp"))
+
+
+def _other_group(monkeypatch, path, fchown):
+    """config.json reported in another group than a new file gets; fchown as given."""
+    import os
+
+    real_stat = os.stat
+    group = real_stat(path).st_gid + 1
+
+    class Stat:
+        def __init__(self, st):
+            self.st = st
+
+        def __getattr__(self, name):
+            return group if name == "st_gid" else getattr(self.st, name)
+
+    monkeypatch.setattr(os, "stat", lambda p, *a, **kw: Stat(real_stat(p, *a, **kw))
+                        if str(p) == str(path) else real_stat(p, *a, **kw))  # fmt: skip
+    monkeypatch.setattr(os, "fchown", fchown)
+    return group
+
+
+def test_the_group_is_given_to_the_replacement(tmp_path, monkeypatch):
+    """fchown(temporary, -1, config.json's group): the owner unchanged, the group kept."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    calls = []
+    group = _other_group(monkeypatch, path, lambda fd, uid, gid: calls.append((fd, uid, gid)))
+    block_scoring.record_workers(tmp_path, 3)
+    assert len(calls) == 1 and calls[0][1:] == (-1, group)
+    monkeypatch.undo()
+    assert json.loads(path.read_text())["workers"] == 3
+    assert os.path.exists(path)
+
+
+@pytest.mark.parametrize("errno_", [22, 95])
+def test_a_file_system_that_cannot_set_the_group_is_a_refusal(tmp_path, monkeypatch, errno_):
+    """EINVAL or EOPNOTSUPP from fchown is a refusal naming the group, not a missing pilot."""
+    import json
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+
+    def refused(fd, uid, gid):
+        raise OSError(errno_, "Operation not supported")
+
+    _other_group(monkeypatch, path, refused)
+    with pytest.raises(PermissionError, match="group"):
+        block_scoring.record_workers(tmp_path, 3)
+
+
+def test_the_group_is_set_before_the_mode(tmp_path, monkeypatch):
+    """Changing the group clears setuid and setgid bits, so the mode comes after it."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    order = []
+    _other_group(monkeypatch, path, lambda fd, uid, gid: order.append("chown"))
+    real_fchmod = os.fchmod
+    monkeypatch.setattr(os, "fchmod", lambda fd, mode: order.append("chmod")
+                        or real_fchmod(fd, mode))  # fmt: skip
+    block_scoring.record_workers(tmp_path, 3)
+    assert order == ["chown", "chmod"]
+
+
+def test_short_writes_still_write_the_whole_record(tmp_path, monkeypatch):
+    """A file system that takes a few bytes per write gets every byte, in order."""
+    import json
+    import os
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
+    real_write = os.write
+    monkeypatch.setattr(os, "write", lambda fd, data: real_write(fd, bytes(data[:3])))
+    block_scoring.record_workers(tmp_path, 3)
+    monkeypatch.undo()
+    assert json.loads(path.read_text()) == {"settings": {"simulations": 300}, "workers": 3}
