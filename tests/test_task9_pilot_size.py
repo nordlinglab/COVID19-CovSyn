@@ -456,7 +456,8 @@ def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, 
     with pytest.raises(SystemExit):
         ps.main(["--resume", str(out)])
     err = capsys.readouterr().err
-    assert "workers" in err and "holds no pilot" not in err  # the pilot is there
+    assert "pilot 2 in" in err and "config.json's workers is" in err  # the pilot is there
+    assert "holds no pilot" not in err
 
 
 def test_a_resume_through_dot_dot_finds_the_results_root(tmp_path, monkeypatch):
