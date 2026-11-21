@@ -833,3 +833,13 @@ def test_a_config_nested_too_deep_to_read_is_a_command_error(tmp_path, capsys, w
     with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out), *(["--workers", workers] if workers else [])])
     assert stop.value.code == 2
+
+
+def test_a_pilot_1_choice_nested_too_deep_is_a_command_error(tmp_path):
+    """--noise reads choice.json the same way: exit 2, not a traceback."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text("[" * 100_000 + "]" * 100_000)
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+    assert stop.value.code == 2

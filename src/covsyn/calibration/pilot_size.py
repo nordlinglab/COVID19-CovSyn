@@ -335,7 +335,7 @@ def main(argv: list[str] | None = None) -> Path:
             noise = json.loads((args.noise / "choice.json").read_text(encoding="utf-8"))
             simulations = noise["chosen_simulations"]
             failed = noise.get("failed_evaluations", 0)
-        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{args.noise} holds no pilot 1 choice ({error!r})")
         if failed:
             parser.error(f"pilot 1 in {args.noise} had {failed} failed evaluations, whose "
