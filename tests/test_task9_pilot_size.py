@@ -754,3 +754,23 @@ def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monke
     ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
     assert set(encodings) == {"config.json", "choice.json"}
     assert all(set(reads) == {"utf-8"} for reads in encodings.values()), encodings
+
+
+def test_a_config_turned_into_a_list_is_named_once(tmp_path, monkeypatch, capsys):
+    """Changed between the two reads: record_workers' refusal and the pilot name it once."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(
+        json.dumps({"settings": {"simulations": 300}, "workers": 2})
+    )
+    real = ps.block_scoring.record_workers
+
+    def changed_meanwhile(out_dir, workers):
+        (out_dir / "config.json").write_text("[1, 2]")
+        return real(out_dir, workers)
+
+    monkeypatch.setattr(ps.block_scoring, "record_workers", changed_meanwhile)
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(out), "--workers", "3"])
+    err = capsys.readouterr().err
+    assert "not a JSON object" in err and err.count(out.name) == 1

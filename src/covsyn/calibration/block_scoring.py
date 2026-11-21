@@ -164,7 +164,7 @@ def record_workers(out_dir: Path, workers: int) -> None:
     path = Path(out_dir) / "config.json"
     config = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(config, dict):
-        raise ValueError(f"{path} is not a JSON object")
+        raise ValueError("not a JSON object")  # the caller names the file
     if config.get("workers") == workers:
         return
     kept = config.get("workers")
