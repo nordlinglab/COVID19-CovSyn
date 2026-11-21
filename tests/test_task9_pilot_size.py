@@ -565,22 +565,57 @@ VALID = ("20261121-093015_0123abc_pilot-size", "20261121-093015_nocommit_pilot-s
 CHANGES = ["\u0663", "\uff13", "A", "F", "_", "-", " ", "x", "0", "a", "-dirty"]
 
 
+def _could_make(name):
+    """Whether runs.make_run_id("pilot-size", ...) can return name, read from its format.
+
+    <YYYYMMDD-HHMMSS>_<commit[:7] or nocommit>[-dirty]_<config name>, with the stamp a
+    datetime's strftime and the commit lowercase hex, as git prints it.
+    """
+    from datetime import datetime
+
+    stamp, _, rest = name.partition("_")
+    commit, _, config = rest.partition("_")
+    try:
+        if datetime.strptime(stamp, "%Y%m%d-%H%M%S").strftime("%Y%m%d-%H%M%S") != stamp:
+            return False
+    except ValueError:
+        return False
+    commit = commit.removesuffix("-dirty")
+    hex_commit = len(commit) == 7 and all(c in "0123456789abcdef" for c in commit)
+    return config == "pilot-size" and (hex_commit or commit == "nocommit")
+
+
 @settings(max_examples=500, deadline=None)
-@given(base=st.sampled_from(VALID), at=st.integers(min_value=0, max_value=40),
+@given(base=st.sampled_from(VALID), at=st.integers(min_value=0, max_value=60),
        change=st.sampled_from(CHANGES), how=st.sampled_from(["swap", "insert", "delete"]))
 def test_a_name_one_edit_off_is_refused(base, at, change, how):
-    """A valid name with one character swapped, inserted or deleted, unless it is still valid.
+    """A valid name with one character swapped, inserted (the end included) or deleted.
 
-    Still valid means runs.make_run_id could have made it, as the reference pattern says.
+    Refused unless runs.make_run_id could still have made it; a stamp that is no date may pass,
+    since the name check guards against hand-made names, not impossible times.
     """
-    import re
-
-    at = at % len(base)
+    at = at % (len(base) + (how == "insert"))
     name = {"swap": base[:at] + change + base[at + 1:], "insert": base[:at] + change + base[at:],
             "delete": base[:at] + base[at + 1:]}[how]
-    valid = re.fullmatch(r"[0-9]{8}-[0-9]{6}_(?:[0-9a-f]{7}|nocommit)(?:-dirty)?_pilot-size",
-                         name)  # fmt: skip
-    assert bool(ps.RUN_ID.fullmatch(name)) == bool(valid), name
+    if _could_make(name):
+        assert ps.RUN_ID.fullmatch(name), name
+    elif not ps.RUN_ID.fullmatch(name):
+        return
+    else:  # accepted though make_run_id could not make it: only a stamp that is no date
+        stamp = name.split("_")[0]
+        assert len(stamp) == 15 and stamp[8] == "-" and (stamp[:8] + stamp[9:]).isdigit()
+
+
+def test_make_run_id_s_names_are_recognised_by_the_independent_reading():
+    """The reference above agrees with make_run_id itself."""
+    from datetime import datetime
+
+    from covsyn.runtime import runs
+
+    for commit, dirty in (("0123abcdef", False), ("", False), ("fedcba9876543", True)):
+        name = runs.make_run_id("pilot-size", when=datetime(2026, 11, 21, 9, 30, 15),
+                                commit=commit, dirty=dirty)  # fmt: skip
+        assert _could_make(name) and ps.RUN_ID.fullmatch(name), name
 
 
 def test_a_read_only_config_says_so_not_that_the_pilot_is_missing(tmp_path, monkeypatch, capsys):

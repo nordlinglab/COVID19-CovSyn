@@ -303,20 +303,55 @@ def test_a_link_left_at_a_temporary_path_is_not_followed(tmp_path):
     assert json.loads((tmp_path / "config.json").read_text())["workers"] == 3
 
 
-@pytest.mark.parametrize("links, cause", [(0o444, "read-only"), ("hard", "hard-linked")])
-def test_the_refusal_names_its_cause(tmp_path, links, cause):
+@pytest.mark.parametrize("setup, cause", [(0o444, "read-only"), ("hard", "hard-linked"),
+                                         ("symbolic", "a symbolic link"),
+                                         ("directory", "read-only directory"),
+                                         ("owner", "owned by another user")])
+def test_the_refusal_names_its_cause(tmp_path, monkeypatch, setup, cause):
     """A hard-linked config.json is writable; the user must be told why it is refused."""
     import json
     import os
 
-    path = tmp_path / "config.json"
-    path.write_text(json.dumps({"settings": {}, "workers": 2}))
-    if links == "hard":
-        os.link(path, tmp_path / "backup.json")
+    run = tmp_path / "run"
+    run.mkdir()
+    path = run / "config.json"
+    if setup == "symbolic":
+        real = tmp_path / "real.json"
+        real.write_text(json.dumps({"settings": {}, "workers": 2}))
+        path.symlink_to(real)
     else:
-        path.chmod(links)
+        path.write_text(json.dumps({"settings": {}, "workers": 2}))
+    if setup == "hard":
+        os.link(path, tmp_path / "backup.json")
+    elif setup == "directory":
+        run.chmod(0o555)
+    elif setup == "owner":
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(path).st_uid + 1)
+    elif isinstance(setup, int):
+        path.chmod(setup)
     try:
         with pytest.raises(PermissionError, match=cause):
-            block_scoring.record_workers(tmp_path, 3)
+            block_scoring.record_workers(run, 3)
     finally:
-        path.chmod(0o644)
+        run.chmod(0o755)
+        if not path.is_symlink():
+            path.chmod(0o644)
+
+
+def test_a_failed_rename_closes_no_descriptor_twice(tmp_path, monkeypatch):
+    """Once the file object owns it, only it closes it; a reused number stays open."""
+    import json
+    import os
+
+    (tmp_path / "config.json").write_text(json.dumps({"settings": {}, "workers": 2}))
+    closed = []
+    real_close = os.close
+    monkeypatch.setattr(os, "close", lambda fd: closed.append(fd) or real_close(fd))
+
+    def failing(src, dst):
+        raise OSError(18, "Invalid cross-device link")
+
+    monkeypatch.setattr(os, "replace", failing)
+    with pytest.raises(OSError):
+        block_scoring.record_workers(tmp_path, 3)
+    assert closed == []  # the with block closed the file, not os.close

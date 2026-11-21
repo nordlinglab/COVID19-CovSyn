@@ -11,7 +11,6 @@ per S, since a worker's S is set when it starts.
 from __future__ import annotations
 
 import concurrent.futures
-import contextlib
 import csv
 import io
 import json
@@ -140,11 +139,14 @@ def record_workers(out_dir: Path, workers: int) -> None:
 
     Written whole or not at all: a temporary file, flushed to disk, replaces it, so a kill, a
     full disk or a crash leaves the old one, which every later resume needs. The replacement
-    keeps the file's mode; a config.json that is read-only, a link or hard-linked is not
-    replaced.
+    keeps the file's mode; a config.json that is read-only, a link, hard-linked, owned by
+    another user or in a read-only directory is not replaced. A process killed outright, which
+    runs no clean-up, leaves its config.json.<random>.tmp, a stale copy that can be deleted;
+    it is not removed here, as it may be another resume's at work.
 
     Raises:
-        PermissionError: config.json is read-only, a link, or hard-linked.
+        PermissionError: config.json is read-only, a link, hard-linked, another user's, or
+            in a read-only directory.
         OSError: config.json cannot be read, or the new one cannot be written.
         ValueError: config.json is not a JSON object.
     """
@@ -163,6 +165,10 @@ def record_workers(out_dir: Path, workers: int) -> None:
         cause = f"hard-linked, with {path.stat().st_nlink} names"
     elif not os.access(path, os.W_OK) or not mode & 0o222:
         cause = "read-only"
+    elif path.stat().st_uid != os.geteuid():  # a replacement would be this user's, not theirs
+        cause = "owned by another user"
+    elif not os.access(path.parent, os.W_OK):
+        cause = "in a read-only directory"
     else:
         cause = ""
     if cause:
@@ -175,16 +181,17 @@ def record_workers(out_dir: Path, workers: int) -> None:
     handle, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     temporary = Path(name)
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as f:
+        try:
+            f = os.fdopen(handle, "w", encoding="utf-8")
+        except BaseException:
+            os.close(handle)  # fdopen never took it; once it has, only the file closes it
+            raise
+        with f:
             os.fchmod(f.fileno(), mode)
             f.write(json.dumps(config, indent=1, allow_nan=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
         os.replace(temporary, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.close(handle)  # if fdopen never took it
-        raise
     finally:
         temporary.unlink(missing_ok=True)
     try:  # the rename itself, on file systems that need it; some refuse a directory fsync
