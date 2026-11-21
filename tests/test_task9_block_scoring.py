@@ -611,7 +611,8 @@ def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
 def socket_path():
     """A path holding a bound AF_UNIX socket, in a short directory: $TMPDIR, else /tmp.
 
-    pytest's own tmp_path, or a long $TMPDIR, can pass macOS's 104-byte cap on a socket's path.
+    pytest's own tmp_path, or a long $TMPDIR, can pass the 104-byte cap on a socket's path that
+    macOS and the BSDs have.
     """
     import os
     import shutil
@@ -620,7 +621,8 @@ def socket_path():
     import tempfile
     from pathlib import Path
 
-    # Bytes of an AF_UNIX path, with its NUL: 108 on Linux, 104 on macOS and the BSDs.
+    # Bytes of an AF_UNIX path, with its NUL: 108 on Linux; 104 elsewhere (macOS, the BSDs),
+    # the smallest common cap, so other platforms only fall back to /tmp a little sooner.
     cap = 108 if sys.platform.startswith("linux") else 104
     directory = Path(tempfile.mkdtemp(prefix="cs"))
     if len(os.fsencode(directory / "t.csv")) >= cap:  # a long $TMPDIR
@@ -1059,15 +1061,27 @@ def test_a_change_without_a_reason_text_still_says_what_happened(tmp_path, monke
     assert "None" not in str(error.value) and os.strerror(errno.ENOENT) in str(error.value)
 
 
-@pytest.mark.parametrize("bare, said", [
-    (lambda: OSError(), "OSError"),
-    (lambda: OSError(""), "OSError"),
-    (lambda: PermissionError(), "PermissionError"),
-    (lambda: OSError(None), "OSError"),
-    (lambda: OSError(None, None), "OSError"),
-    (lambda: OSError("not a number"), "not a number"),
-    (lambda: OSError(2**40), "OSError"),
-])  # fmt: skip
-def test_an_error_with_no_usable_text_is_named_by_its_kind(bare, said):
-    """No text, no errno, None for both, or a code no C int holds: its kind, never "None"."""
+@pytest.mark.parametrize(
+    "bare, said",
+    [
+        (lambda: OSError(), "OSError"),
+        (lambda: OSError(""), "OSError"),
+        (lambda: PermissionError(), "PermissionError"),
+        (lambda: OSError(None), "OSError"),
+        (lambda: OSError(None, None), "OSError"),
+        (lambda: OSError("not a number"), "not a number"),
+        (lambda: OSError(2**40), "OSError"),
+        (lambda: OSError("a", ""), "a"),
+        (lambda: OSError(2.5, None), "OSError"),
+        (lambda: OSError(True), "OSError"),
+        (lambda: OSError(0), "OSError"),
+        (lambda: OSError(0, None), "OSError"),
+    ],
+)
+def test_an_error_without_a_usable_reason_gives_its_words_else_its_kind(bare, said):
+    """No strerror and no usable errno: the error's own words, else its class name.
+
+    A usable errno is a non-zero int other than a bool; None, a float, a string, 0 ("Success")
+    or a code no C int holds are not, and none of them is ever shown as the reason.
+    """
     assert block_scoring._reason(bare()) == said
