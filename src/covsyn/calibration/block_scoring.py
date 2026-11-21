@@ -63,8 +63,9 @@ class Table(NamedTuple):
 TABLE_REFUSALS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS, errno.ELOOP,
                             errno.ENAMETOOLONG, errno.ETXTBSY, errno.EAGAIN,
                             errno.EWOULDBLOCK})  # fmt: skip
-# A socket, or a device without a driver, fails to open before fstat could say what it is.
-NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV})
+# A socket, or a device without a driver, fails to open before fstat could say what it is:
+# ENXIO on Linux, EOPNOTSUPP (ENOTSUP) on macOS, where the pilots run.
+NOT_REGULAR = frozenset({errno.ENXIO, errno.ENODEV, errno.EOPNOTSUPP, errno.ENOTSUP})
 
 
 def _raise_refused(path: Path, error: OSError) -> None:

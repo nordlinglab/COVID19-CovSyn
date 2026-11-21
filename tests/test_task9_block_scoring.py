@@ -905,3 +905,20 @@ def test_a_link_to_a_table_out_of_reach_is_named_as_refused(tmp_path, monkeypatc
         block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
                             exists=False)  # fmt: skip
     assert "Permission denied" in str(error.value) and "leads to no file" not in str(error.value)
+
+
+@pytest.mark.parametrize("code", sorted({errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENXIO,
+                                         errno.ENODEV}))
+def test_every_os_s_refusal_of_a_socket_is_not_a_regular_file(tmp_path, monkeypatch, code):
+    """A socket refused at open, by macOS with EOPNOTSUPP, by Linux with ENXIO: both name it."""
+    import os
+
+    path = tmp_path / "t.csv"
+    path.write_text("")
+
+    def socket_like(p, flags, *args, **kwargs):
+        raise OSError(code, os.strerror(code), str(p))
+
+    monkeypatch.setattr(os, "open", socket_like)
+    with pytest.raises(block_scoring.TableError, match="not a regular file"):
+        block_scoring.read_table(path)
