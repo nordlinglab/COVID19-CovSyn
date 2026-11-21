@@ -1095,9 +1095,9 @@ def _errno_changed():
 def test_an_error_without_a_usable_reason_gives_its_words_else_its_kind(bare, said):
     """No usable strerror or code: the error's own words, else its class name.
 
-    A text counts only as a non-empty string; a code only as a positive int that is no bool,
-    so 0, a negative code or a float is not converted. A string argument may still be shown,
-    as the error's own words.
+    A text counts only as a non-empty string; a code only as a positive int, no bool, that a
+    C int holds, so 0, a negative code, a float or a code too large for a C int is not
+    converted. A string argument may still be shown, as the error's own words.
     """
     assert block_scoring._reason(bare()) == said
 
@@ -1109,11 +1109,12 @@ def test_an_error_without_a_usable_reason_gives_its_words_else_its_kind(bare, sa
         (lambda: OSError(1, 3.5), 1),
         (lambda: OSError(_Code.ENOENT), errno.ENOENT),
         (_errno_changed, errno.ENOENT),
+        (lambda: OSError(1, ""), 1),
     ],
-    ids=["text-true", "text-float", "int-enum", "errno-overflows"],
+    ids=["text-true", "text-float", "int-enum", "errno-overflows", "text-empty"],
 )
 def test_a_usable_code_gives_its_text(bare, code):
-    """A positive int code, an IntEnum's too, gives its text when the strerror is no string.
+    """A positive int code, an IntEnum's too, gives its text when no non-empty strerror does.
 
     A code no C int holds in errno falls to the one args[0] keeps.
     """
