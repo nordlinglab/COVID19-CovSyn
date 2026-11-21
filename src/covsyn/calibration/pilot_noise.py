@@ -154,9 +154,12 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "failed_evaluations": failed}
 
 
-def write_summary(out_dir: Path) -> dict[str, Any]:
-    """Summarise out_dir's blocks.csv into vectors.csv, pairs.csv and choice.json."""
-    summary = summarise(block_scoring.read_rows(Path(out_dir) / BLOCKS_FILE))
+def write_summary(out_dir: Path, warn: bool = True) -> dict[str, Any]:
+    """Summarise out_dir's blocks.csv into vectors.csv, pairs.csv and choice.json.
+
+    warn: as read_rows'; run() has read blocks.csv already, and warned if need be.
+    """
+    summary = summarise(block_scoring.read_rows(Path(out_dir) / BLOCKS_FILE, warn=warn))
     block_scoring.write_csv(Path(out_dir) / VECTORS_FILE, summary["vectors"])
     block_scoring.write_csv(Path(out_dir) / PAIRS_FILE, summary["pairs"])
     choice = {**summary["choice"], "spread": summary["spread"]}
@@ -183,7 +186,7 @@ def run(out_dir: Path, population: np.ndarray, lower: np.ndarray, upper: np.ndar
     todo = [t._asdict() for t in tasks(pilot_rows(), len(population)) if t.key not in done]
     parameters = np.asarray(population, dtype=float) * (upper - lower) + lower
     block_scoring.score(path, todo, COLUMNS, lambda t: parameters[t["row"]], evaluate, make_pool)
-    return write_summary(out_dir)
+    return write_summary(out_dir, warn=False)
 
 
 def _population_and_bounds() -> tuple[np.ndarray, np.ndarray, np.ndarray]:

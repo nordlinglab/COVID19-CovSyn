@@ -942,3 +942,15 @@ def test_one_rule_checks_s_wherever_it_is_read():
     for bad in (300.0, "300", True, 0, 10_001, None):
         with pytest.raises(ValueError, match="S"):
             run_size.check_simulations(bad, "S")
+
+
+def test_a_pilot_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog):
+    """screening.csv with a byte order mark: one warning in a run that reads it twice."""
+    import logging
+
+    summary, out = _pilot(tmp_path, _Optimiser())
+    screen = out / ps.SCREEN_FILE
+    screen.write_bytes(b"\xef\xbb\xbf" + screen.read_bytes())
+    with caplog.at_level(logging.WARNING, logger=ps.block_scoring.log.name):
+        ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), _evaluate, _threads, workers=2)
+    assert caplog.text.count(str(screen)) == 1

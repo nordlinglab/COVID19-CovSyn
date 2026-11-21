@@ -36,19 +36,21 @@ Evaluate = Callable[[np.ndarray, int], tuple]
 MakePool = Callable[[int], concurrent.futures.Executor]
 
 
-def read_rows(path: Path) -> list[dict[str, str]]:
+def read_rows(path: Path, warn: bool = True) -> list[dict[str, str]]:
     """The finished rows of a CSV written by :func:`score`; none when it does not exist yet.
 
     A last line without its newline, which a kill cut off, and a row short of a value are not
     finished evaluations and are left out. A leading UTF-8 byte order mark, which a spreadsheet
-    adds when it saves the table again, is skipped, with a warning: it may have shortened the
-    costs it wrote back.
+    adds when it saves the table as "CSV UTF-8", is skipped, with a warning unless ``warn`` is
+    False, as on a pilot's later reads of a table in one run: it may have shortened the costs it
+    wrote back. A save that adds no mark, such as plain "CSV", shortens them just the same and
+    is not detected.
     """
     if not Path(path).is_file():
         return []
     # Cut before decoding: the kill may have split a character, which only that line holds.
     data = Path(path).read_bytes()
-    if data.startswith(codecs.BOM_UTF8):  # utf-8-sig below skips it
+    if warn and data.startswith(codecs.BOM_UTF8):  # utf-8-sig below skips it
         log.warning("%s starts with a byte order mark: another program, such as a spreadsheet, "
                     "rewrote it, and may have shortened its costs", path)
     text = data[: data.rfind(b"\n") + 1].decode("utf-8-sig")

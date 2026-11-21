@@ -593,3 +593,14 @@ def test_a_table_without_a_byte_order_mark_gives_no_warning(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger=block_scoring.log.name):
         block_scoring.read_rows(path)
     assert not caplog.text
+
+
+def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
+    """warn=False: a pilot's later reads of a table it has warned about in this run."""
+    import logging
+
+    path = tmp_path / "t.csv"
+    path.write_bytes(b"\xef\xbb\xbfname,simulations,seed_offset,cost\na,10,0,1.5\n")
+    with caplog.at_level(logging.WARNING, logger=block_scoring.log.name):
+        assert [r["name"] for r in block_scoring.read_rows(path, warn=False)] == ["a"]
+    assert not caplog.text

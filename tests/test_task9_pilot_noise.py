@@ -431,3 +431,15 @@ def test_a_config_saved_with_a_byte_order_mark_still_reads(tmp_path, monkeypatch
     config = out / "config.json"
     config.write_bytes(b"\xef\xbb\xbf" + config.read_bytes())
     assert pn.main(["--resume", str(out), "--workers", "3"]) == out
+
+
+def test_pilot_1_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog):
+    """blocks.csv with a byte order mark: one warning in a run that reads it twice."""
+    import logging
+
+    pn.run(tmp_path, _population(), np.zeros(DIM), np.ones(DIM), _evaluate, _threads)
+    blocks = tmp_path / pn.BLOCKS_FILE
+    blocks.write_bytes(b"\xef\xbb\xbf" + blocks.read_bytes())
+    with caplog.at_level(logging.WARNING, logger=pn.block_scoring.log.name):
+        pn.run(tmp_path, _population(), np.zeros(DIM), np.ones(DIM), _evaluate, _threads)
+    assert caplog.text.count(str(blocks)) == 1
