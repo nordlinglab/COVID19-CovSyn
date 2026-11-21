@@ -67,10 +67,13 @@ def _open_regular(path: Path, flags: int) -> int:
         raise TableError(f"{path}: a parent of it is not a directory") from None
     except IsADirectoryError:
         raise TableError(f"{path} is not a regular file, but a directory") from None
-    if not stat.S_ISREG(os.fstat(handle).st_mode):
-        os.close(handle)
-        raise TableError(f"{path} is not a regular file, so it is no pilot table")
-    os.set_blocking(handle, True)
+    try:
+        if not stat.S_ISREG(os.fstat(handle).st_mode):
+            raise TableError(f"{path} is not a regular file, so it is no pilot table")
+        os.set_blocking(handle, True)
+    except BaseException:
+        os.close(handle)  # not handed over yet
+        raise
     return handle
 
 
@@ -166,16 +169,20 @@ def score(
             raise TableError(f"{path} went missing while the pilot ran; restore it, then "
                              f"resume") from None
     else:
-        try:  # only if it is still absent; else its rows are unread
-            handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        try:  # only if it is still absent; else its rows are unread. 0o666: the umask decides
+            handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
         except FileExistsError:
-            raise TableError(f"{path} appeared after the pilot looked for it; start it again, "
-                             f"so it reads that table first") from None
+            raise TableError(_taken(path)) from None
         except NotADirectoryError:
             raise TableError(f"{path}: a parent of it is not a directory") from None
-    # A kill can leave the file empty, before its header: then the header is written now.
-    empty = os.fstat(handle).st_size == 0
-    with open(handle, "w", newline="", encoding="utf-8") as f:
+    try:
+        # A kill can leave the file empty, before its header: then the header is written now.
+        empty = os.fstat(handle).st_size == 0
+        f = open(handle, "w", newline="", encoding="utf-8")
+    except BaseException:
+        os.close(handle)  # not handed over yet
+        raise
+    with f:
         writer = csv.DictWriter(f, fieldnames=list(columns))
         if empty:
             writer.writeheader()
@@ -193,6 +200,21 @@ def score(
                     for future in futures:
                         future.cancel()
                     raise
+
+
+def _taken(path: Path) -> str:
+    """Why a new table cannot be created at path: something is there now, said as what it is."""
+    try:
+        entry = os.lstat(path).st_mode
+    except OSError:
+        entry = None
+    if entry is not None and stat.S_ISLNK(entry):
+        return (f"{path} is a symbolic link, to {os.readlink(path)}, where the pilot would make "
+                f"its table; remove it or point it at an existing table")
+    if entry is not None and not stat.S_ISREG(entry):
+        return f"{path} is not a regular file, so it is no pilot table"
+    return (f"{path} appeared after the pilot looked for it; start it again, so it reads that "
+            f"table first")
 
 
 def _drop_cut_off_line(path: Path) -> None:

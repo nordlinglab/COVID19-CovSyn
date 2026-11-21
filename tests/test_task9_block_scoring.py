@@ -606,7 +606,7 @@ def test_a_read_that_asks_for_no_warning_gives_none(tmp_path, caplog):
     assert not caplog.text
 
 
-def test_a_table_gone_at_the_first_read_reads_as_absent(tmp_path, monkeypatch):
+def test_a_missing_table_at_the_first_read_reads_as_absent(tmp_path):
     """Missing when a pilot first looks: no rows, no mark, and exists False, so it starts anew."""
     path = tmp_path / "t.csv"
     table = block_scoring.read_table(path)
@@ -663,3 +663,75 @@ def test_a_new_table_that_appeared_meanwhile_is_not_appended_to(tmp_path):
         block_scoring.score(path, [{"name": "a", "simulations": 10, "seed_offset": 0}], COLUMNS,
                             lambda t: np.ones(2), _evaluate, _threads, exists=False)  # fmt: skip
     assert path.read_bytes() == before
+
+
+def _task():
+    return [{"name": "a", "simulations": 10, "seed_offset": 0}]
+
+
+@pytest.mark.parametrize("entry", ["dangling link", "directory", "fifo"])
+def test_a_new_table_s_path_taken_by_another_entry_is_named(tmp_path, entry):
+    """Not "a table appeared, start again", which a restart would only repeat."""
+    import os
+
+    path = tmp_path / "t.csv"
+    if entry == "dangling link":
+        path.symlink_to(tmp_path / "nowhere" / "x.csv")
+    elif entry == "directory":
+        path.mkdir()
+    else:
+        os.mkfifo(path)
+    with pytest.raises(block_scoring.TableError) as error:
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+    assert "start it again" not in str(error.value) and str(path) in str(error.value)
+
+
+@pytest.mark.parametrize("entry", ["directory", "fifo", "parent"])
+def test_appending_to_a_table_that_is_no_regular_file_is_refused(tmp_path, entry):
+    """The exists=True path: trimmed and appended only as a regular file."""
+    import os
+
+    path = tmp_path / "t.csv"
+    if entry == "directory":
+        path.mkdir()
+    elif entry == "fifo":
+        os.mkfifo(path)
+    else:
+        (tmp_path / "out").write_text("a file")
+        path = tmp_path / "out" / "t.csv"
+    with pytest.raises(block_scoring.TableError, match=str(path)):
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=True)  # fmt: skip
+
+
+def test_a_new_table_under_a_parent_that_is_a_file_is_named(tmp_path):
+    """The create path names a parent that is no directory, as the read path does."""
+    (tmp_path / "out").write_text("a file")
+    path = tmp_path / "out" / "t.csv"
+    with pytest.raises(block_scoring.TableError, match="parent"):
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+
+
+def test_a_table_cut_off_before_any_newline_gets_its_header(tmp_path):
+    """A kill inside the header itself: trimmed to nothing, then written whole."""
+    path = tmp_path / "t.csv"
+    path.write_text("name,simul")
+    _score(path, ["a"])
+    assert [r["name"] for r in block_scoring.read_rows(path)] == ["a"]
+
+
+def test_a_new_table_takes_its_mode_from_the_umask_alone(tmp_path):
+    """0o666 less the umask, as open(path, "a") gave it: a shared group keeps write access."""
+    import os
+    import stat
+
+    old = os.umask(0o002)
+    try:
+        path = tmp_path / "t.csv"
+        block_scoring.score(path, _task(), COLUMNS, lambda t: np.ones(2), _evaluate, _threads,
+                            exists=False)  # fmt: skip
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o664
