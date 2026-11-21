@@ -798,10 +798,10 @@ def test_a_table_the_system_refuses_is_a_table_error(tmp_path, monkeypatch):
     path.write_text("name,simulations,seed_offset,cost\n")
     real_open = os.open
 
-    def refused(p, flags, *args):
+    def refused(p, flags, *args, **kwargs):
         if str(p) == str(path):
             raise PermissionError(13, "Permission denied", str(p))
-        return real_open(p, flags, *args)
+        return real_open(p, flags, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", refused)
     with pytest.raises(block_scoring.TableError, match=re.escape(str(path))):
@@ -837,7 +837,7 @@ def test_an_error_that_is_not_the_table_s_stays_as_it_is(tmp_path, monkeypatch, 
     path = tmp_path / "t.csv"
     path.write_text("name,simulations,seed_offset,cost\n")
 
-    def failing(p, flags, *args):
+    def failing(p, flags, *args, **kwargs):
         raise OSError(code, os.strerror(code), str(p))
 
     monkeypatch.setattr(os, "open", failing)

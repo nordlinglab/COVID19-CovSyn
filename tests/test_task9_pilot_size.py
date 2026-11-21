@@ -1046,21 +1046,27 @@ def test_pilot_2_keeps_the_traceback_of_an_error_outside_the_tables(tmp_path, mo
 
 
 def test_a_full_disk_in_pilot_2_s_tables_keeps_its_traceback(tmp_path, monkeypatch):
-    """Through the real run and block_scoring: ENOSPC creating a table stays an OSError."""
+    """Through main, the real run and block_scoring: ENOSPC stays an OSError, not exit 2."""
     import errno
     import os
 
-    out = tmp_path / "tables" / "p"
-    out.mkdir(parents=True)
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    optimiser = _Optimiser()
+    monkeypatch.setattr("covsyn.pipeline.runner.run_module",
+                        lambda args, output, append, env, keep_fds=(): optimiser(args, output,
+                                                                                 append, env))
     real_open = os.open
 
-    def full(p, flags, *args):
+    def full(p, flags, *args, **kwargs):
         if str(p).endswith(ps.SCREEN_FILE) and flags & os.O_CREAT:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(p))
-        return real_open(p, flags, *args)
+        return real_open(p, flags, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", full)
     with pytest.raises(OSError) as error:
-        ps.run(out, tmp_path / "models", "p", 300, _Optimiser(), _evaluate, _threads, workers=2)
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
     assert not isinstance(error.value, ps.block_scoring.TableError)
     assert error.value.errno == errno.ENOSPC

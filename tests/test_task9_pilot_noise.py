@@ -564,10 +564,10 @@ def test_a_full_disk_in_pilot_1_s_table_keeps_its_traceback(tmp_path, monkeypatc
                         lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
     real_open = os.open
 
-    def full(p, flags, *args):
+    def full(p, flags, *args, **kwargs):
         if str(p).endswith(pn.BLOCKS_FILE) and flags & os.O_CREAT:
             raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(p))
-        return real_open(p, flags, *args)
+        return real_open(p, flags, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", full)
     with pytest.raises(OSError) as error:
