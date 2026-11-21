@@ -453,9 +453,10 @@ def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, 
     )
     monkeypatch.delenv("COVSYN_WORKERS", raising=False)
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stop:
         ps.main(["--resume", str(out)])
     err = capsys.readouterr().err
+    assert stop.value.code == 2
     assert "pilot 2 in" in err and "config.json's workers is" in err  # the pilot is there
     assert "holds no pilot" not in err
 
