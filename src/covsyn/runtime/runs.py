@@ -40,6 +40,34 @@ RESULTS_ROOT = REPO_ROOT / "results"
 CHECKPOINTS = "checkpoints"
 
 
+def json_lines(path: Path) -> list[dict]:
+    """The JSON objects of a JSON-lines file; a line cut off by a kill, or no object, is skipped."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    lines = []
+    for text in path.read_text(errors="replace").splitlines():
+        try:
+            line = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(line, dict):
+            lines.append(line)
+    return lines
+
+
+def append_json_line(path: Path, line: Mapping[str, Any]) -> None:
+    """Append one JSON object as a line; a kill while writing left a line cut off: after it."""
+    path = Path(path)
+    cut_off = False
+    if path.exists() and path.stat().st_size > 0:
+        with open(path, "rb") as f:
+            f.seek(-1, os.SEEK_END)
+            cut_off = f.read(1) != b"\n"
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(("\n" if cut_off else "") + json.dumps(line) + "\n")
+
+
 def last_checkpoint(run_dir: Path) -> Path | None:
     """The optimiser's last finished checkpoint in a run, or None (Task 4).
 

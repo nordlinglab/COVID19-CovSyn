@@ -20,11 +20,12 @@ DEFAULT_ALPHA_END = 0.001
 # warned about. Kept here only, so the command and the pipeline cannot differ; the two tables
 # and OPTIMISER_MODES have the same modes (tests/test_task8_pipeline.py).
 # Task 9: a pilot run's alpha_0 and generations are the pilot's, given on the command line, so
-# its entries are None.
+# its entries are None; a production run's alpha_0 is pilot 2's, given too, and it runs to its
+# stopping rule or G_max = 1,000 generations.
 MODE_ALPHA_0 = {'train': DEFAULT_ALPHA_0, 'test': DEFAULT_ALPHA_0, 'profile': DEFAULT_ALPHA_0,
-                'pilot': None}
+                'pilot': None, 'production': None}
 # Task 5: a profile runs 2 generations.
-MODE_GENERATIONS = {'train': 120, 'test': 10, 'profile': 2, 'pilot': None}
+MODE_GENERATIONS = {'train': 120, 'test': 10, 'profile': 2, 'pilot': None, 'production': 1000}
 
 
 class GrowingSchedule(ValueError):

@@ -13,14 +13,15 @@ import time
 import traceback
 import warnings
 import os
+from datetime import datetime
 from pathlib import Path
 from numpy.random import default_rng
 from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration import (initial_population, parameter_space, revalidation, seed_streams,
-                                step_schedule)
+from covsyn.calibration import (initial_population, monitoring, parameter_space, revalidation,
+                                seed_streams, step_schedule)
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1544,6 +1545,69 @@ def decode_metrics(P):
     return {k: float(v) for k, v in m.items()}
 
 
+class Watch:
+    """A production run's monitoring in firefly(): Task 9's stopping rule and its records.
+
+    Unmonitored, it holds nothing and changes nothing, so other runs are as before.
+    """
+
+    def __init__(self, on: bool, dim: int, checkpoint: dict | None) -> None:
+        """Monitoring when on, from the checkpoint's state when resuming one."""
+        self.on = on
+        resumed = on and checkpoint is not None and 'monitored' in checkpoint
+        self.monitor = (monitoring.Monitor.from_state(checkpoint, dim) if resumed
+                        else monitoring.Monitor(dim))
+        self.reason = str(checkpoint['stop_reason']) if resumed else ''
+        self.evaluations = int(checkpoint['monitor_evaluations']) if resumed else 0
+        self.seconds = float(checkpoint['monitor_seconds']) if resumed else 0.0
+
+    def stopped(self) -> bool:
+        """Whether the rule, or G_max, has stopped the run."""
+        return bool(self.reason)
+
+    def score(self, executor, function, members: np.ndarray, simulations: int) -> None:
+        """Score the members not yet monitored on the monitoring blocks, one task each."""
+        started = time.perf_counter()
+        for vector in self.monitor.new_vectors(members):
+            futures = [executor.submit(function, vector, offset)
+                       for offset in monitoring.offsets(simulations)]
+            self.monitor.add(vector, np.array([float(f.result()[0]) for f in futures]))
+            self.evaluations += len(futures)
+        self.seconds += time.perf_counter() - started
+
+    def judge(self, generation: int, max_generations: int) -> None:
+        """Record the generation's best, and the reason to stop, if any."""
+        self.monitor.record_generation()
+        reason = self.monitor.stop_reason()
+        if reason is None and generation == max_generations - 1:
+            reason = f'reached G_max = {max_generations} generations'
+        self.reason = reason or ''
+
+    def state(self) -> dict | None:
+        """The checkpoint's monitoring entries; None when not monitoring."""
+        if not self.on:
+            return None
+        return {**self.monitor.state(), 'stop_reason': np.array(self.reason),
+                'monitor_evaluations': self.evaluations, 'monitor_seconds': self.seconds}
+
+    def log_stop(self, run_dir: Path, generation: int) -> None:
+        """Append the stop to run.log, unless a line already records it (Task 9)."""
+        path = Path(run_dir) / 'run.log'
+        if any(line.get('event') == monitoring.EVENT and line.get('generation') == generation
+               for line in runs.json_lines(path)):
+            return
+        runs.append_json_line(path, {'event': monitoring.EVENT, 'generation': generation,
+                                     'reason': self.reason,
+                                     'time': datetime.now().isoformat(timespec='seconds')})
+
+    def write_summary(self, tables: Path, simulations: int) -> None:
+        """monitoring.json: what the monitoring cost, apart from the optimisation's."""
+        summary = {'vectors': len(self.monitor.vectors), 'evaluations': self.evaluations,
+                   'simulations': self.evaluations * simulations, 'seconds': self.seconds,
+                   'stop_reason': self.reason}
+        (Path(tables) / monitoring.SUMMARY_FILE).write_text(json.dumps(summary, indent=1) + '\n')
+
+
 class Firefly:
     def __init__(self, pop_size, alpha_0, betamin, gamma, seed=None,
                  alpha_end=DEFAULT_ALPHA_END, g_plan=None):
@@ -1567,12 +1631,17 @@ class Firefly:
         self.profile_dir = None
         # Task 7: the run's optimisation stream, whose block g generation g is scored on.
         self.stream = seed_streams.DEFAULT_OPTIMISATION_STREAM
+        # Task 9: a production run monitors its new elite members and stops by their scores.
+        self.monitor = False
 
     @staticmethod
     def _state(normalized, fireflies, intensities, cost_parts, elite_records, worst_fireflies,
-               worst_intensities, worst_iteration, evaluations, alpha, dim):
-        """What a checkpoint holds: everything the next generation reads (Task 4)."""
-        return {'normalized': np.asarray(normalized, dtype=float),
+               worst_intensities, worst_iteration, evaluations, alpha, dim, monitored=None):
+        """What a checkpoint holds: everything the next generation reads (Task 4).
+
+        monitored: a production run's monitoring state and stop (Task 9), None otherwise.
+        """
+        return {**(monitored or {}), 'normalized': np.asarray(normalized, dtype=float),
                 'fireflies': np.asarray(fireflies, dtype=float),
                 'intensities': np.asarray(intensities, dtype=float),
                 'cost_parts': np.array(json.dumps(cost_parts)),
@@ -1753,6 +1822,11 @@ class Firefly:
                 start = next_generation(checkpoint)
                 for table in (progress_table, evaluation_table, generation_table):
                     drop_progress_after(table.path, start - 1)
+            # Task 9: a production run's monitored scores and stop, kept in its checkpoints.
+            watch = Watch(self.monitor, dim, checkpoint)
+            if watch.stopped():  # a stopped run resumed: nothing to run; log it if lost
+                watch.log_stop(result_path, start - 1)
+                start = max_generations
 
             # Task 8: the elite the next generation keeps, from the costs it starts with; each
             # generation's costs choose the one after, so it is chosen once.
@@ -1801,6 +1875,9 @@ class Firefly:
                 elite_records = record_elite(elite_records, fireflies, intensities,
                                              set(elite) | set(next_elite), generation)
                 elite = next_elite
+                if self.monitor:  # Task 9: score the new members, then apply the rule
+                    watch.score(executor, function, fireflies[next_elite], self.simulations)
+                    watch.judge(generation, max_generations)
                 row = {'generation': generation, 'seed_offset': offset,
                        'best_cost': float(np.min(intensities))}
                 row.update(cost_parts[best_idx])
@@ -1814,8 +1891,13 @@ class Firefly:
                 finish_generation(self._state(
                     normalized_fireflies, fireflies, intensities, cost_parts, elite_records,
                     worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
-                    dim))
+                    dim, watch.state()))
+                if watch.stopped():  # Task 9: after its checkpoint, so a resume knows it
+                    watch.log_stop(result_path, generation)
+                    break
 
+            if self.monitor:
+                watch.write_summary(tables, self.simulations)
             executor.shutdown()  # the workers write their profiles as they exit
         except BaseException:
             # A failed or stopped run cancels the tasks not yet started and waits for the rest:
@@ -1867,8 +1949,10 @@ OPTIMISER_MODES = {
     # Task 5: the population is the worker count, set in main(), and S comes from the command
     # line; a profile is run again, never resumed.
     'profile': (None, 1, 0.01),
-    # Task 9: pilot 2's runs, whose n, generations, S and alpha_0 the pilot gives (main()).
+    # Task 9: pilot 2's runs, whose n, generations, S and alpha_0 the pilot gives (main()),
+    # and the production run, whose n, S and step schedule pilot 2 chose.
     'pilot': (None, 1, 0.03),
+    'production': (None, 1, 0.03),
 }
 # Task 9: a pilot run's n, within the population's rows and above 1, so one firefly moves.
 PILOT_POP_SIZES = range(2, initial_population.N_MAX + 1)
@@ -2126,6 +2210,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
                                       ('--g-plan', getattr(args, 'g_plan', None)),
                                       ('--pop-size', getattr(args, 'pop_size', None)),
                                       ('--generations', getattr(args, 'generations', None)),
+                                      ('--pilot', getattr(args, 'pilot', None)),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
@@ -2184,9 +2269,11 @@ def main() -> None:
                              f'(profile default {PROFILE_SIMULATIONS})')
     # Task 9: checked in main(), so a refusal names the flag
     parser.add_argument('--pop-size', type=int, default=None,
-                        help='pilot mode: number of fireflies, n')
+                        help='pilot and production modes: number of fireflies, n')
     parser.add_argument('--generations', type=int, default=None,
                         help='pilot mode: number of generations, G')
+    parser.add_argument('--pilot', default=None,
+                        help="production mode: pilot 2's run id, whose choice it runs")
     parser.add_argument('--stream', type=optimisation_stream, default=None,
                         help='optimisation stream, 1 to 99, whose block g scores generation g '
                              f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
@@ -2231,14 +2318,27 @@ def main() -> None:
         pop_size, max_generations, simulations = (
             pilot_size(args.pop_size, args.generations, args.simulations)
             if args.resume is None else recorded_size(args.resume))
+    elif mode == 'production':  # Task 9: pilot 2's n, S and schedule, to G_max
+        if args.resume is None:
+            pop_size, _, simulations = pilot_size(args.pop_size, max_generations,
+                                                  args.simulations)
+            for flag, value in (('--g-plan', args.g_plan), ('--alpha-end', args.alpha_end),
+                                ('--pilot', args.pilot)):
+                if value is None:
+                    sys.exit(f"--mode production needs {flag}, pilot 2's choice")
+        else:
+            pop_size, _, simulations = recorded_size(args.resume)
+            args.pilot = recorded_settings(args.resume).get('pilot')
     elif args.simulations is not None:
-        sys.exit('--simulations changes the objective, so it is for --mode profile or pilot '
-                 'only')
+        sys.exit('--simulations changes the objective, so it is for --mode profile, pilot or '
+                 'production only')
     else:
         simulations = SIMULATIONS_PER_EVALUATION
-    for flag, value in (('--pop-size', args.pop_size), ('--generations', args.generations)):
-        if value is not None and mode != 'pilot':  # every other mode fixes them
-            sys.exit(f'{flag} is for --mode pilot only; --mode {mode} fixes it')
+    for flag, value, modes in (('--pop-size', args.pop_size, ('pilot', 'production')),
+                               ('--generations', args.generations, ('pilot',)),
+                               ('--pilot', args.pilot, ('production',))):
+        if value is not None and mode not in modes:  # every other mode fixes them
+            sys.exit(f'{flag} is for --mode {" or ".join(modes)} only, not --mode {mode}')
 
     # Firefly
     # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
@@ -2258,6 +2358,9 @@ def main() -> None:
     fa = Firefly(pop_size, schedule[0], betamin, gamma, seed=args.seed, alpha_end=schedule[1],
                  g_plan=schedule[2])
     fa.run_settings = {'mode': mode}
+    if mode == 'production':  # Task 9: traced to pilot 2's choice, and stopped by its rule
+        fa.run_settings['pilot'] = args.pilot
+        fa.monitor = True
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
     fa.stream = (seed_streams.DEFAULT_OPTIMISATION_STREAM if args.stream is None
