@@ -216,11 +216,14 @@ def main(argv: list[str] | None = None) -> Path:
             config = json.loads((out / CONFIG_FILE).read_text())
             workers = block_scoring.pilot_workers(args.workers, os.environ,
                                                   config.get("workers"))  # fmt: skip
-            block_scoring.record_workers(out, workers)
-        except PermissionError as error:  # refused, not missing: say what was refused
-            parser.error(str(error))
         except (OSError, ValueError, TypeError, AttributeError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
+        try:  # the pilot is there; only its record of the workers is at stake
+            block_scoring.record_workers(out, workers)
+        except PermissionError as error:  # refused: say what was refused
+            parser.error(str(error))
+        except OSError as error:
+            parser.error(f"{out}: could not record the workers in its config.json ({error})")
     else:
         out = runs.run_directory(runs.make_run_id("pilot-noise"), "tables", args.results_root,
                                  new=True)  # fmt: skip

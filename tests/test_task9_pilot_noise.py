@@ -332,3 +332,23 @@ def test_a_read_only_config_says_so_not_that_pilot_1_is_missing(tmp_path, monkey
         (out / "config.json").chmod(0o644)
     err = capsys.readouterr().err
     assert stop.value.code == 2 and "read-only" in err and "holds no pilot" not in err
+
+
+def test_a_config_whose_rewrite_fails_is_not_called_missing(tmp_path, monkeypatch, capsys):
+    """As pilot 2's: a failed write of the workers says so."""
+    import errno
+
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+
+    def failing(out_dir, workers):
+        raise OSError(errno.EIO, "short write", str(out_dir / "config.json"))
+
+    monkeypatch.setattr(pn.block_scoring, "record_workers", failing)
+    with pytest.raises(SystemExit):
+        pn.main(["--resume", str(out), "--workers", "3"])
+    err = capsys.readouterr().err
+    assert "could not record" in err and "holds no pilot" not in err

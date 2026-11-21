@@ -212,7 +212,12 @@ def record_workers(out_dir: Path, workers: int) -> None:
             while view:
                 written = os.write(handle, view)
                 if not written:  # a file system that takes nothing would spin here forever
-                    raise OSError(errno.EIO, f"short write to {temporary}: 0 bytes taken")
+                    raise OSError(
+                        errno.EIO,
+                        "short write: the file system took 0 bytes of the "
+                        "new config.json, which stays as it was",
+                        str(path),
+                    )
                 view = view[written:]
             os.fsync(handle)
         finally:

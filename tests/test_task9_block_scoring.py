@@ -451,9 +451,12 @@ def test_the_group_is_given_to_the_replacement(tmp_path, monkeypatch):
     assert os.path.exists(path)
 
 
-@pytest.mark.parametrize("errno_", [errno.EINVAL, errno.EOPNOTSUPP])
+@pytest.mark.parametrize("errno_", sorted({errno.EINVAL, errno.EOPNOTSUPP, errno.ENOTSUP}))
 def test_a_file_system_that_cannot_set_the_group_is_a_refusal(tmp_path, monkeypatch, errno_):
-    """EINVAL or EOPNOTSUPP from fchown is a refusal naming the group, not a missing pilot."""
+    """EINVAL, EOPNOTSUPP or ENOTSUP (macOS's) from fchown is a refusal naming the group.
+
+    The pilots report a PermissionError as it says (tests/test_task9_pilot_size.py).
+    """
     import json
     import os
 
@@ -508,9 +511,18 @@ def test_a_write_that_takes_nothing_fails_rather_than_spins(tmp_path, monkeypatc
 
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"settings": {}, "workers": 2}))
-    monkeypatch.setattr(os, "write", lambda fd, data: 0)
-    with pytest.raises(OSError, match="short write"):
+    calls = []
+
+    def nothing(fd, data):
+        calls.append(1)
+        if len(calls) > 50:  # without the guard: fail, not hang the suite
+            raise AssertionError("record_workers kept writing after 0 bytes were taken")
+        return 0
+
+    monkeypatch.setattr(os, "write", nothing)
+    with pytest.raises(OSError, match="short write") as info:
         block_scoring.record_workers(tmp_path, 3)
+    assert info.value.errno == errno.EIO and info.value.filename == str(path)
     monkeypatch.undo()
     assert json.loads(path.read_text())["workers"] == 2
     assert not list(tmp_path.glob("config.json.*.tmp"))

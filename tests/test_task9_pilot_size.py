@@ -672,3 +672,22 @@ def test_a_read_only_config_says_so_not_that_the_pilot_is_missing(tmp_path, monk
         (out / "config.json").chmod(0o644)
     err = capsys.readouterr().err
     assert "read-only" in err and "holds no pilot" not in err
+
+
+def test_a_config_whose_rewrite_fails_is_not_called_missing(tmp_path, monkeypatch, capsys):
+    """A failed write (a full disk, a file system that takes nothing) says so."""
+    import errno
+
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
+
+    def failing(out_dir, workers):
+        raise OSError(errno.EIO, "short write", str(out_dir / "config.json"))
+
+    monkeypatch.setattr(ps.block_scoring, "record_workers", failing)
+    monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(out), "--workers", "3"])
+    err = capsys.readouterr().err
+    assert "could not record" in err and "holds no pilot" not in err
