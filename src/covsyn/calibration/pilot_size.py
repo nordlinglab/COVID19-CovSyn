@@ -178,7 +178,7 @@ def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute
               workers: int | None) -> None:
     """Run each setting not yet finished: afresh, or from its checkpoint (as the pipeline).
 
-    Each run takes the pilot's workers through COVSYN_WORKERS, which a resume reads too.
+    Each run takes workers through COVSYN_WORKERS, a resumed one included; None passes none.
     """
     env = {} if workers is None else {hardware.ENV_VARIABLE: str(workers)}
     from covsyn.pipeline import stages
@@ -230,7 +230,9 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
         workers: int | None = None) -> dict[str, Any]:
     """Run, screen and confirm whatever is not yet done, then write the summaries.
 
-    workers: the optimiser runs' workers; None leaves them to COVSYN_WORKERS or the cores.
+    workers: every optimiser run's workers, given it as COVSYN_WORKERS; main() passes the
+    pilot's, recorded in its config.json, so a resume runs with the count it started with.
+    None, as in a test, passes none.
     """
     out_dir = Path(out_dir)
     _optimise(models_root, prefix, simulations, execute, workers)
@@ -302,12 +304,16 @@ def main(argv: list[str] | None = None) -> Path:
         parser.error("give --noise for a new pilot or --resume for one begun")
     workers = hardware.resolve_workers(args.workers, os.environ, None)
     if args.resume is not None:
-        out = args.resume.resolve()  # the optimiser runs from the repository root
+        # Absolute, as the optimiser runs from the repository root; not resolved, so a linked
+        # tables directory keeps its results/ siblings.
+        out = args.resume.absolute()
         try:
-            recorded = json.loads((out / CONFIG_FILE).read_text())["settings"]
-            simulations = recorded["simulations"]
-        except (OSError, ValueError, KeyError) as error:
+            config = json.loads((out / CONFIG_FILE).read_text())
+            simulations = config["settings"]["simulations"]
+        except (OSError, ValueError, KeyError, TypeError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
+        if args.workers is None and isinstance(config.get("workers"), int):
+            workers = config["workers"]  # the pilot's own, unless given again
         root = out.parent.parent
     else:
         try:
@@ -336,7 +342,7 @@ def main(argv: list[str] | None = None) -> Path:
             "confirm_blocks": [CONFIRM_BLOCKS.start, CONFIRM_BLOCKS.stop - 1],
         }, rng_seed=None, workers=workers, initial_population=None)
     prefix = out.name.rsplit("_", 1)[0]  # <stamp>_<commit>, shared by its runs
-    evaluate, make_pool = _evaluator(args.workers)
+    evaluate, make_pool = _evaluator(workers)
     execute = functools.partial(run_module, keep_fds=())
     summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool,
                   workers=workers)

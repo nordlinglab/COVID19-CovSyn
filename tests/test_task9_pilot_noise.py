@@ -301,3 +301,4 @@ def test_failed_evaluations_choose_no_s():
     spread["cost"] = pn.FAILED_EVALUATION_COST
     choice = pn.summarise(rows)["choice"]
     assert choice["chosen_simulations"] is None and choice["failed_evaluations"] == 1
+    assert not any(line["meets"] for line in choice["per_simulations"])  # no S passes either

@@ -12,9 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from covsyn.calibration import initial_population, seed_streams
+from covsyn.calibration import seed_streams
 
-POP_SIZES = range(2, initial_population.N_MAX + 1)
+# initial_population.N_MAX, the population's rows, held here so that the pipeline, which reads
+# it, need not import the population module and scipy (a test keeps the two equal).
+POPULATION_ROWS = 256
+POP_SIZES = range(2, POPULATION_ROWS + 1)
 GENERATIONS = range(1, seed_streams.MAX_BLOCKS + 1)
 SIMULATIONS = range(1, seed_streams.MAX_SIMULATIONS + 1)
 
@@ -24,19 +27,24 @@ def _within(allowed: range) -> str:
 
 
 def from_command(mode: str, pop_size: int | None, generations: int | None,
-                 simulations: int | None) -> tuple[int, int, int]:
+                 simulations: int | None) -> tuple[int, int | None, int]:
     """n, G and S as given on the command line, each required and in range.
+
+    G is the pilot mode's only: production runs to G_max, so its generations are given as None
+    and returned unchecked.
 
     Raises:
         ValueError: One is missing or out of range, naming its flag and the mode.
     """
-    for flag, value, allowed in (("--pop-size", pop_size, POP_SIZES),
-                                 ("--generations", generations, GENERATIONS),
-                                 ("--simulations", simulations, SIMULATIONS)):
+    checks = [("--pop-size", pop_size, POP_SIZES)]
+    if mode == "pilot":
+        checks.append(("--generations", generations, GENERATIONS))
+    checks.append(("--simulations", simulations, SIMULATIONS))
+    for flag, value, allowed in checks:
         if value is None:
             raise ValueError(f"--mode {mode} needs {flag}, which no default stands in for")
         if value not in allowed:
-            raise ValueError(f"{flag} must be {_within(allowed)}, not {value}")
+            raise ValueError(f"--mode {mode}: {flag} must be {_within(allowed)}, not {value}")
     return pop_size, generations, simulations
 
 

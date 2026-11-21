@@ -165,3 +165,35 @@ def test_the_pipeline_does_not_run_the_pilot_mode():
     """covsyn-pilot-size runs the pilot's runs; the pipeline cannot give their size."""
     with pytest.raises(ValueError, match="pilot"):
         pc.parse('[optimise]\nmode = "pilot"\n', "t")
+
+
+def test_a_size_out_of_range_names_the_mode():
+    """The refusal says which mode it is for."""
+    from covsyn.calibration import run_size
+
+    with pytest.raises(ValueError, match="--mode production"):
+        run_size.from_command("production", 300, None, 3000)
+
+
+def test_production_takes_no_generations_to_check():
+    """Its G is G_max, not a flag; only n and S are the user's."""
+    from covsyn.calibration import run_size
+
+    assert run_size.from_command("production", 48, None, 3000)[::2] == (48, 3000)
+
+
+def test_the_row_count_is_the_population_s():
+    """run_size holds it without importing the population module, so the pipeline loads fast."""
+    from covsyn.calibration import initial_population, run_size
+
+    assert run_size.POP_SIZES.stop - 1 == initial_population.N_MAX
+
+
+def test_reading_the_pipeline_configuration_loads_no_scipy():
+    """The configuration is checked before any stage; scipy took 5 s of it (Task 9 review)."""
+    import subprocess
+
+    done = subprocess.run([sys.executable, "-c", "import sys, covsyn.pipeline.config; "
+                           "print('scipy' in sys.modules)"], capture_output=True, text=True,
+                          check=True)  # fmt: skip
+    assert done.stdout.strip() == "False"

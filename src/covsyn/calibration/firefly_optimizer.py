@@ -2244,7 +2244,7 @@ def main() -> None:
             if args.resume is None else recorded_size(args.resume))
     elif mode == 'production':  # Task 9: pilot 2's n, S and schedule, to G_max
         if args.resume is None:
-            pop_size, _, simulations = command_size(mode, args.pop_size, max_generations,
+            pop_size, _, simulations = command_size(mode, args.pop_size, None,
                                                     args.simulations)
             for flag, value in (('--g-plan', args.g_plan), ('--alpha-end', args.alpha_end),
                                 ('--pilot', args.pilot)):

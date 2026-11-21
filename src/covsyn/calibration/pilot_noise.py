@@ -136,16 +136,15 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
               **{f"sd_block_{b}": _sd([spread_cost[(row, b)] for row in row_ids])
                  for b in SPREAD_BLOCKS}}  # fmt: skip
     threshold = THRESHOLD * spread["sd"]
+    # A failed evaluation's 1e6 is no cost: it would swamp the spread, so no S passes.
+    failed = sum(c >= FAILED_EVALUATION_COST for c in cost.values())
     per_simulations = []
     for simulations in BLOCKS:
         largest = max(p["sd_difference"] for p in pairs if p["simulations"] == simulations)
         per_simulations.append({"simulations": simulations, "max_pair_sd": largest,
                                 "ratio": largest / spread["sd"],
-                                "meets": bool(largest <= threshold)})  # fmt: skip
-    # A failed evaluation's 1e6 is no cost: it would swamp the spread, so none is chosen.
-    failed = sum(c >= FAILED_EVALUATION_COST for c in cost.values())
-    chosen = None if failed else next(
-        (line["simulations"] for line in per_simulations if line["meets"]), None)
+                                "meets": bool(largest <= threshold) and not failed})
+    chosen = next((line["simulations"] for line in per_simulations if line["meets"]), None)
     choice = {"threshold_fraction": THRESHOLD, "spread_sd": spread["sd"], "threshold": threshold,
               "per_simulations": per_simulations, "chosen_simulations": chosen,
               "failed_evaluations": failed}

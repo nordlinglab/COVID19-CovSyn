@@ -12,6 +12,8 @@ from __future__ import annotations
 import concurrent.futures
 
 import numpy as np
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from covsyn.calibration import block_scoring
 
@@ -48,7 +50,8 @@ def test_a_cut_off_row_does_not_swallow_the_next(tmp_path):
         f.write("b,10,1")  # no cost and no newline
     _score(path, ["c"])
     rows = block_scoring.read_rows(path)
-    assert [r["name"] for r in rows if r["cost"] not in (None, "")] == ["a", "c"]
+    assert [r["name"] for r in rows] == ["a", "c"]
+    assert not [line for line in path.read_text().splitlines() if line.startswith("b")]
 
 
 def test_read_rows_skips_a_cut_off_row(tmp_path):
@@ -56,3 +59,32 @@ def test_read_rows_skips_a_cut_off_row(tmp_path):
     path = tmp_path / "t.csv"
     path.write_text("name,simulations,seed_offset,cost\na,10,0,1.5\nb,10,1\n")
     assert [r["name"] for r in block_scoring.read_rows(path)] == ["a"]
+
+
+ROWS = [{"name": n, "simulations": 10, "seed_offset": i, "cost": 1.5 + i}
+        for i, n in enumerate(["a", "b", "c", "d"])]
+
+
+def _written(tmp_path):
+    path = tmp_path / "t.csv"
+    block_scoring.write_csv(path, ROWS)
+    return path, path.read_bytes()
+
+
+@settings(max_examples=200, deadline=None)
+@given(cut=st.integers(min_value=0, max_value=10_000))
+def test_a_table_cut_at_any_byte_reads_as_its_whole_rows(tmp_path_factory, cut):
+    """Every complete row and no partial one, wherever a kill stopped the write.
+
+    The next score then appends a valid table.
+    """
+    tmp_path = tmp_path_factory.mktemp("cut")
+    path, data = _written(tmp_path)
+    cut = cut % (len(data) + 1)
+    path.write_bytes(data[:cut])
+    whole = data[:cut].count(b"\n") - 1  # the header's line ends first
+    rows = block_scoring.read_rows(path)
+    assert [r["name"] for r in rows] == [r["name"] for r in ROWS[:max(whole, 0)]]
+    _score(path, ["z"])
+    again = block_scoring.read_rows(path)
+    assert [r["name"] for r in again] == [r["name"] for r in ROWS[:max(whole, 0)]] + ["z"]

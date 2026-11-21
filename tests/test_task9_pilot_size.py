@@ -401,3 +401,37 @@ def test_the_choice_reports_the_alpha_end_the_runs_used():
     rows = _confirmed(_means(), spread=1.0)
     table = [dict(line, agree=True) for line in ps.compare_settings(rows)]
     assert ps.choose(table)["alpha_end"] == step_schedule.DEFAULT_ALPHA_END
+
+
+def test_a_resume_keeps_the_workers_the_pilot_started_with(tmp_path, monkeypatch):
+    """config.json's workers, unless --workers is given again."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300},
+                                                 "workers": 8}))
+    seen = {}
+    monkeypatch.setattr(ps, "run", lambda o, models, prefix, s, *rest, **kw: seen.update(kw)
+                        or {})  # fmt: skip
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: seen.update(pools=workers)
+                        or (_evaluate, _threads))  # fmt: skip
+    ps.main(["--resume", str(out)])
+    assert seen["workers"] == 8 and seen["pools"] == 8
+    ps.main(["--resume", str(out), "--workers", "3"])
+    assert seen["workers"] == 3 and seen["pools"] == 3
+
+
+def test_a_resume_through_a_linked_tables_directory_keeps_the_results_root(tmp_path, monkeypatch):
+    """results/tables a link elsewhere: the runs are still results/models."""
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "20261121-000000_abcdef0_pilot-size").mkdir(parents=True)
+    (elsewhere / "20261121-000000_abcdef0_pilot-size" / "config.json").write_text(
+        json.dumps({"settings": {"simulations": 300}, "workers": 2}))
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results" / "tables").symlink_to(elsewhere)
+    seen = {}
+    monkeypatch.setattr(ps, "run", lambda o, models, prefix, s, *rest, **kw: seen.update(
+        models=models) or {})  # fmt: skip
+    monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
+    ps.main(["--resume", str(tmp_path / "results" / "tables" /
+                             "20261121-000000_abcdef0_pilot-size")])  # fmt: skip
+    assert seen["models"] == tmp_path / "results" / "models"
