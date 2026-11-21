@@ -53,7 +53,7 @@ def run(monkeypatch, tmp_path):
     """Run the optimizer on the recording stand-in and return (None, results, directory)."""
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
     lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
-    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    engine = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=7)
     out = engine.firefly(function=standins.recording, dim=DIM, lb=lb, ub=ub,
                          demographic_parameters=None, max_generations=GENERATIONS,
                          max_workers=2, Cheng_contact_array=None, Cheng_attack_rate=None,
@@ -93,14 +93,17 @@ def test_every_evaluation_of_a_generation_uses_that_generation_s_offset(run):
 def test_generation_0_starts_from_the_initial_scores_without_rescoring(run):
     """The initial population is scored on block 0, generation 0's block, once only (F7).
 
-    Task 6: generation 0 scores every firefly but the elite, which keeps its block-0 cost.
+    Task 6: generation 0 scores every firefly but the elite, which keeps its block-0 costs;
+    Task 8: an elite of k.
     """
     _, _, path = run
-    assert evaluations_per_generation(path)[0] == POP - 1
+    k = fo.elite_size(POP)
+    assert evaluations_per_generation(path)[0] == POP - k
     with np.load(path / fo.CHECKPOINTS / "initial.npz") as initial, \
             np.load(path / fo.CHECKPOINTS / "generation_0000.npz") as first:  # fmt: skip
-        elite = int(np.argmin(initial["intensities"]))
-        assert first["intensities"][elite] == initial["intensities"][elite]
+        elite = fo.elite_members(initial["intensities"], k)
+        np.testing.assert_array_equal(first["intensities"][elite],
+                                      initial["intensities"][elite])
 
 
 def test_the_whole_population_is_rescored_when_the_block_changes(run):
@@ -123,14 +126,16 @@ def test_the_returned_best_rows_are_the_final_population(run):
     assert np.array_equal(best_intensities, intensities)
 
 
-def test_the_archive_holds_one_snapshot_per_sampled_generation(run):
-    """The candidate pool spreads over the search, not just its last generations."""
+def test_the_archive_spreads_over_the_search(run):
+    """The candidate pool spreads over the search, not just its last generations.
+
+    Task 8 replaced the snapshot of one generation in five by every elite vector, entered on
+    the generation listed first (tests/test_task8_archive.py).
+    """
     _, _, path = run
-    archive = np.atleast_2d(np.loadtxt(path / "firefly_archive.txt"))
-    generations = [g for g in range(GENERATIONS) if g % fo.ARCHIVE_EVERY == 0]
-    assert len(archive) == len(generations)
-    assert archive[:, 0].tolist() == [float(g) for g in generations]
-    assert archive.shape[1] == DIM + 2
+    archive = np.loadtxt(path / "firefly_archive.txt", ndmin=2)
+    assert archive.shape[1] == DIM + 3
+    assert archive[:, 0].min() == 0 and archive[:, 0].max() > 0
 
 
 def test_progress_metrics_record_this_generation_not_a_running_best(run):
@@ -186,7 +191,7 @@ def test_the_run_directory_holds_the_configuration(run):
     digest = config["initial_population_sha256"]
     assert len(digest) == 64 and int(digest, 16) >= 0
     # The same seed draws the same initial population, so its hash repeats.
-    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    again = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=7)
     lb, ub = np.zeros(DIM) + 0.1, np.ones(DIM)
     first = lb + again.rng.uniform(0, 1, (POP, DIM)) * (ub - lb)
     assert digest == hashlib.sha256(np.ascontiguousarray(first, dtype=float).tobytes()).hexdigest()
@@ -194,8 +199,8 @@ def test_the_run_directory_holds_the_configuration(run):
 
 def test_an_unseeded_run_records_a_seed_that_redraws_it():
     """Without a seed the run takes the fixed default (Task 7), so rng_seed is never null."""
-    first = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03)
-    again = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=first.seed)
+    first = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03)
+    again = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=first.seed)
     assert isinstance(first.seed, int)
     assert np.array_equal(first.rng.uniform(size=5), again.rng.uniform(size=5))
 
@@ -205,7 +210,7 @@ def test_the_configuration_is_written_before_the_first_evaluation(monkeypatch, t
     import json
 
     monkeypatch.setattr(fo, "result_path", tmp_path, raising=False)
-    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=7)
+    engine = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=7)
     with pytest.raises(RuntimeError):
         engine.firefly(function=standins.crashes, dim=DIM, lb=np.zeros(DIM) + 0.1, ub=np.ones(DIM),
                        demographic_parameters=None, max_generations=GENERATIONS, max_workers=2,

@@ -25,8 +25,8 @@ from covsyn.runtime import runs
 from tests.firefly_standins import Killed, killed_on, objective
 
 RESUMABLE = {"moves": fo.MOVES, "initial_population": {"version": 1, "sha256": "x"},
-             "stream": 1}
-# what a Task 7 run records in its settings
+             "stream": 1, "alpha_0": 0.2, "alpha_end": 0.001, "g_plan": 10}
+# what a Task 8 run records in its settings
 
 DIM = 208
 POP = 4
@@ -62,7 +62,7 @@ def killed_at_start(monkeypatch, generation):
 def optimise(path, function, resume=False):
     """Run the optimiser into ``path`` and return its result tuple."""
     fo.result_path = path
-    engine = fo.Firefly(pop_size=POP, alpha=1, betamin=1, gamma=0.03, seed=SEED)
+    engine = fo.Firefly(pop_size=POP, alpha_0=1, betamin=1, gamma=0.03, seed=SEED)
     return engine.firefly(function=function, dim=DIM, lb=np.zeros(DIM), ub=np.ones(DIM),
                           demographic_parameters=None, max_generations=GENERATIONS,
                           max_workers=2, Cheng_contact_array=None, Cheng_attack_rate=None,

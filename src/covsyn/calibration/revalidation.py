@@ -24,6 +24,7 @@ import csv
 import os
 import shutil
 import subprocess
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -70,13 +71,39 @@ def validation_seed_blocks(
     return [seed_streams.block_seeds(stream, b, simulations) for b in range(blocks)]
 
 
+# Task 8: the first line of firefly_archive.txt from Task 8 on, after np.savetxt's '# '. Its rows
+# are (entered, blocks, params..., mean cost), one per vector that was in the elite; before, the
+# file had no header and held B81's snapshots (generation, params..., cost).
+ARCHIVE_HEADER = "firefly_archive v2: entered blocks params... mean_cost (Task 8)"
+
+
+def read_archive(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """The vectors of a firefly_archive.txt and their costs, of either version.
+
+    Returns:
+        (vectors, costs): from Task 8 on, each elite vector's mean over the blocks it was
+        scored on in the elite; before, each snapshot's cost on its generation's block. Both
+        are empty when the file holds no rows.
+    """
+    with open(path, encoding="utf-8") as f:
+        version_2 = f.readline().startswith("# " + ARCHIVE_HEADER)
+    with warnings.catch_warnings():  # a file of no rows is an empty archive, not a mistake
+        warnings.simplefilter("ignore", UserWarning)
+        rows = np.loadtxt(path, ndmin=2)  # the header is a comment
+    if rows.size == 0:
+        return np.empty((0, 0)), np.empty(0)
+    first = 2 if version_2 else 1
+    return rows[:, first:-1], rows[:, -1]
+
+
 def load_candidates(firefly_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     """The final population and every personal best of a run, without duplicates.
 
-    B81: firefly_archive.txt (generation, params..., cost) holds one snapshot per sampled
-    generation and is added when present, so the pool spans the search and not only its end.
-    Its costs come from different seed blocks and are not comparable with each other; they
-    order the rows and nothing else, because every candidate is re-scored below.
+    firefly_archive.txt is added when present, so the pool spans the search and not only its
+    end: from Task 8 on every vector that was in the elite, with its mean over the blocks it
+    was scored on there; before, B81's snapshot of one generation in five. Its costs come from
+    different seed blocks and are not comparable with each other; they order the rows and
+    nothing else, because every candidate is re-scored below (read_archive).
 
     Args:
         firefly_dir: Directory holding firefly_result.txt (params..., cost),
@@ -91,9 +118,10 @@ def load_candidates(firefly_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     values = [population[:, -1], bests[:, -1]]
     archive_path = Path(firefly_dir) / "firefly_archive.txt"
     if archive_path.exists() and archive_path.stat().st_size:
-        archive = np.atleast_2d(np.loadtxt(archive_path))
-        rows.append(archive[:, 1:-1])
-        values.append(archive[:, -1])
+        vectors, costs = read_archive(archive_path)
+        if len(vectors):
+            rows.append(vectors)
+            values.append(costs)
     vectors = np.vstack(rows)
     costs = np.concatenate(values)
     _, first = np.unique(vectors, axis=0, return_index=True)

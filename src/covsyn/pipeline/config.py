@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from covsyn.calibration import seed_streams
+from covsyn.calibration import seed_streams, step_schedule
 
 PACKAGED = Path(__file__).resolve().parent
 
@@ -27,6 +27,10 @@ class PipelineConfig:
     mode: str = "train"
     config_name: str = "phase-d"
     stream: int = seed_streams.DEFAULT_OPTIMISATION_STREAM  # Task 7
+    # Task 8: the step schedule; None leaves each to the optimiser's default
+    alpha_0: float | None = None
+    alpha_end: float | None = None
+    g_plan: int | None = None
     revalidate: bool = True
     revalidation_blocks: int = 10
     validation_stream: int = seed_streams.DEFAULT_VALIDATION_STREAM  # Task 7
@@ -67,6 +71,9 @@ SCHEMA: dict[str, dict[str, tuple[str, type, Any]]] = {
         "mode": ("mode", str, None),
         "config_name": ("config_name", str, None),
         "stream": ("stream", int, None),
+        "alpha_0": ("alpha_0", float, None),
+        "alpha_end": ("alpha_end", float, None),
+        "g_plan": ("g_plan", int, 1),
     },
     "revalidate": {
         "enabled": ("revalidate", bool, None),
@@ -87,6 +94,13 @@ SCHEMA: dict[str, dict[str, tuple[str, type, Any]]] = {
 
 def _value(section: str, key: str, raw: Any) -> tuple[str, Any]:
     field, kind, minimum = SCHEMA[section][key]
+    # TOML writes a whole step size such as 1 as an integer.
+    if kind is float and isinstance(raw, int) and not isinstance(raw, bool):
+        try:
+            raw = float(raw)
+        except OverflowError:
+            raise ValueError(f"[{section}] {key} is too large, a {len(str(abs(raw)))}-digit "
+                             f"integer") from None
     # bool is an int in Python; a count given as true must not pass.
     if not isinstance(raw, kind) or (kind is int and isinstance(raw, bool)):
         raise ValueError(f"[{section}] {key} must be {kind.__name__}, got {raw!r}")
@@ -112,7 +126,7 @@ def parse(text: str, source: str) -> PipelineConfig:
     """
     try:
         data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as error:
+    except ValueError as error:  # TOMLDecodeError, or an integer over Python's digit limit
         raise ValueError(f"{source}: {error}") from None
     values: dict[str, Any] = {}
     for section, keys in data.items():
@@ -128,7 +142,42 @@ def parse(text: str, source: str) -> PipelineConfig:
                 raise ValueError(f"{source}: unknown setting {key!r} in [{section}]")
             field, value = _value(section, key, raw)
             values[field] = value
+    _check_schedule(values, source)
     return PipelineConfig(**values)
+
+
+def _check_schedule(values: dict[str, Any], source: str) -> None:
+    """Refuse a mode or schedule the optimiser would refuse, unset ends at its defaults (Task 8).
+
+    A g_plan longer than the mode's generations is not refused: see schedule_warnings.
+    """
+    mode = values.get("mode", PipelineConfig.mode)
+    if mode not in step_schedule.MODE_GENERATIONS:  # the optimiser's modes
+        raise ValueError(f"{source}: [optimise] mode {mode!r} is not one of "
+                         f"{sorted(step_schedule.MODE_GENERATIONS)}")
+    if all(values.get(field) is None for field in ("alpha_0", "alpha_end", "g_plan")):
+        return
+    generations = step_schedule.MODE_GENERATIONS[mode]
+    try:
+        step_schedule.checked_schedule(
+            values.get("alpha_0"), values.get("alpha_end"), values.get("g_plan"), generations,
+            alpha_0_default=step_schedule.MODE_ALPHA_0[mode])
+    except ValueError as error:
+        raise ValueError(f"{source}: [optimise] step schedule: {error}") from None
+
+
+def schedule_warnings(config: PipelineConfig) -> list[str]:
+    """What the pipeline's log warns of in the step schedule before a run starts (Task 8).
+
+    A g_plan longer than the mode's generations runs, as the optimiser does, but may be a typo
+    (decision of 2026-11-20); the log keeps it with the run, which a warning from parse() would
+    not reach.
+    """
+    generations = step_schedule.MODE_GENERATIONS.get(config.mode)
+    if config.g_plan is None or generations is None:  # no mode: the optimiser refuses it
+        return []
+    outlasts = step_schedule.plan_outlasts_run(config.g_plan, generations, "g_plan")
+    return [] if outlasts is None else [f"[optimise] {outlasts}"]
 
 
 def load(name: str) -> PipelineConfig:
@@ -156,6 +205,8 @@ def to_toml(config: PipelineConfig) -> str:
                 value = value or 0
             if isinstance(value, tuple):
                 value = list(value)
+            if value is None:  # Task 8: unset, so the optimiser's default; TOML has no None
+                continue
             lines.append(f"{key} = {_toml(value)}")
     return "\n".join(lines) + "\n"
 

@@ -19,7 +19,8 @@ from scipy.stats import genextreme
 from tqdm import tqdm
 
 from covsyn.model.data_synthesis_main import run_covid
-from covsyn.calibration import initial_population, parameter_space, seed_streams
+from covsyn.calibration import (initial_population, parameter_space, revalidation, seed_streams,
+                                step_schedule)
 from covsyn.runtime import hardware, profiling, runs, timings
 from covsyn.calibration.sar_anchors import (CHENG2020_INDEX_CASES, LAYER_CUMULATIVE_SAR,
                                             LAYER_INFECTIONS_PER_INDEX,
@@ -1115,19 +1116,86 @@ SIMULATIONS_PER_EVALUATION = 300
 # stream meets (seed_streams).
 # Costs from different blocks are NOT comparable, so nothing keeps a running minimum across
 # generations: the attraction, the elite and the progress row all use this generation's scores,
-# and the candidates are re-scored on one common set of blocks afterwards.
-ARCHIVE_EVERY = 5
+# and the candidates are re-scored on one common set of blocks afterwards. Until Task 8 the
+# archive held a snapshot of the best firefly of one generation in five; it now holds every
+# elite vector with its mean over the blocks it was scored on there (record_elite).
 
 
 # Task 7: the move generator's seed when none is given.
 DEFAULT_RNG_SEED = 1
+
+# Task 8: the step size schedule, in step_schedule so the pipeline checks its settings by the
+# same rule without loading the model.
+DEFAULT_ALPHA_0 = step_schedule.DEFAULT_ALPHA_0
+DEFAULT_ALPHA_END = step_schedule.DEFAULT_ALPHA_END
+step_size = step_schedule.step_size
 
 # Task 6: the synchronous firefly algorithm (Yang, 2010). config.json records it, and a run
 # that does not, started before Task 6 with its sequential moves, is not resumed with these.
 MOVES = 'synchronous'
 
 
-def synchronous_moves(normalized, costs, alpha, betamin, gamma, rng):
+# Task 8: the elite's size; a population of n <= 5 keeps n - 1, so one firefly still moves
+# (decision of 2026-11-20).
+ELITE_SIZE = 5
+
+
+def elite_size(pop_size: int) -> int:
+    """The number of fireflies a generation keeps unmoved, k = min(5, n - 1) (Task 8)."""
+    return max(0, min(ELITE_SIZE, pop_size - 1))
+
+
+def elite_members(costs, k: int) -> list[int]:
+    """The indices of the k lowest costs, lowest first, a tie going to the lower index."""
+    return [int(i) for i in np.argsort(np.asarray(costs), kind='stable')[:k]]
+
+
+# Task 8: an elite record is (entered, last block, blocks, total cost, params...): the
+# generation whose block first scored the vector in the elite, the last such block, how many
+# blocks, and the sum of their costs. The checkpoint keeps the records, so a resumed run goes on
+# counting where it stopped.
+RECORD_PARAMS = 4
+ARCHIVE_HEADER = revalidation.ARCHIVE_HEADER
+
+
+def no_elite_records(dim: int) -> np.ndarray:
+    """The records of a run before any generation: none, with room for dim parameters."""
+    return np.empty((0, RECORD_PARAMS + dim))
+
+
+def record_elite(records, fireflies, intensities, members, block: int) -> np.ndarray:
+    """The records after adding each member's cost on block (Task 8).
+
+    A vector already recorded adds the cost unless that block is already counted, so a block
+    counts once; any other vector, such as a member that moved, starts a record of its own.
+    Members are taken in ascending order, so new records come in a fixed order.
+
+    Returns:
+        A new array; ``records`` is left unchanged.
+    """
+    records = np.array(records, dtype=float)
+    for m in sorted(members):
+        vector = np.asarray(fireflies[m], dtype=float)
+        same = np.flatnonzero(np.all(records[:, RECORD_PARAMS:] == vector, axis=1))
+        if len(same) == 0:
+            new = np.concatenate(([block, block, 1, intensities[m]], vector))
+            records = np.vstack([records, new])
+        elif records[same[0], 1] != block:
+            row = records[same[0]]  # a view, so the update lands in records
+            row[1] = block
+            row[2] += 1
+            row[3] += intensities[m]
+    return records
+
+
+def archive_rows(records) -> np.ndarray:
+    """firefly_archive.txt's rows, (entered, blocks, params..., mean cost), from the records."""
+    records = np.asarray(records, dtype=float)
+    return np.column_stack([records[:, 0], records[:, 2], records[:, RECORD_PARAMS:],
+                            records[:, 3] / np.maximum(records[:, 2], 1)])
+
+
+def synchronous_moves(normalized, costs, alpha, betamin, gamma, rng, fixed=()):
     """Every firefly's new normalised position, from the positions and costs given (Task 6).
 
     Firefly i moves towards each strictly brighter firefly j (costs[j] < costs[i]), for i and
@@ -1135,14 +1203,18 @@ def synchronous_moves(normalized, costs, alpha, betamin, gamma, rng):
     per coordinate, beta = betamin exp(-gamma r) with r the squared distance (B51) from i's
     position so far to j's start position, and is clipped to [0, 1] after each move. Nothing
     is evaluated between moves, so the brightest firefly, and one as bright, stays put; the
-    steps are drawn from rng in that fixed order, one vector per move.
+    steps are drawn from rng in that fixed order, one vector per move. A firefly in ``fixed``,
+    the elite (Task 8), makes no move and draws no step.
 
     Returns:
         The new positions; ``normalized`` is left unchanged.
     """
     start = np.asarray(normalized, dtype=float)
     moved = start.copy()
+    fixed = set(fixed)
     for i in range(len(start)):
+        if i in fixed:
+            continue
         for j in range(len(start)):
             if costs[j] < costs[i]:
                 r = np.sum(np.square(moved[i] - start[j]), axis=-1)
@@ -1473,9 +1545,13 @@ def decode_metrics(P):
 
 
 class Firefly:
-    def __init__(self, pop_size, alpha, betamin, gamma, seed=None):
+    def __init__(self, pop_size, alpha_0, betamin, gamma, seed=None,
+                 alpha_end=DEFAULT_ALPHA_END, g_plan=None):
         self.pop_size = pop_size
-        self.alpha = alpha
+        # Task 8: the step size schedule, see step_size; g_plan None is the run's generations.
+        self.alpha_0 = alpha_0
+        self.alpha_end = alpha_end
+        self.g_plan = g_plan
         self.betamin = betamin
         self.gamma = gamma
         # Task 7: the seed of the moves, config.json's rng_seed; without one, the fixed default,
@@ -1493,14 +1569,15 @@ class Firefly:
         self.stream = seed_streams.DEFAULT_OPTIMISATION_STREAM
 
     @staticmethod
-    def _state(normalized, fireflies, intensities, cost_parts, archive, worst_fireflies,
+    def _state(normalized, fireflies, intensities, cost_parts, elite_records, worst_fireflies,
                worst_intensities, worst_iteration, evaluations, alpha, dim):
         """What a checkpoint holds: everything the next generation reads (Task 4)."""
         return {'normalized': np.asarray(normalized, dtype=float),
                 'fireflies': np.asarray(fireflies, dtype=float),
                 'intensities': np.asarray(intensities, dtype=float),
                 'cost_parts': np.array(json.dumps(cost_parts)),
-                'archive': np.asarray(archive, dtype=float).reshape(len(archive), dim + 2),
+                'elite_records': np.asarray(elite_records, dtype=float).reshape(
+                    len(elite_records), RECORD_PARAMS + dim),
                 'worst_fireflies': np.asarray(worst_fireflies, dtype=float),
                 'worst_intensities': np.asarray(worst_intensities, dtype=float),
                 'worst_iteration': np.asarray(worst_iteration, dtype=float),
@@ -1525,8 +1602,39 @@ class Firefly:
         if resume:
             check_progress_table(result_path)  # a checkpoint, and its table: else NOT_RESUMABLE
         checkpoint = load_last_checkpoint(result_path) if resume else None
+        # Task 7: generation g takes block g of the stream, so a stream's blocks bound the
+        # generations, checked before this run writes or runs anything (decision of
+        # 2026-11-20); main() checks before it claims the run directory.
+        problem = generations_problem(max_generations)
+        if problem is not None:
+            if checkpoint is not None:
+                not_resumable(f'{result_path} cannot be resumed: {problem}')
+            raise ValueError(problem)
         # Task 3: recorded before any evaluation, so a run that fails early still has it.
-        settings = {'pop_size': self.pop_size, 'alpha': self.alpha, 'betamin': self.betamin,
+        g_plan = max_generations if self.g_plan is None else self.g_plan
+        if checkpoint is not None:
+            # Task 8: a resume moves on the schedule config.json records, which describes the
+            # run; one extended to more generations keeps shrinking over the plan it started
+            # with.
+            recorded = recorded_schedule(result_path)
+            g_plan = recorded[2] if self.g_plan is None else g_plan
+            if (self.alpha_0, self.alpha_end, g_plan) != recorded:
+                not_resumable(f'{result_path} cannot be resumed with the step schedule '
+                              f'{(self.alpha_0, self.alpha_end, g_plan)}: it started with '
+                              f'{recorded}')
+        step_size(0, self.alpha_0, self.alpha_end, g_plan, names=SETTING_NAMES)  # out of range?
+        # No cap on G_plan, but it may be a typo: said when a run starts, and on each resume
+        # that makes the plan outlast a run that started as long as it, while generations are
+        # left to run (config.json keeps the generations the run started with).
+        outlasts = step_schedule.plan_outlasts_run(g_plan, max_generations)
+        if outlasts is not None and (checkpoint is None or (
+                started_as_long_as_plan(result_path, g_plan)
+                and next_generation(checkpoint) < max_generations)):
+            last = step_size(max_generations - 1, self.alpha_0, self.alpha_end, g_plan)
+            warnings.warn(f'{outlasts} (alpha_end {self.alpha_end!r}, last step {last:.3g})',
+                          stacklevel=2)
+        settings = {'pop_size': self.pop_size, 'alpha_0': self.alpha_0,
+                    'alpha_end': self.alpha_end, 'g_plan': g_plan, 'betamin': self.betamin,
                     'gamma': self.gamma, 'max_generations': max_generations, 'dimensions': dim,
                     'simulations': self.simulations, 'stage_timing': self.stage_timing,
                     **self.run_settings, 'moves': MOVES,  # Task 6: last, so nothing overrides it
@@ -1614,13 +1722,14 @@ class Firefly:
             # updated after a firefly MOVED, so an initial point -- a warm start of 2.49 in the test
             # of run 9 -- was never recorded as the best.
             # B81: no running minimum over generations -- see generation_seed_offset. The archive
-            # below carries positions from across the search into the candidate pool instead.
-            archive = []
+            # carries positions from across the search into the candidate pool instead; Task 8:
+            # every elite vector, with its mean over the blocks it was scored on there.
+            elite_records = no_elite_records(dim)
             worst_fireflies = np.zeros(np.shape(fireflies))
             worst_intensities = np.zeros(np.shape(intensities))
             worst_iteration = np.zeros(np.shape(intensities))
             evaluations = self.pop_size
-            new_alpha = self.alpha
+            new_alpha = step_size(0, self.alpha_0, self.alpha_end, g_plan)
             start = 0
             if checkpoint is None:
                 # Save the first random guess
@@ -1628,7 +1737,7 @@ class Firefly:
                 np.savetxt(result_path/'firefly_result_first_initial_guess.txt',
                            result, fmt='%.7f')
                 finish_generation(self._state(
-                    normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                    normalized_fireflies, fireflies, intensities, cost_parts, elite_records,
                     worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
                     dim))
             else:
@@ -1636,34 +1745,37 @@ class Firefly:
                 fireflies = checkpoint['fireflies'].copy()
                 intensities = checkpoint['intensities'].copy()
                 cost_parts = json.loads(str(checkpoint['cost_parts']))
-                archive = [row for row in checkpoint['archive']]
+                elite_records = checkpoint['elite_records'].copy()
                 worst_fireflies = checkpoint['worst_fireflies'].copy()
                 worst_intensities = checkpoint['worst_intensities'].copy()
                 worst_iteration = checkpoint['worst_iteration'].copy()
                 evaluations = int(checkpoint['evaluations'])
-                new_alpha = float(checkpoint['alpha'])
-                start = int(checkpoint['generation']) + 1
+                start = next_generation(checkpoint)
                 for table in (progress_table, evaluation_table, generation_table):
                     drop_progress_after(table.path, start - 1)
 
+            # Task 8: the elite the next generation keeps, from the costs it starts with; each
+            # generation's costs choose the one after, so it is chosen once.
+            elite = elite_members(intensities, elite_size(self.pop_size))
             for generation in tqdm(range(start, max_generations)):
                 # B81: this generation's block, and every firefly scored on it -- the brightest
                 # included, since its score came from another block and cannot be compared here.
                 offset = generation_seed_offset(generation, self.simulations, self.stream)
                 clock = timings.GenerationClock(generation, max_workers)
-                new_alpha *= 0.97
+                new_alpha = step_size(generation, self.alpha_0, self.alpha_end, g_plan)  # Task 8
                 # Task 6: every firefly moves on the positions and costs the generation starts
-                # from, then all are scored at once. B49 / E78: the brightest stays where it is.
+                # from, then all are scored at once. B49 / E78: the brightest stays where it is;
+                # Task 8: so do the rest of the k lowest, all re-scored on this block.
                 moving = time.perf_counter_ns()
-                elite = int(np.argmin(intensities))
                 normalized_fireflies = synchronous_moves(
                     normalized_fireflies, intensities, new_alpha, self.betamin, self.gamma,
-                    generation_rng(self.seed, generation))  # Task 4
+                    generation_rng(self.seed, generation), fixed=elite)  # Task 4
                 fireflies = normalized_fireflies*(ub-lb) + lb
                 clock.moves_ns += time.perf_counter_ns() - moving
                 # Generation 0's block is the initial one, on which the elite is already scored
                 # (F7); every other candidate is scored on this generation's block.
-                candidates = [k for k in range(self.pop_size) if generation > 0 or k != elite]
+                candidates = [k for k in range(self.pop_size)
+                              if generation > 0 or k not in elite]
                 print(f'  gen {generation} | scoring {len(candidates)} fireflies | '
                       f'evals {evaluations}', flush=True)
                 evaluate(candidates, fireflies, offset)
@@ -1682,9 +1794,13 @@ class Firefly:
                 # Append this generation's best solution's decoded metrics to a CSV so the
                 # run can be plotted/inspected live (and aborted early if values look wrong).
                 best_idx = int(np.argmin(intensities))
-                if generation % ARCHIVE_EVERY == 0:
-                    archive.append(np.concatenate(
-                        ([generation], fireflies[best_idx], [intensities[best_idx]])))
+                # Task 8: the members kept in place, and those this block puts in the next
+                # elite, each with its cost on this block; generation 0's kept members their
+                # block-0 costs, counted here only.
+                next_elite = elite_members(intensities, elite_size(self.pop_size))
+                elite_records = record_elite(elite_records, fireflies, intensities,
+                                             set(elite) | set(next_elite), generation)
+                elite = next_elite
                 row = {'generation': generation, 'seed_offset': offset,
                        'best_cost': float(np.min(intensities))}
                 row.update(cost_parts[best_idx])
@@ -1696,7 +1812,7 @@ class Firefly:
                 # Task 5: the timing row follows the checkpoint, whose time it records; a kill
                 # between the two leaves that generation without one.
                 finish_generation(self._state(
-                    normalized_fireflies, fireflies, intensities, cost_parts, archive,
+                    normalized_fireflies, fireflies, intensities, cost_parts, elite_records,
                     worst_fireflies, worst_intensities, worst_iteration, evaluations, new_alpha,
                     dim))
 
@@ -1725,31 +1841,63 @@ class Firefly:
                   flush=True)
         # B81: firefly_best.txt keeps one row per firefly -- reproduce_wu2025 and
         # firefly_txt_to_csv require the four result files to have equal row counts -- so the
-        # final population fills it, and the snapshots go to firefly_archive.txt, which
-        # revalidation.load_candidates adds to the candidate pool when it exists.
-        np.savetxt(result_path/'firefly_archive.txt', np.atleast_2d(np.array(archive)),
-                   fmt='%.7f')
+        # final population fills it, and the elite vectors go to firefly_archive.txt, which
+        # revalidation.load_candidates adds to the candidate pool when it exists (Task 8).
+        np.savetxt(result_path/'firefly_archive.txt', archive_rows(elite_records), fmt='%.7f',
+                   header=ARCHIVE_HEADER)
         best_iteration = np.full(self.pop_size, float(evaluations))
         return (np.array(fireflies, dtype=float), np.array(intensities, dtype=float),
                 best_iteration, worst_fireflies, worst_intensities, worst_iteration,
                 fireflies, intensities)
 
 
-# Each mode's (pop_size, alpha, betamin, gamma, max_generations); main() runs these, and a run
-# recorded with another mode cannot be continued.
+# Each mode's (pop_size, betamin, gamma); main() runs these, with the mode's alpha_0 and
+# generations from step_schedule (MODE_ALPHA_0, MODE_GENERATIONS), and a run recorded with
+# another mode cannot be continued.
 OPTIMISER_MODES = {
     # B51 (E79): gamma was 0.131, but r is the SQUARED distance over all 199 normalised
     # dimensions, whose expectation between two uniform points is d/6 = 33; at the median r of
     # 29.7 that gave beta = 0.02, i.e. no attraction -- run 9 never moved off its warm start in
     # 120 generations. gamma = 6/d makes beta = 1/e = 0.37 at the typical distance and lets it
     # approach 1 as fireflies close in.
-    'train': (100, 1, 1, 0.03, 120),
-    'test': (3, 1, 1, 0.01, 10),
+    # Task 8: alpha_0 (step_schedule.MODE_ALPHA_0) starts the step schedule (step_size); it was
+    # the step that shrank by 0.97, from 1.
+    'train': (100, 1, 0.03),
+    'test': (3, 1, 0.01),
     # Task 5: the population is the worker count, set in main(), and S comes from the command
     # line; a profile is run again, never resumed.
-    'profile': (None, 1, 1, 0.01, 2),
+    'profile': (None, 1, 0.01),
 }
 PROFILE_SIMULATIONS = 3000  # the plan's default S for a profile
+
+
+# Task 8: the step schedule's names in config.json, for a refusal of a recorded schedule.
+SETTING_NAMES = ('alpha_0', 'alpha_end', 'g_plan')
+
+
+def started_as_long_as_plan(run_dir: Path, g_plan: int) -> bool:
+    """Whether the run started no shorter than its plan, by config.json (Task 8).
+
+    Only a warning hangs on it, so a count that is missing or not a whole number reads as yes,
+    which warns, rather than stopping the resume.
+    """
+    recorded = recorded_settings(run_dir).get('max_generations')
+    if isinstance(recorded, bool) or not isinstance(recorded, int):
+        return True
+    return step_schedule.plan_outlasts_run(g_plan, recorded) is None
+
+
+def next_generation(checkpoint: dict) -> int:
+    """The generation a resume runs first, after the checkpoint's (the initial one's is -1)."""
+    return int(checkpoint['generation']) + 1
+
+
+def generations_problem(max_generations: int) -> str | None:
+    """Why a run of max_generations cannot start, or None: one block per generation (Task 7)."""
+    if max_generations > seed_streams.MAX_BLOCKS:
+        return (f"max_generations {max_generations} is more than a stream's "
+                f'{seed_streams.MAX_BLOCKS} blocks, one per generation')
+    return None
 
 
 def not_resumable(message: str) -> None:
@@ -1796,16 +1944,37 @@ def resumed_settings(run_dir: Path) -> tuple[int, str, bool]:
     return seed, mode, stage_timing
 
 
+def recorded_settings(run_dir: Path) -> dict:
+    """The settings a run recorded in its config.json, for a resume to read (Task 8).
+
+    Raises:
+        SystemExit: With code runs.NOT_RESUMABLE when retrying cannot help: config.json is
+            missing, not a file, unreadable as JSON, or has no settings table. With a message
+            (status 1) for any other read error, which may pass, as in resumed_settings.
+    """
+    try:
+        settings = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
+            'settings']
+        if not isinstance(settings, dict):
+            raise TypeError(f'settings is {settings!r}')
+    except (FileNotFoundError, IsADirectoryError, NotADirectoryError, ValueError, KeyError,
+            TypeError) as error:  # what retrying cannot change
+        not_resumable(f'{run_dir} cannot be resumed: no settings in its config.json ({error!r})')
+    except OSError as error:  # a disk that may come back: retrying can help, so not that code
+        raise SystemExit(f'{run_dir}: could not read its config.json ({error!r})') from error
+    return settings
+
+
 def recorded_stream(run_dir: Path) -> int:
     """The optimisation stream a run recorded in its config.json, to resume it on (Task 7).
 
     Raises:
-        SystemExit: runs.NOT_RESUMABLE when it is missing or not an optimisation stream.
+        SystemExit: runs.NOT_RESUMABLE when it is missing or not an optimisation stream; see
+            recorded_settings for a config.json that cannot be read.
     """
     try:
-        stream = json.loads((Path(run_dir) / 'config.json').read_text(encoding='utf-8'))[
-            'settings']['stream']
-    except (OSError, ValueError, KeyError, TypeError) as error:
+        stream = recorded_settings(run_dir)['stream']
+    except KeyError as error:
         not_resumable(f'{run_dir} cannot be resumed: no stream in its config.json ({error!r})')
     try:
         return seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, 'optimisation')
@@ -1841,6 +2010,50 @@ def check_resumed_bounds(run_dir: Path, lower: np.ndarray, upper: np.ndarray) ->
                       f'./variable now gives; it cannot be resumed under them')
 
 
+def positive_float(text: str) -> float:
+    """A command-line number greater than 0."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'{text!r} is not a number') from None
+    if not (value > 0 and np.isfinite(value)):
+        raise argparse.ArgumentTypeError(f'{text} is not greater than 0')
+    return value
+
+
+def positive_int(text: str) -> int:
+    """A command-line whole number of at least 1."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'{text!r} is not a whole number') from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f'{value} is not at least 1')
+    return value
+
+
+def recorded_schedule(run_dir: Path) -> tuple[float, float, int]:
+    """The step schedule a run recorded in its config.json, to resume it with (Task 8).
+
+    Raises:
+        SystemExit: runs.NOT_RESUMABLE when it is missing, as in a run started before Task 8,
+            which moved by a factor of 0.97, or out of range; see recorded_settings for a
+            config.json that cannot be read.
+    """
+    settings = recorded_settings(run_dir)
+    try:
+        schedule = settings['alpha_0'], settings['alpha_end'], settings['g_plan']
+    except KeyError as error:
+        not_resumable(f'{run_dir} cannot be resumed: no step schedule in its config.json, as '
+                      f'in a run started before Task 8 ({error!r})')
+    try:
+        step_size(0, *schedule, names=SETTING_NAMES)
+    except (ValueError, TypeError) as error:
+        not_resumable(f'{run_dir} cannot be resumed: its recorded step schedule {schedule} is '
+                      f'out of range ({error})')
+    return schedule
+
+
 def optimisation_stream(text: str) -> int:
     """--stream: one of the optimisation streams, 1 to 99 (Task 7)."""
     try:
@@ -1857,7 +2070,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
 
     Raises:
         SystemExit: --resume with --run-dir, --seed, --mode, --warm_start, --simulations,
-            --stream or --stage-timings.
+            --stream, --alpha-0, --alpha-end, --g-plan or --stage-timings.
     """
     if args.resume is None:
         return 'train' if args.mode is None else args.mode  # '' is refused as unknown below
@@ -1865,12 +2078,15 @@ def resume_arguments(args: argparse.Namespace) -> str:
                                       ('--mode', args.mode), ('--warm_start', args.warm_start),
                                       ('--simulations', getattr(args, 'simulations', None)),
                                       ('--stream', getattr(args, 'stream', None)),
+                                      ('--alpha-0', getattr(args, 'alpha_0', None)),
+                                      ('--alpha-end', getattr(args, 'alpha_end', None)),
+                                      ('--g-plan', getattr(args, 'g_plan', None)),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
     if given:  # a mistake in the command, reported before anything is read
-        sys.exit(f'--resume takes the directory, seed, mode and stream from the run; '
-                 f'remove {", ".join(given)}')
+        sys.exit(f'--resume takes the directory, seed, mode, stream and step schedule from the '
+                 f'run; remove {", ".join(given)}')
     # Then the checkpoints: a run killed before any has nothing to continue, whatever its
     # config.json holds, and that is the reason to report.
     problem = runs.resume_problem(args.resume)
@@ -1878,6 +2094,7 @@ def resume_arguments(args: argparse.Namespace) -> str:
         not_resumable(problem)
     args.seed, mode, args.stage_timings = resumed_settings(args.resume)
     args.stream = recorded_stream(args.resume)
+    args.alpha_0, args.alpha_end, args.g_plan = recorded_schedule(args.resume)
     return mode
 
 
@@ -1923,6 +2140,15 @@ def main() -> None:
     parser.add_argument('--stream', type=optimisation_stream, default=None,
                         help='optimisation stream, 1 to 99, whose block g scores generation g '
                              f'(default {seed_streams.DEFAULT_OPTIMISATION_STREAM})')
+    # Task 8: the step schedule, which pilot 2 (Task 9) chooses
+    parser.add_argument('--alpha-0', type=positive_float, default=None,
+                        help="step size of generation 0 (default: the mode's, "
+                             f'{DEFAULT_ALPHA_0} for every mode until pilot 2)')
+    parser.add_argument('--alpha-end', type=positive_float, default=None,
+                        help=f'step size from generation G_plan - 1 on, at most --alpha-0 '
+                             f'(default {DEFAULT_ALPHA_END})')
+    parser.add_argument('--g-plan', type=positive_int, default=None,
+                        help="planned run length G_plan (default: the mode's generations)")
     parser.add_argument('--stage-timings', action='store_true',
                         help="time run_covid's stages into timings_evaluation.csv")
     args = parser.parse_args()
@@ -1942,7 +2168,8 @@ def main() -> None:
     if mode not in OPTIMISER_MODES:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
-    pop_size, alpha, betamin, gamma, max_generations = OPTIMISER_MODES[mode]
+    pop_size, betamin, gamma = OPTIMISER_MODES[mode]
+    max_generations = step_schedule.MODE_GENERATIONS[mode]
     # Task 5: a profile has n = workers, 2 generations, and S from the command line.
     if mode == 'profile':
         pop_size = max_workers
@@ -1956,7 +2183,22 @@ def main() -> None:
         simulations = SIMULATIONS_PER_EVALUATION
 
     # Firefly
-    fa = Firefly(pop_size, alpha, betamin, gamma, seed=args.seed)
+    # Task 8: the step schedule, the mode's alpha_0 unless given; a resume's comes from its
+    # config.json (resume_arguments).
+    problem = generations_problem(max_generations)  # Task 7: before the claim, as below
+    if problem is not None:  # a resume's generations are its mode's, as it is now
+        if args.resume is not None:
+            not_resumable(f"{args.resume} cannot be resumed: the mode's {problem}")
+        sys.exit(f'mode {mode}: {problem}')
+    try:  # Task 8: refused here, before the run directory is claimed
+        schedule = step_schedule.checked_schedule(
+            args.alpha_0, args.alpha_end, args.g_plan, max_generations,
+            names=('--alpha-0', '--alpha-end', '--g-plan'),
+            alpha_0_default=step_schedule.MODE_ALPHA_0[mode])  # what the pipeline checks
+    except ValueError as error:
+        sys.exit(f'step schedule: {error}')
+    fa = Firefly(pop_size, schedule[0], betamin, gamma, seed=args.seed, alpha_end=schedule[1],
+                 g_plan=schedule[2])
     fa.run_settings = {'mode': mode}
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings
