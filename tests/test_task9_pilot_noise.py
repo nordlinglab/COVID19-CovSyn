@@ -512,6 +512,10 @@ def test_pilot_1_reports_a_table_error_as_a_refusal(tmp_path, monkeypatch, capsy
 
 def test_a_read_only_table_is_a_refusal_not_a_traceback(tmp_path, monkeypatch, capsys):
     """A blocks.csv set read-only: the resume stops with its path and the reason."""
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root writes into a read-only file, so there is nothing to refuse")
     monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
     monkeypatch.setattr(pn, "_population_and_bounds",
                         lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
@@ -534,3 +538,17 @@ def test_a_read_only_table_is_a_refusal_not_a_traceback(tmp_path, monkeypatch, c
         (out / pn.BLOCKS_FILE).chmod(0o644)
     err = capsys.readouterr().err
     assert stop.value.code == 2 and pn.BLOCKS_FILE in err
+
+
+def test_an_error_outside_the_tables_keeps_its_traceback(tmp_path, monkeypatch):
+    """A full disk, a worker's error: not a usage refusal, but the error itself."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+
+    def full(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(pn, "run", full)
+    with pytest.raises(OSError, match="No space left"):
+        pn.main(["--results-root", str(tmp_path)])

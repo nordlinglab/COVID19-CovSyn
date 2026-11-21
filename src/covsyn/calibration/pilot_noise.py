@@ -263,9 +263,9 @@ def main(argv: list[str] | None = None) -> Path:
                           initial_population=population)
     try:
         summary = run(out, population, lower, upper, evaluate, make_pool)
-    # A table gone or out of place, or one the system refuses (read-only, a link loop): say
-    # which, with its path, rather than a traceback.
-    except (block_scoring.TableError, OSError) as error:
+    # A table gone or out of place, or one the system refuses: say which, with its path.
+    # Other errors, a full disk or a worker's, keep their tracebacks.
+    except block_scoring.TableError as error:
         parser.error(str(error))
     print(json.dumps(summary["choice"], indent=1))
     return out

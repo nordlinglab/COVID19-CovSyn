@@ -383,9 +383,9 @@ def main(argv: list[str] | None = None) -> Path:
     try:
         summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool,
                       workers=workers)
-    # A table gone or out of place, or one the system refuses (read-only, a link loop): say
-    # which, with its path, rather than a traceback.
-    except (block_scoring.TableError, OSError) as error:
+    # A table gone or out of place, or one the system refuses: say which, with its path.
+    # Other errors, a full disk or a worker's, keep their tracebacks.
+    except block_scoring.TableError as error:
         parser.error(str(error))
     print(json.dumps(summary, indent=1))
     return out
