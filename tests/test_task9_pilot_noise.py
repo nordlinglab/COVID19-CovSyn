@@ -352,3 +352,17 @@ def test_a_config_whose_rewrite_fails_is_not_called_missing(tmp_path, monkeypatc
         pn.main(["--resume", str(out), "--workers", "3"])
     err = capsys.readouterr().err
     assert "could not record" in err and "holds no pilot" not in err
+
+
+def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, monkeypatch, capsys):
+    """NaN reads but does not write as JSON: an exit-2 refusal, not a traceback."""
+    monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
+    monkeypatch.setattr(pn, "_population_and_bounds",
+                        lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
+    monkeypatch.delenv("COVSYN_WORKERS", raising=False)
+    out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
+    text = (out / "config.json").read_text()
+    (out / "config.json").write_text(text.replace('"settings": {', '"settings": {"x": NaN, ', 1))
+    with pytest.raises(SystemExit) as stop:
+        pn.main(["--resume", str(out), "--workers", "3"])
+    assert stop.value.code == 2 and "could not record" in capsys.readouterr().err

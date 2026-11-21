@@ -691,3 +691,15 @@ def test_a_config_whose_rewrite_fails_is_not_called_missing(tmp_path, monkeypatc
         ps.main(["--resume", str(out), "--workers", "3"])
     err = capsys.readouterr().err
     assert "could not record" in err and "holds no pilot" not in err
+
+
+def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, capsys):
+    """NaN reads but does not write as JSON: an exit-2 refusal, not a traceback."""
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(
+        '{"settings": {"simulations": 300, "x": NaN}, "workers": 2}'
+    )
+    with pytest.raises(SystemExit) as stop:
+        ps.main(["--resume", str(out), "--workers", "3"])
+    assert stop.value.code == 2 and "could not record" in capsys.readouterr().err

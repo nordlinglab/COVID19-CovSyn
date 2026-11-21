@@ -324,7 +324,7 @@ def main(argv: list[str] | None = None) -> Path:
             block_scoring.record_workers(out, workers)
         except PermissionError as error:  # refused: say what was refused
             parser.error(str(error))
-        except OSError as error:
+        except (OSError, ValueError) as error:  # ValueError: a NaN read, not writable as JSON
             parser.error(f"{out}: could not record the workers in its config.json ({error})")
         root = out.parent.parent
     else:
