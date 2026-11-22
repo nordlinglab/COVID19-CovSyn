@@ -183,7 +183,8 @@ def read_pilot(path: Path) -> dict:
                          "text") from None  # fmt: skip
     if not table.exists:
         if Path(path).is_symlink():
-            raise SystemExit(f"{path} is a link to {os.readlink(path)}, which does not exist")
+            raise SystemExit(f"{path} is a link to {os.path.realpath(path)}, which does not "
+                             "exist")  # the last link's target, as an absolute path
         raise SystemExit(f"{path} does not exist")
     costs: dict = {}
     for number, r in enumerate(table.rows, start=1):

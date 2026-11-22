@@ -460,3 +460,15 @@ def test_a_pilot_table_linked_to_a_missing_file_says_so(tmp_path):
     link.symlink_to(tmp_path / "moved" / "blocks.csv")
     with pytest.raises(SystemExit, match="is a link to .*moved.*, which does not exist"):
         psb.read_pilot(link)
+
+
+def test_a_chain_of_links_names_the_file_that_is_missing(tmp_path, monkeypatch):
+    """The final target, resolved from the link's own directory (round 12)."""
+    (tmp_path / "pilot").mkdir()
+    (tmp_path / "pilot" / "b.csv").symlink_to("gone.csv")  # relative to pilot/
+    link = tmp_path / "blocks.csv"
+    link.symlink_to("pilot/b.csv")
+    monkeypatch.chdir(tmp_path.parent)
+    with pytest.raises(SystemExit) as stopped:
+        psb.read_pilot(link)
+    assert str(tmp_path / "pilot" / "gone.csv") in str(stopped.value)
