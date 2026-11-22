@@ -213,6 +213,13 @@ def missing_from_pilot(keys, pilot: dict) -> list:
     return [key for key in keys if key not in pilot]
 
 
+def _cheng_inputs() -> tuple[np.ndarray, np.ndarray]:
+    """Cheng et al. (2020)'s attack rates and their bin weights, as the objective reads them."""
+    with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
+        ct = pickle.load(f)
+    return np.asarray(ct["Cheng_attack_rate"]), np.asarray(ct["norm_weights"])
+
+
 def main() -> None:
     """Re-score pilot 1 keeping each bin's term, then make its choice with and without one."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -232,9 +239,7 @@ def main() -> None:
         )
     parameters = population * (upper - lower) + lower
     _, make_pool = block_scoring.objective_pools(args.workers)
-    with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
-        ct = pickle.load(f)
-    cheng, weights = np.asarray(ct["Cheng_attack_rate"]), np.asarray(ct["norm_weights"])
+    cheng, weights = _cheng_inputs()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     path = args.out_dir / "bins.csv"
     new = needs_header(path)  # before reading it: refuses a header or a last row cut short

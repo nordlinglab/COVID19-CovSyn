@@ -484,22 +484,23 @@ def test_a_long_row_left_out_is_named_among_those_not_counted(tmp_path):
 
 
 def test_a_missing_cheng_input_stops_before_the_output_is_made(tmp_path, monkeypatch):
-    """The Cheng attack rates are read before anything is written (round 12)."""
+    """The Cheng attack rates are read before anything is written (rounds 12 and 13)."""
     pilot = tmp_path / "blocks.csv"
     pilot.write_text(PILOT_HEADER, encoding="utf-8")
     out = tmp_path / "out"
     monkeypatch.setattr(sys, "argv", ["probe", str(out), str(pilot)])
-    monkeypatch.setattr(psb, "missing_from_pilot", lambda keys, pilot: [])
+    monkeypatch.setattr(psb.pilot_noise, "_population_and_bounds",
+                        lambda: (np.zeros((4, 3)), np.zeros(3), np.ones(3)))  # fmt: skip
+    monkeypatch.setattr(psb.pilot_noise, "pilot_rows", lambda: {"literature": 0})
+    monkeypatch.setattr(psb.pilot_noise, "tasks", lambda vectors, rows: [])
     monkeypatch.setattr(psb.block_scoring, "objective_pools", lambda workers: (None, None))
+    called = []
 
-    real_open = open
+    def unreadable():
+        called.append(True)
+        raise SystemExit("no Cheng inputs")
 
-    def unreadable(path, *args, **kwargs):  # the probe's own read of the Cheng inputs only
-        if str(path).endswith("processed_contact_tracing_data.pkl"):
-            raise SystemExit("no Cheng inputs")
-        return real_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(psb, "open", unreadable, raising=False)
+    monkeypatch.setattr(psb, "_cheng_inputs", unreadable)
     with pytest.raises(SystemExit, match="no Cheng inputs"):
         psb.main()
-    assert not out.exists()
+    assert called and not out.exists()
