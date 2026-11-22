@@ -91,3 +91,10 @@ def test_inputs_that_do_not_fit_are_refused(selected, lower, upper, main_set):
     """R = 5 vectors, bounds and set of their dimension, and a set of at least the best."""
     with pytest.raises(ValueError):
         pu.parameter_table(selected, lower, upper, main_set)
+
+
+def test_an_empty_table_is_refused_rather_than_written(tmp_path):
+    """No parameters, no header to write: say so (code review 2026-11-22)."""
+    with pytest.raises(ValueError, match="no parameters"):
+        pu.write_table(tmp_path / "parameter_uncertainty.csv", [])
+    assert not (tmp_path / "parameter_uncertainty.csv").exists()

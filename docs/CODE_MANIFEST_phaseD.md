@@ -43,7 +43,7 @@ A module without an entry point runs as `uv run python -m covsyn.<package>.<modu
 | `calibration/`, objective | `fast_cost.py` (the objective the optimiser runs), `cost_parts.py`, `sar_anchors.py`, `target_margins.py` (B60) |
 | `calibration/`, search | `firefly_optimizer.py`, `parameter_space.py` (bounds and literature vector, Task 7), `initial_population.py` (Task 7), `seed_streams.py` (Task 7), `step_schedule.py` (Task 8) |
 | `calibration/`, run size and stopping | `run_size.py` (n, G, S, Task 9), `monitoring.py` (production stopping rule, Task 9), `block_scoring.py` (resumable block scores, Task 9), `pilot_noise.py`, `pilot_size.py` |
-| `calibration/`, after the run | `revalidation.py` (E87; cost uncertainty, Task 10), `select_by_checklist.py`, `parameter_uncertainty.py` (spread across the five production runs, Task 10) |
+| `calibration/`, after the run | `revalidation.py` (E87; cost uncertainty, Task 10), `select_by_checklist.py`, `parameter_uncertainty.py` (spread across the five production runs, Task 10; no command calls it yet) |
 | `calibration/`, parameter setup | `apply_phase_d_parameters.py`, `rebuild_school_pmf.py` (E39) |
 | `pipeline/` | `config.py` (TOML settings), `stages.py`, `runner.py`, `default.toml` (Task 4) |
 | `runtime/` | `hardware.py` (Task 2), `runs.py` (run names and directories, Task 3), `measure.py`, `memory.py`, `profiling.py`, `timings.py` (Task 5) |

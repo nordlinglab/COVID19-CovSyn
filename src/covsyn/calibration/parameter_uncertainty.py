@@ -76,7 +76,16 @@ def parameter_table(selected: np.ndarray, lower: np.ndarray, upper: np.ndarray,
 
 
 def write_table(path: Path, table: list[dict[str, Any]]) -> None:
-    """Write parameter_uncertainty.csv, one row per parameter."""
+    """Write parameter_uncertainty.csv, one row per parameter.
+
+    No command calls this yet: the Task 10 orchestrator of the five runs, whose design waits on
+    the 2026-11-23 meeting, will.
+
+    Raises:
+        ValueError: The table has no parameters.
+    """
+    if not table:
+        raise ValueError("the table has no parameters to write")
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(table[0]))
         writer.writeheader()
