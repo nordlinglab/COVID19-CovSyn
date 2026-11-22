@@ -172,9 +172,9 @@ def _check_production(values: dict[str, Any], source: str) -> None:
         blocks = values.setdefault("revalidation_blocks", TASK10_BLOCKS)
         if blocks != TASK10_BLOCKS:
             raise ValueError(f"{source}: [revalidate] blocks is {blocks}, but production re-scores "
-                             f"on {TASK10_BLOCKS} blocks (Task 10). In a new configuration, remove "
-                             f"it; a saved pipeline.toml that sets it belongs to a production run "
-                             f"started before Task 10, which cannot be resumed")  # fmt: skip
+                             f"on {TASK10_BLOCKS} blocks (Task 10). Remove the setting; a saved "
+                             f"run whose pipeline.toml sets another count cannot be resumed, so "
+                             f"start a new run")  # fmt: skip
         missing = [key for key in PRODUCTION_SETTINGS if values.get(key) is None]
         if missing:
             raise ValueError(f"{source}: [optimise] mode \"production\" needs "
