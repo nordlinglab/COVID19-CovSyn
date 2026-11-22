@@ -113,7 +113,11 @@ def ranked_archive(path: Path, k: int = ARCHIVE_CANDIDATES) -> tuple[np.ndarray,
     with open(path, encoding="utf-8") as f:
         if f.readline().strip() != f"# {ARCHIVE_HEADER}":
             raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
-    rows = np.loadtxt(path, ndmin=2, encoding="utf-8")
+    with warnings.catch_warnings():  # a file of no rows is an empty archive, not a mistake
+        warnings.simplefilter("ignore", UserWarning)
+        rows = np.loadtxt(path, ndmin=2, encoding="utf-8")
+    if rows.size == 0:
+        return np.empty((0, 0)), np.empty(0)
     order = np.lexsort((np.arange(len(rows)), rows[:, 0], rows[:, -1]))
     vectors: list[np.ndarray] = []
     means: list[float] = []
@@ -303,6 +307,8 @@ def main(argv: list[str] | None = None) -> None:
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
     vectors, train = load_candidates(firefly_dir, args.archive_best)
+    if not len(vectors):
+        raise SystemExit(f"{firefly_dir}: no candidates to revalidate (its archive is empty)")
     try:
         seed_blocks = validation_seed_blocks(blocks, simulations, args.stream)
     except ValueError as error:

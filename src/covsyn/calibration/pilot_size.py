@@ -190,6 +190,8 @@ def _screen_tasks(models_root: Path, prefix: str, simulations: int,
         name = run_name(prefix, setting)
         candidates[name] = archive_candidates(Path(models_root) / name / "firefly_archive.txt",
                                              CANDIDATES)
+        if not len(candidates[name]):
+            raise RuntimeError(f"run {name} has no candidates: its archive is empty")
         for c in range(len(candidates[name])):
             for b in SCREEN_BLOCKS:
                 if (name, c, b) not in done:

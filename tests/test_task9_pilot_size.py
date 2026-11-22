@@ -1060,3 +1060,14 @@ def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["covsyn-pilot-size", "--given", "x"])
     assert getattr(import_module(module), function)() == 0
     assert calls == [((), {})]  # no arguments of its own, so argparse reads sys.argv
+
+
+def test_a_run_whose_archive_is_empty_stops_the_screening(tmp_path):
+    """No candidates is no representative: stop and say which run (code review 2026-11-22)."""
+    for setting in ps.settings():
+        run = tmp_path / ps.run_name("p", setting)
+        run.mkdir()
+        np.savetxt(run / "firefly_archive.txt", np.empty((0, 6)),
+                   header=revalidation.ARCHIVE_HEADER, encoding="utf-8")  # fmt: skip
+    with pytest.raises(RuntimeError, match="no candidates"):
+        ps._screen_tasks(tmp_path, "p", 3000, set())

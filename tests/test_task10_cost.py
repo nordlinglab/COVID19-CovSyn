@@ -145,3 +145,20 @@ def test_the_score_runs_its_s_simulations_per_block(monkeypatch):
                         lambda *a, seed_offset=0, simulations=None: seen.append(simulations) or 1.0)
     rv.score(np.zeros(DIM), None, None, (None, None, None), [range(0, 3000)], 3000)
     assert seen == [3000]
+
+
+def test_an_archive_of_no_rows_ranks_no_candidates(tmp_path):
+    """A header-only archive gives no vectors, not a reshape error (code review 2026-11-22)."""
+    _archive(tmp_path, np.empty((0, DIM + 3)))
+    vectors, means = rv.ranked_archive(tmp_path / "firefly_archive.txt", 10)
+    assert len(vectors) == 0 and len(means) == 0
+
+
+def test_revalidating_an_empty_archive_stops_with_a_reason(tmp_path):
+    """--archive-best on a header-only archive: no candidates, said so, nothing scored."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _archive(run, np.empty((0, DIM + 3)))
+    with pytest.raises(SystemExit, match="no candidates"):
+        rv.main([str(run), str(tmp_path / "out"), "30", "--simulations", "3000",
+                 "--archive-best", "10", "--workers", "1"])  # fmt: skip
