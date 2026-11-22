@@ -205,9 +205,9 @@ def main() -> None:
     parser.add_argument("pilot_blocks", type=Path)
     parser.add_argument("--workers", type=int, default=None)
     args = parser.parse_args()
+    pilot = read_pilot(args.pilot_blocks)  # before anything is written
     args.out_dir.mkdir(parents=True, exist_ok=True)
     path = args.out_dir / "bins.csv"
-    pilot = read_pilot(args.pilot_blocks)
     new = needs_header(path)  # before reading it: refuses a header or a last row cut short
     done = {} if new else read_done(path)
     population, lower, upper = pilot_noise._population_and_bounds()

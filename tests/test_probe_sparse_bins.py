@@ -392,3 +392,12 @@ def test_pilot_1_s_table_with_a_cost_that_is_not_finite_is_refused(tmp_path, cos
     path.write_text(PILOT_HEADER + f"vector,literature,0,300,0,0,{cost}\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="record 1: its cost is not finite"):
         psb.read_pilot(path)
+
+
+def test_a_missing_pilot_table_stops_before_the_output_is_made(tmp_path, monkeypatch):
+    """Named, with nothing left behind (round 9)."""
+    out, missing = tmp_path / "out", tmp_path / "typo_blocks.csv"
+    monkeypatch.setattr(sys, "argv", ["probe", str(out), str(missing)])
+    with pytest.raises(SystemExit, match="typo_blocks.csv"):
+        psb.main()
+    assert not out.exists()
