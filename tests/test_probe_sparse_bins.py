@@ -364,7 +364,7 @@ def test_pilot_1_s_table_with_an_unreadable_key_is_refused_naming_its_record(tmp
     path = tmp_path / "blocks.csv"
     path.write_text(PILOT_HEADER + "vector,literature,0,300,0,0,1.0\n"
                     "vector,literature,x,300,1,0,1.0\n", encoding="utf-8")  # fmt: skip
-    with pytest.raises(SystemExit, match="record 2: its key cannot be read"):
+    with pytest.raises(SystemExit, match="finished row 2 .*: its key cannot be read"):
         psb.read_pilot(path)
 
 
@@ -372,7 +372,7 @@ def test_pilot_1_s_table_with_an_unreadable_cost_says_so(tmp_path):
     """The cost is the bad cell, not the key (round 9)."""
     path = tmp_path / "blocks.csv"
     path.write_text(PILOT_HEADER + "vector,literature,0,300,0,0,abc\n", encoding="utf-8")
-    with pytest.raises(SystemExit, match="record 1: its cost cannot be read"):
+    with pytest.raises(SystemExit, match="finished row 1 .*: its cost cannot be read"):
         psb.read_pilot(path)
 
 
@@ -390,7 +390,7 @@ def test_pilot_1_s_table_with_a_cost_that_is_not_finite_is_refused(tmp_path, cos
     """Found before any simulation, naming the record (round 9)."""
     path = tmp_path / "blocks.csv"
     path.write_text(PILOT_HEADER + f"vector,literature,0,300,0,0,{cost}\n", encoding="utf-8")
-    with pytest.raises(SystemExit, match="record 1: its cost is not finite"):
+    with pytest.raises(SystemExit, match="finished row 1 .*: its cost is not finite"):
         psb.read_pilot(path)
 
 
@@ -415,3 +415,12 @@ def test_a_pilot_table_that_does_not_exist_is_said_not_to(tmp_path):
     """Not "went missing while the pilot ran": the probe never saw it (round 10)."""
     with pytest.raises(SystemExit, match="nope.csv does not exist"):
         psb.read_pilot(tmp_path / "nope.csv")
+
+
+def test_the_row_named_counts_finished_rows_and_says_so(tmp_path):
+    """A short row before the bad one is left out, as pilot 1 leaves it out (round 10)."""
+    path = tmp_path / "blocks.csv"
+    path.write_text(PILOT_HEADER + "vector,lit,0,300,0,0,1.0\nvector,lit,0,300\n"
+                    "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
+    with pytest.raises(SystemExit, match="finished row 2 .*cut or short rows"):
+        psb.read_pilot(path)

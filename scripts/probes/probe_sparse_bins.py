@@ -168,7 +168,8 @@ def read_pilot(path: Path) -> dict:
 
     Raises:
         SystemExit: The table cannot be read, or a record's key or cost cannot be, or an
-            evaluation is held twice; the message names the record.
+            evaluation is held twice; the message names the row by its number among those
+            read_table keeps.
     """
     try:
         table = block_scoring.read_table(path)
@@ -182,7 +183,7 @@ def read_pilot(path: Path) -> dict:
         raise SystemExit(f"{path} does not exist")
     costs: dict = {}
     for number, r in enumerate(table.rows, start=1):
-        where = f"{path}, record {number}"
+        where = f"{path}, finished row {number} (read_table leaves out cut or short rows)"
         try:
             key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
         except (TypeError, ValueError, KeyError):
