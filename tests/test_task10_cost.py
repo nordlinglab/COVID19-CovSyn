@@ -165,7 +165,7 @@ def test_revalidating_an_empty_archive_stops_with_a_reason(tmp_path):
     assert not (tmp_path / "out").exists()  # stopped before writing anything
 
 
-def test_a_stream_outside_validation_stops_before_writing(tmp_path):
+def test_a_stream_outside_validation_stops_before_writing(tmp_path, capsys):
     """--stream 150 is refused, and no output directory is left (code review round 3)."""
     run = tmp_path / "run"
     run.mkdir()
@@ -173,6 +173,7 @@ def test_a_stream_outside_validation_stops_before_writing(tmp_path):
     with pytest.raises(SystemExit):
         rv.main([str(run), str(tmp_path / "out"), "30", "--stream", "150",
                  "--archive-best", "10", "--workers", "1"])  # fmt: skip
+    assert "150" in capsys.readouterr().err  # the stream is the reason
     assert not (tmp_path / "out").exists()
 
 
@@ -184,3 +185,27 @@ def test_an_archive_from_before_task_8_stops_with_a_reason(tmp_path):
     with pytest.raises(SystemExit, match="v2 archive"):
         rv.main([str(run), str(tmp_path / "out"), "30", "--archive-best", "10",
                  "--workers", "1"])  # fmt: skip
+
+
+@pytest.mark.parametrize("blocks", ["0", "-3"])
+def test_no_blocks_is_refused_before_writing(tmp_path, capsys, blocks):
+    """Revalidation on no blocks would write NaN means (code review round 4)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _archive(run, [[g, 1, g * 0.1, 0.2, 0.3, 9.0 - g * 0.1] for g in range(3)])
+    with pytest.raises(SystemExit):
+        rv.main([str(run), str(tmp_path / "out"), blocks, "--archive-best", "10",
+                 "--workers", "1"])  # fmt: skip
+    assert "blocks" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_archive_refusal_names_its_path_once(tmp_path):
+    """The archive's own message holds its path (code review round 4)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    np.savetxt(run / "firefly_archive.txt", np.ones((2, DIM + 2)))
+    with pytest.raises(SystemExit) as stopped:
+        rv.main([str(run), str(tmp_path / "out"), "30", "--archive-best", "10",
+                 "--workers", "1"])  # fmt: skip
+    assert str(stopped.value).count(str(run)) == 1

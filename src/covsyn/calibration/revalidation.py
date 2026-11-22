@@ -156,6 +156,10 @@ def load_candidates(firefly_dir: Path, archive_best: int | None = None
 
     Returns:
         (vectors, training costs), sorted by training cost.
+
+    Raises:
+        ValueError: With archive_best, the archive is not Task 8's (v2).
+        OSError: A file it reads is missing or cannot be read.
     """
     if archive_best is not None:
         return ranked_archive(Path(firefly_dir) / "firefly_archive.txt", archive_best)
@@ -292,6 +296,8 @@ def main(argv: list[str] | None = None) -> None:
         run_size.check_simulations(simulations, "--simulations")
     except ValueError as error:
         parser.error(str(error))
+    if args.blocks < 1:
+        parser.error(f"the blocks must be 1 or more, not {args.blocks}")
     if args.archive_best is not None and args.archive_best < 1:
         parser.error(f"--archive-best must be 1 or more, not {args.archive_best}")
     firefly_dir, out_dir, blocks = args.firefly_dir, args.out_dir, args.blocks
@@ -299,7 +305,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         vectors, train = load_candidates(firefly_dir, args.archive_best)
     except (ValueError, OSError) as error:  # such as an archive from before Task 8
-        raise SystemExit(f"{firefly_dir}: {error}") from None
+        raise SystemExit(str(error)) from None
     if not len(vectors):  # before anything is written or read
         reason = " (its archive is empty)" if args.archive_best is not None else ""
         raise SystemExit(f"{firefly_dir}: no candidates to revalidate{reason}")
