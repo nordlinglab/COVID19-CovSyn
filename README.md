@@ -28,18 +28,19 @@ Every command below runs from the repository root, because the modules read thei
 
 | Path | Contents |
 |---|---|
-| `src/covsyn/model/` | The simulation: `data_synthesize.py` (demographics, social contexts, course of disease, contacts), `data_synthesis_main.py` (one simulation and the Monte Carlo driver), `r0_network.py` |
-| `src/covsyn/calibration/` | Fitting: `firefly_optimizer.py` (optimizer and reference objective), `fast_cost.py` (the objective the optimizer runs), `cost_parts.py`, `sar_anchors.py` (attack-rate anchors), `apply_phase_d_parameters.py` (search bounds and seed vector), `rebuild_school_pmf.py` |
+| `src/covsyn/model/` | The simulation: `data_synthesize.py` (demographics, social contexts, course of disease, contacts), `data_synthesis_main.py` (one simulation and the Monte Carlo driver), `r0_network.py`, `contact_measures.py`, `school_calendar.py`, `work_calendar.py` |
+| `src/covsyn/calibration/` | Fitting: `firefly_optimizer.py` (optimizer and reference objective), `fast_cost.py` (the objective the optimizer runs), `cost_parts.py`, `sar_anchors.py` (attack-rate anchors), `target_margins.py`, `apply_phase_d_parameters.py` (search bounds and seed vector), `rebuild_school_pmf.py`; `parameter_space.py`, `initial_population.py` and `seed_streams.py` (Task 7), `step_schedule.py` (Task 8), `run_size.py`, `monitoring.py`, `block_scoring.py`, `pilot_noise.py` and `pilot_size.py` (Task 9), `revalidation.py`, `select_by_checklist.py` and `parameter_uncertainty.py` (Task 10) |
 | `src/covsyn/data_processing/` | Model inputs and validation references: `rw_data_processing.py`, `taiwan_reference.py`, the `extract_*.py` scripts that build `validation_reference/` |
-| `src/covsyn/validation/` | Acceptance checklist and run reports: `verify_phase_d.py`, `check_constraints.py` (per-case constraint table), `measure_age_rr.py`, `measure_days.py`, `rr_exact.py`, `tw_check.py`, `show_final.py`, `show_bounds.py`, `check_gap.py`, `compare_phase_d_runs.py` |
+| `src/covsyn/validation/` | Acceptance checklist and run reports: `verify_phase_d.py`, `acceptance.py`, `check_constraints.py` (per-case constraint table), `measure_age_rr.py`, `measure_days.py`, `rr_exact.py`, `tw_check.py`, `show_final.py`, `show_bounds.py`, `check_gap.py`, `compare_phase_d_runs.py`, `city_effect.py`, `compare_first_wave.py` |
 | `src/covsyn/figures/` | Validation figures, including `plot_todolist923.py` |
 | `src/covsyn/upstream/` | Upstream code the preprint describes, not used by the Phase D pipeline |
 | `src/covsyn/pipeline/` | `covsyn-pipeline`: the Phase D stages in order, with resume, and `default.toml` |
+| `src/covsyn/runtime/` | Worker count (`hardware.py`), run names and directories (`runs.py`), and timings, memory and profiling |
 | `scripts/` | `data_synthesis.sh`; `gates/` (checks before a run), `probes/` and `benchmarks/` (the tools behind findings in the decision register) |
 | `tests/` | Regression, pipeline and unit tests; fixtures in `tests/fixtures/` |
 | `variable/`, `data/`, `validation_reference/` | Fitted parameters, raw inputs, and reference distributions |
-| `results/models/phaseD_run10/`, `results/tables/phaseD_run10/` | Best vector and bounds, and the progress table, of Phase D run 10 |
-| `docs/` | `covsyn_decisions.md` (every modelling decision and finding) and Phase D notes |
+| `results/models/<run-id>/`, `results/tables/<run-id>/`, `results/figures/<run-id>/` | Each run's parameters and logs, tables, and figures; only the runs `.gitignore` names are committed, such as Phase D run 10 and pilot 1's summaries |
+| `docs/` | `covsyn_decisions.md` (every modelling decision and finding), `CODE_MANIFEST_phaseD.md` (what each file does) and Phase D notes |
 | `notebooks/` | Analysis notebooks |
 
 ## Usage
@@ -134,6 +135,10 @@ It chooses the setting with the lowest mean cost whose two runs agree, the mean 
 The production run, `--mode production` or `mode = "production"` in `[optimise]`, takes pilot 2's n (`pop_size`), S (`simulations`), α_0, α_end, G_plan and run id (`pilot`), all required.
 It scores each new elite vector on blocks 0 to 4 of monitoring stream 100, and stops when the best monitored vector has improved by no more than one paired standard error over 5 generations, or at G_max = 1,000 generations;
 the reason goes into `run.log`, and the monitoring's cost into `monitoring.json` beside `progress.csv`.
+Its revalidation re-scores the archive's 10 best distinct vectors, by ascending mean, at its S on 30 blocks of its validation stream (Task 10), and refuses another number of blocks.
+The best is the lowest mean;
+`cost_uncertainty.csv` gives each candidate's mean ± SE and its paired difference to the best with a 95% t interval on 29 degrees of freedom, exploratory since the best is chosen on the same blocks, and marks the candidates whose interval includes 0 as indistinguishable from the best.
+The selection uses the same scores.
 
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.
 The pipeline warns as soon as available memory falls below 10% of the total.
@@ -168,7 +173,8 @@ PARAMETER_PATH=results/models/phaseD_run10 scripts/data_synthesis.sh
 Simulation output, data files and printed reports must match exactly;
 the objective and the numbers in the checklist JSON match to a relative 1e-6, the normal precision difference between platforms (B91).
 The other tests check the rules in `docs/covsyn_decisions.md`.
-The slow tests are marked `slow`; `-m "not slow"` skips them.
+The slow tests are marked `slow`;
+`-m "not slow"` skips them.
 Their fixtures were made on macOS (arm64), and Linux x86-64 passes them: the objective agrees to a relative 4e-9 and the checklist's dispersion fit to 1.5e-8.
 
 ## Data Structure
