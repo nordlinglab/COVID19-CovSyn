@@ -12,6 +12,12 @@ rows, and a run whose bounds or dimension differ from those stored is refused, n
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import tomllib
+from importlib import import_module
+from pathlib import Path
+
 import numpy as np
 import pytest
 from scipy.stats import qmc
@@ -161,12 +167,24 @@ def test_version_1_is_committed_and_matches_the_generator(written):
 
 def test_making_a_population_does_not_load_the_optimiser():
     """The population needs the bounds and two helpers, not the optimiser: no import cycle."""
-    import subprocess
-    import sys
-
     code = ("import sys, numpy as np, covsyn.calibration.initial_population as ip; "
             "ip.normalise(np.ones(2), np.zeros(2), np.full(2, 2.0), 'x'); "
             "print('covsyn.calibration.firefly_optimizer' in sys.modules)")  # fmt: skip
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          cwd=REPO_ROOT, check=True).stdout.strip()  # fmt: skip
     assert out == "False"
+
+
+def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
+    """The console script runs main() on the command line as given, and exits 0 once done.
+
+    main() reads sys.argv when given none; a returned path would print and give status 1.
+    """
+    scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
+    module, _, function = scripts["covsyn-initial-population"].partition(":")
+    calls = []
+    monkeypatch.setattr(ip, "main", lambda *args, **kwargs: calls.append((args, kwargs))
+                        or Path("/a/run"))  # fmt: skip
+    monkeypatch.setattr(sys, "argv", ["covsyn-initial-population", "--given", "x"])
+    assert getattr(import_module(module), function)() == 0
+    assert calls == [((), {})]  # no arguments of its own, so argparse reads sys.argv

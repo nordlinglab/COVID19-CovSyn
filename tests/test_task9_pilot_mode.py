@@ -13,13 +13,14 @@ everything else.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 
 import numpy as np
 import pytest
 
 from covsyn.calibration import firefly_optimizer as fo
-from covsyn.calibration import parameter_space, step_schedule
+from covsyn.calibration import initial_population, parameter_space, run_size, step_schedule
 from covsyn.pipeline import config as pc
 from covsyn.runtime import runs
 from tests.test_task4_resume import RESUMABLE
@@ -33,7 +34,7 @@ def _without(flag):
     """PILOT without flag and its value."""
     args = list(PILOT)
     i = args.index(flag)
-    return args[:i] + args[i + 2:]
+    return args[:i] + args[i + 2 :]
 
 
 def test_a_pilot_run_takes_its_size_length_s_and_alpha_0(started):  # noqa: F811
@@ -62,9 +63,17 @@ def test_a_pilot_run_needs_every_setting(monkeypatch, tmp_path, flag):
     assert not (tmp_path / "r").exists()
 
 
-@pytest.mark.parametrize("flag, value", [("--pop-size", "1"), ("--pop-size", "257"),
-                                         ("--generations", "0"), ("--generations", "1001"),
-                                         ("--simulations", "0"), ("--simulations", "10001")])
+@pytest.mark.parametrize(
+    "flag, value",
+    [
+        ("--pop-size", "1"),
+        ("--pop-size", "257"),
+        ("--generations", "0"),
+        ("--generations", "1001"),
+        ("--simulations", "0"),
+        ("--simulations", "10001"),
+    ],
+)
 def test_a_pilot_setting_out_of_range_is_refused(monkeypatch, tmp_path, flag, value):
     """Each within what the run can hold.
 
@@ -147,11 +156,19 @@ def test_a_resumed_pilot_run_refuses_a_new_size_or_length(monkeypatch, tmp_path,
         fo.main()
 
 
-@pytest.mark.parametrize("key, value", [("pop_size", None), ("pop_size", 1),
-                                        ("max_generations", "3"), ("simulations", 0),
-                                        ("pop_size", True)])
-def test_a_pilot_run_with_a_recorded_size_out_of_range_cannot_be_resumed(monkeypatch, tmp_path,
-                                                                         capsys, key, value):
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("pop_size", None),
+        ("pop_size", 1),
+        ("max_generations", "3"),
+        ("simulations", 0),
+        ("pop_size", True),
+    ],
+)
+def test_a_pilot_run_with_a_recorded_size_out_of_range_cannot_be_resumed(
+    monkeypatch, tmp_path, capsys, key, value
+):
     """Retrying cannot fix config.json, so NOT_RESUMABLE, naming the setting."""
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume",
                                       str(_pilot_run(tmp_path, {key: value}))])  # fmt: skip
@@ -169,38 +186,29 @@ def test_the_pipeline_does_not_run_the_pilot_mode():
 
 def test_a_size_out_of_range_names_the_mode():
     """The refusal says which mode it is for."""
-    from covsyn.calibration import run_size
-
     with pytest.raises(ValueError, match="--mode production"):
         run_size.from_command("production", 300, None, 3000)
 
 
 def test_production_takes_no_generations_to_check():
     """Its G is G_max, not a flag; only n and S are the user's."""
-    from covsyn.calibration import run_size
-
     assert run_size.from_command("production", 48, None, 3000)[::2] == (48, 3000)
 
 
 def test_the_row_count_is_the_population_s():
     """run_size holds it without importing the population module, so the pipeline loads fast."""
-    from covsyn.calibration import initial_population, run_size
-
     assert run_size.POP_SIZES.stop - 1 == initial_population.N_MAX
 
 
 def test_reading_the_pipeline_configuration_loads_no_scipy():
     """The configuration is checked before any stage; scipy took 5 s of it (Task 9 review)."""
-    import subprocess
-
     done = subprocess.run([sys.executable, "-c", "import sys, covsyn.pipeline.config; "
                            "print('scipy' in sys.modules)"], capture_output=True, text=True,
                           check=True)  # fmt: skip
     assert done.stdout.strip() == "False"
 
 
-def test_a_run_whose_config_an_editor_saved_with_a_byte_order_mark_resumes(monkeypatch,
-                                                                           tmp_path):
+def test_a_run_whose_config_an_editor_saved_with_a_byte_order_mark_resumes(monkeypatch, tmp_path):
     """The optimiser reads its config.json past a BOM, as the pilots read theirs."""
     run = _pilot_run(tmp_path)
     config = run / "config.json"
@@ -211,8 +219,6 @@ def test_a_run_whose_config_an_editor_saved_with_a_byte_order_mark_resumes(monke
 
 def test_every_size_refusal_says_a_whole_number_from_its_range():
     """One wording, from the command line or config.json."""
-    from covsyn.calibration import run_size
-
     with pytest.raises(ValueError, match="--pop-size must be a whole number from 2 to 256"):
         run_size.from_command("pilot", 300, 10, 3000)
     with pytest.raises(ValueError, match="pop_size is 2.5, not a whole number from 2 to 256"):
@@ -225,5 +231,6 @@ def test_the_profile_s_refusal_has_the_same_wording(monkeypatch, tmp_path):
                                       "20000", "--run-dir", str(tmp_path / "r")])  # fmt: skip
     with pytest.raises(SystemExit) as stop:
         fo.main()
-    assert str(stop.value) == ("--mode profile: --simulations must be a whole number from 1 to "
-                               "10000, not 20000")  # word for word the pilot mode's
+    assert str(stop.value) == (
+        "--mode profile: --simulations must be a whole number from 1 to 10000, not 20000"
+    )  # word for word the pilot mode's

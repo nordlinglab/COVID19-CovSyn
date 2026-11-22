@@ -1,0 +1,40 @@
+{
+ "threshold_fraction": 0.1,
+ "spread_sd": 634.8806290530108,
+ "threshold": 63.488062905301085,
+ "per_simulations": [
+  {
+   "simulations": 300,
+   "max_pair_sd": 178.1343961046866,
+   "ratio": 0.280579352957094,
+   "meets": false
+  },
+  {
+   "simulations": 1000,
+   "max_pair_sd": 101.42945324517065,
+   "ratio": 0.15976145530926503,
+   "meets": false
+  },
+  {
+   "simulations": 3000,
+   "max_pair_sd": 57.24787720988114,
+   "ratio": 0.09017108821743733,
+   "meets": true
+  },
+  {
+   "simulations": 10000,
+   "max_pair_sd": 20.97268853026631,
+   "ratio": 0.03303406588660488,
+   "meets": true
+  }
+ ],
+ "chosen_simulations": 3000,
+ "failed_evaluations": 0,
+ "spread": {
+  "rows": 256,
+  "simulations": 10000,
+  "sd": 634.8806290530108,
+  "sd_block_43": 629.851015141208,
+  "sd_block_44": 640.9392265169729
+ }
+}

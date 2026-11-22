@@ -17,14 +17,22 @@ from __future__ import annotations
 
 import concurrent.futures
 import csv
+import errno
 import itertools
 import json
+import logging
+import os
+import sys
+import tomllib
+from importlib import import_module
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from covsyn.calibration import pilot_noise as pn
 from covsyn.calibration import seed_streams
+from tests.conftest import REPO_ROOT
 
 DIM = 4
 
@@ -101,8 +109,13 @@ def test_the_summary_gives_each_vector_s_mean_and_sd_at_each_s():
     rows = _synthetic({s: 1.0 for s in pn.BLOCKS}, 10.0)
     summary = pn.summarise(rows)
     for line in summary["vectors"]:
-        costs = [r["cost"] for r in rows if r["kind"] == "vector"
-                 and r["label"] == line["label"] and r["simulations"] == line["simulations"]]
+        costs = [
+            r["cost"]
+            for r in rows
+            if r["kind"] == "vector"
+            and r["label"] == line["label"]
+            and r["simulations"] == line["simulations"]
+        ]
         assert line["blocks"] == 30
         assert line["mean"] == pytest.approx(np.mean(costs))
         assert line["sd"] == pytest.approx(np.std(costs, ddof=1))
@@ -336,8 +349,6 @@ def test_a_read_only_config_says_so_not_that_pilot_1_is_missing(tmp_path, monkey
 
 def test_a_config_whose_rewrite_fails_is_not_called_missing(tmp_path, monkeypatch, capsys):
     """As pilot 2's: a failed write of the workers says so."""
-    import errno
-
     monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
     monkeypatch.setattr(pn, "_population_and_bounds",
                         lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
@@ -373,21 +384,19 @@ def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, monkeypatc
 
 def test_a_resume_reads_config_json_as_utf_8(tmp_path, monkeypatch):
     """As pilot 2's: the read asks for UTF-8, as write_config writes."""
-    import pathlib
-
     monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
     monkeypatch.setattr(pn, "_population_and_bounds",
                         lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
     out = pn.main(["--results-root", str(tmp_path), "--workers", "2"])
     encodings = []
-    real = pathlib.Path.read_text
+    real = Path.read_text
 
     def recording(self, *args, **kwargs):
         if self.name == "config.json":
             encodings.append(kwargs.get("encoding", args[0] if args else None))
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(pathlib.Path, "read_text", recording)
+    monkeypatch.setattr(Path, "read_text", recording)
     pn.main(["--resume", str(out)])
     assert encodings and set(encodings) == {"utf-8-sig"}  # UTF-8, a byte order mark skipped
 
@@ -436,8 +445,6 @@ def test_a_config_saved_with_a_byte_order_mark_still_reads(tmp_path, monkeypatch
 
 def test_pilot_1_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog):
     """blocks.csv with a byte order mark: one warning in a run that reads it twice."""
-    import logging
-
     pn.run(tmp_path, _population(), np.zeros(DIM), np.ones(DIM), _evaluate, _threads)
     blocks = tmp_path / pn.BLOCKS_FILE
     blocks.write_bytes(b"\xef\xbb\xbf" + blocks.read_bytes())
@@ -448,8 +455,6 @@ def test_pilot_1_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog
 
 def test_a_mark_added_while_pilot_1_runs_is_warned_about(tmp_path, caplog, monkeypatch):
     """Saved by a spreadsheet after the first read: the summary's read, the choice's, warns."""
-    import logging
-
     blocks = tmp_path / pn.BLOCKS_FILE
     real_summary = pn.write_summary
 
@@ -464,8 +469,9 @@ def test_a_mark_added_while_pilot_1_runs_is_warned_about(tmp_path, caplog, monke
 
 
 @pytest.mark.parametrize("recorded", [True, 0, -2, "8"])
-def test_a_recorded_worker_count_out_of_range_names_pilot_1(tmp_path, monkeypatch, capsys,
-                                                            recorded):
+def test_a_recorded_worker_count_out_of_range_names_pilot_1(
+    tmp_path, monkeypatch, capsys, recorded
+):
     """The pilot is there; one recorded value is wrong, and the refusal says so."""
     monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
     monkeypatch.setattr(pn, "_population_and_bounds",
@@ -512,8 +518,6 @@ def test_pilot_1_reports_a_table_error_as_a_refusal(tmp_path, monkeypatch, capsy
 
 def test_a_read_only_table_is_a_refusal_not_a_traceback(tmp_path, monkeypatch, capsys):
     """A blocks.csv set read-only: the resume stops with its path and the reason."""
-    import os
-
     if os.geteuid() == 0:
         pytest.skip("root writes into a read-only file, so there is nothing to refuse")
     monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
@@ -556,9 +560,6 @@ def test_an_error_outside_the_tables_keeps_its_traceback(tmp_path, monkeypatch):
 
 def test_a_full_disk_in_pilot_1_s_table_keeps_its_traceback(tmp_path, monkeypatch):
     """Through main, the real run and block_scoring: ENOSPC stays an OSError, not exit 2."""
-    import errno
-    import os
-
     monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
     monkeypatch.setattr(pn, "_population_and_bounds",
                         lambda: (_population(), np.zeros(DIM), np.ones(DIM)))  # fmt: skip
@@ -574,3 +575,18 @@ def test_a_full_disk_in_pilot_1_s_table_keeps_its_traceback(tmp_path, monkeypatc
         pn.main(["--results-root", str(tmp_path)])
     assert not isinstance(error.value, pn.block_scoring.TableError)
     assert error.value.errno == errno.ENOSPC
+
+
+def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
+    """The console script runs main() on the command line as given, and exits 0 once done.
+
+    main() reads sys.argv when given none; a returned path would print and give status 1.
+    """
+    scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
+    module, _, function = scripts["covsyn-pilot-noise"].partition(":")
+    calls = []
+    monkeypatch.setattr(pn, "main", lambda *args, **kwargs: calls.append((args, kwargs))
+                        or Path("/a/run"))  # fmt: skip
+    monkeypatch.setattr(sys, "argv", ["covsyn-pilot-noise", "--given", "x"])
+    assert getattr(import_module(module), function)() == 0
+    assert calls == [((), {})]  # no arguments of its own, so argparse reads sys.argv
