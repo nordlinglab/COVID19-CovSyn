@@ -19,19 +19,28 @@ confirmation means; none agreeing chooses none, and the measurements go to the p
 
 from __future__ import annotations
 
+import builtins
 import concurrent.futures
 import csv
+import errno
 import json
+import logging
+import os
+import re
 import sys
 import tomllib
+from datetime import datetime
 from importlib import import_module
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration import pilot_size as ps
-from covsyn.calibration import seed_streams
+from covsyn.calibration import revalidation, run_size, seed_streams, step_schedule
+from covsyn.runtime import hardware, runs
+from tests import firefly_standins as standins
 from tests.conftest import REPO_ROOT
 
 DIM = 3
@@ -75,8 +84,6 @@ def test_a_run_is_the_optimiser_s_pilot_mode_with_its_setting(tmp_path):
 
 def _archive(path, rows):
     """firefly_archive.txt v2: (entered, blocks, params..., mean), written as the optimiser does."""
-    from covsyn.calibration import firefly_optimizer as fo
-
     fo.write_archive(path / "firefly_archive.txt", np.array(rows, dtype=float))
 
 
@@ -372,8 +379,6 @@ def test_the_command_refuses_a_pilot_1_that_chose_no_s(tmp_path):
 
 def test_every_run_uses_the_pilot_s_workers(tmp_path):
     """--workers reaches the optimiser runs too, as COVSYN_WORKERS, resumed ones included."""
-    from covsyn.runtime import hardware
-
     optimiser = _Optimiser()
     _pilot(tmp_path, optimiser, workers=3)
     assert optimiser.envs and all(env == {hardware.ENV_VARIABLE: "3"} for env in optimiser.envs)
@@ -419,8 +424,6 @@ def test_the_command_refuses_a_pilot_1_with_failed_evaluations(tmp_path):
 
 def test_the_choice_reports_the_alpha_end_the_runs_used():
     """The optimiser's default, which the pilot mode leaves in place."""
-    from covsyn.calibration import step_schedule
-
     rows = _confirmed(_means(), spread=1.0)
     table = [dict(line, agree=True) for line in ps.compare_settings(rows)]
     assert ps.choose(table)["alpha_end"] == step_schedule.DEFAULT_ALPHA_END
@@ -588,8 +591,6 @@ from hypothesis import strategies as st  # noqa: E402
 )
 def test_every_pilot_2_run_id_is_recognised(when, commit, dirty):
     """Whatever time, commit and state runs.make_run_id is given."""
-    from covsyn.runtime import runs
-
     name = runs.make_run_id("pilot-size", when=when, commit=commit or "", dirty=dirty)
     assert ps.RUN_ID.fullmatch(name)
 
@@ -608,8 +609,6 @@ def _could_make(name):
     <YYYYMMDD-HHMMSS>_<commit[:7] or nocommit>[-dirty]_<config name>, with the stamp a
     datetime's strftime and the commit lowercase hex, as git prints it.
     """
-    from datetime import datetime
-
     stamp, _, rest = name.partition("_")
     commit, _, config = rest.partition("_")
     try:
@@ -639,8 +638,6 @@ def test_a_name_one_edit_off_is_refused(base, at, change, how):
     Refused unless runs.make_run_id could still have made it; a stamp that is no date may pass,
     since the name check guards against hand-made names, not impossible times.
     """
-    import re
-
     at = at % (len(base) + (how == "insert"))
     name = {
         "swap": base[:at] + change + base[at + 1 :],
@@ -659,10 +656,6 @@ def test_a_name_one_edit_off_is_refused(base, at, change, how):
 
 def test_make_run_id_s_names_are_recognised_by_the_independent_reading():
     """The reference above agrees with make_run_id itself."""
-    from datetime import datetime
-
-    from covsyn.runtime import runs
-
     for commit, dirty in (("0123abcdef", False), ("", False), ("fedcba9876543", True)):
         name = runs.make_run_id("pilot-size", when=datetime(2026, 11, 21, 9, 30, 15),
                                 commit=commit, dirty=dirty)  # fmt: skip
@@ -687,8 +680,6 @@ def test_a_read_only_config_says_so_not_that_the_pilot_is_missing(tmp_path, monk
 
 def test_a_config_whose_rewrite_fails_is_not_called_missing(tmp_path, monkeypatch, capsys):
     """A failed write (a full disk, a file system that takes nothing) says so."""
-    import errno
-
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
@@ -718,8 +709,6 @@ def test_a_config_json_cannot_write_back_is_a_command_error(tmp_path, capsys):
 
 def test_a_real_short_write_is_reported_once_with_config_json_kept(tmp_path, monkeypatch, capsys):
     """Through main and the real record step: exit 2, the path once, config.json unchanged."""
-    import os
-
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
     (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
@@ -739,8 +728,6 @@ def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monke
 
     The default encoding is set in C, so the test checks the reads ask for UTF-8.
     """
-    import pathlib
-
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
     (out / "config.json").write_text(
@@ -750,7 +737,7 @@ def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monke
     noise.mkdir()
     (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
     encodings: dict[str, list] = {}
-    real = pathlib.Path.read_text
+    real = Path.read_text
 
     def recording(self, *args, **kwargs):
         if self.name in ("config.json", "choice.json"):  # every read, main's first among them
@@ -758,7 +745,7 @@ def test_a_resume_reads_config_json_as_utf_8_whatever_the_locale(tmp_path, monke
                                                                   else None))  # fmt: skip
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(pathlib.Path, "read_text", recording)
+    monkeypatch.setattr(Path, "read_text", recording)
     monkeypatch.setattr(ps, "run", lambda *a, **kw: {})
     monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
     ps.main(["--resume", str(out)])
@@ -791,8 +778,6 @@ def test_a_config_turned_into_a_list_is_named_once(tmp_path, monkeypatch, capsys
 
 def test_the_archive_is_read_as_utf_8_header_and_rows(tmp_path, monkeypatch):
     """Both the header check and np.loadtxt, as the optimiser writes it (Task 9 review)."""
-    import builtins
-
     _archive(tmp_path, [[0, 1, 0.1, 0.2, 0.3, 4.0]])
     seen, opened = [], []
     real = np.loadtxt
@@ -813,8 +798,6 @@ def test_the_archive_is_read_as_utf_8_header_and_rows(tmp_path, monkeypatch):
 
 def test_revalidation_reads_the_archive_as_utf_8(tmp_path, monkeypatch):
     """The other reader of the archive, the same way."""
-    from covsyn.calibration import revalidation
-
     _archive(tmp_path, [[0, 1, 0.1, 0.2, 0.3, 4.0]])
     seen = []
     real = np.loadtxt
@@ -826,8 +809,6 @@ def test_revalidation_reads_the_archive_as_utf_8(tmp_path, monkeypatch):
 
 def test_the_optimiser_writes_the_archive_as_utf_8(tmp_path):
     """np.savetxt's default is latin1, which cannot hold a header the readers read as UTF-8."""
-    from covsyn.calibration import firefly_optimizer as fo
-
     path = tmp_path / "firefly_archive.txt"
     fo.write_archive(path, np.array([[0, 1, 0.1, 0.2, 4.0]]), header="archive \u03c3 \u2265")
     assert path.read_text(encoding="utf-8").startswith("# archive \u03c3 \u2265")
@@ -878,9 +859,6 @@ def test_a_pilot_1_choice_nested_too_deep_is_a_command_error(tmp_path):
 
 def test_the_optimiser_s_run_writes_its_archive_through_write_archive(tmp_path, monkeypatch):
     """So the run's archive is UTF-8, as write_archive writes it."""
-    from covsyn.calibration import firefly_optimizer as fo
-    from tests import firefly_standins as standins
-
     written = []
     real = fo.write_archive
     monkeypatch.setattr(fo, "write_archive", lambda path, rows, *a, **kw: written.append(path)
@@ -948,8 +926,6 @@ def test_a_resumed_pilot_s_recorded_s_of_the_wrong_kind_is_refused(tmp_path, mon
 
 def test_one_rule_checks_s_wherever_it_is_read():
     """run_size's, which the optimiser's resume, pilot 1's choice and pilot 2's resume use."""
-    from covsyn.calibration import run_size
-
     assert run_size.check_simulations(300, "S") == 300
     for bad in (300.0, "300", True, 0, 10_001, None):
         with pytest.raises(ValueError, match="S is .*, not a whole number from 1 to 10000"):
@@ -958,8 +934,6 @@ def test_one_rule_checks_s_wherever_it_is_read():
 
 def test_a_pilot_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog):
     """screening.csv with a byte order mark: one warning in a run that reads it twice."""
-    import logging
-
     summary, out = _pilot(tmp_path, _Optimiser())
     screen = out / ps.SCREEN_FILE
     screen.write_bytes(b"\xef\xbb\xbf" + screen.read_bytes())
@@ -971,8 +945,6 @@ def test_a_pilot_warns_once_about_a_table_a_spreadsheet_rewrote(tmp_path, caplog
 @pytest.mark.parametrize("table", [ps.SCREEN_FILE, ps.CONFIRM_FILE])
 def test_a_mark_added_while_pilot_2_runs_is_warned_about(tmp_path, caplog, monkeypatch, table):
     """Saved by a spreadsheet after a table's first read: its later read warns, once."""
-    import logging
-
     out = tmp_path / "tables" / "p"
     out.mkdir(parents=True)
     real_score = ps.block_scoring.score
@@ -990,8 +962,6 @@ def test_a_mark_added_while_pilot_2_runs_is_warned_about(tmp_path, caplog, monke
 
 def test_a_table_s_mark_is_judged_from_the_bytes_it_is_read_from(tmp_path, caplog):
     """read_table reports the mark of the very bytes it read, so no second open can differ."""
-    import logging
-
     path = tmp_path / "t.csv"
     path.write_bytes(b"\xef\xbb\xbfname,simulations,seed_offset,cost\na,10,0,1.5\n")
     with caplog.at_level(logging.WARNING, logger=ps.block_scoring.log.name):
@@ -1052,9 +1022,6 @@ def test_pilot_2_keeps_the_traceback_of_an_error_outside_the_tables(tmp_path, mo
 
 def test_a_full_disk_in_pilot_2_s_tables_keeps_its_traceback(tmp_path, monkeypatch):
     """Through main, the real run and block_scoring: ENOSPC stays an OSError, not exit 2."""
-    import errno
-    import os
-
     noise = tmp_path / "noise"
     noise.mkdir()
     (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
