@@ -424,3 +424,14 @@ def test_the_row_named_counts_finished_rows_and_says_so(tmp_path):
                     "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
     with pytest.raises(SystemExit, match="finished row 2 .*cut or short rows"):
         psb.read_pilot(path)
+
+
+def test_a_table_that_is_not_pilot_1_s_stops_before_the_output_is_made(tmp_path, monkeypatch):
+    """Readable but lacking pilot 1's evaluations: nothing left behind (round 10)."""
+    pilot = tmp_path / "blocks.csv"
+    pilot.write_text(PILOT_HEADER + "vector,literature,0,300,0,0,1.0\n", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["probe", str(out), str(pilot)])
+    with pytest.raises(SystemExit, match="lacks"):
+        psb.main()
+    assert not out.exists()

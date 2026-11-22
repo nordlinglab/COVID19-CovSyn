@@ -212,17 +212,9 @@ def main() -> None:
     parser.add_argument("pilot_blocks", type=Path)
     parser.add_argument("--workers", type=int, default=None)
     args = parser.parse_args()
-    pilot = read_pilot(args.pilot_blocks)  # before anything is written
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    path = args.out_dir / "bins.csv"
-    new = needs_header(path)  # before reading it: refuses a header or a last row cut short
-    done = {} if new else read_done(path)
+    # The pilot table is checked whole before anything is written.
+    pilot = read_pilot(args.pilot_blocks)
     population, lower, upper = pilot_noise._population_and_bounds()
-    parameters = population * (upper - lower) + lower
-    _, make_pool = block_scoring.objective_pools(args.workers)
-    with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
-        ct = pickle.load(f)
-    cheng, weights = np.asarray(ct["Cheng_attack_rate"]), np.asarray(ct["norm_weights"])
     every = pilot_noise.tasks(pilot_noise.pilot_rows(), len(population))
     missing = missing_from_pilot([t.key for t in every], pilot)
     if missing:
@@ -230,6 +222,15 @@ def main() -> None:
             f"{args.pilot_blocks} lacks {len(missing)} of pilot 1's evaluations, "
             f"such as {missing[0]}: is it pilot 1's blocks.csv?"
         )
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    path = args.out_dir / "bins.csv"
+    new = needs_header(path)  # before reading it: refuses a header or a last row cut short
+    done = {} if new else read_done(path)
+    parameters = population * (upper - lower) + lower
+    _, make_pool = block_scoring.objective_pools(args.workers)
+    with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
+        ct = pickle.load(f)
+    cheng, weights = np.asarray(ct["Cheng_attack_rate"]), np.asarray(ct["norm_weights"])
     differing = mismatched(done, pilot)
     if differing:
         raise SystemExit(
