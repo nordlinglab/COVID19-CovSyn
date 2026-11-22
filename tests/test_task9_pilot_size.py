@@ -1087,3 +1087,25 @@ def test_the_command_exits_zero_after_a_finished_pilot(monkeypatch):
     module, _, function = scripts["covsyn-pilot-size"].partition(":")
     monkeypatch.setattr(ps, "main", lambda argv=None: Path("/a/pilot"))
     assert getattr(import_module(module), function)() == 0
+
+
+def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
+    """The console script runs main() on the command line as given, and exits 0 once done.
+
+    main() reads sys.argv when given none; a returned path would print and give status 1.
+    """
+    import sys
+    import tomllib
+    from importlib import import_module
+    from pathlib import Path
+
+    from tests.conftest import REPO_ROOT
+
+    scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
+    module, _, function = scripts["covsyn-pilot-size"].partition(":")
+    calls = []
+    monkeypatch.setattr(ps, "main", lambda *args, **kwargs: calls.append((args, kwargs))
+                        or Path("/a/run"))  # fmt: skip
+    monkeypatch.setattr(sys, "argv", ["covsyn-pilot-size", "--given", "x"])
+    assert getattr(import_module(module), function)() == 0
+    assert calls == [((), {})]  # no arguments of its own, so argparse reads sys.argv
