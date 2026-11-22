@@ -40,15 +40,15 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from covsyn.calibration import block_scoring, run_size, seed_streams, step_schedule
-from covsyn.calibration.revalidation import ARCHIVE_HEADER
+from covsyn.calibration import block_scoring, revalidation, run_size, seed_streams, step_schedule
+from covsyn.calibration.revalidation import archive_candidates
 from covsyn.runtime import hardware, runs
 
 POP_SIZES = (24, 48, 96)
 ALPHA_0S = (0.05, 0.2)
 STREAMS = (1, 2)
 BUDGET = 10_000
-CANDIDATES = 10
+CANDIDATES = revalidation.ARCHIVE_CANDIDATES  # k = 10, as Task 10
 VALIDATION_STREAM = 202
 SCREEN_BLOCKS = range(0, 30)
 CONFIRM_BLOCKS = range(30, 60)
@@ -105,28 +105,6 @@ def optimiser_args(setting: Setting, simulations: int, run_dir: Path) -> list[st
             "--generations", str(setting.generations), "--simulations", str(simulations),
             "--alpha-0", f"{setting.alpha_0:g}", "--stream", str(setting.stream),
             "--run-dir", str(run_dir)]  # fmt: skip
-
-
-def archive_candidates(path: Path, k: int = CANDIDATES) -> np.ndarray:
-    """A run's best k distinct archive vectors, lowest mean first, ties to the earlier entry.
-
-    Raises:
-        ValueError: The archive is not Task 8's (v2): its rows are not elite vectors with
-            their means.
-    """
-    with open(path, encoding="utf-8") as f:
-        if f.readline().strip() != f"# {ARCHIVE_HEADER}":
-            raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
-    rows = np.loadtxt(path, ndmin=2, encoding="utf-8")
-    order = np.lexsort((np.arange(len(rows)), rows[:, 0], rows[:, -1]))
-    chosen: list[np.ndarray] = []
-    for i in order:
-        vector = rows[i, 2:-1]
-        if not any(np.array_equal(vector, v) for v in chosen):
-            chosen.append(vector)
-        if len(chosen) == k:
-            break
-    return np.array(chosen).reshape(len(chosen), rows.shape[1] - 3)
 
 
 def compare_settings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -210,7 +188,8 @@ def _screen_tasks(models_root: Path, prefix: str, simulations: int,
     candidates, todo = {}, []
     for setting in settings():
         name = run_name(prefix, setting)
-        candidates[name] = archive_candidates(Path(models_root) / name / "firefly_archive.txt")
+        candidates[name] = archive_candidates(Path(models_root) / name / "firefly_archive.txt",
+                                             CANDIDATES)
         for c in range(len(candidates[name])):
             for b in SCREEN_BLOCKS:
                 if (name, c, b) not in done:

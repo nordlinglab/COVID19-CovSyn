@@ -30,7 +30,7 @@ from typing import Any
 
 import numpy as np
 
-from covsyn.calibration import seed_streams
+from covsyn.calibration import run_size, seed_streams
 from covsyn.runtime import hardware
 
 REPORTED_OUTCOMES = (
@@ -96,7 +96,45 @@ def read_archive(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return rows[:, first:-1], rows[:, -1]
 
 
-def load_candidates(firefly_dir: Path) -> tuple[np.ndarray, np.ndarray]:
+# Task 9's pilot 2 and Task 10 re-score a run's best k = 10 archive candidates.
+ARCHIVE_CANDIDATES = 10
+
+
+def ranked_archive(path: Path, k: int = ARCHIVE_CANDIDATES) -> tuple[np.ndarray, np.ndarray]:
+    """A run's best k distinct archive vectors and their means, lowest first.
+
+    By the archive's mean cost, a tie to the vector that entered the elite first, then to the
+    earlier row (Task 9's pilot 2 and Task 10, decisions of 2026-11-21 and 2026-11-22).
+
+    Raises:
+        ValueError: The archive is not Task 8's (v2): its rows are not elite vectors with
+            their means.
+    """
+    with open(path, encoding="utf-8") as f:
+        if f.readline().strip() != f"# {ARCHIVE_HEADER}":
+            raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
+    rows = np.loadtxt(path, ndmin=2, encoding="utf-8")
+    order = np.lexsort((np.arange(len(rows)), rows[:, 0], rows[:, -1]))
+    vectors: list[np.ndarray] = []
+    means: list[float] = []
+    for i in order:
+        vector = rows[i, 2:-1]
+        if not any(np.array_equal(vector, v) for v in vectors):
+            vectors.append(vector)
+            means.append(float(rows[i, -1]))
+        if len(vectors) == k:
+            break
+    width = rows.shape[1] - 3
+    return np.array(vectors).reshape(len(vectors), width), np.array(means)
+
+
+def archive_candidates(path: Path, k: int = ARCHIVE_CANDIDATES) -> np.ndarray:
+    """A run's best k distinct archive vectors, as ranked_archive orders them."""
+    return ranked_archive(path, k)[0]
+
+
+def load_candidates(firefly_dir: Path, archive_best: int | None = None
+                    ) -> tuple[np.ndarray, np.ndarray]:
     """The final population and every personal best of a run, without duplicates.
 
     firefly_archive.txt is added when present, so the pool spans the search and not only its
@@ -109,9 +147,14 @@ def load_candidates(firefly_dir: Path) -> tuple[np.ndarray, np.ndarray]:
         firefly_dir: Directory holding firefly_result.txt (params..., cost),
             firefly_best.txt (iteration, params..., cost) and optionally firefly_archive.txt.
 
+        archive_best: Take only the archive's best this many distinct vectors (Task 10),
+            not the final population nor the personal bests.
+
     Returns:
         (vectors, training costs), sorted by training cost.
     """
+    if archive_best is not None:
+        return ranked_archive(Path(firefly_dir) / "firefly_archive.txt", archive_best)
     population = np.atleast_2d(np.loadtxt(Path(firefly_dir) / "firefly_result.txt"))
     bests = np.atleast_2d(np.loadtxt(Path(firefly_dir) / "firefly_best.txt"))
     rows = [population[:, :-1], bests[:, 1:-1]]
@@ -165,8 +208,12 @@ def score(
     pool: concurrent.futures.Executor,
     cheng: tuple[np.ndarray, np.ndarray, np.ndarray],
     seed_blocks: list[range],
+    simulations: int | None = None,
 ) -> tuple[list[float], dict[str, float]]:
-    """Objective cost and reported outcomes of one vector on each seed block."""
+    """Objective cost and reported outcomes of one vector on each seed block, of S simulations.
+
+    simulations: S, the optimiser's 300 when None (Task 10: the production run's S).
+    """
     from covsyn.calibration import fast_cost
     from covsyn.calibration.cost_parts import LAST
 
@@ -174,11 +221,42 @@ def score(
     outcomes: dict[str, list[float]] = {name: [] for name in REPORTED_OUTCOMES}
     for block in seed_blocks:
         totals.append(
-            float(fast_cost.cost_function(vector, demo, pool, *cheng, seed_offset=block.start))
+            float(fast_cost.cost_function(vector, demo, pool, *cheng, seed_offset=block.start,
+                                    simulations=simulations))
         )
         for name in REPORTED_OUTCOMES:
             outcomes[name].append(float(LAST.get("measured_" + name, np.nan)))
     return totals, {name: float(np.nanmean(v)) for name, v in outcomes.items()}
+
+
+def cost_uncertainty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each candidate's mean cost +- SE, and its paired difference to the best (Task 10).
+
+    Over the blocks of revalidation.csv's rows (block_0, block_1, ...): the best is the lowest
+    mean, a tie to the earlier row, the archive's order; d = candidate - best, block by block,
+    with a paired t interval of n - 1 degrees of freedom. The best is chosen on these blocks,
+    so the interval is exploratory (decision of 2026-11-22). A candidate whose interval holds 0
+    cannot be told apart from the best.
+    """
+    from scipy import stats
+
+    costs = [np.array([float(r[k]) for k in sorted((k for k in r if k.startswith("block_")),
+                                                   key=lambda k: int(k[6:]))])
+             for r in rows]  # fmt: skip
+    means = [float(c.mean()) for c in costs]
+    best = min(range(len(rows)), key=lambda i: (means[i], i))
+    table = []
+    for i, c in enumerate(costs):
+        n = len(c)
+        d = c - costs[best]
+        half = (float(stats.t.ppf(0.975, n - 1) * d.std(ddof=1) / np.sqrt(n))
+                if i != best and n > 1 else 0.0)  # fmt: skip
+        low, high = float(d.mean()) - half, float(d.mean()) + half
+        table.append({"candidate": rows[i]["candidate"], "mean": means[i],
+                      "se": float(c.std(ddof=1) / np.sqrt(n)) if n > 1 else 0.0,
+                      "difference_to_best": float(d.mean()), "ci_low": low, "ci_high": high,
+                      "indistinguishable": bool(low <= 0 <= high), "best": i == best})
+    return table
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -198,8 +276,20 @@ def main(argv: list[str] | None = None) -> None:
         default=seed_streams.DEFAULT_VALIDATION_STREAM,
         help="validation stream, 200 to 299, whose blocks 0.. score the candidates (Task 7)",
     )
+    parser.add_argument("--simulations", type=int, default=None,
+                        help="simulations per block, S (default: the optimiser's 300); Task 10 "
+                             "re-scores at the production run's S")  # fmt: skip
+    parser.add_argument("--archive-best", type=int, default=None,
+                        help="score only the archive's best this many distinct vectors (Task 10)")
     hardware.add_workers_argument(parser)  # Task 2: was 32 workers (D3)
     args = parser.parse_args(argv)
+    simulations = fo.SIMULATIONS_PER_EVALUATION if args.simulations is None else args.simulations
+    try:  # before anything is read: S within one block of a stream
+        run_size.check_simulations(simulations, "--simulations")
+    except ValueError as error:
+        parser.error(str(error))
+    if args.archive_best is not None and args.archive_best < 1:
+        parser.error(f"--archive-best must be 1 or more, not {args.archive_best}")
     firefly_dir, out_dir, blocks = args.firefly_dir, args.out_dir, args.blocks
     workers = hardware.resolve_workers(args.workers, os.environ, None)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -212,14 +302,14 @@ def main(argv: list[str] | None = None) -> None:
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
-    vectors, train = load_candidates(firefly_dir)
+    vectors, train = load_candidates(firefly_dir, args.archive_best)
     try:
-        seed_blocks = validation_seed_blocks(blocks, fo.SIMULATIONS_PER_EVALUATION, args.stream)
+        seed_blocks = validation_seed_blocks(blocks, simulations, args.stream)
     except ValueError as error:
         parser.error(str(error))
     print(
         f"commit {commit or '(not a git checkout)'}; {len(vectors)} candidates from "
-        f"{firefly_dir}; {blocks} blocks of {fo.SIMULATIONS_PER_EVALUATION} seeds of stream "
+        f"{firefly_dir}; {blocks} blocks of {simulations} seeds of stream "
         f"{args.stream}, from {seed_blocks[0].start if seed_blocks else '-'}",
         flush=True,
     )
@@ -229,7 +319,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     rows = []
     for index, (vector, training_cost) in enumerate(zip(vectors, train, strict=True)):
-        totals, outcomes = score(vector, demo, pool, cheng, seed_blocks)
+        totals, outcomes = score(vector, demo, pool, cheng, seed_blocks, simulations)
         rows.append(
             {
                 "candidate": index,
@@ -251,6 +341,12 @@ def main(argv: list[str] | None = None) -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+    # Task 10: each candidate's mean +- SE and paired difference to the best, beside it.
+    uncertainty = cost_uncertainty(rows)
+    with open(out_dir / "cost_uncertainty.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(uncertainty[0]))
+        writer.writeheader()
+        writer.writerows(uncertainty)
     chosen = min(rows, key=lambda r: r["validation_mean"])
     write_best_file(
         out_dir / "firefly_best.txt", vectors, np.array([r["validation_mean"] for r in rows])

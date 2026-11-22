@@ -1,0 +1,147 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Task 10, item 1: the cost's measured uncertainty.
+
+From doc/plan_Nordling2026_CovSynFireflyNordlingLab.md, Task 10: re-score the best k = 10
+archive candidates on 30 blocks of a validation stream not used before, at S; report each mean
+cost +- SE (SD / sqrt(30)) in cost_uncertainty.csv, with the paired difference to the best
+candidate and its 95% confidence interval; the candidates whose interval includes 0 cannot be
+told apart from the best.
+
+Decisions of 2026-11-22: only the archive, its at most 10 distinct vectors by ascending mean,
+ties to the one that entered the elite first (pilot 2's rule); the best is the lowest mean on
+the 30 blocks, a tie to the archive's order; the interval is a paired t interval, 29 degrees of
+freedom, exploratory, as the best is chosen on the same blocks; the production pipeline's
+revalidation does this at its S and 30 blocks, and its results serve the selection and
+cost_uncertainty.csv alike.
+"""
+
+from __future__ import annotations
+
+import csv
+
+import numpy as np
+import pytest
+from scipy import stats
+
+from covsyn.calibration import pilot_size, seed_streams
+from covsyn.calibration import revalidation as rv
+from covsyn.calibration.revalidation import ARCHIVE_HEADER
+
+DIM = 3
+
+
+def _archive(path, rows):
+    np.savetxt(path / "firefly_archive.txt", np.array(rows, dtype=float), header=ARCHIVE_HEADER,
+               encoding="utf-8")  # fmt: skip
+
+
+def test_the_archive_ranking_is_one_rule_for_pilot_2_and_task_10(tmp_path):
+    """The revalidation module holds it; pilot 2 uses the same function."""
+    assert pilot_size.archive_candidates is rv.archive_candidates
+
+
+def test_the_candidates_can_be_the_archive_s_best_alone(tmp_path):
+    """--archive-best k: no final population, no personal bests; k by ascending mean."""
+    rows = [[g % 4, 1, g, g + 1, g + 2, 50.0 - g] for g in range(15)]
+    _archive(tmp_path, rows)
+    np.savetxt(tmp_path / "firefly_result.txt", np.zeros((2, DIM + 1)))
+    np.savetxt(tmp_path / "firefly_best.txt", np.zeros((2, DIM + 2)))
+    vectors, means = rv.load_candidates(tmp_path, archive_best=10)
+    assert len(vectors) == 10
+    np.testing.assert_array_equal(vectors[0], [14, 15, 16])
+    np.testing.assert_allclose(means, [50.0 - g for g in range(14, 4, -1)])
+
+
+def _rows(costs_by_candidate):
+    """revalidation.csv rows from each candidate's block costs."""
+    return [{"candidate": i, **{f"block_{b}": c for b, c in enumerate(costs)}}
+            for i, costs in enumerate(costs_by_candidate)]  # fmt: skip
+
+
+def test_each_candidate_s_mean_and_se_over_its_blocks():
+    """Mean and SD / sqrt(30), the SD with ddof = 1."""
+    rng = np.random.default_rng(1)
+    costs = [rng.normal(10 + i, 1, 30) for i in range(4)]
+    table = rv.cost_uncertainty(_rows(costs))
+    for line, c in zip(table, costs, strict=True):
+        assert line["mean"] == pytest.approx(np.mean(c))
+        assert line["se"] == pytest.approx(np.std(c, ddof=1) / np.sqrt(30))
+
+
+def test_the_paired_difference_to_the_best_has_a_t_interval_on_29_degrees_of_freedom():
+    """Mean of d = candidate - best by block, +- t(0.975, 29) SD(d) / sqrt(30)."""
+    rng = np.random.default_rng(2)
+    shared = rng.normal(0, 3, 30)
+    costs = [10 + shared + rng.normal(0, 0.5, 30), 10.2 + shared + rng.normal(0, 0.5, 30),
+             14 + shared + rng.normal(0, 0.5, 30)]  # fmt: skip
+    table = rv.cost_uncertainty(_rows(costs))
+    best = min(range(3), key=lambda i: np.mean(costs[i]))
+    for line, c in zip(table, costs, strict=True):
+        d = c - costs[best]
+        half = (stats.t.ppf(0.975, 29) * np.std(d, ddof=1) / np.sqrt(30)
+                if line["candidate"] != best else 0.0)  # fmt: skip
+        assert line["difference_to_best"] == pytest.approx(np.mean(d))
+        assert line["ci_low"] == pytest.approx(np.mean(d) - half)
+        assert line["ci_high"] == pytest.approx(np.mean(d) + half)
+        assert line["indistinguishable"] == bool(line["ci_low"] <= 0 <= line["ci_high"])
+    assert table[best]["best"] and sum(line["best"] for line in table) == 1
+    assert not table[2]["indistinguishable"]  # 4 higher, with shared noise: told apart
+
+
+def test_a_tie_for_best_goes_to_the_archive_s_order():
+    """The earlier candidate, which ranked higher in the archive."""
+    costs = [np.full(30, 5.0), np.full(30, 5.0)]
+    table = rv.cost_uncertainty(_rows(costs))
+    assert table[0]["best"] and not table[1]["best"]
+
+
+def test_the_best_is_indistinguishable_from_itself():
+    """Its difference is 0, inside its own interval."""
+    costs = [np.arange(30.0), np.arange(30.0) + 1]
+    assert rv.cost_uncertainty(_rows(costs))[0]["indistinguishable"]
+
+
+def test_the_command_rescoring_the_archive_at_s_writes_cost_uncertainty(tmp_path, monkeypatch):
+    """--simulations S and --archive-best k: blocks of S seeds of the given stream."""
+    run = tmp_path / "run"
+    run.mkdir()
+    _archive(run, [[g, 1, g * 0.1, 0.2, 0.3, 9.0 - g * 0.1] for g in range(12)])
+    np.savetxt(run / "firefly_result.txt", np.zeros((2, DIM + 1)))
+    np.savetxt(run / "firefly_best.txt", np.zeros((2, DIM + 2)))
+    seen = {}
+
+    def scored(vector, demo, pool, cheng, seed_blocks, simulations):
+        seen.setdefault("blocks", seed_blocks)
+        seen["simulations"] = simulations
+        totals = [float(vector[0]) + b.start % 7 for b in seed_blocks]
+        return totals, {name: 0.0 for name in rv.REPORTED_OUTCOMES}
+
+    monkeypatch.setattr(rv, "score", scored)
+    out = tmp_path / "out"
+    rv.main([str(run), str(out), "30", "--stream", "203", "--simulations", "3000",
+             "--archive-best", "10", "--workers", "1"])  # fmt: skip
+    assert seen["simulations"] == 3000
+    assert seen["blocks"] == [seed_streams.block_seeds(203, b, 3000) for b in range(30)]
+    with open(out / "revalidation.csv", newline="") as f:
+        assert len(list(csv.DictReader(f))) == 10
+    with open(out / "cost_uncertainty.csv", newline="") as f:
+        table = list(csv.DictReader(f))
+    assert len(table) == 10 and sum(r["best"] == "True" for r in table) == 1
+
+
+def test_a_simulation_count_a_block_cannot_hold_is_refused(tmp_path):
+    """S must fit one block of a stream, as everywhere else."""
+    with pytest.raises(SystemExit):
+        rv.main([str(tmp_path), str(tmp_path / "out"), "30", "--simulations", "10001"])
+
+
+def test_the_score_runs_its_s_simulations_per_block(monkeypatch):
+    """The score hands S to the objective, not the optimiser's 300."""
+    from covsyn.calibration import fast_cost
+
+    seen = []
+    monkeypatch.setattr(fast_cost, "cost_function",
+                        lambda *a, seed_offset=0, simulations=None: seen.append(simulations) or 1.0)
+    rv.score(np.zeros(DIM), None, None, (None, None, None), [range(0, 3000)], 3000)
+    assert seen == [3000]
