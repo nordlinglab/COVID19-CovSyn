@@ -179,16 +179,28 @@ def load_candidates(firefly_dir: Path, archive_best: int | None = None
     """
     if archive_best is not None:
         return ranked_archive(Path(firefly_dir) / "firefly_archive.txt", archive_best)
-    population = np.atleast_2d(_rows(Path(firefly_dir) / "firefly_result.txt"))
-    bests = np.atleast_2d(_rows(Path(firefly_dir) / "firefly_best.txt"))
+    result_path = Path(firefly_dir) / "firefly_result.txt"
+    best_path = Path(firefly_dir) / "firefly_best.txt"
+    with warnings.catch_warnings():  # a file of no rows is refused below, by name
+        warnings.simplefilter("ignore", UserWarning)
+        population = _rows(result_path, ndmin=2)
+        bests = _rows(best_path, ndmin=2)
+    for path, table in ((result_path, population), (best_path, bests)):
+        if table.size == 0:
+            raise ValueError(f"{path}: no rows")
     rows = [population[:, :-1], bests[:, 1:-1]]
     values = [population[:, -1], bests[:, -1]]
+    paths = [result_path, best_path]
     archive_path = Path(firefly_dir) / "firefly_archive.txt"
     if archive_path.exists() and archive_path.stat().st_size:
         vectors, costs = read_archive(archive_path)
         if len(vectors):
             rows.append(vectors)
             values.append(costs)
+            paths.append(archive_path)
+    if len({r.shape[1] for r in rows}) > 1:
+        widths = ", ".join(f"{p} {r.shape[1]}" for p, r in zip(paths, rows, strict=True))
+        raise ValueError(f"the vectors differ in length: {widths}")
     vectors = np.vstack(rows)
     costs = np.concatenate(values)
     _, first = np.unique(vectors, axis=0, return_index=True)

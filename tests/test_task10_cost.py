@@ -240,3 +240,25 @@ def test_a_relative_run_directory_is_still_named(tmp_path, monkeypatch):
     monkeypatch.chdir(run)
     with pytest.raises(SystemExit, match="firefly_archive.txt"):
         rv.main([".", str(tmp_path / "out"), "30", "--archive-best", "10", "--workers", "1"])
+
+
+def test_files_of_different_widths_are_refused_naming_them(tmp_path):
+    """The population and personal bests must hold vectors of one length (round 7)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "firefly_result.txt").write_text("1 2 3 4\n")
+    (run / "firefly_best.txt").write_text("0 1 2 3 4 5\n")
+    with pytest.raises(SystemExit, match="firefly_result.txt.*firefly_best.txt"):
+        rv.main([str(run), str(tmp_path / "out"), "30", "--workers", "1"])
+
+
+@pytest.mark.parametrize("name", ["firefly_result.txt", "firefly_best.txt"])
+def test_a_file_of_no_rows_is_refused_naming_it(tmp_path, name):
+    """An empty population or personal-best file: named, not an IndexError (round 7)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    np.savetxt(run / "firefly_result.txt", np.zeros((2, DIM + 1)))
+    np.savetxt(run / "firefly_best.txt", np.zeros((2, DIM + 2)))
+    (run / name).write_text("")
+    with pytest.raises(SystemExit, match=f"{name}.*no rows"):
+        rv.main([str(run), str(tmp_path / "out"), "30", "--workers", "1"])
