@@ -133,12 +133,12 @@ def _first_bad_line(path: Path) -> int | None:
     return None
 
 
-def _keyed(path: Path, value):
-    """Each row of a CSV table by its evaluation key (kind, row, S, block), as value(row).
+def read_done(path: Path) -> dict:
+    """The rows already in bins.csv, by evaluation key (kind, row, S, block).
 
     Raises:
-        SystemExit: A row is not UTF-8, its key or value cannot be read, or an evaluation is
-            held twice; the message names the file's line.
+        SystemExit: A row is not UTF-8, its key cannot be read, or an evaluation is held
+            twice; the message names the file's line.
     """
     rows: dict = {}
     with open(path, newline="", encoding="utf-8") as f:
@@ -148,12 +148,11 @@ def _keyed(path: Path, value):
                 where = f"{path}, line {reader.line_num}"
                 try:
                     key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
-                    item = value(r)
                 except (TypeError, ValueError, KeyError):
                     raise SystemExit(f"{where}: its key cannot be read") from None
                 if key in rows:
                     raise SystemExit(f"{where}: {key} is held twice")
-                rows[key] = item
+                rows[key] = r
         except UnicodeDecodeError:  # decoded a block at a time, so find the line itself
             line = _first_bad_line(path)
             raise SystemExit(f"{path}{'' if line is None else f', line {line}'}: not UTF-8 "
@@ -161,14 +160,35 @@ def _keyed(path: Path, value):
     return rows
 
 
-def read_done(path: Path) -> dict:
-    """The rows already in bins.csv, by evaluation key; see _keyed."""
-    return _keyed(path, lambda r: r)
-
-
 def read_pilot(path: Path) -> dict:
-    """Pilot 1's cost of each evaluation, by key, from its blocks.csv; see _keyed."""
-    return _keyed(path, lambda r: float(r["cost"]))
+    """Pilot 1's cost of each evaluation, by key, read as pilot 1 reads its blocks.csv.
+
+    block_scoring.read_table skips a byte order mark and leaves out a last line cut short
+    and a row short of a value, so the costs are the ones pilot 1 summarised.
+
+    Raises:
+        SystemExit: The table cannot be read, or a record's key or cost cannot be, or an
+            evaluation is held twice; the message names the record.
+    """
+    try:
+        table = block_scoring.read_table(path, required=True)
+    except block_scoring.TableError as error:
+        raise SystemExit(str(error)) from None
+    costs: dict = {}
+    for number, r in enumerate(table.rows, start=1):
+        where = f"{path}, record {number}"
+        try:
+            key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
+        except (TypeError, ValueError, KeyError):
+            raise SystemExit(f"{where}: its key cannot be read") from None
+        try:
+            cost = float(r["cost"])
+        except (TypeError, ValueError, KeyError):
+            raise SystemExit(f"{where}: its cost cannot be read") from None
+        if key in costs:
+            raise SystemExit(f"{where}: {key} is held twice")
+        costs[key] = cost
+    return costs
 
 
 def missing_from_pilot(keys, pilot: dict) -> list:

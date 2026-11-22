@@ -345,17 +345,35 @@ def test_a_scored_row_with_a_negative_term_is_refused():
     assert psb.mismatched({KEY: row}, {KEY: 10.0}) == [KEY]
 
 
-def test_pilot_1_s_table_with_an_unreadable_key_is_refused_naming_its_line(tmp_path):
-    """As bins.csv is read (round 8)."""
+PILOT_HEADER = "kind,label,row,simulations,block,seed_offset,cost\n"
+
+
+def test_pilot_1_s_table_is_read_as_pilot_1_reads_it(tmp_path):
+    """Its byte order mark skipped, a last line cut short left out (round 9)."""
     path = tmp_path / "blocks.csv"
-    path.write_text("kind,label,row,simulations,block,seed_offset,cost\n"
-                    "vector,literature,0,300,0,0,1.0\nvector,literature,,300,1,0,1.0\n",
-                    encoding="utf-8")  # fmt: skip
-    with pytest.raises(SystemExit, match="line 3"):
-        psb.read_pilot(path)
-    path.write_text("kind,label,row,simulations,block,seed_offset,cost\n"
-                    "vector,literature,0,300,0,0,1.5\n", encoding="utf-8")  # fmt: skip
+    path.write_bytes(
+        b"\xef\xbb\xbf"
+        + PILOT_HEADER.encode()
+        + b"vector,literature,0,300,0,0,1.5\nvector,literature,0,300,1,0,13.4"
+    )
     assert psb.read_pilot(path) == {("vector", 0, 300, 0): 1.5}
+
+
+def test_pilot_1_s_table_with_an_unreadable_key_is_refused_naming_its_record(tmp_path):
+    """Named, not a traceback (round 8)."""
+    path = tmp_path / "blocks.csv"
+    path.write_text(PILOT_HEADER + "vector,literature,0,300,0,0,1.0\n"
+                    "vector,literature,x,300,1,0,1.0\n", encoding="utf-8")  # fmt: skip
+    with pytest.raises(SystemExit, match="record 2: its key cannot be read"):
+        psb.read_pilot(path)
+
+
+def test_pilot_1_s_table_with_an_unreadable_cost_says_so(tmp_path):
+    """The cost is the bad cell, not the key (round 9)."""
+    path = tmp_path / "blocks.csv"
+    path.write_text(PILOT_HEADER + "vector,literature,0,300,0,0,abc\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="record 1: its cost cannot be read"):
+        psb.read_pilot(path)
 
 
 def test_a_bad_line_is_found_with_the_csv_reader_s_line_endings(tmp_path):
