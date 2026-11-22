@@ -203,7 +203,7 @@ def test_a_short_or_unreadable_row_is_refused_not_a_traceback(field, value):
 
 
 def _write(path, rows):
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=psb.COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
@@ -337,3 +337,31 @@ def _integer(text):
         return True
     except ValueError:
         return False
+
+
+def test_a_scored_row_with_a_negative_term_is_refused():
+    """Each term is a weighted square (round 8)."""
+    row = _scored(term_0_1="5.0", term_0_2="-2.0")
+    assert psb.mismatched({KEY: row}, {KEY: 10.0}) == [KEY]
+
+
+def test_pilot_1_s_table_with_an_unreadable_key_is_refused_naming_its_line(tmp_path):
+    """As bins.csv is read (round 8)."""
+    path = tmp_path / "blocks.csv"
+    path.write_text("kind,label,row,simulations,block,seed_offset,cost\n"
+                    "vector,literature,0,300,0,0,1.0\nvector,literature,,300,1,0,1.0\n",
+                    encoding="utf-8")  # fmt: skip
+    with pytest.raises(SystemExit, match="line 3"):
+        psb.read_pilot(path)
+    path.write_text("kind,label,row,simulations,block,seed_offset,cost\n"
+                    "vector,literature,0,300,0,0,1.5\n", encoding="utf-8")  # fmt: skip
+    assert psb.read_pilot(path) == {("vector", 0, 300, 0): 1.5}
+
+
+def test_a_bad_line_is_found_with_the_csv_reader_s_line_endings(tmp_path):
+    """A lone carriage return ends a line for csv; none found gives no line (round 8)."""
+    path = tmp_path / "bins.csv"
+    path.write_bytes(b"a\rb\r\xff\n")
+    assert psb._first_bad_line(path) == 3
+    path.write_bytes(b"a\nb\n")
+    assert psb._first_bad_line(path) is None

@@ -104,8 +104,8 @@ def _unusable(r: dict, expected: float) -> bool:
     if infections < 0 or contacts < 0:  # failed, written as a fresh failed row is
         return not (contacts == infections == -1 and cost == fo.FAILED_EVALUATION_COST
                     and np.isnan(attack) and not any(terms))  # fmt: skip
-    if infections > contacts or not np.all(np.isfinite([attack, *terms])):
-        return True  # more infected than met, or a cost that is no cost
+    if infections > contacts or not np.all(np.isfinite([attack, *terms])) or min(terms) < 0:
+        return True  # more infected than met, or a cost that is no weighted square
     return not np.isclose(sum(terms), attack, rtol=1e-9, atol=1e-12)
 
 
@@ -114,47 +114,61 @@ def mismatched(done: dict, pilot: dict) -> list:
 
     A row is unusable when a cell is missing or no number; when its cost is not pilot 1's, as
     the table given now has it; when it failed but was not charged FAILED_EVALUATION_COST with
-    no terms, as a fresh failed row is written; or when its terms, which leaving a bin out
-    uses, do not add up to its attack-rate cost, as a fresh row's must.
+    no terms, counts of -1 and a NaN attack, as a fresh failed row is written; when it counts
+    more infections than contacts, or has a term that is negative or not finite; or when its
+    terms, which leaving a bin out uses, do not add up to its attack-rate cost.
     """
     return [key for key, r in done.items() if key not in pilot or _unusable(r, pilot[key])]
 
 
-def _first_bad_line(path: Path) -> int:
-    """The number of the file's first line that is not UTF-8."""
+def _first_bad_line(path: Path) -> int | None:
+    """The number of the file's first line that is not UTF-8, lines ended as csv ends them."""
     with open(path, "rb") as f:
-        for number, line in enumerate(f, start=1):
-            try:
-                line.decode("utf-8")
-            except UnicodeDecodeError:
-                return number
-    return 0
+        lines = f.read().splitlines()  # \n, \r\n and a lone \r
+    for number, line in enumerate(lines, start=1):
+        try:
+            line.decode("utf-8")
+        except UnicodeDecodeError:
+            return number
+    return None
 
 
-def read_done(path: Path) -> dict:
-    """The rows already in bins.csv, by evaluation key (kind, row, S, block).
+def _keyed(path: Path, value):
+    """Each row of a CSV table by its evaluation key (kind, row, S, block), as value(row).
 
     Raises:
-        SystemExit: A row is not UTF-8, its key cannot be read, or an evaluation is held
-            twice; the message names the file's line.
+        SystemExit: A row is not UTF-8, its key or value cannot be read, or an evaluation is
+            held twice; the message names the file's line.
     """
-    done: dict = {}
+    rows: dict = {}
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         try:
             for r in reader:
+                where = f"{path}, line {reader.line_num}"
                 try:
                     key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
+                    item = value(r)
                 except (TypeError, ValueError, KeyError):
-                    raise SystemExit(
-                        f"{path}, line {reader.line_num}: its key cannot be read"
-                    ) from None
-                if key in done:
-                    raise SystemExit(f"{path}, line {reader.line_num}: {key} is held twice")
-                done[key] = r
+                    raise SystemExit(f"{where}: its key cannot be read") from None
+                if key in rows:
+                    raise SystemExit(f"{where}: {key} is held twice")
+                rows[key] = item
         except UnicodeDecodeError:  # decoded a block at a time, so find the line itself
-            raise SystemExit(f"{path}, line {_first_bad_line(path)}: not UTF-8 text") from None
-    return done
+            line = _first_bad_line(path)
+            raise SystemExit(f"{path}{'' if line is None else f', line {line}'}: not UTF-8 "
+                             "text") from None  # fmt: skip
+    return rows
+
+
+def read_done(path: Path) -> dict:
+    """The rows already in bins.csv, by evaluation key; see _keyed."""
+    return _keyed(path, lambda r: r)
+
+
+def read_pilot(path: Path) -> dict:
+    """Pilot 1's cost of each evaluation, by key, from its blocks.csv; see _keyed."""
+    return _keyed(path, lambda r: float(r["cost"]))
 
 
 def missing_from_pilot(keys, pilot: dict) -> list:
@@ -171,9 +185,7 @@ def main() -> None:
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     path = args.out_dir / "bins.csv"
-    with open(args.pilot_blocks, newline="") as f:
-        pilot = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"])):
-                 float(r["cost"]) for r in csv.DictReader(f)}  # fmt: skip
+    pilot = read_pilot(args.pilot_blocks)
     new = needs_header(path)  # before reading it: refuses a header or a last row cut short
     done = {} if new else read_done(path)
     population, lower, upper = pilot_noise._population_and_bounds()
@@ -196,7 +208,7 @@ def main() -> None:
             f"{differing[0]}, differ from {args.pilot_blocks}"
         )
     todo = [t for t in every if t.key not in done]
-    with open(path, "a", newline="") as out:
+    with open(path, "a", newline="", encoding="utf-8") as out:
         writer = csv.DictWriter(out, fieldnames=COLUMNS)
         if new:
             writer.writeheader()
