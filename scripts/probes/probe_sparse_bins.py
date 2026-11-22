@@ -185,6 +185,8 @@ def read_pilot(path: Path) -> dict:
             cost = float(r["cost"])
         except (TypeError, ValueError, KeyError):
             raise SystemExit(f"{where}: its cost cannot be read") from None
+        if not np.isfinite(cost):  # found now, not after simulating its evaluation
+            raise SystemExit(f"{where}: its cost is not finite")
         if key in costs:
             raise SystemExit(f"{where}: {key} is held twice")
         costs[key] = cost

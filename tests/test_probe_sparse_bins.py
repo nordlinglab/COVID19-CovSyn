@@ -383,3 +383,12 @@ def test_a_bad_line_is_found_with_the_csv_reader_s_line_endings(tmp_path):
     assert psb._first_bad_line(path) == 3
     path.write_bytes(b"a\nb\n")
     assert psb._first_bad_line(path) is None
+
+
+@pytest.mark.parametrize("cost", ["nan", "inf", "-inf"])
+def test_pilot_1_s_table_with_a_cost_that_is_not_finite_is_refused(tmp_path, cost):
+    """Found before any simulation, naming the record (round 9)."""
+    path = tmp_path / "blocks.csv"
+    path.write_text(PILOT_HEADER + f"vector,literature,0,300,0,0,{cost}\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="record 1: its cost is not finite"):
+        psb.read_pilot(path)
