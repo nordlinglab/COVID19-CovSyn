@@ -481,3 +481,25 @@ def test_a_long_row_left_out_is_named_among_those_not_counted(tmp_path):
                     "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
     with pytest.raises(SystemExit, match=r"finished row 1 \(cut, short or long rows not counted\)"):
         psb.read_pilot(path)
+
+
+def test_a_missing_cheng_input_stops_before_the_output_is_made(tmp_path, monkeypatch):
+    """The Cheng attack rates are read before anything is written (round 12)."""
+    pilot = tmp_path / "blocks.csv"
+    pilot.write_text(PILOT_HEADER, encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["probe", str(out), str(pilot)])
+    monkeypatch.setattr(psb, "missing_from_pilot", lambda keys, pilot: [])
+    monkeypatch.setattr(psb.block_scoring, "objective_pools", lambda workers: (None, None))
+
+    real_open = open
+
+    def unreadable(path, *args, **kwargs):  # the probe's own read of the Cheng inputs only
+        if str(path).endswith("processed_contact_tracing_data.pkl"):
+            raise SystemExit("no Cheng inputs")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(psb, "open", unreadable, raising=False)
+    with pytest.raises(SystemExit, match="no Cheng inputs"):
+        psb.main()
+    assert not out.exists()
