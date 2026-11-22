@@ -1,0 +1,70 @@
+{
+ "settings": {
+  "command": "covsyn-pilot-noise",
+  "commit": "054e9e0817bb6c994a172d3ebdbc486d217d7e34",
+  "rows": {
+   "literature": 0,
+   "run19": 2,
+   "random_a": 95,
+   "random_b": 164
+  },
+  "row_seed": 20261121,
+  "row_sampler": "numpy.random.default_rng(row_seed).choice(rows 3-255, 2, replace=False)",
+  "stream": 201,
+  "blocks": {
+   "300": [
+    0,
+    29
+   ],
+   "1000": [
+    9,
+    38
+   ],
+   "3000": [
+    13,
+    42
+   ],
+   "10000": [
+    13,
+    42
+   ]
+  },
+  "spread": {
+   "simulations": 10000,
+   "blocks": [
+    43,
+    44
+   ],
+   "rows": 256
+  },
+  "threshold_fraction": 0.1
+ },
+ "rng_seed": null,
+ "workers": 24,
+ "machine": {
+  "cpu_model": "Apple M3 Ultra",
+  "performance_cores": 24,
+  "core_method": "sysctl hw.perflevel0.physicalcpu",
+  "platform": "macOS-15.6-arm64-arm-64bit-Mach-O"
+ },
+ "versions": {
+  "python": "3.13.14",
+  "packages": {
+   "bidict": "0.23.1",
+   "lifelines": "0.30.0",
+   "matplotlib": "3.10.3",
+   "networkx": "3.4.2",
+   "numpy": "2.2.6",
+   "openpyxl": "3.1.5",
+   "pandas": "2.2.3",
+   "psutil": "7.2.2",
+   "scikit-learn": "1.6.1",
+   "scipy": "1.15.3",
+   "seaborn": "0.13.2",
+   "tqdm": "4.67.1",
+   "xlrd": "2.0.2"
+  }
+ },
+ "uv_lock_sha256": "872bc73ea157016881c4f2bac1c523d73cf66d21e63b35bc9d7931460c5bb391",
+ "initial_population_sha256": "672fc7c37b80cadae094809585db58f90071913ab649190e0bc1a829837bf31a"
+}

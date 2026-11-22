@@ -207,3 +207,7 @@ tools/
 !/results/tables/
 /results/tables/*
 !/results/tables/phaseD_run10/
+# Task 9: the pilots' summaries and commands, which T9 in docs/covsyn_decisions.md rests on;
+# their per-block tables (blocks.csv, screening.csv, confirmation.csv) stay on the Mac.
+!/results/tables/20261122-075442_054e9e0_pilot-noise/
+/results/tables/20261122-075442_054e9e0_pilot-noise/blocks.csv
