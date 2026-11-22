@@ -24,6 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from covsyn.calibration import seed_streams
+from covsyn.calibration.revalidation import ARCHIVE_CANDIDATES as TASK10_CANDIDATES
 from covsyn.pipeline.config import PipelineConfig
 from covsyn.runtime import measure, runs
 
@@ -210,6 +211,11 @@ def revalidate(ctx: Context) -> None:
             str(ctx.config.revalidation_blocks),
             "--stream",
             str(ctx.config.validation_stream),
+            # Task 10: production re-scores its archive's best k at its own S, which serves
+            # the selection and cost_uncertainty.csv alike (decision of 2026-11-22).
+            *(["--simulations", str(ctx.config.simulations),
+               "--archive-best", str(TASK10_CANDIDATES)]
+              if ctx.config.mode == "production" else []),
         ],
         "revalidation",
         output=ctx.layout.logs / "revalidate.log",
