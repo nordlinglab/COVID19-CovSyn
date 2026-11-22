@@ -422,7 +422,7 @@ def test_the_row_named_counts_finished_rows_and_says_so(tmp_path):
     path = tmp_path / "blocks.csv"
     path.write_text(PILOT_HEADER + "vector,lit,0,300,0,0,1.0\nvector,lit,0,300\n"
                     "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
-    with pytest.raises(SystemExit, match=r"finished row 2 \(cut, short or long rows not counted\)"):
+    with pytest.raises(SystemExit, match=r"finished row 2 \(blank, cut, short or long rows"):
         psb.read_pilot(path)
 
 
@@ -479,7 +479,7 @@ def test_a_long_row_left_out_is_named_among_those_not_counted(tmp_path):
     path = tmp_path / "blocks.csv"
     path.write_text(PILOT_HEADER + "vector,lit,0,300,0,0,1.0,extra\n"
                     "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
-    with pytest.raises(SystemExit, match=r"finished row 1 \(cut, short or long rows not counted\)"):
+    with pytest.raises(SystemExit, match=r"finished row 1 \(blank, cut, short or long rows"):
         psb.read_pilot(path)
 
 
@@ -504,3 +504,12 @@ def test_a_missing_cheng_input_stops_before_the_output_is_made(tmp_path, monkeyp
     with pytest.raises(SystemExit, match="no Cheng inputs"):
         psb.main()
     assert called and not out.exists()
+
+
+def test_a_blank_line_left_out_is_named_among_those_not_counted(tmp_path):
+    """The csv reader skips blank lines too (round 13)."""
+    path = tmp_path / "blocks.csv"
+    path.write_text(PILOT_HEADER + "vector,lit,0,300,0,0,1.0\n\nvector,lit,x,300,2,0,1.0\n",
+                    encoding="utf-8")  # fmt: skip
+    with pytest.raises(SystemExit, match=r"finished row 2 \(blank, cut, short or long rows"):
+        psb.read_pilot(path)
