@@ -153,7 +153,8 @@ def read_table(path: Path, warn: bool = True, required: bool = False) -> Table:
     Nothing, no mark and exists False when it does not exist: a pilot's first read, which then
     starts the table. ``required`` is for its later reads, of a table it has seen: one gone
     meanwhile stops the pilot instead. A last line without its newline, which a kill cut off,
-    and a row short of a value are not finished evaluations and are left out. A leading UTF-8
+    and a row short of a value or with one too many are not finished evaluations and are left
+    out, as the csv reader leaves out a blank line. A leading UTF-8
     byte order mark, which a spreadsheet adds when it saves the table as "CSV UTF-8", is
     skipped, with a warning unless ``warn`` is False: it may have shortened the costs it wrote
     back. The mark is judged from the bytes the rows come from, so a pilot's later reads in a
