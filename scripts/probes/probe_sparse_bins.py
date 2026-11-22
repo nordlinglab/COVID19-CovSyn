@@ -104,6 +104,8 @@ def _unusable(r: dict, expected: float) -> bool:
     if infections < 0 or contacts < 0:  # failed, written as a fresh failed row is
         return not (contacts == infections == -1 and cost == fo.FAILED_EVALUATION_COST
                     and np.isnan(attack) and not any(terms))  # fmt: skip
+    if infections > contacts or not np.all(np.isfinite([attack, *terms])):
+        return True  # more infected than met, or a cost that is no cost
     return not np.isclose(sum(terms), attack, rtol=1e-9, atol=1e-12)
 
 
@@ -118,23 +120,40 @@ def mismatched(done: dict, pilot: dict) -> list:
     return [key for key, r in done.items() if key not in pilot or _unusable(r, pilot[key])]
 
 
+def _first_bad_line(path: Path) -> int:
+    """The number of the file's first line that is not UTF-8."""
+    with open(path, "rb") as f:
+        for number, line in enumerate(f, start=1):
+            try:
+                line.decode("utf-8")
+            except UnicodeDecodeError:
+                return number
+    return 0
+
+
 def read_done(path: Path) -> dict:
     """The rows already in bins.csv, by evaluation key (kind, row, S, block).
 
     Raises:
-        SystemExit: A row's key cannot be read, or an evaluation is held twice; the message
-            names the line.
+        SystemExit: A row is not UTF-8, its key cannot be read, or an evaluation is held
+            twice; the message names the file's line.
     """
     done: dict = {}
-    with open(path, newline="") as f:
-        for line, r in enumerate(csv.DictReader(f), start=2):
-            try:
-                key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
-            except (TypeError, ValueError, KeyError):
-                raise SystemExit(f"{path}, line {line}: its key cannot be read") from None
-            if key in done:
-                raise SystemExit(f"{path}, line {line}: {key} is held twice")
-            done[key] = r
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        try:
+            for r in reader:
+                try:
+                    key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
+                except (TypeError, ValueError, KeyError):
+                    raise SystemExit(
+                        f"{path}, line {reader.line_num}: its key cannot be read"
+                    ) from None
+                if key in done:
+                    raise SystemExit(f"{path}, line {reader.line_num}: {key} is held twice")
+                done[key] = r
+        except UnicodeDecodeError:  # decoded a block at a time, so find the line itself
+            raise SystemExit(f"{path}, line {_first_bad_line(path)}: not UTF-8 text") from None
     return done
 
 

@@ -279,3 +279,61 @@ def _number(text):
         return True
     except ValueError:
         return False
+
+
+def test_a_row_that_is_not_utf_8_is_refused_naming_its_line(tmp_path):
+    """A damaged byte after the header: named, not a traceback (round 7)."""
+    path = tmp_path / "bins.csv"
+    _write(path, [_scored()])
+    with open(path, "ab") as f:
+        f.write(b"vector,\xff\n")
+    with pytest.raises(SystemExit, match="line 3"):
+        psb.read_done(path)
+
+
+def test_the_line_named_is_the_file_s_own_line(tmp_path):
+    """After a blank line, the record count and the line differ (round 7)."""
+    path = tmp_path / "bins.csv"
+    _write(path, [_scored()])
+    with open(path, "a", newline="") as f:
+        f.write("\n")
+        csv.DictWriter(f, fieldnames=psb.COLUMNS).writerow(_scored(block="x"))
+    with pytest.raises(SystemExit, match="line 4"):
+        psb.read_done(path)
+
+
+@pytest.mark.parametrize("changes", [
+    {"household_0_3_contacts": "1", "household_0_3_infections": "2"},  # more infected than met
+    {"attack": "inf", "term_0_1": "inf"},  # adds up, but no cost
+])  # fmt: skip
+def test_a_scored_row_that_cannot_be_real_is_refused(changes):
+    """Infections within contacts, and finite costs (round 7)."""
+    assert psb.mismatched({KEY: _scored(**changes)}, {KEY: 10.0}) == [KEY]
+
+
+@given(field=st.sampled_from(["household_0_3_contacts", "household_0_3_infections"]),
+       text=st.text().filter(lambda t: not _integer(t)))  # fmt: skip
+def test_a_count_that_is_no_integer_makes_a_row_unusable(field, text):
+    """Property: counts are integers; '1.5' or 'nan' refuse the row (round 7)."""
+    assert psb.mismatched({KEY: _scored(**{field: text})}, {KEY: 10.0}) == [KEY]
+
+
+@given(field=st.sampled_from(["row", "simulations", "block"]),
+       text=st.text(alphabet=st.characters(blacklist_categories=("Cs",),
+                                           blacklist_characters="\r\n\x00"))
+       .filter(lambda t: not _integer(t)))  # fmt: skip
+def test_a_key_that_is_no_integer_is_refused_naming_its_line(tmp_path_factory, field, text):
+    """Property: any key cell int() cannot read stops the resume at its line (round 7)."""
+    path = tmp_path_factory.mktemp("done") / "bins.csv"
+    _write(path, [_scored(**{field: text})])
+    with pytest.raises(SystemExit, match="line 2"):
+        psb.read_done(path)
+
+
+def _integer(text):
+    """Whether int() reads it."""
+    try:
+        int(text)
+        return True
+    except ValueError:
+        return False
