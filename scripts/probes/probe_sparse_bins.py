@@ -171,13 +171,15 @@ def read_pilot(path: Path) -> dict:
             evaluation is held twice; the message names the record.
     """
     try:
-        table = block_scoring.read_table(path, required=True)
+        table = block_scoring.read_table(path)
     except block_scoring.TableError as error:
         raise SystemExit(str(error)) from None
     except UnicodeDecodeError:
         line = _first_bad_line(path)
         raise SystemExit(f"{path}{'' if line is None else f', line {line}'}: not UTF-8 "
                          "text") from None  # fmt: skip
+    if not table.exists:
+        raise SystemExit(f"{path} does not exist")
     costs: dict = {}
     for number, r in enumerate(table.rows, start=1):
         where = f"{path}, record {number}"

@@ -409,3 +409,9 @@ def test_a_pilot_table_that_is_not_utf_8_is_refused_naming_its_line(tmp_path):
     path.write_bytes(PILOT_HEADER.encode() + b"vector,lit\xe9,0,300,0,0,1.0\n")
     with pytest.raises(SystemExit, match="blocks.csv, line 2: not UTF-8"):
         psb.read_pilot(path)
+
+
+def test_a_pilot_table_that_does_not_exist_is_said_not_to(tmp_path):
+    """Not "went missing while the pilot ran": the probe never saw it (round 10)."""
+    with pytest.raises(SystemExit, match="nope.csv does not exist"):
+        psb.read_pilot(tmp_path / "nope.csv")
