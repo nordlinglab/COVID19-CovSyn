@@ -165,13 +165,16 @@ def read_pilot(path: Path) -> dict:
     """Pilot 1's cost of each evaluation, by key, read as pilot 1 reads its blocks.csv.
 
     block_scoring.read_table skips a byte order mark and leaves out a last line cut short
-    and a row short of a value, so the costs are the ones pilot 1 summarised.
+    and a row short of a value or with one too many, so the costs are the ones pilot 1
+    summarised.
 
     Raises:
         SystemExit: The path does not exist, or is a link to a file that does not; the table
             cannot be one (read_table's refusal); it is not UTF-8, named by its first bad
-            line; or a row's key or cost cannot be read, its cost is not finite, or an
-            evaluation is held twice, named by its number among the rows read_table keeps.
+            line where one is found; or a row's key or cost cannot be read, its cost is not
+            finite, or an evaluation is held twice, named by its number among the rows
+            read_table keeps.
+        OSError: Another failure to read it, such as an I/O error, passed through as is.
     """
     try:
         table = block_scoring.read_table(path)
