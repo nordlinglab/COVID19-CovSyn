@@ -77,6 +77,12 @@ def validation_seed_blocks(
 ARCHIVE_HEADER = "firefly_archive v2: entered blocks params... mean_cost (Task 8)"
 
 
+def _hide_no_data() -> None:
+    """Hide numpy's warning that a file holds no rows, and no other (in catch_warnings)."""
+    warnings.filterwarnings("ignore", message=".*(no data|[Ee]mpty input file).*",
+                            category=UserWarning)  # fmt: skip
+
+
 def _rows(path: Path, **kwargs: Any) -> np.ndarray:
     """np.loadtxt of a run's file, whose errors name the file, as loadtxt's do not."""
     try:
@@ -104,7 +110,7 @@ def read_archive(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """
     version_2 = _first_line(path).startswith("# " + ARCHIVE_HEADER)
     with warnings.catch_warnings():  # a file of no rows is an empty archive, not a mistake
-        warnings.simplefilter("ignore", UserWarning)
+        _hide_no_data()
         rows = _rows(path, ndmin=2, encoding="utf-8")  # the header is a comment
     if rows.size == 0:
         return np.empty((0, 0)), np.empty(0)
@@ -129,7 +135,7 @@ def ranked_archive(path: Path, k: int = ARCHIVE_CANDIDATES) -> tuple[np.ndarray,
     if _first_line(path).strip() != f"# {ARCHIVE_HEADER}":
         raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
     with warnings.catch_warnings():  # a file of no rows is an empty archive, not a mistake
-        warnings.simplefilter("ignore", UserWarning)
+        _hide_no_data()
         rows = _rows(path, ndmin=2, encoding="utf-8")
     if rows.size == 0:
         return np.empty((0, 0)), np.empty(0)
@@ -182,8 +188,7 @@ def load_candidates(firefly_dir: Path, archive_best: int | None = None
     result_path = Path(firefly_dir) / "firefly_result.txt"
     best_path = Path(firefly_dir) / "firefly_best.txt"
     with warnings.catch_warnings():  # a file of no rows is refused below, by name
-        warnings.filterwarnings("ignore", message=".*(no data|[Ee]mpty input file).*",
-                                category=UserWarning)  # fmt: skip
+        _hide_no_data()
         population = _rows(result_path, ndmin=2)
         bests = _rows(best_path, ndmin=2)
     for path, table in ((result_path, population), (best_path, bests)):

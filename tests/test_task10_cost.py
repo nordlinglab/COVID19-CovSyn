@@ -272,3 +272,25 @@ def test_files_of_costs_alone_are_refused(tmp_path):
     (run / "firefly_best.txt").write_text("0 5.0\n")
     with pytest.raises(SystemExit, match="firefly_result.txt.*no parameters"):
         rv.main([str(run), str(tmp_path / "out"), "30", "--workers", "1"])
+
+
+@pytest.mark.parametrize("read", ["read_archive", "ranked_archive", "load_candidates"])
+def test_other_warnings_while_reading_still_show(tmp_path, monkeypatch, read):
+    """Only numpy's no-data warning is hidden, wherever a run's files are read (round 9)."""
+    import warnings
+
+    _archive(tmp_path, [[0, 1, 0.1, 0.2, 0.3, 9.0]])
+    np.savetxt(tmp_path / "firefly_result.txt", np.zeros((2, DIM + 1)))
+    np.savetxt(tmp_path / "firefly_best.txt", np.zeros((2, DIM + 2)))
+    real = np.loadtxt
+
+    def noisy(*args, **kwargs):
+        warnings.warn("another warning", UserWarning, stacklevel=2)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(rv.np, "loadtxt", noisy)
+    arguments = {"read_archive": (tmp_path / "firefly_archive.txt",),
+                 "ranked_archive": (tmp_path / "firefly_archive.txt", 10),
+                 "load_candidates": (tmp_path,)}[read]  # fmt: skip
+    with pytest.warns(UserWarning, match="another warning"):
+        getattr(rv, read)(*arguments)
