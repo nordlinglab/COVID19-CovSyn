@@ -451,8 +451,7 @@ def test_a_resume_keeps_the_workers_the_pilot_started_with(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("recorded", [True, 0, -2, "8"])
-def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, capsys,
-                                                         recorded):
+def test_a_recorded_worker_count_out_of_range_is_refused(tmp_path, monkeypatch, capsys, recorded):
     """Not a traceback, nor two different counts for the runs and the pools."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
@@ -759,9 +758,7 @@ def test_a_config_turned_into_a_list_is_named_once(tmp_path, monkeypatch, capsys
     """Changed between the two reads: record_workers' refusal and the pilot name it once."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(
-        json.dumps({"settings": {"simulations": 300}, "workers": 2})
-    )
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
     real = ps.block_scoring.record_workers
 
     def changed_meanwhile(out_dir, workers):
@@ -832,9 +829,7 @@ def test_a_config_nested_too_deep_by_the_second_read_is_a_command_error(
     """Rewritten between the reads: the record step's RecursionError, the run named once."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    (out / "config.json").write_text(
-        json.dumps({"settings": {"simulations": 300}, "workers": 2})
-    )
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300}, "workers": 2}))
 
     def too_deep(out_dir, workers):
         raise RecursionError("maximum recursion depth exceeded while decoding a JSON array")
@@ -889,13 +884,21 @@ def test_json_saved_with_a_byte_order_mark_still_reads(tmp_path, monkeypatch):
     assert json.loads(config.read_text(encoding="utf-8-sig"))["workers"] == 3
 
 
-@pytest.mark.parametrize("choice", [{"chosen_simulations": 300.0}, {"chosen_simulations": "300"},
-                                    {"chosen_simulations": True}, {"chosen_simulations": 0},
-                                    {"chosen_simulations": 10_001},
-                                    {"chosen_simulations": 300, "failed_evaluations": "0"},
-                                    {"chosen_simulations": 300, "failed_evaluations": -1}])
-def test_a_pilot_1_choice_of_the_wrong_kind_is_refused_before_any_run(tmp_path, monkeypatch,
-                                                                      choice):
+@pytest.mark.parametrize(
+    "choice",
+    [
+        {"chosen_simulations": 300.0},
+        {"chosen_simulations": "300"},
+        {"chosen_simulations": True},
+        {"chosen_simulations": 0},
+        {"chosen_simulations": 10_001},
+        {"chosen_simulations": 300, "failed_evaluations": "0"},
+        {"chosen_simulations": 300, "failed_evaluations": -1},
+    ],
+)
+def test_a_pilot_1_choice_of_the_wrong_kind_is_refused_before_any_run(
+    tmp_path, monkeypatch, choice
+):
     """S a whole number of simulations a block holds, failures a count: else exit 2, no run."""
     noise = tmp_path / "noise"
     noise.mkdir()
@@ -908,8 +911,9 @@ def test_a_pilot_1_choice_of_the_wrong_kind_is_refused_before_any_run(tmp_path, 
 
 
 @pytest.mark.parametrize("simulations", [300.0, "300", True, 0, 10_001, None])
-def test_a_resumed_pilot_s_recorded_s_of_the_wrong_kind_is_refused(tmp_path, monkeypatch,
-                                                                   capsys, simulations):
+def test_a_resumed_pilot_s_recorded_s_of_the_wrong_kind_is_refused(
+    tmp_path, monkeypatch, capsys, simulations
+):
     """The resume's S passes the same rule as pilot 1's choice: else exit 2, no run."""
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
@@ -1027,9 +1031,10 @@ def test_a_full_disk_in_pilot_2_s_tables_keeps_its_traceback(tmp_path, monkeypat
     (noise / "choice.json").write_text(json.dumps({"chosen_simulations": 300}))
     monkeypatch.setattr(ps, "_evaluator", lambda workers: (_evaluate, _threads))
     optimiser = _Optimiser()
-    monkeypatch.setattr("covsyn.pipeline.runner.run_module",
-                        lambda args, output, append, env, keep_fds=(): optimiser(args, output,
-                                                                                 append, env))
+    monkeypatch.setattr(
+        "covsyn.pipeline.runner.run_module",
+        lambda args, output, append, env, keep_fds=(): optimiser(args, output, append, env),
+    )
     real_open = os.open
 
     def full(p, flags, *args, **kwargs):

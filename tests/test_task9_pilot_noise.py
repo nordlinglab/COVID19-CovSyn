@@ -109,8 +109,13 @@ def test_the_summary_gives_each_vector_s_mean_and_sd_at_each_s():
     rows = _synthetic({s: 1.0 for s in pn.BLOCKS}, 10.0)
     summary = pn.summarise(rows)
     for line in summary["vectors"]:
-        costs = [r["cost"] for r in rows if r["kind"] == "vector"
-                 and r["label"] == line["label"] and r["simulations"] == line["simulations"]]
+        costs = [
+            r["cost"]
+            for r in rows
+            if r["kind"] == "vector"
+            and r["label"] == line["label"]
+            and r["simulations"] == line["simulations"]
+        ]
         assert line["blocks"] == 30
         assert line["mean"] == pytest.approx(np.mean(costs))
         assert line["sd"] == pytest.approx(np.std(costs, ddof=1))
@@ -464,8 +469,9 @@ def test_a_mark_added_while_pilot_1_runs_is_warned_about(tmp_path, caplog, monke
 
 
 @pytest.mark.parametrize("recorded", [True, 0, -2, "8"])
-def test_a_recorded_worker_count_out_of_range_names_pilot_1(tmp_path, monkeypatch, capsys,
-                                                            recorded):
+def test_a_recorded_worker_count_out_of_range_names_pilot_1(
+    tmp_path, monkeypatch, capsys, recorded
+):
     """The pilot is there; one recorded value is wrong, and the refusal says so."""
     monkeypatch.setattr(pn, "_evaluator", lambda workers: (_evaluate, _threads))
     monkeypatch.setattr(pn, "_population_and_bounds",
