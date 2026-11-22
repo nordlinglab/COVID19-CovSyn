@@ -220,3 +220,23 @@ def test_a_malformed_file_is_refused_naming_the_run(tmp_path):
         rv.main([str(run), str(tmp_path / "out"), "30", "--archive-best", "10",
                  "--workers", "1"])  # fmt: skip
     assert str(stopped.value).count(str(run)) == 1
+
+
+def test_a_malformed_personal_best_file_is_named(tmp_path):
+    """Without --archive-best: the file that cannot be read, not only its run (round 6)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    np.savetxt(run / "firefly_result.txt", np.zeros((2, DIM + 1)))
+    (run / "firefly_best.txt").write_text("0 x 1 2 3\n")
+    with pytest.raises(SystemExit, match="firefly_best.txt"):
+        rv.main([str(run), str(tmp_path / "out"), "30", "--workers", "1"])
+
+
+def test_a_relative_run_directory_is_still_named(tmp_path, monkeypatch):
+    """Run as '.', whose name is in any message: the file's path is given (round 6)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "firefly_archive.txt").write_text(f"# {ARCHIVE_HEADER}\nx 1 2 3 4 5\n", "utf-8")
+    monkeypatch.chdir(run)
+    with pytest.raises(SystemExit, match="firefly_archive.txt"):
+        rv.main([".", str(tmp_path / "out"), "30", "--archive-best", "10", "--workers", "1"])

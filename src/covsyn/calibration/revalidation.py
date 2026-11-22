@@ -77,6 +77,23 @@ def validation_seed_blocks(
 ARCHIVE_HEADER = "firefly_archive v2: entered blocks params... mean_cost (Task 8)"
 
 
+def _rows(path: Path, **kwargs: Any) -> np.ndarray:
+    """np.loadtxt of a run's file, whose errors name the file, as loadtxt's do not."""
+    try:
+        return np.loadtxt(path, **kwargs)
+    except ValueError as error:  # UnicodeDecodeError too
+        raise ValueError(f"{path}: {error}") from error
+
+
+def _first_line(path: Path) -> str:
+    """A file's first line, as UTF-8; an error names the file."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.readline()
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{path}: not UTF-8 text ({error.reason})") from error
+
+
 def read_archive(path: Path) -> tuple[np.ndarray, np.ndarray]:
     """The vectors of a firefly_archive.txt and their costs, of either version.
 
@@ -85,11 +102,10 @@ def read_archive(path: Path) -> tuple[np.ndarray, np.ndarray]:
         scored on in the elite; before, each snapshot's cost on its generation's block. Both
         are empty when the file holds no rows.
     """
-    with open(path, encoding="utf-8") as f:
-        version_2 = f.readline().startswith("# " + ARCHIVE_HEADER)
+    version_2 = _first_line(path).startswith("# " + ARCHIVE_HEADER)
     with warnings.catch_warnings():  # a file of no rows is an empty archive, not a mistake
         warnings.simplefilter("ignore", UserWarning)
-        rows = np.loadtxt(path, ndmin=2, encoding="utf-8")  # the header is a comment
+        rows = _rows(path, ndmin=2, encoding="utf-8")  # the header is a comment
     if rows.size == 0:
         return np.empty((0, 0)), np.empty(0)
     first = 2 if version_2 else 1
@@ -110,12 +126,11 @@ def ranked_archive(path: Path, k: int = ARCHIVE_CANDIDATES) -> tuple[np.ndarray,
         ValueError: The archive is not Task 8's (v2): its rows are not elite vectors with
             their means.
     """
-    with open(path, encoding="utf-8") as f:
-        if f.readline().strip() != f"# {ARCHIVE_HEADER}":
-            raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
+    if _first_line(path).strip() != f"# {ARCHIVE_HEADER}":
+        raise ValueError(f"{path} is not a v2 archive (Task 8), so it has no means to rank")
     with warnings.catch_warnings():  # a file of no rows is an empty archive, not a mistake
         warnings.simplefilter("ignore", UserWarning)
-        rows = np.loadtxt(path, ndmin=2, encoding="utf-8")
+        rows = _rows(path, ndmin=2, encoding="utf-8")
     if rows.size == 0:
         return np.empty((0, 0)), np.empty(0)
     order = np.lexsort((np.arange(len(rows)), rows[:, 0], rows[:, -1]))
@@ -158,13 +173,14 @@ def load_candidates(firefly_dir: Path, archive_best: int | None = None
         (vectors, training costs), sorted by training cost.
 
     Raises:
-        ValueError: With archive_best, the archive is not Task 8's (v2).
+        ValueError: A file it reads is malformed, or, with archive_best, the archive is not
+            Task 8's (v2); the message names the file.
         OSError: A file it reads is missing or cannot be read.
     """
     if archive_best is not None:
         return ranked_archive(Path(firefly_dir) / "firefly_archive.txt", archive_best)
-    population = np.atleast_2d(np.loadtxt(Path(firefly_dir) / "firefly_result.txt"))
-    bests = np.atleast_2d(np.loadtxt(Path(firefly_dir) / "firefly_best.txt"))
+    population = np.atleast_2d(_rows(Path(firefly_dir) / "firefly_result.txt"))
+    bests = np.atleast_2d(_rows(Path(firefly_dir) / "firefly_best.txt"))
     rows = [population[:, :-1], bests[:, 1:-1]]
     values = [population[:, -1], bests[:, -1]]
     archive_path = Path(firefly_dir) / "firefly_archive.txt"
@@ -305,9 +321,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         vectors, train = load_candidates(firefly_dir, args.archive_best)
     except (ValueError, OSError) as error:  # such as an archive from before Task 8
-        message = str(error)  # loadtxt's names no file; the archive's own refusal does
-        raise SystemExit(message if str(firefly_dir) in message
-                         else f"{firefly_dir}: {message}") from None  # fmt: skip
+        raise SystemExit(str(error)) from None  # each names its file
     if not len(vectors):  # before anything is written or read
         reason = " (its archive is empty)" if args.archive_best is not None else ""
         raise SystemExit(f"{firefly_dir}: no candidates to revalidate{reason}")
