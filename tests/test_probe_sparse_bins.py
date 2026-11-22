@@ -64,3 +64,34 @@ def test_the_rows_without_a_bin_lose_its_term_only():
 def test_no_rows_give_no_rows():
     """Nothing to take the term from."""
     assert psb.without_bin([], 0, 1) == []
+
+
+def test_a_simulation_that_raises_is_charged_as_pilot_1_charged_it(monkeypatch):
+    """FAILED_EVALUATION_COST and no bins, not a crash of the whole re-scoring."""
+    from covsyn.calibration import fast_cost
+    from covsyn.calibration import firefly_optimizer as fo
+
+    def broken(P, seed_offset, clock):
+        raise RuntimeError("simulation failed")
+
+    monkeypatch.setattr(fast_cost, "_simulate_and_score", broken)
+    monkeypatch.setattr(fast_cost, "_WORKER_SIMULATIONS", 300)
+    cost, attack, bins = psb.score_bins(np.zeros(3), 0)
+    assert cost == fo.FAILED_EVALUATION_COST and np.isnan(attack) and bins is None
+
+
+def test_an_empty_or_missing_table_needs_a_header(tmp_path):
+    """A table killed before its header reached the disk is begun again."""
+    path = tmp_path / "bins.csv"
+    assert psb.needs_header(path)
+    path.write_text("")
+    assert psb.needs_header(path)
+    path.write_text("kind,cost\n")
+    assert not psb.needs_header(path)
+
+
+def test_every_evaluation_must_be_in_pilot_1_s_table():
+    """Another file, or another stream's, would check nothing: name what is missing."""
+    keys = [("vector", 0, 300, 0), ("vector", 2, 300, 0)]
+    assert psb.missing_from_pilot(keys, {("vector", 0, 300, 0): 1.0}) == [("vector", 2, 300, 0)]
+    assert psb.missing_from_pilot(keys, dict.fromkeys(keys, 1.0)) == []

@@ -412,20 +412,9 @@ def evaluate_candidate(P, seed_offset):
 def _evaluate_candidate(P, seed_offset):
     """evaluate_candidate's work, profiled or not."""
     clock = timings.TaskClock(_WORKER_STAGE_TIMING, _WORKER_PROCESS)
-    case_limit = (fo.SIMULATIONS_PER_EVALUATION if _WORKER_SIMULATIONS is None
-                  else _WORKER_SIMULATIONS)
     reduction_ns = 0
     try:
-        taiwan_data_matrix = (np.load('./variable/Taiwan_data_matrix.npy')
-                              if _WORKER_TAIWAN_MATRIX is None else _WORKER_TAIWAN_MATRIX)
-        seeds = list(range(seed_offset, seed_offset + case_limit))
-        # The candidate's simulations share one copy of the vector, as each of cost_function's
-        # tasks gets one by pickling, so the penalty reads the vector as given.
-        results = _simulate(seeds, copy.deepcopy(P), _WORKER_TAIWAN_MATRIX_COLUMNS, clock)
-        reducing = time.perf_counter_ns()
-        cost, parts = _cost(P, _pool([results], case_limit), case_limit, taiwan_data_matrix,
-                            *_WORKER_CHENG)
-        reduction_ns = time.perf_counter_ns() - reducing
+        cost, parts, _, reduction_ns = _simulate_and_score(P, seed_offset, clock)
     except Exception:
         traceback.print_exc()
         print('fast_cost: simulation failed for this parameter vector, charging '
@@ -435,6 +424,26 @@ def _evaluate_candidate(P, seed_offset):
     timing.update(start_unix_s=round(clock.start, 6), end_unix_s=round(time.time(), 6),
                   cost_reduction_s=timings.seconds(reduction_ns))
     return cost, parts, timing
+
+
+def _simulate_and_score(P, seed_offset, clock):
+    """The worker's S simulations from seed_offset, pooled and scored (Task 6).
+
+    Returns:
+        The cost, its parts, the pooled results (_pool's) and the reduction's nanoseconds.
+    """
+    case_limit = (fo.SIMULATIONS_PER_EVALUATION if _WORKER_SIMULATIONS is None
+                  else _WORKER_SIMULATIONS)
+    taiwan_data_matrix = (np.load('./variable/Taiwan_data_matrix.npy')
+                          if _WORKER_TAIWAN_MATRIX is None else _WORKER_TAIWAN_MATRIX)
+    seeds = list(range(seed_offset, seed_offset + case_limit))
+    # The candidate's simulations share one copy of the vector, as each of cost_function's
+    # tasks gets one by pickling, so the penalty reads the vector as given.
+    results = _simulate(seeds, copy.deepcopy(P), _WORKER_TAIWAN_MATRIX_COLUMNS, clock)
+    reducing = time.perf_counter_ns()
+    pooled = _pool([results], case_limit)
+    cost, parts = _cost(P, pooled, case_limit, taiwan_data_matrix, *_WORKER_CHENG)
+    return cost, parts, pooled, time.perf_counter_ns() - reducing
 
 
 def _failed_parts():

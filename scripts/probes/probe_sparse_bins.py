@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import copy
 import csv
 import json
 import pickle
@@ -54,16 +53,26 @@ def without_bin(rows: list[dict], group: int, bin_: int) -> list[dict]:
 
 
 def score_bins(P, seed_offset):
-    """One pool task: the cost, its attack-rate part and the pooled Cheng bins."""
-    simulations = fast_cost._WORKER_SIMULATIONS
-    seeds = list(range(seed_offset, seed_offset + simulations))
+    """One pool task: the cost, its attack-rate part and the pooled Cheng bins.
+
+    A simulation that raises is charged FAILED_EVALUATION_COST with no bins, as pilot 1 was.
+    """
     clock = timings.TaskClock(False, fast_cost._WORKER_PROCESS)
-    results = fast_cost._simulate(seeds, copy.deepcopy(P),
-                                  fast_cost._WORKER_TAIWAN_MATRIX_COLUMNS, clock)  # fmt: skip
-    pooled = fast_cost._pool([results], simulations)
-    cost, parts = fast_cost._cost(P, pooled, simulations, fast_cost._WORKER_TAIWAN_MATRIX,
-                                  *fast_cost._WORKER_CHENG)  # fmt: skip
+    try:
+        cost, parts, pooled, _ = fast_cost._simulate_and_score(P, seed_offset, clock)
+    except Exception:
+        return fo.FAILED_EVALUATION_COST, float("nan"), None
     return cost, parts["cost_attack_rate"], pooled[1]
+
+
+def needs_header(path: Path) -> bool:
+    """Whether the table is to be begun: missing, or killed before its header was written."""
+    return not path.exists() or path.stat().st_size == 0
+
+
+def missing_from_pilot(keys, pilot: dict) -> list:
+    """The evaluations pilot 1's table does not hold, so their costs could not be checked."""
+    return [key for key in keys if key not in pilot]
 
 
 def main() -> None:
@@ -89,13 +98,20 @@ def main() -> None:
     with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
         ct = pickle.load(f)
     cheng, weights = np.asarray(ct["Cheng_attack_rate"]), np.asarray(ct["norm_weights"])
-    todo = [t for t in pilot_noise.tasks(pilot_noise.pilot_rows(), len(population))
-            if t.key not in done]  # fmt: skip
-    new = not path.exists()
+    every = pilot_noise.tasks(pilot_noise.pilot_rows(), len(population))
+    missing = missing_from_pilot([t.key for t in every], pilot)
+    if missing:
+        raise SystemExit(
+            f"{args.pilot_blocks} lacks {len(missing)} of pilot 1's evaluations, "
+            f"such as {missing[0]}: is it pilot 1's blocks.csv?"
+        )
+    todo = [t for t in every if t.key not in done]
+    new = needs_header(path)
     with open(path, "a", newline="") as out:
         writer = csv.DictWriter(out, fieldnames=COLUMNS)
         if new:
             writer.writeheader()
+            out.flush()
         for simulations in sorted({t.simulations for t in todo}):
             batch = [t for t in todo if t.simulations == simulations]
             with make_pool(simulations) as pool:
@@ -104,14 +120,17 @@ def main() -> None:
                 for future in concurrent.futures.as_completed(futures):
                     t = futures[future]
                     cost, attack, bins = future.result()
-                    terms = attack_terms(bins, cheng, weights)
-                    if not np.isclose(terms.sum(), attack, rtol=1e-9, atol=1e-12):
+                    failed = bins is None  # charged as pilot 1 charged it; no bin to leave out
+                    terms = (
+                        np.zeros((GROUPS, BINS)) if failed else attack_terms(bins, cheng, weights)
+                    )
+                    if not failed and not np.isclose(terms.sum(), attack, rtol=1e-9, atol=1e-12):
                         raise SystemExit(f"{t}: bins give {terms.sum()}, the objective {attack}")
-                    if t.key in pilot and not np.isclose(cost, pilot[t.key], rtol=1e-9):
+                    if not np.isclose(cost, pilot[t.key], rtol=1e-9):
                         raise SystemExit(f"{t}: cost {cost}, pilot 1 had {pilot[t.key]}")
                     row = {**t._asdict(), "cost": cost, "attack": attack,
-                           "household_0_3_contacts": int(bins[0, 0, 1]),
-                           "household_0_3_infections": int(bins[0, 1, 1]),
+                           "household_0_3_contacts": -1 if failed else int(bins[0, 0, 1]),
+                           "household_0_3_infections": -1 if failed else int(bins[0, 1, 1]),
                            **dict(zip(TERMS, terms.ravel(), strict=True))}  # fmt: skip
                     writer.writerow(row)
                     out.flush()
