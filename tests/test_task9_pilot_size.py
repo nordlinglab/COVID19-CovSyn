@@ -35,6 +35,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration import pilot_size as ps
@@ -575,15 +577,11 @@ def test_a_hand_named_pilot_directory_is_refused(tmp_path, monkeypatch, capsys, 
     assert "is not results/tables/<run-id> of a pilot 2" in capsys.readouterr().err
 
 
-from hypothesis import example, given, settings  # noqa: E402
-from hypothesis import strategies as st  # noqa: E402
-
-
 @settings(max_examples=200, deadline=None)
 @given(
     when=st.datetimes(
-        min_value=__import__("datetime").datetime(2000, 1, 1),
-        max_value=__import__("datetime").datetime(9999, 12, 31),
+        min_value=datetime(2000, 1, 1),
+        max_value=datetime(9999, 12, 31),
     ),
     commit=st.one_of(st.none(), st.text("0123456789abcdef", min_size=7, max_size=40)),
     dirty=st.booleans(),
