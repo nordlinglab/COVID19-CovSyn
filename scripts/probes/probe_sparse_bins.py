@@ -71,15 +71,29 @@ def needs_header(path: Path) -> bool:
     """Whether the table is to be begun: missing, or killed before its header was written.
 
     Raises:
-        SystemExit: It begins with another header, such as one cut short.
+        SystemExit: It begins with another header, such as one cut short, or its last row was
+            cut, so the next would be joined onto it.
     """
     if not path.exists() or path.stat().st_size == 0:
         return True
-    with open(path, newline="") as f:
-        first = f.readline().rstrip("\r\n")
+    with open(path, "rb") as f:
+        first = f.readline().decode("utf-8").rstrip("\r\n")
+        f.seek(-1, 2)
+        last = f.read(1)
     if first != ",".join(COLUMNS):
         raise SystemExit(f"{path} begins with another header, {first!r}: move it aside")
+    if last != b"\n":
+        raise SystemExit(f"{path}: its last row was cut; remove that line, then resume")
     return False
+
+
+def mismatched(done: dict, pilot: dict) -> list:
+    """The rows already scored whose cost is not pilot 1's, as the table given now has it."""
+    return [
+        k
+        for k, r in done.items()
+        if k not in pilot or not np.isclose(float(r["cost"]), pilot[k], rtol=1e-9)
+    ]
 
 
 def missing_from_pilot(keys, pilot: dict) -> list:
@@ -99,8 +113,9 @@ def main() -> None:
     with open(args.pilot_blocks, newline="") as f:
         pilot = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"])):
                  float(r["cost"]) for r in csv.DictReader(f)}  # fmt: skip
+    new = needs_header(path)  # before reading it: refuses a header or a last row cut short
     done = {}
-    if path.exists():
+    if not new:
         with open(path, newline="") as f:
             done = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"])): r
                     for r in csv.DictReader(f)}  # fmt: skip
@@ -117,8 +132,13 @@ def main() -> None:
             f"{args.pilot_blocks} lacks {len(missing)} of pilot 1's evaluations, "
             f"such as {missing[0]}: is it pilot 1's blocks.csv?"
         )
+    differing = mismatched(done, pilot)
+    if differing:
+        raise SystemExit(
+            f"{path}: {len(differing)} rows already scored, such as "
+            f"{differing[0]}, differ from {args.pilot_blocks}"
+        )
     todo = [t for t in every if t.key not in done]
-    new = needs_header(path)
     with open(path, "a", newline="") as out:
         writer = csv.DictWriter(out, fieldnames=COLUMNS)
         if new:

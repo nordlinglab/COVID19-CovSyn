@@ -100,13 +100,15 @@ def test_every_evaluation_must_be_in_pilot_1_s_table():
 def test_a_failed_simulation_prints_its_traceback(monkeypatch, capsys):
     """Charged 1e6 like pilot 1, but the reason is shown (code review round 2)."""
     from covsyn.calibration import fast_cost
+    from covsyn.calibration import firefly_optimizer as fo
 
     def broken(P, seed_offset, clock):
         raise RuntimeError("the reason")
 
     monkeypatch.setattr(fast_cost, "_simulate_and_score", broken)
-    psb.score_bins(np.zeros(3), 0)
+    cost, _, bins = psb.score_bins(np.zeros(3), 0)
     assert "the reason" in capsys.readouterr().err
+    assert cost == fo.FAILED_EVALUATION_COST and bins is None
 
 
 def test_a_table_with_another_header_is_refused(tmp_path):
@@ -117,3 +119,18 @@ def test_a_table_with_another_header_is_refused(tmp_path):
         psb.needs_header(path)
     path.write_text(",".join(psb.COLUMNS) + "\n")
     assert not psb.needs_header(path)
+
+
+def test_a_table_whose_last_row_was_cut_is_refused(tmp_path):
+    """The next row would be joined onto it (code review round 3)."""
+    path = tmp_path / "bins.csv"
+    path.write_text(",".join(psb.COLUMNS) + "\nvector,literature,0,30")
+    with pytest.raises(SystemExit, match="cut"):
+        psb.needs_header(path)
+
+
+def test_resumed_rows_are_checked_against_pilot_1_too():
+    """A row from an earlier run, against the table given now (code review round 3)."""
+    done = {("vector", 0, 300, 0): {"cost": "10.0"}, ("vector", 2, 300, 0): {"cost": "5.0"}}
+    pilot = {("vector", 0, 300, 0): 10.0, ("vector", 2, 300, 0): 6.0}
+    assert psb.mismatched(done, pilot) == [("vector", 2, 300, 0)]
