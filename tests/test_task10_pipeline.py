@@ -59,3 +59,9 @@ def test_the_saved_production_configuration_keeps_its_thirty_blocks():
     """pipeline.toml, which a resume reads, holds the 30."""
     config = pc.parse(PRODUCTION, "t")
     assert pc.parse(pc.to_toml(config), "saved").revalidation_blocks == 30
+
+
+def test_the_refusal_says_a_run_saved_with_other_blocks_cannot_be_resumed():
+    """A pipeline.toml saved before Task 10 with another count: start a new run instead."""
+    with pytest.raises(ValueError, match="cannot be resumed"):
+        pc.parse(PRODUCTION + "[revalidate]\nblocks = 10\n", "saved")
