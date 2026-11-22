@@ -296,6 +296,10 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(f"--archive-best must be 1 or more, not {args.archive_best}")
     firefly_dir, out_dir, blocks = args.firefly_dir, args.out_dir, args.blocks
     workers = hardware.resolve_workers(args.workers, os.environ, None)
+    vectors, train = load_candidates(firefly_dir, args.archive_best)
+    if not len(vectors):  # before anything is written or read
+        reason = " (its archive is empty)" if args.archive_best is not None else ""
+        raise SystemExit(f"{firefly_dir}: no candidates to revalidate{reason}")
     out_dir.mkdir(parents=True, exist_ok=True)
     with open("./variable/demographic_parameters.pkl", "rb") as f:
         demo = pickle.load(f)
@@ -306,9 +310,6 @@ def main(argv: list[str] | None = None) -> None:
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     ).stdout.strip()
-    vectors, train = load_candidates(firefly_dir, args.archive_best)
-    if not len(vectors):
-        raise SystemExit(f"{firefly_dir}: no candidates to revalidate (its archive is empty)")
     try:
         seed_blocks = validation_seed_blocks(blocks, simulations, args.stream)
     except ValueError as error:

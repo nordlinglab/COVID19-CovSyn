@@ -159,6 +159,7 @@ def test_revalidating_an_empty_archive_stops_with_a_reason(tmp_path):
     run = tmp_path / "run"
     run.mkdir()
     _archive(run, np.empty((0, DIM + 3)))
-    with pytest.raises(SystemExit, match="no candidates"):
+    with pytest.raises(SystemExit, match="no candidates.*archive is empty"):
         rv.main([str(run), str(tmp_path / "out"), "30", "--simulations", "3000",
                  "--archive-best", "10", "--workers", "1"])  # fmt: skip
+    assert not (tmp_path / "out").exists()  # stopped before writing anything
