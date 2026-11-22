@@ -162,3 +162,36 @@ def test_resumed_rows_whose_terms_do_not_add_to_their_attack_cost_are_flagged():
     good = {**row, "term_0_1": "3.0"}
     assert psb.mismatched({key: good}, {key: 10.0}) == []
     assert psb.mismatched({key: {**row, "term_0_1": "2.0"}}, {key: 10.0}) == [key]
+
+
+def _scored(**changes):
+    """A resumed row as bins.csv holds it, of cost 10 and attack 3, all in term_0_1."""
+    row = {c: "0" for c in psb.COLUMNS}
+    row.update({"kind": "vector", "label": "literature", "cost": "10.0", "attack": "3.0",
+                "term_0_1": "3.0", **changes})  # fmt: skip
+    return row
+
+
+KEY = ("vector", 0, 300, 0)
+
+
+def test_a_failed_row_with_no_terms_is_kept():
+    """Charged 1e6, attack NaN, counts -1, terms 0: as a fresh failed row is written."""
+    row = _scored(cost=str(1e6), attack="nan", term_0_1="0.0", household_0_3_contacts="-1",
+                  household_0_3_infections="-1")  # fmt: skip
+    assert psb.mismatched({KEY: row}, {KEY: 1e6}) == []
+
+
+def test_a_failed_row_with_terms_is_refused():
+    """Leaving a bin out would take its term from a cost of 1e6."""
+    row = _scored(cost=str(1e6), attack="nan", term_0_1="5.0", household_0_3_infections="-1")
+    assert psb.mismatched({KEY: row}, {KEY: 1e6}) == [KEY]
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [("attack", None), ("term_2_5", None), ("household_0_3_infections", ""), ("cost", "x")],
+)
+def test_a_short_or_unreadable_row_is_refused_not_a_traceback(field, value):
+    """A row cut inside, or a cell that is no number: named, not a crash."""
+    assert psb.mismatched({KEY: _scored(**{field: value})}, {KEY: 10.0}) == [KEY]

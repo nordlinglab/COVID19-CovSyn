@@ -90,21 +90,30 @@ def needs_header(path: Path) -> bool:
     return False
 
 
-def mismatched(done: dict, pilot: dict) -> list:
-    """Rows already scored that cannot be used: not pilot 1's cost, or terms not their attack.
+def _unusable(r: dict, expected: float) -> bool:
+    """Whether a resumed row cannot be used; see mismatched."""
+    try:
+        cost, attack = float(r["cost"]), float(r["attack"])
+        terms = [float(r[t]) for t in TERMS]
+        infections = int(r["household_0_3_infections"])
+    except (TypeError, ValueError, KeyError):  # cut inside, or a cell that is no number
+        return True
+    if not np.isclose(cost, expected, rtol=1e-9):
+        return True
+    if infections < 0:  # failed: charged as pilot 1 charged it, with no bin to leave out
+        return cost != fo.FAILED_EVALUATION_COST or any(terms)
+    return not np.isclose(sum(terms), attack, rtol=1e-9, atol=1e-12)
 
-    The cost is checked against the table given now; the terms, which leaving a bin out uses,
-    must add up to the row's attack-rate cost, as a fresh row's must. A failed row has none.
+
+def mismatched(done: dict, pilot: dict) -> list:
+    """Rows already scored that cannot be used.
+
+    A row is unusable when a cell is missing or no number; when its cost is not pilot 1's, as
+    the table given now has it; when it failed but was not charged FAILED_EVALUATION_COST with
+    no terms, as a fresh failed row is written; or when its terms, which leaving a bin out
+    uses, do not add up to its attack-rate cost, as a fresh row's must.
     """
-    bad = []
-    for key, r in done.items():
-        if key not in pilot or not np.isclose(float(r["cost"]), pilot[key], rtol=1e-9):
-            bad.append(key)
-        elif int(r["household_0_3_infections"]) >= 0 and not np.isclose(
-            sum(float(r[t]) for t in TERMS), float(r["attack"]), rtol=1e-9, atol=1e-12
-        ):
-            bad.append(key)
-    return bad
+    return [key for key, r in done.items() if key not in pilot or _unusable(r, pilot[key])]
 
 
 def missing_from_pilot(keys, pilot: dict) -> list:
