@@ -22,12 +22,17 @@ from __future__ import annotations
 import concurrent.futures
 import csv
 import json
+import sys
+import tomllib
+from importlib import import_module
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from covsyn.calibration import pilot_size as ps
 from covsyn.calibration import seed_streams
+from tests.conftest import REPO_ROOT
 
 DIM = 3
 
@@ -1077,13 +1082,6 @@ def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
 
     main() reads sys.argv when given none; a returned path would print and give status 1.
     """
-    import sys
-    import tomllib
-    from importlib import import_module
-    from pathlib import Path
-
-    from tests.conftest import REPO_ROOT
-
     scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
     module, _, function = scripts["covsyn-pilot-size"].partition(":")
     calls = []

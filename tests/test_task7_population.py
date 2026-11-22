@@ -12,6 +12,7 @@ rows, and a run whose bounds or dimension differ from those stored is refused, n
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tomllib
 from importlib import import_module
@@ -166,9 +167,6 @@ def test_version_1_is_committed_and_matches_the_generator(written):
 
 def test_making_a_population_does_not_load_the_optimiser():
     """The population needs the bounds and two helpers, not the optimiser: no import cycle."""
-    import subprocess
-    import sys
-
     code = ("import sys, numpy as np, covsyn.calibration.initial_population as ip; "
             "ip.normalise(np.ones(2), np.zeros(2), np.full(2, 2.0), 'x'); "
             "print('covsyn.calibration.firefly_optimizer' in sys.modules)")  # fmt: skip
