@@ -86,7 +86,7 @@ def test_an_empty_or_missing_table_needs_a_header(tmp_path):
     assert psb.needs_header(path)
     path.write_text("")
     assert psb.needs_header(path)
-    path.write_text("kind,cost\n")
+    path.write_text(",".join(psb.COLUMNS) + "\n")
     assert not psb.needs_header(path)
 
 
@@ -95,3 +95,25 @@ def test_every_evaluation_must_be_in_pilot_1_s_table():
     keys = [("vector", 0, 300, 0), ("vector", 2, 300, 0)]
     assert psb.missing_from_pilot(keys, {("vector", 0, 300, 0): 1.0}) == [("vector", 2, 300, 0)]
     assert psb.missing_from_pilot(keys, dict.fromkeys(keys, 1.0)) == []
+
+
+def test_a_failed_simulation_prints_its_traceback(monkeypatch, capsys):
+    """Charged 1e6 like pilot 1, but the reason is shown (code review round 2)."""
+    from covsyn.calibration import fast_cost
+
+    def broken(P, seed_offset, clock):
+        raise RuntimeError("the reason")
+
+    monkeypatch.setattr(fast_cost, "_simulate_and_score", broken)
+    psb.score_bins(np.zeros(3), 0)
+    assert "the reason" in capsys.readouterr().err
+
+
+def test_a_table_with_another_header_is_refused(tmp_path):
+    """A header cut short when killed would misread every row after it."""
+    path = tmp_path / "bins.csv"
+    path.write_text("kind,ro")
+    with pytest.raises(SystemExit, match="header"):
+        psb.needs_header(path)
+    path.write_text(",".join(psb.COLUMNS) + "\n")
+    assert not psb.needs_header(path)

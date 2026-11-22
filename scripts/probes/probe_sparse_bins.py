@@ -20,6 +20,7 @@ import concurrent.futures
 import csv
 import json
 import pickle
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -61,13 +62,24 @@ def score_bins(P, seed_offset):
     try:
         cost, parts, pooled, _ = fast_cost._simulate_and_score(P, seed_offset, clock)
     except Exception:
+        traceback.print_exc()
         return fo.FAILED_EVALUATION_COST, float("nan"), None
     return cost, parts["cost_attack_rate"], pooled[1]
 
 
 def needs_header(path: Path) -> bool:
-    """Whether the table is to be begun: missing, or killed before its header was written."""
-    return not path.exists() or path.stat().st_size == 0
+    """Whether the table is to be begun: missing, or killed before its header was written.
+
+    Raises:
+        SystemExit: It begins with another header, such as one cut short.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return True
+    with open(path, newline="") as f:
+        first = f.readline().rstrip("\r\n")
+    if first != ",".join(COLUMNS):
+        raise SystemExit(f"{path} begins with another header, {first!r}: move it aside")
+    return False
 
 
 def missing_from_pilot(keys, pilot: dict) -> list:
@@ -136,17 +148,27 @@ def main() -> None:
                     out.flush()
                     done[t.key] = row
     rows = list(done.values())
-    summary = {"evaluations": len(rows), "checked_against_pilot_1": sum(k in pilot for k in done),
-               "as_pilot_1": pilot_noise.summarise(rows)["choice"],
-               "without_household_0_3": pilot_noise.summarise(without_bin(rows, *SPARSE))["choice"],
-               "household_0_3": {
-                   str(s): {"evaluations": sum(int(r["simulations"]) == s for r in rows),
-                            "with_an_infection": sum(int(r["simulations"]) == s and
-                                                     int(r["household_0_3_infections"]) > 0
-                                                     for r in rows),
-                            "largest_term": max(float(r[f"term_{SPARSE[0]}_{SPARSE[1]}"])
-                                                for r in rows if int(r["simulations"]) == s)}
-                   for s in sorted({int(r["simulations"]) for r in rows})}}  # fmt: skip
+    scored = [r for r in rows if int(r["household_0_3_infections"]) >= 0]  # not failed
+    term = f"term_{SPARSE[0]}_{SPARSE[1]}"
+    summary = {
+        "evaluations": len(rows),  # each checked against pilot 1's cost
+        "failed": len(rows) - len(scored),
+        "as_pilot_1": pilot_noise.summarise(rows)["choice"],
+        "without_household_0_3": pilot_noise.summarise(without_bin(rows, *SPARSE))["choice"],
+        "household_0_3": {
+            str(s): {
+                "evaluations": sum(int(r["simulations"]) == s for r in scored),
+                "with_an_infection": sum(
+                    int(r["simulations"]) == s and int(r["household_0_3_infections"]) > 0
+                    for r in scored
+                ),
+                "largest_term": max(
+                    (float(r[term]) for r in scored if int(r["simulations"]) == s), default=None
+                ),
+            }
+            for s in sorted({int(r["simulations"]) for r in rows})
+        },
+    }
     (args.out_dir / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     print(json.dumps(summary, indent=1))
 
