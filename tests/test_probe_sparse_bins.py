@@ -131,6 +131,34 @@ def test_a_table_whose_last_row_was_cut_is_refused(tmp_path):
 
 def test_resumed_rows_are_checked_against_pilot_1_too():
     """A row from an earlier run, against the table given now (code review round 3)."""
-    done = {("vector", 0, 300, 0): {"cost": "10.0"}, ("vector", 2, 300, 0): {"cost": "5.0"}}
+    row = {"attack": "0.0", "household_0_3_infections": "0", **dict.fromkeys(psb.TERMS, "0.0")}
+    done = {("vector", 0, 300, 0): {**row, "cost": "10.0"},
+            ("vector", 2, 300, 0): {**row, "cost": "5.0"}}  # fmt: skip
     pilot = {("vector", 0, 300, 0): 10.0, ("vector", 2, 300, 0): 6.0}
     assert psb.mismatched(done, pilot) == [("vector", 2, 300, 0)]
+
+
+def test_a_table_that_is_not_utf_8_is_refused_with_a_reason(tmp_path):
+    """Its first line cannot be the header (code review round 4)."""
+    path = tmp_path / "bins.csv"
+    path.write_bytes(b"\xff\xfek\x00i\x00\n")
+    with pytest.raises(SystemExit, match="another header"):
+        psb.needs_header(path)
+
+
+def test_a_header_without_its_newline_is_called_a_cut_header(tmp_path):
+    """Not a cut row, which would send the user to delete the header (code review round 4)."""
+    path = tmp_path / "bins.csv"
+    path.write_text(",".join(psb.COLUMNS))
+    with pytest.raises(SystemExit, match="its header lacks its newline"):
+        psb.needs_header(path)
+
+
+def test_resumed_rows_whose_terms_do_not_add_to_their_attack_cost_are_flagged():
+    """Terms from an older probe would feed the choice unchecked (code review round 4)."""
+    key = ("vector", 0, 300, 0)
+    row = {"cost": "10.0", "attack": "3.0", "household_0_3_infections": "0",
+           **dict.fromkeys(psb.TERMS, "0.0")}  # fmt: skip
+    good = {**row, "term_0_1": "3.0"}
+    assert psb.mismatched({key: good}, {key: 10.0}) == []
+    assert psb.mismatched({key: {**row, "term_0_1": "2.0"}}, {key: 10.0}) == [key]

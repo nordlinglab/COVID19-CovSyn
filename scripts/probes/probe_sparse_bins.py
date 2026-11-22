@@ -71,29 +71,40 @@ def needs_header(path: Path) -> bool:
     """Whether the table is to be begun: missing, or killed before its header was written.
 
     Raises:
-        SystemExit: It begins with another header, such as one cut short, or its last row was
-            cut, so the next would be joined onto it.
+        SystemExit: It begins with another header, such as one cut short or not UTF-8; its
+            header lacks its newline; or its last row was cut, so the next would join it.
     """
     if not path.exists() or path.stat().st_size == 0:
         return True
     with open(path, "rb") as f:
-        first = f.readline().decode("utf-8").rstrip("\r\n")
+        line = f.readline()
         f.seek(-1, 2)
         last = f.read(1)
+    first = line.decode("utf-8", errors="replace").rstrip("\r\n")
     if first != ",".join(COLUMNS):
         raise SystemExit(f"{path} begins with another header, {first!r}: move it aside")
+    if not line.endswith(b"\n"):
+        raise SystemExit(f"{path}: its header lacks its newline; add it, then resume")
     if last != b"\n":
         raise SystemExit(f"{path}: its last row was cut; remove that line, then resume")
     return False
 
 
 def mismatched(done: dict, pilot: dict) -> list:
-    """The rows already scored whose cost is not pilot 1's, as the table given now has it."""
-    return [
-        k
-        for k, r in done.items()
-        if k not in pilot or not np.isclose(float(r["cost"]), pilot[k], rtol=1e-9)
-    ]
+    """Rows already scored that cannot be used: not pilot 1's cost, or terms not their attack.
+
+    The cost is checked against the table given now; the terms, which leaving a bin out uses,
+    must add up to the row's attack-rate cost, as a fresh row's must. A failed row has none.
+    """
+    bad = []
+    for key, r in done.items():
+        if key not in pilot or not np.isclose(float(r["cost"]), pilot[key], rtol=1e-9):
+            bad.append(key)
+        elif int(r["household_0_3_infections"]) >= 0 and not np.isclose(
+            sum(float(r[t]) for t in TERMS), float(r["attack"]), rtol=1e-9, atol=1e-12
+        ):
+            bad.append(key)
+    return bad
 
 
 def missing_from_pilot(keys, pilot: dict) -> list:
