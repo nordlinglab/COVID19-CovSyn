@@ -262,3 +262,13 @@ def test_a_file_of_no_rows_is_refused_naming_it(tmp_path, name):
     (run / name).write_text("")
     with pytest.raises(SystemExit, match=f"{name}.*no rows"):
         rv.main([str(run), str(tmp_path / "out"), "30", "--workers", "1"])
+
+
+def test_files_of_costs_alone_are_refused(tmp_path):
+    """Vectors of no parameters cannot be simulated (round 8)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "firefly_result.txt").write_text("5.0\n")
+    (run / "firefly_best.txt").write_text("0 5.0\n")
+    with pytest.raises(SystemExit, match="firefly_result.txt.*no parameters"):
+        rv.main([str(run), str(tmp_path / "out"), "30", "--workers", "1"])

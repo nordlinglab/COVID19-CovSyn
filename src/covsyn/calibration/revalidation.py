@@ -182,7 +182,8 @@ def load_candidates(firefly_dir: Path, archive_best: int | None = None
     result_path = Path(firefly_dir) / "firefly_result.txt"
     best_path = Path(firefly_dir) / "firefly_best.txt"
     with warnings.catch_warnings():  # a file of no rows is refused below, by name
-        warnings.simplefilter("ignore", UserWarning)
+        warnings.filterwarnings("ignore", message=".*(no data|[Ee]mpty input file).*",
+                                category=UserWarning)  # fmt: skip
         population = _rows(result_path, ndmin=2)
         bests = _rows(best_path, ndmin=2)
     for path, table in ((result_path, population), (best_path, bests)):
@@ -198,6 +199,8 @@ def load_candidates(firefly_dir: Path, archive_best: int | None = None
             rows.append(vectors)
             values.append(costs)
             paths.append(archive_path)
+    if rows[0].shape[1] == 0:
+        raise ValueError(f"{result_path}: no parameters, only costs")
     if len({r.shape[1] for r in rows}) > 1:
         widths = ", ".join(f"{p} {r.shape[1]}" for p, r in zip(paths, rows, strict=True))
         raise ValueError(f"the vectors differ in length: {widths}")
