@@ -19,6 +19,7 @@ import argparse
 import concurrent.futures
 import csv
 import json
+import os
 import pickle
 import traceback
 from pathlib import Path
@@ -180,6 +181,8 @@ def read_pilot(path: Path) -> dict:
         raise SystemExit(f"{path}{'' if line is None else f', line {line}'}: not UTF-8 "
                          "text") from None  # fmt: skip
     if not table.exists:
+        if Path(path).is_symlink():
+            raise SystemExit(f"{path} is a link to {os.readlink(path)}, which does not exist")
         raise SystemExit(f"{path} does not exist")
     costs: dict = {}
     for number, r in enumerate(table.rows, start=1):

@@ -452,3 +452,11 @@ def test_a_worker_count_refused_stops_before_the_output_is_made(tmp_path, monkey
     with pytest.raises(SystemExit, match="workers refused"):
         psb.main()
     assert not out.exists()
+
+
+def test_a_pilot_table_linked_to_a_missing_file_says_so(tmp_path):
+    """The link exists; its target does not (round 11)."""
+    link = tmp_path / "blocks.csv"
+    link.symlink_to(tmp_path / "moved" / "blocks.csv")
+    with pytest.raises(SystemExit, match="is a link to .*moved.*, which does not exist"):
+        psb.read_pilot(link)
