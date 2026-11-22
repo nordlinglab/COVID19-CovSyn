@@ -1,101 +1,93 @@
-# CovSyn Phase D code manifest (2026-09-29)
+# CovSyn code manifest
 
-Prepared before moving the code into the thesis repository. **Nothing has been copied or committed yet.**
+What each part of the repository does, as of 2026-11-22 (rework plan Tasks 1–9 merged, Task 10 in progress).
+`README.md` explains installation and usage;
+`docs/covsyn_decisions.md` records why each part is as it is.
 
-## Where the code has to go
+The first version (2026-09-29) listed the uncommitted Phase D files before they entered git (decision B53).
+That move is done, so this version describes the committed layout instead;
+`git log -p -- docs/CODE_MANIFEST_phaseD.md` shows the earlier versions.
 
-`C:\Theisis\covid19-research\src\covsyn` is **not an ordinary folder**. It is a git submodule:
+## Entry points
 
-```
-[submodule "src/covsyn"]
-    path = src/covsyn
-    url  = git@github.com:nordlinglab/COVID19-CovSyn.git     (pinned at 15dd3f1)
-```
+Each runs as `uv run <command>` from the repository root, as `pyproject.toml` `[project.scripts]` lists them.
 
-That is the same repository as this working directory (`origin = nordlinglab/COVID19-CovSyn`, HEAD `15dd3f1`).
-So the code reaches the thesis repo by committing it here, pushing, and moving the submodule pointer:
+| Command | Module | Purpose |
+|---|---|---|
+| `covsyn-pipeline` | `pipeline/runner.py` | Run the Phase D stages in order, and resume an interrupted run (Task 4) |
+| `covsyn-optimise` | `calibration/firefly_optimizer.py` | Firefly optimisation in the `train`, `test`, `profile`, `pilot` and `production` modes |
+| `covsyn-revalidation` | `calibration/revalidation.py` | Re-score a run's candidates on unseen seeds; in production, the archive's best 10 at S, with `cost_uncertainty.csv` (Task 10) |
+| `covsyn-select-by-checklist` | `calibration/select_by_checklist.py` | Choose among the revalidated candidates by the acceptance checklist (B60) |
+| `covsyn-initial-population` | `calibration/initial_population.py` | Build the fixed 256-row initial population (Task 7) |
+| `covsyn-pilot-noise` | `calibration/pilot_noise.py` | Pilot 1: the objective's noise against S (Task 9) |
+| `covsyn-pilot-size` | `calibration/pilot_size.py` | Pilot 2: population and step size at pilot 1's S (Task 9) |
+| `covsyn-cores` | `runtime/hardware.py` | Print the performance cores and the worker count (Task 2) |
+| `covsyn-data-synthesis` | `model/data_synthesis_main.py` | Synthesise data from a parameter vector |
+| `covsyn-verify-phase-d` | `validation/verify_phase_d.py` | The acceptance checklist (B14, B17–B36) |
+| `covsyn-measure-age-rr` | `validation/measure_age_rr.py` | Pooled age risk ratio (B14) |
+| `covsyn-measure-days` | `validation/measure_days.py` | Days a candidate contact is met, per layer |
+| `covsyn-check-constraints` | `validation/check_constraints.py` | Per-case temporal and biological constraints (N2, E48) |
+| `covsyn-show-bounds` | `validation/show_bounds.py` | Layer attack-rate bounds |
+| `covsyn-compare-phase-d-runs` | `validation/compare_phase_d_runs.py` | Two verification runs, check by check |
+| `covsyn-plot-todolist923` | `figures/plot_todolist923.py` | Validation figures of the 2026-09-23 meeting |
+| `covsyn-reproduce-wu2025` | `figures/reproduce_wu2025.py` | The CovSyn paper's data comparisons with the corrected model |
 
-1. In this repo: create a branch, commit the files listed below, push.
-2. In `covid19-research`: `git -C src/covsyn fetch && git -C src/covsyn checkout <new commit>`, then commit the new
-   submodule pointer.
+Module paths are relative to `src/covsyn/`.
+A module without an entry point runs as `uv run python -m covsyn.<package>.<module>`.
 
-Copying files into `src/covsyn` instead would put untracked files inside a submodule and leave the thesis repo pointing
-at the old commit.
+## Package `src/covsyn/`
 
-## State of the code
-
-- Only **62 files** are tracked in git (the original CovSyn). **All Phase D work is uncommitted**: 11 tracked files are
-  modified and about 70 scripts and documents are untracked.
-- The **remote Mac holds the authoritative copy** (the runs execute there). Compared file by file:
-  63 identical, **1 different**, 3 local-only, **39 remote-only**, including files the pipeline calls
-  (`show_final.py`, `check_gap.py`, `show_bounds.py`, `smoke_run7.py`). The local copy is therefore incomplete.
-- `Data_synthesis_main.py` differs: the local copy has 5 extra lines that also save
-  `{layer}_expected_infections` (via `getattr(..., None)`). The remote copy is the one every Phase D run used.
-  **Decision needed** on which one to commit.
-
-## A. Pipeline — used by the current runs (39 files, found by following the entry points and their imports)
-
-Entry points: `launch_run6.sh`, `phaseD_chain.sh`, `data_synthesis.sh`, the gates `verify_fast_cost.py` and
-`smoke_run7.py`, and the setup scripts `apply_phaseD_parameters.py`, `sar_anchors.py`, `rebuild_school_pmf.py`.
-
-| Group | Files |
+| Package | Modules |
 |---|---|
-| Model | `Data_synthesize.py`, `Data_synthesis_main.py`, `R0_network.py`, `rw_data_processing.py`, `plot_results.py` (the Cheng binning lives here) |
-| Objective and optimizer | `firefly_optimizer.py`, `fast_cost.py`, `cost_parts.py`, `sar_anchors.py`, `parameter_space.py`, `initial_population.py` (Task 7), `seed_streams.py` (Task 7) |
-| Parameter setup | `apply_phaseD_parameters.py`, `rebuild_school_pmf.py` |
-| Run control | `launch_run6.sh`, `phaseD_chain.sh`, `data_synthesis.sh` |
-| Gates | `verify_fast_cost.py`, `smoke_run7.py` |
-| Acceptance and reports | `verify_phaseD.py`, `measure_age_rr.py`, `measure_days.py`, `rr_exact.py`, `tw_check.py`, `show_final.py`, `show_bounds.py`, `check_gap.py`, `compare_phaseD_runs.py`, `check_constraints.py` |
-| Validation figures | `validate_layers.py`, `validate_infection.py`, `compare_healthcare_municipality.py`, `workplace_sampling_options.py`, `plot_10panel.py`, `plot_cheng_attackrate.py`, `plot_diagnostics.py`, `plot_reality_vs_covsyn.py`, `plot_violin_reality_vs_covsyn.py`, `plot_vs_notebook_literature.py`, `plot_validation.py`, `plot_todolist923.py`, `taiwan_reference.py` |
+| `model/` | `data_synthesize.py` (demographics, social contexts, course of disease, contacts), `data_synthesis_main.py` (one simulation and the Monte Carlo driver), `r0_network.py`, `contact_measures.py`, `school_calendar.py` (B77), `work_calendar.py` (B75) |
+| `calibration/`, objective | `fast_cost.py` (the objective the optimiser runs), `cost_parts.py`, `sar_anchors.py`, `target_margins.py` (B60) |
+| `calibration/`, search | `firefly_optimizer.py`, `parameter_space.py` (bounds and literature vector, Task 7), `initial_population.py` (Task 7), `seed_streams.py` (Task 7), `step_schedule.py` (Task 8) |
+| `calibration/`, run size and stopping | `run_size.py` (n, G, S, Task 9), `monitoring.py` (production stopping rule, Task 9), `block_scoring.py` (resumable block scores, Task 9), `pilot_noise.py`, `pilot_size.py` |
+| `calibration/`, after the run | `revalidation.py` (E87; cost uncertainty, Task 10), `select_by_checklist.py`, `parameter_uncertainty.py` (spread across the five production runs, Task 10) |
+| `calibration/`, parameter setup | `apply_phase_d_parameters.py`, `rebuild_school_pmf.py` (E39) |
+| `pipeline/` | `config.py` (TOML settings), `stages.py`, `runner.py`, `default.toml` (Task 4) |
+| `runtime/` | `hardware.py` (Task 2), `runs.py` (run names and directories, Task 3), `measure.py`, `memory.py`, `profiling.py`, `timings.py` (Task 5) |
+| `validation/` | `verify_phase_d.py`, `acceptance.py` (B57, E89), `check_constraints.py`, `measure_age_rr.py`, `measure_days.py`, `rr_exact.py`, `tw_check.py`, `show_final.py`, `show_bounds.py`, `check_gap.py`, `compare_phase_d_runs.py`, `city_effect.py` (B56), `compare_first_wave.py` (B66) |
+| `figures/` | `plot_results.py` (holds the Cheng binning the objective uses), `plot_todolist923.py`, `reproduce_wu2025.py`, `validate_layers.py`, `validate_infection.py`, `compare_healthcare_municipality.py`, `workplace_sampling_options.py` (E3), `plot_10panel.py`, `plot_cheng_attackrate.py`, `plot_diagnostics.py`, `plot_reality_vs_covsyn.py`, `plot_violin_reality_vs_covsyn.py`, `plot_vs_notebook_literature.py`, `plot_validation.py` |
+| `data_processing/` | `rw_data_processing.py`, `taiwan_reference.py`, `build_first_wave_seeds.py` (B66), `recompute_taiwan_targets.py`, and the `extract_*.py` scripts that build `validation_reference/` |
+| `upstream/` | The preprint's code, not used by the pipeline: `parameters_for_initialization.py` (E53), `parameters_for_training.py`, `scoring.py`, `transition_probability_estimation.py`, `firefly_txt_to_csv.py` |
 
-## B. Supporting tools — not in the pipeline, but they produced recorded findings (keep for reproducibility)
+## Scripts `scripts/`
 
-| File | Produced / used for |
+| Path | Purpose |
 |---|---|
-| `extract_tracing_reference.py`, `extract_coworker_contacts.py` | build `validation_reference/*.csv` from the Taiwan tracing workbooks |
-| `extract_literature_provenance.py` (local only) | `validation_reference/literature_provenance.csv` (Table D draft) |
-| `probe_community_shape.py`, `probe_medical_shape.py` (remote only), `probe_tail_price.py`, `probe_tail_price_detail.py` | reachability gates (B40, B47, B50) |
-| `probe_recovery_tradeoff.py`, `probe_city_ratio.py`, `probe_preonset_window.py` | findings E74, E83, E84 |
-| `recover_cost_parts.py`, `test_shared_cost_parts.py` | E71 |
-| `calibrate_outcome_weight.py`, `audit_bounds.py`, `rr_population_check.py` | B43, bound audits, E62 |
-| `bench_fast_cost.py`, `bench_speed.py`, `bench_cost.py`, `verify_speedup.py`, `firefly_optimizer_baseline.py` | speed-up evidence (E64, E65); the baseline is the pre-speed-up reference copy |
-| `plot_progress.py`, `analyze_synthetic.py`, `cost_decomp.py`, `validate_transition_times.py`, `validate_full.py`, `cheng_gate.py` | earlier diagnostics, not cited in the register; keep or drop (**your call**) |
+| `data_synthesis.sh` | Synthesise the data sets of a finished run |
+| `gates/` | Checks before a run: `smoke_test.py`, `verify_fast_cost.py` (`fast_cost` equals the reference objective) |
+| `probes/` | One-question tools behind findings in the register, such as reachability gates (B40, B47, B50, B62, B76) and trade-offs (B54, B58, E74) |
+| `benchmarks/` | Speed-up evidence (E64, E65); `firefly_optimizer_baseline.py` is the pre-speed-up reference |
+| `calibrate_*.py` | Calibrations of the first-wave seeding (B74, B78, B79) |
 
-## C. Original CovSyn files that are tracked but not used by Phase D
+## Tests `tests/`
 
-`parameters_for_initialization.py` (one-off generator, E53), `parameters_for_training.py`, `scoring.py`,
-`transition_probability_estimation.py`, `firefly_txt_to_csv.py`, notebooks, `requirements.txt`, `README.md`, `LICENSE`.
-Keep them: they are the upstream code the preprint describes.
+Run with `uv run pytest`.
 
-## D. One-off scratch — recommend NOT committing
-
-Remote only: `bins.py`, `calibrate.py`, `check.py`, `check_gap_dir.py`, `check_pen.py`, `check_rr.py`, `cp.py`,
-`daily.py`, `e26.py`, `explore_tw.py`, `fix_show_final.py`, `gaps.py`, `layerday.py`, `mode_cmp.py`, `new.py`, `q678.py`,
-`reconcile.py`, `rr_trial.py`, `seed.py`, `smoke.py`, `smoke_run4.py`, `smoke_run6.py`, `verify.py`, `verify2.py`,
-`verify_new.py`, `wp.py`, `chain_after_firefly.sh`.
-Both sides: `check_age.py`, `debug_hc_bins.py`, `debug_hc_bins2.py`, `patch_firefly_penalty.py`,
-`widen_recovery_bounds.py`, `verify_changes.py`, `attack_curve_plot.py`.
-Local only: `apply_course_fixes.py`, `plot_layer_sar.py`.
-Also: every `*.bak_run*`, `__pycache__/`, `old/`, `old_covsyn/`, `.codex-tools/`, logs.
-
-## E. Documents
-
-| File | Recommendation |
+| Files | Cover |
 |---|---|
-| `covsyn_decisions.md` | commit: it is the record of why the model is what it is |
-| `covsyn_flowcharts*.md`, `covsyn_age_weight_litreview*.md`, `covsyn_parameter_audit.md`, other `covsyn_*.md` | commit (review first) |
-| `report_run10_todolist923/` | commit or keep outside the code repo (**your call**) |
-| **`HANDOVER.md`, `.claude/skills/`** | **do NOT commit as they are**: they contain the remote Mac's IP address, port, user name and SSH key path (`HANDOVER.md` 3 places, `.claude/skills/remote-mac-ssh/SKILL.md` 11, `.claude/skills/covsyn-report/SKILL.md` 1). Commit only a scrubbed copy, or keep them out |
-| `CLAUDE.md` | contains no connection details; it is agent instructions for this working copy, so keep it out unless wanted |
+| `test_regression.py`, `test_pipeline.py`, `test_pipeline_tolerance.py` | Run 10's cost, simulation fingerprints and pipeline outputs, against `tests/fixtures/` |
+| `test_task<N>_*.py` | Rework plan Tasks 2–10 |
+| `test_b<NN>_*.py` and the rest | One decision or finding each |
+| `make_*_fixtures.py`, `firefly_standins.py`, `pipeline_runner.py`, `regression_digest.py`, `conftest.py` | Fixture builders and shared helpers |
 
-## F. Data and results
+## Data and results
 
-| Path | Recommendation |
+| Path | Contents |
 |---|---|
-| `variable/` | commit the Phase D parameter files (they are modified tracked files; needed to reproduce run 10) |
-| `validation_reference/*.csv` | commit (small, derived from the public tracing workbook) |
-| `results/models/phaseD_run10/firefly_best.txt` | commit the best vector (small) so run 10 can be reproduced |
-| `ARCHIVE_*`, `synthetic_data_results_*`, figures, `diagnostic_figures/` | do not commit (large, regenerable) |
+| `variable/` | Model parameters, search bounds, the literature vector and `initial_population_v1.npz` |
+| `data/` | Raw demographic and course-of-disease inputs |
+| `validation_reference/` | Reference distributions derived from the public Taiwan tracing data |
+| `results/models/<run-id>/` | A run's parameters, populations, logs and `config.json` |
+| `results/tables/<run-id>/`, `results/figures/<run-id>/` | Its tables and figures |
 
-Note: the thesis repo's own `src/README.md` (issue 1) wants data out of `src/`. Because `src/covsyn` is the upstream
-CovSyn repository, that is a decision about the CovSyn repo layout, not about this move.
+A run id is `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>` (`runtime/runs.py`).
+Runs are not committed, except those `.gitignore` names: Phase D runs 10, 18 and 19, `legacy_gamma0131_g200`, and pilot 1's summary tables in `results/tables/20261122-075442_054e9e0_pilot-noise/`.
+
+## Kept out of git
+
+- `HANDOVER.md` and `.claude/`: they hold the remote host's address and key path (B53).
+- `CLAUDE.md`: agent instructions for one working copy.
+- `ARCHIVE_*/`, `synthetic_data_results_*/`, `logs/`, and every other run output: large and regenerable.
