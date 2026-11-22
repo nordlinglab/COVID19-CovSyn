@@ -422,7 +422,7 @@ def test_the_row_named_counts_finished_rows_and_says_so(tmp_path):
     path = tmp_path / "blocks.csv"
     path.write_text(PILOT_HEADER + "vector,lit,0,300,0,0,1.0\nvector,lit,0,300\n"
                     "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
-    with pytest.raises(SystemExit, match=r"finished row 2 \(cut or short rows not counted\)"):
+    with pytest.raises(SystemExit, match=r"finished row 2 \(cut, short or long rows not counted\)"):
         psb.read_pilot(path)
 
 
@@ -472,3 +472,12 @@ def test_a_chain_of_links_names_the_file_that_is_missing(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as stopped:
         psb.read_pilot(link)
     assert str(tmp_path / "pilot" / "gone.csv") in str(stopped.value)
+
+
+def test_a_long_row_left_out_is_named_among_those_not_counted(tmp_path):
+    """read_table leaves out a row of too many values too (round 12)."""
+    path = tmp_path / "blocks.csv"
+    path.write_text(PILOT_HEADER + "vector,lit,0,300,0,0,1.0,extra\n"
+                    "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
+    with pytest.raises(SystemExit, match=r"finished row 1 \(cut, short or long rows not counted\)"):
+        psb.read_pilot(path)
