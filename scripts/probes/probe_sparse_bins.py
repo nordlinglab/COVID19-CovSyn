@@ -174,6 +174,10 @@ def read_pilot(path: Path) -> dict:
         table = block_scoring.read_table(path, required=True)
     except block_scoring.TableError as error:
         raise SystemExit(str(error)) from None
+    except UnicodeDecodeError:
+        line = _first_bad_line(path)
+        raise SystemExit(f"{path}{'' if line is None else f', line {line}'}: not UTF-8 "
+                         "text") from None  # fmt: skip
     costs: dict = {}
     for number, r in enumerate(table.rows, start=1):
         where = f"{path}, record {number}"

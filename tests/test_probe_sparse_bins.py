@@ -401,3 +401,11 @@ def test_a_missing_pilot_table_stops_before_the_output_is_made(tmp_path, monkeyp
     with pytest.raises(SystemExit, match="typo_blocks.csv"):
         psb.main()
     assert not out.exists()
+
+
+def test_a_pilot_table_that_is_not_utf_8_is_refused_naming_its_line(tmp_path):
+    """As bins.csv is (round 10)."""
+    path = tmp_path / "blocks.csv"
+    path.write_bytes(PILOT_HEADER.encode() + b"vector,lit\xe9,0,300,0,0,1.0\n")
+    with pytest.raises(SystemExit, match="blocks.csv, line 2: not UTF-8"):
+        psb.read_pilot(path)
