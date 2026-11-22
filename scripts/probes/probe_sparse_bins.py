@@ -186,7 +186,7 @@ def read_pilot(path: Path) -> dict:
         raise SystemExit(f"{path} does not exist")
     costs: dict = {}
     for number, r in enumerate(table.rows, start=1):
-        where = f"{path}, finished row {number} (read_table leaves out cut or short rows)"
+        where = f"{path}, finished row {number} (cut or short rows not counted)"
         try:
             key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
         except (TypeError, ValueError, KeyError):

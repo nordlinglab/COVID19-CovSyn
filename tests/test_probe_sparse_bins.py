@@ -422,7 +422,7 @@ def test_the_row_named_counts_finished_rows_and_says_so(tmp_path):
     path = tmp_path / "blocks.csv"
     path.write_text(PILOT_HEADER + "vector,lit,0,300,0,0,1.0\nvector,lit,0,300\n"
                     "vector,lit,x,300,2,0,1.0\n", encoding="utf-8")  # fmt: skip
-    with pytest.raises(SystemExit, match="finished row 2 .*cut or short rows"):
+    with pytest.raises(SystemExit, match=r"finished row 2 \(cut or short rows not counted\)"):
         psb.read_pilot(path)
 
 
