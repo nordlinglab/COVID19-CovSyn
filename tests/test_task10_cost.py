@@ -209,3 +209,14 @@ def test_the_archive_refusal_names_its_path_once(tmp_path):
         rv.main([str(run), str(tmp_path / "out"), "30", "--archive-best", "10",
                  "--workers", "1"])  # fmt: skip
     assert str(stopped.value).count(str(run)) == 1
+
+
+def test_a_malformed_file_is_refused_naming_the_run(tmp_path):
+    """A message of no file, as loadtxt's, gets the run added (code review round 5)."""
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "firefly_archive.txt").write_text(f"# {ARCHIVE_HEADER}\nx 1 2 3 4 5\n", "utf-8")
+    with pytest.raises(SystemExit) as stopped:
+        rv.main([str(run), str(tmp_path / "out"), "30", "--archive-best", "10",
+                 "--workers", "1"])  # fmt: skip
+    assert str(stopped.value).count(str(run)) == 1

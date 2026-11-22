@@ -305,7 +305,9 @@ def main(argv: list[str] | None = None) -> None:
     try:
         vectors, train = load_candidates(firefly_dir, args.archive_best)
     except (ValueError, OSError) as error:  # such as an archive from before Task 8
-        raise SystemExit(str(error)) from None
+        message = str(error)  # loadtxt's names no file; the archive's own refusal does
+        raise SystemExit(message if str(firefly_dir) in message
+                         else f"{firefly_dir}: {message}") from None  # fmt: skip
     if not len(vectors):  # before anything is written or read
         reason = " (its archive is empty)" if args.archive_best is not None else ""
         raise SystemExit(f"{firefly_dir}: no candidates to revalidate{reason}")
