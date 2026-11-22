@@ -12,6 +12,11 @@ rows, and a run whose bounds or dimension differ from those stored is refused, n
 
 from __future__ import annotations
 
+import sys
+import tomllib
+from importlib import import_module
+from pathlib import Path
+
 import numpy as np
 import pytest
 from scipy.stats import qmc
@@ -177,13 +182,6 @@ def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
 
     main() reads sys.argv when given none; a returned path would print and give status 1.
     """
-    import sys
-    import tomllib
-    from importlib import import_module
-    from pathlib import Path
-
-    from tests.conftest import REPO_ROOT
-
     scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
     module, _, function = scripts["covsyn-initial-population"].partition(":")
     calls = []

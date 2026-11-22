@@ -1072,23 +1072,6 @@ def test_a_full_disk_in_pilot_2_s_tables_keeps_its_traceback(tmp_path, monkeypat
     assert error.value.errno == errno.ENOSPC
 
 
-def test_the_command_exits_zero_after_a_finished_pilot(monkeypatch):
-    """The console script's exit status is 0, not the directory main() returns.
-
-    sys.exit prints a returned path and turns it into status 1 (pilot 1 on the Mac, 2026-11-22).
-    """
-    import tomllib
-    from importlib import import_module
-    from pathlib import Path
-
-    from tests.conftest import REPO_ROOT
-
-    scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["scripts"]
-    module, _, function = scripts["covsyn-pilot-size"].partition(":")
-    monkeypatch.setattr(ps, "main", lambda argv=None: Path("/a/pilot"))
-    assert getattr(import_module(module), function)() == 0
-
-
 def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
     """The console script runs main() on the command line as given, and exits 0 once done.
 
