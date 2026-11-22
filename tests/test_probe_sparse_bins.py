@@ -435,3 +435,20 @@ def test_a_table_that_is_not_pilot_1_s_stops_before_the_output_is_made(tmp_path,
     with pytest.raises(SystemExit, match="lacks"):
         psb.main()
     assert not out.exists()
+
+
+def test_a_worker_count_refused_stops_before_the_output_is_made(tmp_path, monkeypatch):
+    """The inputs and the pool are set up before anything is written (round 11)."""
+    pilot = tmp_path / "blocks.csv"
+    pilot.write_text(PILOT_HEADER, encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["probe", str(out), str(pilot)])
+    monkeypatch.setattr(psb, "missing_from_pilot", lambda keys, pilot: [])
+
+    def refused(workers):
+        raise SystemExit("workers refused")
+
+    monkeypatch.setattr(psb.block_scoring, "objective_pools", refused)
+    with pytest.raises(SystemExit, match="workers refused"):
+        psb.main()
+    assert not out.exists()
