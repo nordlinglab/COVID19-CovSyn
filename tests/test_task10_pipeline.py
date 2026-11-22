@@ -24,6 +24,11 @@ def _revalidation(recorder):
     return [str(a) for a in args]
 
 
+def _blocks(args):
+    """The block count: after the module, the run and the output directory."""
+    return args[args.index("covsyn.calibration.revalidation") + 3]
+
+
 def test_production_revalidates_thirty_blocks_unless_told_otherwise():
     """Task 10's 30 blocks, without a [revalidate] blocks of its own."""
     assert pc.parse(PRODUCTION, "t").revalidation_blocks == 30
@@ -42,7 +47,7 @@ def test_production_re_scores_the_archive_s_best_ten_at_its_s(tmp_path):
     args = _revalidation(recorder)
     assert args[args.index("--simulations") + 1] == "3000"
     assert args[args.index("--archive-best") + 1] == "10"
-    assert "30" in args  # the blocks
+    assert _blocks(args) == "30"
 
 
 def test_a_train_run_revalidates_as_before(tmp_path):
@@ -52,7 +57,7 @@ def test_a_train_run_revalidates_as_before(tmp_path):
                  recorder)  # fmt: skip
     args = _revalidation(recorder)
     assert "--simulations" not in args and "--archive-best" not in args
-    assert "10" in args
+    assert _blocks(args) == "10"
 
 
 def test_the_saved_production_configuration_keeps_its_thirty_blocks():
