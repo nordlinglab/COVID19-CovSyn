@@ -9,11 +9,14 @@ probe splits the attack-rate term per bin and re-makes pilot 1's choice with a b
 
 from __future__ import annotations
 
+import csv
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts" / "probes"))
 
@@ -131,7 +134,8 @@ def test_a_table_whose_last_row_was_cut_is_refused(tmp_path):
 
 def test_resumed_rows_are_checked_against_pilot_1_too():
     """A row from an earlier run, against the table given now (code review round 3)."""
-    row = {"attack": "0.0", "household_0_3_infections": "0", **dict.fromkeys(psb.TERMS, "0.0")}
+    row = {"attack": "0.0", "household_0_3_contacts": "0", "household_0_3_infections": "0",
+           **dict.fromkeys(psb.TERMS, "0.0")}  # fmt: skip
     done = {("vector", 0, 300, 0): {**row, "cost": "10.0"},
             ("vector", 2, 300, 0): {**row, "cost": "5.0"}}  # fmt: skip
     pilot = {("vector", 0, 300, 0): 10.0, ("vector", 2, 300, 0): 6.0}
@@ -157,7 +161,8 @@ def test_a_header_without_its_newline_is_called_a_cut_header(tmp_path):
 def test_resumed_rows_whose_terms_do_not_add_to_their_attack_cost_are_flagged():
     """Terms from an older probe would feed the choice unchecked (code review round 4)."""
     key = ("vector", 0, 300, 0)
-    row = {"cost": "10.0", "attack": "3.0", "household_0_3_infections": "0",
+    row = {"cost": "10.0", "attack": "3.0", "household_0_3_contacts": "0",
+           "household_0_3_infections": "0",
            **dict.fromkeys(psb.TERMS, "0.0")}  # fmt: skip
     good = {**row, "term_0_1": "3.0"}
     assert psb.mismatched({key: good}, {key: 10.0}) == []
@@ -195,3 +200,82 @@ def test_a_failed_row_with_terms_is_refused():
 def test_a_short_or_unreadable_row_is_refused_not_a_traceback(field, value):
     """A row cut inside, or a cell that is no number: named, not a crash."""
     assert psb.mismatched({KEY: _scored(**{field: value})}, {KEY: 10.0}) == [KEY]
+
+
+def _write(path, rows):
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=psb.COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_rows_already_scored_are_read_by_their_key(tmp_path):
+    """kind, row, S and block identify an evaluation, as in pilot 1's table."""
+    path = tmp_path / "bins.csv"
+    _write(path, [_scored(row="2", simulations="300", block="7")])
+    assert list(psb.read_done(path)) == [("vector", 2, 300, 7)]
+
+
+@pytest.mark.parametrize("field", ["row", "simulations", "block"])
+def test_a_row_whose_key_cannot_be_read_is_refused(tmp_path, field):
+    """Named, not a traceback (code review round 6)."""
+    path = tmp_path / "bins.csv"
+    _write(path, [_scored(**{field: "x"})])
+    with pytest.raises(SystemExit, match="line 2"):
+        psb.read_done(path)
+
+
+def test_an_evaluation_held_twice_is_refused(tmp_path):
+    """One of them would be dropped unchecked (code review round 6)."""
+    path = tmp_path / "bins.csv"
+    _write(path, [_scored(), _scored(cost="11.0")])
+    with pytest.raises(SystemExit, match="twice"):
+        psb.read_done(path)
+
+
+@pytest.mark.parametrize("changes", [
+    {"household_0_3_contacts": "5"},  # failed, but counts contacts
+    {"attack": "3.0"},  # failed, but has an attack-rate cost
+])  # fmt: skip
+def test_a_failed_row_must_be_written_as_a_fresh_failed_row(changes):
+    """Charged 1e6, attack NaN, counts -1, terms 0 (code review round 6)."""
+    failed = {
+        "cost": str(1e6),
+        "attack": "nan",
+        "term_0_1": "0.0",
+        "household_0_3_contacts": "-1",
+        "household_0_3_infections": "-1",
+    }
+    row = _scored(**{**failed, **changes})
+    assert psb.mismatched({KEY: row}, {KEY: 1e6}) == [KEY]
+
+
+def test_a_scored_row_with_negative_contacts_is_refused():
+    """Only a failed row has the -1 placeholders."""
+    assert psb.mismatched({KEY: _scored(household_0_3_contacts="-1")}, {KEY: 10.0}) == [KEY]
+
+
+NUMERIC = ["cost", "attack", "household_0_3_contacts", "household_0_3_infections", *psb.TERMS]
+
+
+@given(field=st.sampled_from(NUMERIC),
+       text=st.text().filter(lambda t: not _number(t)))  # fmt: skip
+def test_any_cell_that_is_no_number_makes_a_row_unusable(field, text):
+    """Property: whatever the text, a numeric cell that is not a number refuses the row."""
+    assert psb.mismatched({KEY: _scored(**{field: text})}, {KEY: 10.0}) == [KEY]
+
+
+@given(costs=st.lists(st.floats(0, 100), min_size=len(psb.TERMS), max_size=len(psb.TERMS)))
+def test_a_row_written_as_main_writes_it_is_usable(costs):
+    """Property: terms that add up to the attack cost, and the pilot's cost, always pass."""
+    row = _scored(attack=repr(sum(costs)), **dict(zip(psb.TERMS, map(repr, costs), strict=True)))
+    assert psb.mismatched({KEY: row}, {KEY: 10.0}) == []
+
+
+def _number(text):
+    """Whether float() reads it: a cell that is a number in some column."""
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False

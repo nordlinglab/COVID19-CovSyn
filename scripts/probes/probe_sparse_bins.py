@@ -95,13 +95,15 @@ def _unusable(r: dict, expected: float) -> bool:
     try:
         cost, attack = float(r["cost"]), float(r["attack"])
         terms = [float(r[t]) for t in TERMS]
+        contacts = int(r["household_0_3_contacts"])
         infections = int(r["household_0_3_infections"])
     except (TypeError, ValueError, KeyError):  # cut inside, or a cell that is no number
         return True
     if not np.isclose(cost, expected, rtol=1e-9):
         return True
-    if infections < 0:  # failed: charged as pilot 1 charged it, with no bin to leave out
-        return cost != fo.FAILED_EVALUATION_COST or any(terms)
+    if infections < 0 or contacts < 0:  # failed, written as a fresh failed row is
+        return not (contacts == infections == -1 and cost == fo.FAILED_EVALUATION_COST
+                    and np.isnan(attack) and not any(terms))  # fmt: skip
     return not np.isclose(sum(terms), attack, rtol=1e-9, atol=1e-12)
 
 
@@ -114,6 +116,26 @@ def mismatched(done: dict, pilot: dict) -> list:
     uses, do not add up to its attack-rate cost, as a fresh row's must.
     """
     return [key for key, r in done.items() if key not in pilot or _unusable(r, pilot[key])]
+
+
+def read_done(path: Path) -> dict:
+    """The rows already in bins.csv, by evaluation key (kind, row, S, block).
+
+    Raises:
+        SystemExit: A row's key cannot be read, or an evaluation is held twice; the message
+            names the line.
+    """
+    done: dict = {}
+    with open(path, newline="") as f:
+        for line, r in enumerate(csv.DictReader(f), start=2):
+            try:
+                key = (r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"]))
+            except (TypeError, ValueError, KeyError):
+                raise SystemExit(f"{path}, line {line}: its key cannot be read") from None
+            if key in done:
+                raise SystemExit(f"{path}, line {line}: {key} is held twice")
+            done[key] = r
+    return done
 
 
 def missing_from_pilot(keys, pilot: dict) -> list:
@@ -134,11 +156,7 @@ def main() -> None:
         pilot = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"])):
                  float(r["cost"]) for r in csv.DictReader(f)}  # fmt: skip
     new = needs_header(path)  # before reading it: refuses a header or a last row cut short
-    done = {}
-    if not new:
-        with open(path, newline="") as f:
-            done = {(r["kind"], int(r["row"]), int(r["simulations"]), int(r["block"])): r
-                    for r in csv.DictReader(f)}  # fmt: skip
+    done = {} if new else read_done(path)
     population, lower, upper = pilot_noise._population_and_bounds()
     parameters = population * (upper - lower) + lower
     _, make_pool = block_scoring.objective_pools(args.workers)
