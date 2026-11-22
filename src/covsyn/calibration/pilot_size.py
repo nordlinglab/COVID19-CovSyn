@@ -391,5 +391,15 @@ def main(argv: list[str] | None = None) -> Path:
     return out
 
 
-if __name__ == "__main__":
+def cli() -> int:
+    """The console script: run main() on sys.argv, and exit 0 once it returns.
+
+    main() returns the pilot's directory, for callers; a console script exits with what its
+    function returns, so a path would print and give status 1.
+    """
     main()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(cli())
