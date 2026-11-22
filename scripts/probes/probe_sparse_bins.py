@@ -168,9 +168,10 @@ def read_pilot(path: Path) -> dict:
     and a row short of a value, so the costs are the ones pilot 1 summarised.
 
     Raises:
-        SystemExit: The table cannot be read, or a record's key or cost cannot be, or an
-            evaluation is held twice; the message names the row by its number among those
-            read_table keeps.
+        SystemExit: The path does not exist, or is a link to a file that does not; the table
+            cannot be one (read_table's refusal); it is not UTF-8, named by its first bad
+            line; or a row's key or cost cannot be read, its cost is not finite, or an
+            evaluation is held twice, named by its number among the rows read_table keeps.
     """
     try:
         table = block_scoring.read_table(path)
