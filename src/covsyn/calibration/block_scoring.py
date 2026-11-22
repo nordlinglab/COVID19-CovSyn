@@ -155,13 +155,13 @@ def read_table(path: Path, warn: bool = True, required: bool = False) -> Table:
     meanwhile stops the pilot instead. A last line without its newline, which a kill cut off,
     and a row short of a value or with one too many are not finished evaluations and are left
     out, as the csv reader leaves out a blank line after the header (a blank first line
-    would be read as an empty header, and every row then left out silently, as unfinished).
-    A leading UTF-8
-    byte order mark, which a spreadsheet adds when it saves the table as "CSV UTF-8", is
-    skipped, with a warning unless ``warn`` is False: it may have shortened the costs it wrote
-    back. The mark is judged from the bytes the rows come from, so a pilot's later reads in a
-    run can pass ``warn=not marked`` and warn only about a mark added since. A save that adds
-    no mark, such as plain "CSV", shortens the costs just the same and is not detected.
+    would be read as an empty header, and every row would then be left out silently, as
+    unfinished). A leading UTF-8 byte order mark, which a spreadsheet adds when it saves the
+    table as "CSV UTF-8", is skipped, with a warning unless ``warn`` is False: it may have
+    shortened the costs it wrote back. The mark is judged from the bytes the rows come from,
+    so a pilot's later reads in a run can pass ``warn=not marked`` and warn only about a mark
+    added since. A save that adds no mark, such as plain "CSV", shortens the costs just the
+    same and is not detected.
 
     Raises:
         TableError: ``required`` and it is missing; or it cannot be one (see TableError).
