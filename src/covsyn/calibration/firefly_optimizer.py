@@ -1309,9 +1309,10 @@ CHENG_SYMPTOMATIC_INDEX_CASES = CHENG2020_INDEX_CASES - 9
 def reported_energy(compute) -> float:
     """compute(), the energy term for the log, or NaN when any part of it fails (B95).
 
-    Energy is reported but not charged since 2026-11-23, so neither its inputs (the Taiwan
-    matrix, the synthetic test matrix) nor the statistic may fail the evaluation (code review
-    2026-11-23, two rounds); the traceback is printed.
+    Energy is reported but not charged since 2026-11-23, so neither building the synthetic test
+    matrix nor the statistic may fail the evaluation (code review 2026-11-23); the traceback is
+    printed. A missing Taiwan matrix, a committed input, still stops the run, in both
+    implementations.
     """
     try:
         return compute()
@@ -1451,8 +1452,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     # print('Time spend in loop: ', time.time() - start_t)
     # start_t = time.time()
     # Energy distance
+    # A missing or unreadable Taiwan matrix, a committed input, stops the evaluation as it
+    # stops fast_cost's pool setup: only failures in computing energy become NaN (round 3).
+    taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
+
     def energy():
-        taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
         synthetic_data_matrix = convert_synthetic_data_to_test_matrix(
             results, taiwan_data_matrix, source_case_number * repeat_number)
         return energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
