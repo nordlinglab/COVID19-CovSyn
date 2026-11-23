@@ -48,11 +48,13 @@ def main():
           % (cost, abs(cost - result[row, -1]) < 1e-9))
 
     print('=== objective decomposition ===')
-    order = ['cost_contact', 'cost_attack_rate', 'cost_energy', 'cost_penalty', 'cost_outcome']
+    # B95: energy is reported but no longer part of the total.
+    order = ['cost_contact', 'cost_attack_rate', 'cost_penalty', 'cost_outcome']
     total = sum(parts[k] for k in order)
     for key in order:
         print('  %-24s %9.4f   %6.1f%%' % (key, parts[key], 100 * parts[key] / total))
     print('  %-24s %9.4f' % ('total', total))
+    print('  %-24s %9.4f   (reported, not charged)' % ('cost_energy', parts['cost_energy']))
     for key in ('cost_contact_household', 'cost_contact_healthcare', 'cost_contact_others'):
         print('  %-24s %9.4f' % (key, parts[key]))
 
