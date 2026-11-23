@@ -565,7 +565,9 @@ def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_
         synthetic_data_matrix[i] = row
     energy_cost = fo.energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
 
-    energy_weight = 1
+    # Since 2026-11-23 (user decision) the energy term is reported in cost_energy but not
+    # charged: no parameter responds to it alone (probe_term_sensitivity, e737d4c). The total
+    # skips it rather than weighting it by 0, so a NaN energy cannot reach the total.
     contact_cost = sum(contact_costs)
     attack_cost = fo.ATTACK_RATE_WEIGHT * sum(attack_rate_costs)
     penalty = fo.physiology_penalty(P)
@@ -574,11 +576,11 @@ def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_
     measured['pre_onset_zero_share_sampled'] = measured['pre_onset_zero_share']
     measured['pre_onset_zero_share'] = fo.pre_onset_zero_probability(P)
     outcome = fo.outcome_penalty(measured)
-    total_cost = contact_cost + attack_cost + energy_weight * energy_cost + penalty + outcome
+    total_cost = contact_cost + attack_cost + penalty + outcome
 
     parts = dict(
         cost_contact=float(contact_cost), cost_attack_rate=float(attack_cost),
-        cost_energy=float(energy_weight * energy_cost), cost_penalty=float(penalty),
+        cost_energy=float(energy_cost), cost_penalty=float(penalty),
         cost_outcome=float(outcome),
         cost_contact_household=float(contact_costs[0]),
         cost_contact_healthcare=float(contact_costs[1]),
