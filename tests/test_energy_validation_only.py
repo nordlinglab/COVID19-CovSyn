@@ -64,3 +64,29 @@ def test_the_reference_objective_charges_the_same_terms(
     parts = dict(LAST_COST_PARTS)
     assert cost == pytest.approx(sum(parts[k] for k in CHARGED), rel=1e-12)
     assert math.isfinite(parts["cost_energy"])
+
+
+def _raise(*args, **kwargs):
+    raise ValueError("energy failed")
+
+
+def test_an_energy_error_is_reported_as_nan_not_a_failed_evaluation(
+    monkeypatch, run10_vector, demographic_parameters, cheng_data
+):
+    """Energy is not charged, so its failure must not charge FAILED_EVALUATION_COST."""
+    monkeypatch.setattr(fo, "energy_statistic", _raise)
+    cost, parts = _candidate(monkeypatch, demographic_parameters, cheng_data, run10_vector)
+    assert cost == pytest.approx(sum(parts[k] for k in CHARGED), rel=1e-12)
+    assert math.isnan(parts["cost_energy"])
+
+
+def test_the_reference_objective_survives_an_energy_error(
+    monkeypatch, run10_vector, demographic_parameters, cheng_data, cost_pool
+):
+    """The same in firefly_optimizer.cost_function."""
+    monkeypatch.setattr(fo, "SIMULATIONS_PER_EVALUATION", 10)
+    monkeypatch.setattr(fo, "energy_statistic", _raise)
+    cost = fo.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data)
+    parts = dict(LAST_COST_PARTS)
+    assert cost == pytest.approx(sum(parts[k] for k in CHARGED), rel=1e-12)
+    assert math.isnan(parts["cost_energy"])

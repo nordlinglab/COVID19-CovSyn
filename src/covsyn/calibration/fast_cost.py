@@ -545,7 +545,7 @@ def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_
     synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
     for i, row in enumerate(rows[:case_limit]):
         synthetic_data_matrix[i] = row
-    energy_cost = fo.energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
+    energy_cost = fo.reported_energy(taiwan_data_matrix, synthetic_data_matrix)  # B91, B95
 
     # Since 2026-11-23 (user decision) the energy term is reported in cost_energy but not
     # charged: no parameter responds to it alone (probe_term_sensitivity, e737d4c). The total
