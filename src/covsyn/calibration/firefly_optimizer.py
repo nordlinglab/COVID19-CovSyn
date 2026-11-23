@@ -1434,7 +1434,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     bins = np.zeros((len(layers), 2, 6))
     case = 0
     for seed, result in zip(seeds_copy, results, strict=True):
-        profile = cheng_recording.draw_profile(seed, cheng_recording.default_profiles())
+        profile = cheng_recording.default_table().draw(seed)
         _, _, course_list, contact_list = result.result()
         for j, (course, contact) in enumerate(zip(course_list, contact_list, strict=True)):
             if case < source_case_number * repeat_number:

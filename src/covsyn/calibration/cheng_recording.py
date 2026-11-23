@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import csv
 import functools
+import math
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +44,8 @@ EXTENSION_SHARE = 0.9
 EXTENSION_DAYS = 4
 MISSING_ARRIVAL = "resample"  # treatment A; "before" (B) is the sensitivity
 MISSING_TREATMENTS = ("resample", "before")
+# Lower edges of Cheng's bins 0-3, 4-5, 6-7, 8-9 and > 9 days from onset (< 0 is bin 0).
+BIN_EDGES = np.array([0, 4, 6, 8, 10])
 
 # Cheng's three groups, in the objective's order, and the layers each is built from.
 GROUPS = (("household", ("household",)), ("health_care", ("health_care",)),
@@ -71,13 +74,63 @@ def default_profiles() -> list[dict]:
     return load_profiles()
 
 
+class ProfileTable:
+    """Profiles checked once and ready to draw from, so a draw costs no pass over the table.
+
+    Checking the bands and collecting the known arrivals on every draw took about 1 s of an
+    evaluation's 3,000 simulations, enough to cost the profile its 80% run_covid share
+    (Task 5 criterion; Mac test 2026-11-23).
+    """
+
+    def __init__(self, profiles: list[dict]):
+        """Check the bands and collect the known arrivals of these profiles."""
+        if not profiles:
+            raise ValueError("no index-case profile to draw from")
+        for p in profiles:  # run_covid's age tables run from 0 to 100 (code review 2026-11-23)
+            if _finite(p["age_low"], p["age_high"]) and not (
+                    0 <= p["age_low"] <= p["age_high"] <= 100):
+                raise ValueError(f"case {p['case_id']}: age band "
+                                 f"{p['age_low']}-{p['age_high']} lies outside 0-100")
+        self.profiles = list(profiles)
+        self.known = [int(p["arrival_from_onset"]) for p in self.profiles
+                      if p["imported"] and _finite(p["arrival_from_onset"])]
+
+    def draw(self, seed: int, missing: str = MISSING_ARRIVAL) -> dict:
+        """See draw_profile."""
+        if missing not in MISSING_TREATMENTS:
+            raise ValueError(f"missing must be one of {MISSING_TREATMENTS}, got {missing!r}")
+        rng = np.random.default_rng([int(seed), PROFILE_STREAM])
+        case = self.profiles[int(rng.integers(len(self.profiles)))]
+        low, high = case["age_low"], case["age_high"]
+        age = int(rng.integers(int(low), int(high) + 1)) if _finite(low, high) else None
+        arrival = None
+        if case["imported"]:
+            if _finite(case["arrival_from_onset"]):
+                arrival = int(case["arrival_from_onset"])
+            elif missing == "resample" and self.known:
+                arrival = self.known[int(rng.integers(len(self.known)))]
+        return {"case_id": case["case_id"], "age": age, "imported": case["imported"],
+                "airport": case["airport"], "arrival_from_onset": arrival}
+
+
+def _finite(*values) -> bool:
+    return all(math.isfinite(v) for v in values)
+
+
+@functools.cache
+def default_table() -> ProfileTable:
+    """The committed profiles as a table, built once per process."""
+    return ProfileTable(default_profiles())
+
+
 def simulate(seed, P, demographic_parameters, profiles=None, **run_covid_kwargs):
     """run_covid for the objective: the index case takes the seed's profile and its age.
 
     Returns:
         (run_covid's output, the profile).
     """
-    profile = draw_profile(seed, default_profiles() if profiles is None else profiles)
+    table = default_table() if profiles is None else ProfileTable(profiles)
+    profile = table.draw(seed)
     out = run_covid(seed, P, demographic_parameters, save_file=False, source_age=profile["age"],
                     **run_covid_kwargs)
     return out, profile
@@ -95,29 +148,7 @@ def draw_profile(seed: int, profiles: list[dict], missing: str = MISSING_ARRIVAL
         {'case_id', 'age', 'imported', 'airport', 'arrival_from_onset'}, the arrival an int
         or None.
     """
-    if missing not in MISSING_TREATMENTS:
-        raise ValueError(f"missing must be one of {MISSING_TREATMENTS}, got {missing!r}")
-    if not profiles:
-        raise ValueError("no index-case profile to draw from")
-    for p in profiles:  # run_covid's age tables run from 0 to 100 (code review 2026-11-23)
-        if np.isfinite([p["age_low"], p["age_high"]]).all() and not (
-                0 <= p["age_low"] <= p["age_high"] <= 100):
-            raise ValueError(f"case {p['case_id']}: age band {p['age_low']}-{p['age_high']} "
-                             "lies outside 0-100")
-    rng = np.random.default_rng([int(seed), PROFILE_STREAM])
-    case = profiles[int(rng.integers(len(profiles)))]
-    low, high = case["age_low"], case["age_high"]
-    age = int(rng.integers(int(low), int(high) + 1)) if np.isfinite([low, high]).all() else None
-    arrival = None
-    if case["imported"]:
-        if np.isfinite(case["arrival_from_onset"]):
-            arrival = int(case["arrival_from_onset"])
-        elif missing == "resample":
-            known = [p["arrival_from_onset"] for p in profiles
-                     if p["imported"] and np.isfinite(p["arrival_from_onset"])]
-            arrival = int(known[int(rng.integers(len(known)))]) if known else None
-    return {"case_id": case["case_id"], "age": age, "imported": case["imported"],
-            "airport": case["airport"], "arrival_from_onset": arrival}
+    return ProfileTable(profiles).draw(seed, missing)
 
 
 def arrival_day(profile: dict, onset: int):
@@ -176,17 +207,18 @@ def _record_layer(out, contact, layer, onset, start, end, arrival):
         if events is not None and len(events) != matrix.shape[0]:
             raise ValueError(f"municipality_event_mask has {len(events)} entries for "
                              f"{matrix.shape[0]} contact rows")
-        for m, row in enumerate(matrix):
-            if events is not None and events[m]:
-                continue  # B55: replaced by the expectation below
-            days = np.flatnonzero(row)
-            days = days[(days >= start) & (days <= end)]
-            if days.size == 0:
-                continue
-            b = _cheng_day_bin(int(days[0]) - onset)
-            out[0, b] += 1
-            if not np.isnan(times[m]) and (arrival is None or times[m] >= arrival):
-                out[1, b] += 1
+        # Vectorised over the contacts: the Python loop per row cost the objective's profile
+        # its 80% run_covid share (Task 5 criterion; Mac test 2026-11-23).
+        keep = np.ones(matrix.shape[0], dtype=bool) if events is None else ~events
+        days = np.arange(matrix.shape[1])
+        seen = matrix[keep] & ((days >= start) & (days <= end))
+        has = seen.any(axis=1)
+        bins = np.searchsorted(BIN_EDGES, seen.argmax(axis=1)[has] - onset, side="right")
+        infected = ~np.isnan(times[keep][has])
+        if arrival is not None:
+            infected &= times[keep][has] >= arrival
+        out[0] += np.bincount(bins, minlength=6)
+        out[1] += np.bincount(bins[infected], minlength=6)
     if events is not None:
         expected_infections = contact.get("municipality_event_expected_infections")
         for day, count in enumerate(contact["municipality_event_expected_contacts"]):
