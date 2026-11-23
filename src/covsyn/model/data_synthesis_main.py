@@ -96,6 +96,15 @@ def source_profiles_for(mode, seed):
     return cheng_recording.default_table().cohort(seed)
 
 
+def source_profiles_metadata(mode):
+    """E84: what run_metadata.json records about the index-case profiles of this mode."""
+    if source_profiles_for(mode, 0) is None:
+        return {}
+    from covsyn.calibration import cheng_recording
+    return {'source_profiles': cheng_recording.PROFILES.as_posix(),
+            'profile_stream': cheng_recording.PROFILE_STREAM}
+
+
 def _checked_source_age(age):
     """age as an int, after checking it indexes the age tables (E84)."""
     if isinstance(age, bool) or not float(age).is_integer() or not 0 <= age <= 100:
@@ -1057,7 +1066,8 @@ def main() -> None:
                                               else None),
                            **options, stream=stream, seed_start=seed_start,
                            monte_carlo_number=mc_number,
-                           parameter_path=str(parameter_path))
+                           parameter_path=str(parameter_path),
+                           **source_profiles_metadata(mode))
         print("--- Done %s seconds ---" % (time.time() - start_time))
 
 

@@ -13,11 +13,16 @@ from __future__ import annotations
 import copy
 
 import numpy as np
+import pytest
 
 from covsyn.calibration import cheng_recording as cr
 from covsyn.calibration.firefly_optimizer import CHENG_SYMPTOMATIC_INDEX_CASES
 from covsyn.figures import reproduce_wu2025 as rw
-from covsyn.model.data_synthesis_main import run_covid, source_profiles_for
+from covsyn.model.data_synthesis_main import (
+    run_covid,
+    source_profiles_for,
+    source_profiles_metadata,
+)
 
 
 def test_fig6_bins_are_the_recorded_bins_of_each_case(
@@ -43,3 +48,29 @@ def test_fig6_bins_are_the_recorded_bins_of_each_case(
         assert np.allclose(data["Household|contacts"][run], bins[0, 0])
         assert np.allclose(data["Health care|infections"][run], bins[1, 1])
         assert np.allclose(data["All|contacts"][run], bins[:, 0].sum(axis=0))
+
+
+def test_fig6_refuses_data_whose_index_cases_have_no_profile(
+    tmp_path, run10_vector, demographic_parameters
+):
+    """Data synthesised before E84 would be binned without arrival or airport isolation."""
+    _, _, courses, contacts = run_covid(
+        11, np.array(run10_vector), copy.deepcopy(demographic_parameters), save_file=False,
+        mode="cheng2020")
+    np.save(tmp_path / "course_of_disease_data_0.npy", np.array(courses, dtype=object))
+    np.save(tmp_path / "contact_data_0.npy", np.array(contacts, dtype=object))
+    with pytest.raises(ValueError, match="index_profile"):
+        rw.cheng_bins(tmp_path, ["Household"])
+
+
+def test_the_cheng2020_metadata_names_the_profiles(tmp_path):
+    """A reader can tell E84 data from older data."""
+    import json
+
+    from covsyn.model.data_synthesis_main import write_run_metadata
+
+    write_run_metadata(tmp_path, mode="cheng2020", **source_profiles_metadata("cheng2020"))
+    record = json.loads((tmp_path / "run_metadata.json").read_text())
+    assert record["source_profiles"] == "variable/cheng_period_profiles.csv"
+    assert record["profile_stream"] == cr.PROFILE_STREAM
+    assert source_profiles_metadata("spread_Taiwan_weight") == {}

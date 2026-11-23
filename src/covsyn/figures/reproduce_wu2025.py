@@ -841,6 +841,9 @@ def cheng_bins(directory: Path, layers: list[str]) -> tuple[dict[str, np.ndarray
             continue
         runs += 1
         scale = CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic
+        if not any("index_profile" in c for c in courses):
+            raise ValueError(f"{directory}: no index case carries an index_profile; "
+                             "resynthesise the cheng2020 data with E84's Cheng cohort")
         bins = cheng_recording.recorded_totals(courses, contacts)
         for layer in layers:
             contact = bins[group[layer], 0].sum(axis=0)

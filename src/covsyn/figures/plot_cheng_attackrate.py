@@ -2,7 +2,9 @@
 Records the contacts as the firefly cost target does (E84, cheng_recording: the first day of
 exposure inside Cheng's investigation period, each contact counted once, layers grouped as
 Cheng: Household / Health care / Others), so the synthetic attack rate is defined like Cheng
-2020 Fig 2 and like the objective."""
+2020 Fig 2 and like the objective. The pipeline runs it on the spread_Taiwan_weight data, whose
+cases carry no index-case profile (they are local), so no arrival or airport isolation
+applies; Fig 6 (reproduce_wu2025) shows the cohort with Cheng's profiles."""
 import glob, sys, numpy as np
 from pathlib import Path
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
