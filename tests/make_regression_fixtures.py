@@ -4,7 +4,8 @@
 
 Run from the repository root, on the compute server's pinned environment, whenever a decision
 intentionally changes simulated output; first at the commit that produced Phase D run 10, last
-for B91-B93 (exact energy distances, the largest spreader, hospital transmission):
+for E84 (2026-11-23: Cheng's bins as his investigation recorded them, the index case's profile,
+energy reported but not charged; generated under WSL, within B91's tolerance of the server):
 
     uv run python tests/make_regression_fixtures.py
 
