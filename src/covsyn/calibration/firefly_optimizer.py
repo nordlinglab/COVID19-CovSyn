@@ -266,8 +266,8 @@ SIMULATIONS_PER_TASK = 10
 class _CompletedSimulation:
     """Gives an already-computed simulation result the .result() interface.
 
-    generate_contact_result(), convert_synthetic_data_to_test_matrix() and the index-case
-    loop in _cost_function() all expect the Future objects the pool used to hand back one
+    extract_course_and_contact(), convert_synthetic_data_to_test_matrix() and the loops in
+    _cost_function() all expect the Future objects the pool used to hand back one
     per simulation. Batching means the pool now returns a LIST of results per task, so each
     one is wrapped here and every consumer keeps working unchanged.
     """
@@ -294,9 +294,9 @@ def _run_simulation_batch(seeds, P, demographic_parameters):
 def extract_course_and_contact(results, case_number):
     """Pull the course-of-disease and contact records out of the simulation results once.
 
-    This used to sit inside generate_contact_result(), which _cost_function() calls once per
-    Cheng layer, so the same 300 results were walked three times, every record was fetched
-    twice per walk (result.result()[2] and result.result()[3]), and np.append on a growing
+    This used to sit inside generate_contact_result() (removed after E84 moved the binning to
+    cheng_recording), which _cost_function() called once per Cheng layer, so the same 300
+    results were walked three times, every record was fetched twice per walk (result.result()[2] and result.result()[3]), and np.append on a growing
     object array made each walk quadratic. Doing it once per evaluation instead of three
     times is the second half of the speed-up recorded at SIMULATIONS_PER_TASK; the arrays
     produced are identical to what the np.append loop produced.
@@ -309,31 +309,6 @@ def extract_course_and_contact(results, case_number):
         contact_data_list.extend(value[3])
     return (np.array(course_of_disease_data_list[0:case_number], dtype=object),
             np.array(contact_data_list[0:case_number], dtype=object))
-
-
-def generate_contact_result(course_of_disease_data_list, contact_data_list, layer):
-    # Transform the data to contact bars as Cheng2020
-    if (layer == 'Household') | (layer == 'Health care'):
-        _, contact_array, _, infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer=layer)
-    elif layer == 'Cheng others':
-        _, school_contact_array, _, school_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='School')
-        _, workplace_contact_array, _, workplace_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='Workplace')
-        _, municipality_contact_array, _, municipality_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='Municipality',
-            expected_events=True)   # B55
-        contact_array = np.sum(np.vstack(
-            (school_contact_array, workplace_contact_array, municipality_contact_array)), axis=0)
-        infection_array = np.sum(np.vstack(
-            (school_infection_array, workplace_infection_array, municipality_infection_array)), axis=0)
-        # contact_array = school_contact_array + \
-        #     workplace_contact_array + municipality_contact_array
-        # infection_array = school_infection_array + \
-        #     workplace_infection_array + municipality_infection_array
-
-    return (contact_array, infection_array)
 
 
 # def cost_function(P, demographic_parameters):
@@ -1378,7 +1353,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     seeds = range(seed_offset, seed_offset + source_case_number * repeat_number)
 
     # Submit simulations to the SHARED (persistent) process pool passed in by firefly().
-    # Downstream convert_synthetic_data_to_test_matrix()/generate_contact_result() call
+    # Downstream convert_synthetic_data_to_test_matrix() and the binning loop call
     # future.result(), which blocks until each simulation finishes, so no explicit wait
     # is needed here. Reusing one pool avoids re-spawning/re-importing all workers on
     # every evaluation (the dominant cost on macOS 'spawn').
