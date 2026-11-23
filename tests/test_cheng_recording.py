@@ -359,3 +359,11 @@ def test_a_case_confirmed_before_onset_records_up_to_its_confirmation():
     contact = _contact([[4], [1], [5]], [np.nan, np.nan, np.nan])
     assert _household(cr.recorded_bins(course, contact, back=0))[0] == [1, 0, 0, 0, 0, 0]
     assert _household(cr.recorded_bins(course, contact, back=4))[0] == [2, 0, 0, 0, 0, 0]
+
+
+@pytest.mark.parametrize(("low", "high"), [(100.0, 109.0), (-10.0, -1.0), (90.0, 101.0)])
+def test_a_band_outside_the_age_tables_is_refused(low, high):
+    """run_covid takes ages 0-100, so such a profile would fail every seed that draws it."""
+    profiles = [dict(_profiles()[2], age_low=low, age_high=high)]
+    with pytest.raises(ValueError, match="age"):
+        cr.draw_profile(0, profiles)

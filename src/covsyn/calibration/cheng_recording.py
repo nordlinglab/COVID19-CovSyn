@@ -99,6 +99,11 @@ def draw_profile(seed: int, profiles: list[dict], missing: str = MISSING_ARRIVAL
         raise ValueError(f"missing must be one of {MISSING_TREATMENTS}, got {missing!r}")
     if not profiles:
         raise ValueError("no index-case profile to draw from")
+    for p in profiles:  # run_covid's age tables run from 0 to 100 (code review 2026-11-23)
+        if np.isfinite([p["age_low"], p["age_high"]]).all() and not (
+                0 <= p["age_low"] <= p["age_high"] <= 100):
+            raise ValueError(f"case {p['case_id']}: age band {p['age_low']}-{p['age_high']} "
+                             "lies outside 0-100")
     rng = np.random.default_rng([int(seed), PROFILE_STREAM])
     case = profiles[int(rng.integers(len(profiles)))]
     low, high = case["age_low"], case["age_high"]
