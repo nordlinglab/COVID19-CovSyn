@@ -102,10 +102,18 @@ class _OneCase:
 
 
 def _case_matrix_row(demographic, course, contact, columns):
-    """This case's row of the energy-distance test matrix, from the original converter."""
+    """This case's row of the energy-distance test matrix, from the original converter.
+
+    None when the converter fails: the row only feeds the energy term, which is reported but
+    not charged (B95), so the parent records energy as NaN instead of failing the evaluation.
+    """
     dummy = np.empty((1, columns))
-    return convert_synthetic_data_to_test_matrix([_OneCase(demographic, course, contact)],
-                                                dummy, 1)[0]
+    try:
+        return convert_synthetic_data_to_test_matrix([_OneCase(demographic, course, contact)],
+                                                    dummy, 1)[0]
+    except Exception:
+        traceback.print_exc()
+        return None
 
 
 def workplace_scalars(course, contact, social=None):
@@ -542,10 +550,15 @@ def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_
         contact_costs.append(cost)
         attack_rate_costs.append(attack_rate_cost)
 
-    synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
-    for i, row in enumerate(rows[:case_limit]):
-        synthetic_data_matrix[i] = row
-    energy_cost = fo.reported_energy(taiwan_data_matrix, synthetic_data_matrix)  # B91, B95
+    def energy():
+        if any(row is None for row in rows[:case_limit]):
+            raise ValueError('a case had no test-matrix row')
+        synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
+        for i, row in enumerate(rows[:case_limit]):
+            synthetic_data_matrix[i] = row
+        return fo.energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
+
+    energy_cost = fo.reported_energy(energy)  # B95
 
     # Since 2026-11-23 (user decision) the energy term is reported in cost_energy but not
     # charged: no parameter responds to it alone (probe_term_sensitivity, e737d4c). The total

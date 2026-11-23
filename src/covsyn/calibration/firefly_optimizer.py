@@ -1305,17 +1305,18 @@ def generation_seed_offset(generation, simulations=SIMULATIONS_PER_EVALUATION,
 CHENG_SYMPTOMATIC_INDEX_CASES = CHENG2020_INDEX_CASES - 9
 
 
-def reported_energy(taiwan_data_matrix, synthetic_data_matrix) -> float:
-    """The energy term for the log, or NaN when it cannot be computed (B95).
+def reported_energy(compute) -> float:
+    """compute(), the energy term for the log, or NaN when any part of it fails (B95).
 
-    Energy is reported but not charged since 2026-11-23, so a failure here must not fail the
-    evaluation (code review 2026-11-23); the traceback is printed.
+    Energy is reported but not charged since 2026-11-23, so neither its inputs (the Taiwan
+    matrix, the synthetic test matrix) nor the statistic may fail the evaluation (code review
+    2026-11-23, two rounds); the traceback is printed.
     """
     try:
-        return energy_statistic(taiwan_data_matrix, synthetic_data_matrix)
+        return compute()
     except Exception:
         traceback.print_exc()
-        print('energy_statistic failed; cost_energy recorded as NaN', flush=True)
+        print('the energy term failed; cost_energy recorded as NaN', flush=True)
         return np.nan
 
 
@@ -1449,10 +1450,13 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     # print('Time spend in loop: ', time.time() - start_t)
     # start_t = time.time()
     # Energy distance
-    taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
-    synthetic_data_matrix = convert_synthetic_data_to_test_matrix(
-        results, taiwan_data_matrix, source_case_number * repeat_number)
-    energy_cost = reported_energy(taiwan_data_matrix, synthetic_data_matrix)  # B91, B95
+    def energy():
+        taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
+        synthetic_data_matrix = convert_synthetic_data_to_test_matrix(
+            results, taiwan_data_matrix, source_case_number * repeat_number)
+        return energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
+
+    energy_cost = reported_energy(energy)  # B95
     # energy_cost = max(energy_cost, 0)  # Prevent negative energy cost
     # Objective function
     # print('Energy cost: ', energy_cost)

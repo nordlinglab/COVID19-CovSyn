@@ -90,3 +90,25 @@ def test_the_reference_objective_survives_an_energy_error(
     parts = dict(LAST_COST_PARTS)
     assert cost == pytest.approx(sum(parts[k] for k in CHARGED), rel=1e-12)
     assert math.isnan(parts["cost_energy"])
+
+
+def test_a_failure_building_the_energy_matrix_is_reported_as_nan(
+    monkeypatch, run10_vector, demographic_parameters, cheng_data
+):
+    """The test-matrix rows are only for energy, so their failure must not fail the evaluation."""
+    monkeypatch.setattr(fast_cost, "convert_synthetic_data_to_test_matrix", _raise)
+    cost, parts = _candidate(monkeypatch, demographic_parameters, cheng_data, run10_vector)
+    assert cost == pytest.approx(sum(parts[k] for k in CHARGED), rel=1e-12)
+    assert math.isnan(parts["cost_energy"])
+
+
+def test_the_reference_survives_a_failure_building_the_energy_matrix(
+    monkeypatch, run10_vector, demographic_parameters, cheng_data, cost_pool
+):
+    """The same in firefly_optimizer.cost_function."""
+    monkeypatch.setattr(fo, "SIMULATIONS_PER_EVALUATION", 10)
+    monkeypatch.setattr(fo, "convert_synthetic_data_to_test_matrix", _raise)
+    cost = fo.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data)
+    parts = dict(LAST_COST_PARTS)
+    assert cost == pytest.approx(sum(parts[k] for k in CHARGED), rel=1e-12)
+    assert math.isnan(parts["cost_energy"])
