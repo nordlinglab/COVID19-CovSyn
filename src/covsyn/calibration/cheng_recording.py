@@ -98,10 +98,26 @@ class ProfileTable:
 
     def draw(self, seed: int, missing: str = MISSING_ARRIVAL) -> dict:
         """See draw_profile."""
+        rng = self._rng(seed, missing)
+        return self._resolve(self.profiles[int(rng.integers(len(self.profiles)))], rng, missing)
+
+    def cohort(self, seed: int, missing: str = MISSING_ARRIVAL) -> list[dict]:
+        """Every profile once, in table order, ages and unknown arrivals drawn from the seed.
+
+        Fig 6's simulation has one index case per case of Cheng's (run_covid's
+        source_profiles), so its bins compare with Cheng's cohort itself.
+        """
+        rng = self._rng(seed, missing)
+        return [self._resolve(case, rng, missing) for case in self.profiles]
+
+    @staticmethod
+    def _rng(seed, missing):
         if missing not in MISSING_TREATMENTS:
             raise ValueError(f"missing must be one of {MISSING_TREATMENTS}, got {missing!r}")
-        rng = np.random.default_rng([int(seed), PROFILE_STREAM])
-        case = self.profiles[int(rng.integers(len(self.profiles)))]
+        return np.random.default_rng([int(seed), PROFILE_STREAM])
+
+    def _resolve(self, case, rng, missing):
+        """The case's profile with a drawn age and, if unknown and resampled, arrival."""
         low, high = case["age_low"], case["age_high"]
         age = int(rng.integers(int(low), int(high) + 1)) if _finite(low, high) else None
         arrival = None

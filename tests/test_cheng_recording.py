@@ -367,3 +367,25 @@ def test_a_band_outside_the_age_tables_is_refused(low, high):
     profiles = [dict(_profiles()[2], age_low=low, age_high=high)]
     with pytest.raises(ValueError, match="age"):
         cr.draw_profile(0, profiles)
+
+
+def test_a_cohort_holds_every_profile_once_in_table_order():
+    """Fig 6's 100 index cases are Cheng's 100 cases."""
+    cohort = cr.ProfileTable(_profiles()).cohort(5)
+    assert [p["case_id"] for p in cohort] == [1, 2, 3]
+
+
+def test_a_cohort_is_the_seeds_and_ages_lie_in_the_bands():
+    """Drawn from the seed only; every age in its own case's band."""
+    table = cr.ProfileTable(_profiles())
+    assert table.cohort(5) == table.cohort(5)
+    for seed in range(50):
+        for profile, case in zip(table.cohort(seed), _profiles(), strict=True):
+            assert case["age_low"] <= profile["age"] <= case["age_high"]
+
+
+def test_a_cohort_resolves_unknown_arrivals_like_a_draw():
+    """Case 1 has no known arrival: resampled from case 2's (3), or none with 'before'."""
+    table = cr.ProfileTable(_profiles())
+    assert table.cohort(0)[0]["arrival_from_onset"] == 3
+    assert table.cohort(0, missing="before")[0]["arrival_from_onset"] is None
