@@ -18,7 +18,6 @@ from numpy.random import default_rng
 from scipy.stats import genextreme
 from tqdm import tqdm
 
-from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration import (initial_population, monitoring, parameter_space, revalidation,
                                 run_size, seed_streams, step_schedule)
 from covsyn.runtime import hardware, profiling, runs, timings
@@ -283,8 +282,13 @@ class _CompletedSimulation:
 
 
 def _run_simulation_batch(seeds, P, demographic_parameters):
-    """Run several simulations inside one pool task. See SIMULATIONS_PER_TASK."""
-    return [run_covid(seed, P, demographic_parameters, save_file=False) for seed in seeds]
+    """Run several simulations inside one pool task. See SIMULATIONS_PER_TASK.
+
+    E84: each index case takes its seed's profile of Cheng's period (cheng_recording.simulate);
+    the parent draws the same profile again from the seed to record the contacts.
+    """
+    from covsyn.calibration import cheng_recording
+    return [cheng_recording.simulate(seed, P, demographic_parameters)[0] for seed in seeds]
 
 
 def extract_course_and_contact(results, case_number):
@@ -1410,9 +1414,20 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     # E86: contacts per Cheng cohort of symptomatic index cases.
     contact_scale = cheng_contact_scale(sum(
         1 for course in course_of_disease_data_list if not np.isnan(course['incubation_period'])))
+    # E84: every case recorded as Cheng's investigation did, the index case of each simulation
+    # with its seed's profile, added case by case in the order fast_cost adds them.
+    from covsyn.calibration import cheng_recording
+    bins = np.zeros((len(layers), 2, 6))
+    case = 0
+    for seed, result in zip(seeds_copy, results, strict=True):
+        profile = cheng_recording.draw_profile(seed, cheng_recording.default_profiles())
+        _, _, course_list, contact_list = result.result()
+        for j, (course, contact) in enumerate(zip(course_list, contact_list, strict=True)):
+            if case < source_case_number * repeat_number:
+                bins += cheng_recording.case_bins(course, contact, profile if j == 0 else None)
+            case += 1
     for i, layer in enumerate(layers):
-        contact_array, infection_array = generate_contact_result(
-            course_of_disease_data_list, contact_data_list, layer=layer)
+        contact_array, infection_array = bins[i, 0], bins[i, 1]
         contact_array = contact_array.astype(float)
         norm_contact_array = contact_array/max_Cheng_contact
         infection_array = infection_array.astype(float)

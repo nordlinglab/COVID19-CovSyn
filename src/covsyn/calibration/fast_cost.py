@@ -22,9 +22,10 @@ pool initializer rather than once per task.
 
 Bit-identity
 ------------
-The binning is not reimplemented here: _case_cheng_bins() calls the SAME
-create_array_cheng2020_fig2() the parent used, one case at a time, and _case_matrix_row()
-calls the same convert_synthetic_data_to_test_matrix(). Only the aggregation moved. Run
+The binning is not reimplemented here: since E84 both this module and the parent-side
+reference call cheng_recording.case_bins() one case at a time, in the same order, and
+_case_matrix_row() calls the same convert_synthetic_data_to_test_matrix(). Only the aggregation
+moved. Run
 verify_fast_cost.py to check the total cost and every cost part against
 firefly_optimizer.cost_function() on real parameter vectors; adopt this only if that reports
 identical output.
@@ -36,10 +37,9 @@ import traceback
 import numpy as np
 import psutil
 
+from covsyn.calibration import cheng_recording
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
-from covsyn.model.data_synthesis_main import run_covid
-from covsyn.figures.plot_results import create_array_cheng2020_fig2
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
                                            largest_spreader_percentile, offspring_dispersion,
@@ -50,9 +50,8 @@ from covsyn.runtime import profiling, timings
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix')
           for L in LAYERS}
-# The three groups the objective scores, and the create_array_cheng2020_fig2 layer names they
-# are built from. 'Cheng others' is the sum of the other three layers, exactly as
-# firefly_optimizer.generate_contact_result() sums them.
+# The three groups the objective scores, in cheng_recording.GROUPS' order; the second element
+# names the layers each is built from. 'Cheng others' is the sum of the other three layers.
 CHENG_GROUPS = (('Household', ('Household',)),
                 ('Health care', ('Health care',)),
                 ('Cheng others', ('School', 'Workplace', 'Municipality')))
@@ -100,24 +99,6 @@ class _OneCase:
 
     def result(self):
         return self._value
-
-
-def _case_cheng_bins(course, contact):
-    """This case's contribution to the three groups' six-bin counts.
-
-    Calls create_array_cheng2020_fig2() itself, so the bin edges, the dropping of asymptomatic
-    cases and the first-contact-day arithmetic are the original code, not a copy of it.
-    """
-    bins = np.zeros((len(CHENG_GROUPS), 2, 6))
-    one_course, one_contact = [course], [contact]
-    for gi, (_group, layer_names) in enumerate(CHENG_GROUPS):
-        for layer in layer_names:
-            _, contact_array, _, infection_array = create_array_cheng2020_fig2(
-                one_course, one_contact, layer=layer, expected_events=True)   # B55
-            if contact_array.size == 6:
-                bins[gi, 0] += contact_array
-                bins[gi, 1] += infection_array
-    return bins
 
 
 def _case_matrix_row(demographic, course, contact, columns):
@@ -237,13 +218,14 @@ def _simulate(seeds, P, columns, clock):
     out = []
     for seed in seeds:
         started = time.perf_counter_ns()
-        demographic_list, social_list, course_list, contact_list = run_covid(
-            seed, P, demographic_parameters, save_file=False, stage_times=clock.stage_ns)
+        (demographic_list, social_list, course_list, contact_list), profile = (
+            cheng_recording.simulate(seed, P, demographic_parameters, stage_times=clock.stage_ns))
         simulated = time.perf_counter_ns()
         clock.run_covid_ns += simulated - started
         cases = []
         for j, (course, contact) in enumerate(zip(course_list, contact_list)):
-            cases.append((_case_cheng_bins(course, contact),
+            # E84: recorded as Cheng's investigation did; the index case with its arrival.
+            cases.append((cheng_recording.case_bins(course, contact, profile if j == 0 else None),
                           _case_matrix_row(demographic_list[j], course, contact, columns),
                           not np.isnan(course['incubation_period'])))
         index = (_index_case_scalars(course_list[0], contact_list[0],

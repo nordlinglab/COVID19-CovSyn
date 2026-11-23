@@ -201,10 +201,17 @@ def test_expected_event_contacts_before_arrival_are_not_recorded():
 
 def test_without_a_record_period_the_bins_are_the_objectives_old_ones():
     """No period and no arrival reproduce create_array_cheng2020_fig2 with B55, per group."""
-    from covsyn.calibration import fast_cost
+    from covsyn.figures.plot_results import create_array_cheng2020_fig2
 
+    layers = (("Household",), ("Health care",), ("School", "Workplace", "Municipality"))
     for contact in (_contact([range(2, 8), [0], [12]], [3.0, np.nan, np.nan]), _event_contact()):
-        old = fast_cost._case_cheng_bins(_course(), contact)
+        old = np.zeros((3, 2, 6))
+        for gi, names in enumerate(layers):
+            for name in names:
+                _, contacts, _, infections = create_array_cheng2020_fig2(
+                    [_course()], [contact], layer=name, expected_events=True)
+                if contacts.size == 6:
+                    old[gi] += (contacts, infections)
         assert np.array_equal(cr.recorded_bins(_course(), contact, back=None), old)
 
 

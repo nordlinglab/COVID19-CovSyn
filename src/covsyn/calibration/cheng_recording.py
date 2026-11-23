@@ -29,11 +29,13 @@ both dates (probe_cheng_arrival, run 19); not a free parameter. Sensitivity: 0.5
 from __future__ import annotations
 
 import csv
+import functools
 from pathlib import Path
 
 import numpy as np
 
 from covsyn.figures.plot_results import _cheng_day_bin
+from covsyn.model.data_synthesis_main import run_covid
 
 PROFILES = Path("variable/cheng_period_profiles.csv")  # build_cheng_profiles
 PROFILE_STREAM = 84  # the profile draw's own generator, [seed, PROFILE_STREAM] (E84)
@@ -61,6 +63,24 @@ def load_profiles(path: Path = PROFILES) -> list[dict]:
                  "arrival_from_onset": (float(row["arrival_from_onset"])
                                         if row["arrival_from_onset"] else np.nan)}
                 for row in csv.DictReader(f)]
+
+
+@functools.cache
+def default_profiles() -> list[dict]:
+    """The committed profiles, read once per process."""
+    return load_profiles()
+
+
+def simulate(seed, P, demographic_parameters, profiles=None, **run_covid_kwargs):
+    """run_covid for the objective: the index case takes the seed's profile and its age.
+
+    Returns:
+        (run_covid's output, the profile).
+    """
+    profile = draw_profile(seed, default_profiles() if profiles is None else profiles)
+    out = run_covid(seed, P, demographic_parameters, save_file=False, source_age=profile["age"],
+                    **run_covid_kwargs)
+    return out, profile
 
 
 def draw_profile(seed: int, profiles: list[dict], missing: str = MISSING_ARRIVAL) -> dict:
