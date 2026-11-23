@@ -822,10 +822,14 @@ def cheng_bins(directory: Path, layers: list[str]) -> tuple[dict[str, np.ndarray
     """Contacts, infections and attack rate per Cheng bin, one row per Monte-Carlo run.
 
     Contacts and infections are scaled to Cheng's 91 symptomatic index cases (E86), since
-    only symptomatic cases have an onset to bin contacts against.
+    only symptomatic cases have an onset to bin contacts against. Every case is recorded as
+    the objective records it (E84, cheng_recording.case_bins), an index case with the profile
+    its course record carries; 'All' is the sum of Cheng's three groups.
     """
+    from covsyn.calibration import cheng_recording
     from covsyn.calibration.firefly_optimizer import CHENG_SYMPTOMATIC_INDEX_CASES
-    from covsyn.figures.plot_results import create_array_cheng2020_fig2
+
+    group = {"Household": [0], "Health care": [1], "All": [0, 1, 2]}
 
     out: dict[str, list] = {
         f"{layer}|{q}": [] for layer in layers for q in ("contacts", "infections", "attack")
@@ -837,10 +841,13 @@ def cheng_bins(directory: Path, layers: list[str]) -> tuple[dict[str, np.ndarray
             continue
         runs += 1
         scale = CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic
+        bins = np.zeros((len(cheng_recording.GROUPS), 2, 6))
+        for course, contact_record in zip(courses, contacts, strict=True):
+            bins += cheng_recording.case_bins(course, contact_record,
+                                              course.get("index_profile"))
         for layer in layers:
-            _, contact, _, infection = create_array_cheng2020_fig2(courses, contacts, layer=layer)
-            contact = np.zeros(6) if np.size(contact) == 0 else np.asarray(contact, float)
-            infection = np.zeros(6) if np.size(infection) == 0 else np.asarray(infection, float)
+            contact = bins[group[layer], 0].sum(axis=0)
+            infection = bins[group[layer], 1].sum(axis=0)
             attack = np.divide(infection, contact, out=np.full(6, np.nan), where=contact > 0) * 100
             out[f"{layer}|contacts"].append(contact * scale)
             out[f"{layer}|infections"].append(infection * scale)
