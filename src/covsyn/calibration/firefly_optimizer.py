@@ -296,10 +296,11 @@ def extract_course_and_contact(results, case_number):
 
     This used to sit inside generate_contact_result() (removed after E84 moved the binning to
     cheng_recording), which _cost_function() called once per Cheng layer, so the same 300
-    results were walked three times, every record was fetched twice per walk (result.result()[2] and result.result()[3]), and np.append on a growing
-    object array made each walk quadratic. Doing it once per evaluation instead of three
-    times is the second half of the speed-up recorded at SIMULATIONS_PER_TASK; the arrays
-    produced are identical to what the np.append loop produced.
+    results were walked three times, every record was fetched twice per walk
+    (result.result()[2] and result.result()[3]), and np.append on a growing object array made
+    each walk quadratic. Doing it once per evaluation instead of three times is the second half
+    of the speed-up recorded at SIMULATIONS_PER_TASK; the arrays produced are identical to what
+    the np.append loop produced.
     """
     course_of_disease_data_list = []
     contact_data_list = []
