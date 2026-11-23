@@ -1,11 +1,12 @@
 """Cheng-2020-comparable secondary attack rate diagnostic, WITH literature overlay.
-Uses the repo's own create_array_cheng2020_fig2 (onset-relative first-contact-day binning,
-each contact counted once, layers grouped as Cheng: Household / Health care / Others) so the
-synthetic attack rate is defined exactly like Cheng 2020 Fig 2 and like the firefly cost target."""
+Records the contacts as the firefly cost target does (E84, cheng_recording: the first day of
+exposure inside Cheng's investigation period, each contact counted once, layers grouped as
+Cheng: Household / Health care / Others), so the synthetic attack rate is defined like Cheng
+2020 Fig 2 and like the objective."""
 import glob, sys, numpy as np
 from pathlib import Path
 import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
-from covsyn.figures.plot_results import create_array_cheng2020_fig2
+from covsyn.calibration.cheng_recording import recorded_totals
 
 # Usage:
 #     uv run python -m covsyn.figures.plot_cheng_attackrate [data_dir] [out_dir]
@@ -25,17 +26,9 @@ for f in sorted(glob.glob(SYN + '/course_of_disease_data_*.npy'), key=lambda p: 
     contact += list(np.load(SYN + f'/contact_data_{sim}.npy', allow_pickle=True))
 print('total infectors:', len(course))
 
-def layer_counts(layer):
-    _, c, _, inf = create_array_cheng2020_fig2(course, contact, layer=layer)
-    return np.asarray(c, float), np.asarray(inf, float)
-
-groups = {}
-hc, hi = layer_counts('Household'); groups['Household'] = (hc, hi)
-cc, ci = layer_counts('Health care'); groups['Health care'] = (cc, ci)
-oc = np.zeros(6); oi = np.zeros(6)
-for L in ('School', 'Workplace', 'Municipality'):
-    c, i = layer_counts(L); oc += c; oi += i
-groups['Others'] = (oc, oi)
+totals = recorded_totals(course, contact)
+groups = {name: (totals[g, 0], totals[g, 1])
+          for g, name in enumerate(('Household', 'Health care', 'Others'))}
 
 fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
 for ax, (name, (c, i)) in zip(axes, groups.items()):

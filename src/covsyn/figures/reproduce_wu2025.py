@@ -841,10 +841,7 @@ def cheng_bins(directory: Path, layers: list[str]) -> tuple[dict[str, np.ndarray
             continue
         runs += 1
         scale = CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic
-        bins = np.zeros((len(cheng_recording.GROUPS), 2, 6))
-        for course, contact_record in zip(courses, contacts, strict=True):
-            bins += cheng_recording.case_bins(course, contact_record,
-                                              course.get("index_profile"))
+        bins = cheng_recording.recorded_totals(courses, contacts)
         for layer in layers:
             contact = bins[group[layer], 0].sum(axis=0)
             infection = bins[group[layer], 1].sum(axis=0)

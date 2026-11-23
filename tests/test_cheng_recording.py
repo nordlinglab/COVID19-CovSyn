@@ -389,3 +389,14 @@ def test_a_cohort_resolves_unknown_arrivals_like_a_draw():
     table = cr.ProfileTable(_profiles())
     assert table.cohort(0)[0]["arrival_from_onset"] == 3
     assert table.cohort(0, missing="before")[0]["arrival_from_onset"] is None
+
+
+def test_the_totals_over_cases_are_the_sum_of_their_recorded_bins():
+    """Each case with the profile its course record carries; none gives zeros."""
+    profile = {"age": 30, "imported": True, "airport": False, "arrival_from_onset": 5}
+    late = dict(_course(onset=5, confirmed=14), index_profile=profile)
+    cases = [(_course(), _contact([range(2, 8)], [3.0])), (late, _contact([range(2, 12)], [4.0]))]
+    totals = cr.recorded_totals([c for c, _ in cases], [k for _, k in cases])
+    want = cr.case_bins(*cases[0]) + cr.case_bins(late, cases[1][1], profile)
+    assert np.array_equal(totals, want)
+    assert cr.recorded_totals([], []).tolist() == np.zeros((3, 2, 6)).tolist()

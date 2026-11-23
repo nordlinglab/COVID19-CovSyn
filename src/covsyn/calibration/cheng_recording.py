@@ -263,3 +263,15 @@ def case_bins(course: dict, contact: dict, profile: dict | None = None,
     extended = recorded_bins(course, contact, EXTENSION_DAYS, arrival, airport)
     from_onset = recorded_bins(course, contact, 0, arrival, airport)
     return share * extended + (1.0 - share) * from_onset
+
+
+def recorded_totals(courses: list[dict], contacts: list[dict]) -> np.ndarray:
+    """case_bins summed over cases, each with the profile its course record carries (E84).
+
+    For saved synthetic data: an index case of the cheng2020 synthesis keeps its profile as
+    'index_profile'; any other case has none.
+    """
+    out = np.zeros((len(GROUPS), 2, 6))
+    for course, contact in zip(courses, contacts, strict=True):
+        out += case_bins(course, contact, course.get("index_profile"))
+    return out
