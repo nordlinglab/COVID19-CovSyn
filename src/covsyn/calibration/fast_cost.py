@@ -104,16 +104,16 @@ class _OneCase:
 def _case_matrix_row(demographic, course, contact, columns):
     """This case's row of the energy-distance test matrix, from the original converter.
 
-    None when the converter fails: the row only feeds the energy term, which is reported but
-    not charged (B95), so the parent records energy as NaN instead of failing the evaluation.
+    The error's text instead when the converter fails: the row only feeds the energy term,
+    which is reported but not charged (B95), so the parent records energy as NaN, reporting the
+    failure once per evaluation rather than once per case (code review round 3).
     """
     dummy = np.empty((1, columns))
     try:
         return convert_synthetic_data_to_test_matrix([_OneCase(demographic, course, contact)],
                                                     dummy, 1)[0]
-    except Exception:
-        traceback.print_exc()
-        return None
+    except Exception as error:
+        return f'{type(error).__name__}: {error}'
 
 
 def workplace_scalars(course, contact, social=None):
@@ -551,8 +551,10 @@ def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_
         attack_rate_costs.append(attack_rate_cost)
 
     def energy():
-        if any(row is None for row in rows[:case_limit]):
-            raise ValueError('a case had no test-matrix row')
+        failed = [row for row in rows[:case_limit] if isinstance(row, str)]
+        if failed:
+            raise ValueError(f'{len(failed)} cases had no test-matrix row; the first: '
+                             f'{failed[0]}')
         synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
         for i, row in enumerate(rows[:case_limit]):
             synthetic_data_matrix[i] = row

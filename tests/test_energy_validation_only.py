@@ -112,3 +112,12 @@ def test_the_reference_survives_a_failure_building_the_energy_matrix(
     parts = dict(LAST_COST_PARTS)
     assert cost == pytest.approx(sum(parts[k] for k in CHARGED), rel=1e-12)
     assert math.isnan(parts["cost_energy"])
+
+
+def test_a_failing_test_matrix_reports_once_not_per_case(
+    monkeypatch, capsys, run10_vector, demographic_parameters, cheng_data
+):
+    """A converter failing for every case prints one traceback, not one per case."""
+    monkeypatch.setattr(fast_cost, "convert_synthetic_data_to_test_matrix", _raise)
+    _candidate(monkeypatch, demographic_parameters, cheng_data, run10_vector)
+    assert capsys.readouterr().err.count("Traceback") == 1
