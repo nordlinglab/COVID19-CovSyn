@@ -142,8 +142,10 @@ def recorded_bins(course: dict, contact: dict, back, arrival=None, airport=False
     if back is None:
         start, end = -np.inf, np.inf
     else:
-        start = onset - back
         end = course["positive_test_date"] - course["infection_day"]
+        # A traced case can be confirmed before onset; its investigation then starts no later
+        # than its confirmation, so the period is not empty (code review 2026-11-23).
+        start = min(onset, end) - back
     if arrival is not None:
         start = max(start, arrival)
     for gi, (_, layers) in enumerate(GROUPS):

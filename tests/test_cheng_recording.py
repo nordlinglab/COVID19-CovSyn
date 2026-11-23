@@ -347,3 +347,15 @@ def test_the_arrival_day_counts_from_infection():
     assert cr.arrival_day({"imported": True, "arrival_from_onset": 3}, 5) == 8
     assert cr.arrival_day({"imported": True, "arrival_from_onset": None}, 5) is None
     assert cr.arrival_day({"imported": False, "arrival_from_onset": None}, 5) is None
+
+
+def test_a_case_confirmed_before_onset_records_up_to_its_confirmation():
+    """Traced and confirmed on day 4, onset on day 6: the period starts no later than day 4.
+
+    From onset the period is [4, 4]; extended it is [0, 4]. Without this the period from onset
+    would be empty (code review 2026-11-23); no case of the objective's data is affected.
+    """
+    course = _course(onset=6, confirmed=4)
+    contact = _contact([[4], [1], [5]], [np.nan, np.nan, np.nan])
+    assert _household(cr.recorded_bins(course, contact, back=0))[0] == [1, 0, 0, 0, 0, 0]
+    assert _household(cr.recorded_bins(course, contact, back=4))[0] == [2, 0, 0, 0, 0, 0]
