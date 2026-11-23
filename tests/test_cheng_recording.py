@@ -400,3 +400,11 @@ def test_the_totals_over_cases_are_the_sum_of_their_recorded_bins():
     want = cr.case_bins(*cases[0]) + cr.case_bins(late, cases[1][1], profile)
     assert np.array_equal(totals, want)
     assert cr.recorded_totals([], []).tolist() == np.zeros((3, 2, 6)).tolist()
+
+
+def test_contact_rows_without_any_day_record_nothing():
+    """A matrix of rows but no day columns, as a window ending before day 0 gives."""
+    contact = _contact()
+    contact["household_contacts_matrix"] = np.zeros((2, 0), dtype=bool)
+    contact["household_effective_contacts_infection_time"] = [np.nan, np.nan]
+    assert cr.recorded_bins(_course(), contact, back=4).sum() == 0

@@ -216,7 +216,7 @@ def _record_layer(out, contact, layer, onset, start, end, arrival):
         expected = contact.get("municipality_event_expected_contacts")
         if mask is not None and expected is not None:
             events = np.asarray(mask, dtype=bool)
-    if matrix.ndim == 2 and matrix.shape[0]:
+    if matrix.ndim == 2 and matrix.shape[0] and matrix.shape[1]:  # rows with no day: nothing
         times = np.full(matrix.shape[0], np.nan)
         recorded = np.asarray(contact.get(f"{layer}_effective_contacts_infection_time") or [],
                               dtype=float)
