@@ -89,8 +89,9 @@ def imported_factor_for(arrival_date, factor):
 
 
 def source_profiles_for(mode, seed):
-    """E84: Cheng's cohort of index-case profiles for Fig 6's cheng2020 mode, else None."""
-    if mode != 'cheng2020':
+    """E84: Cheng's cohort of index-case profiles for Fig 6's cheng2020 mode and its
+    single-process twin 'test', else None."""
+    if mode not in ('cheng2020', 'test'):
         return None
     from covsyn.calibration import cheng_recording  # imports this module
     return cheng_recording.default_table().cohort(seed)
@@ -1024,7 +1025,8 @@ def main() -> None:
         for i in range(mc_number):
             results.append(run_covid(seed=seeds[i], input_P=input_P,
                                      demographic_parameters=demographic_parameters, save_file=True,
-                                     result_path=result_path, mode=mode))
+                                     result_path=result_path, mode=mode,
+                                     source_profiles=source_profiles_for(mode, seeds[i])))
         print("--- Done %s seconds ---" % (time.time() - start_time))
     else:
         full_batches = mc_number // cpu_cores

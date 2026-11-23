@@ -91,5 +91,6 @@ def test_the_cheng2020_synthesis_gives_its_index_cases_chengs_cohort():
     cohort = source_profiles_for("cheng2020", 7)
     assert cohort == cr.default_table().cohort(7)
     assert len(cohort) == 100
+    assert source_profiles_for("test", 7) == cohort  # "the same setting as cheng2020"
     assert source_profiles_for("spread_Taiwan_weight", 7) is None
     assert source_profiles_for("result", 7) is None
