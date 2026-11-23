@@ -63,6 +63,12 @@ def test_fig6_refuses_data_whose_index_cases_have_no_profile(
         rw.cheng_bins(tmp_path, ["Household"])
 
 
+def test_fig6_refuses_an_unknown_layer(tmp_path):
+    """Only Cheng's groups and their sum can be drawn."""
+    with pytest.raises(ValueError, match="School"):
+        rw.cheng_bins(tmp_path, ["School"])
+
+
 def test_the_cheng2020_metadata_names_the_profiles(tmp_path):
     """A reader can tell E84 data from older data."""
     import json

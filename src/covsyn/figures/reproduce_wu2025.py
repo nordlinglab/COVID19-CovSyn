@@ -829,7 +829,10 @@ def cheng_bins(directory: Path, layers: list[str]) -> tuple[dict[str, np.ndarray
     from covsyn.calibration import cheng_recording
     from covsyn.calibration.firefly_optimizer import CHENG_SYMPTOMATIC_INDEX_CASES
 
-    group = {"Household": [0], "Health care": [1], "All": [0, 1, 2]}
+    group = {"Household": [0], "Health care": [1], "Others": [2], "All": [0, 1, 2]}
+    unknown = [layer for layer in layers if layer not in group]
+    if unknown:
+        raise ValueError(f"cheng_bins draws {sorted(group)}, not {unknown}")
 
     out: dict[str, list] = {
         f"{layer}|{q}": [] for layer in layers for q in ("contacts", "infections", "attack")
