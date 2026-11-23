@@ -178,6 +178,9 @@ def get_saveable_data(data, data_type):
             # so a scenario's output can be split by period.
             'seed_arrival_date': getattr(data, 'seed_arrival_date', None),
         }
+        # E84: only present for a source case given a profile, so older output keeps its keys.
+        if getattr(data, 'index_profile', None) is not None:
+            data_dict['index_profile'] = data.index_profile
     elif data_type == "contact":
         # Save contact data attributes
         data_dict = {
@@ -290,7 +293,7 @@ STAGES = ('demographic', 'social', 'course_of_disease', 'contact_draw', 'queue')
 def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.',
               mode='result', contact_weight=1.0, quarantine_breach='with_unclear',
               imported_isolation='imported_delay', imported_factor=IMPORTED_FACTOR, seed_file=None,
-              stage_times=None, source_age=None):
+              stage_times=None, source_age=None, source_profiles=None):
     """Simulate one Monte-Carlo run of the given mode.
 
     Args:
@@ -316,6 +319,10 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         source_age: E84: the age, a whole year in 0-100, of every source case of a mode without
             seed table (the calibration gives its index case the age of a case from Cheng et
             al. 2020's period); None, the default, draws it from the population.
+        source_profiles: E84 (Fig 6): one profile per source case of a mode without seed table,
+            each a dict with 'age' (a whole year in 0-100, or None to draw it) and what the
+            Cheng recording reads; source case k takes profile k, and its course record keeps
+            it as 'index_profile'. None, the default, leaves the records' keys unchanged.
 
     Returns:
         The demographic, social, course-of-disease and contact data of every case.
@@ -523,6 +530,13 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         school_days = None
     else:
         school_days = SchoolCalendar(work_calendar.day_zero, dated=mode in FIRST_WAVE_SEED_FILES)
+    if source_profiles is not None and source_age is not None:
+        raise ValueError('give source_age or source_profiles, not both: the profiles carry '
+                         'the ages')
+    if source_profiles is not None and (mode in FIRST_WAVE_SEED_FILES
+                                        or len(source_profiles) != len(infection_days)):
+        raise ValueError(f'source_profiles needs one profile per source case of mode {mode!r}'
+                         f', got {len(source_profiles)}')
     age = np.nan if source_age is None else _checked_source_age(source_age)
     contact_type = np.nan
     transmission_digraph = []
@@ -541,6 +555,14 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                         else np.nan)
             infection_queue.put((source_case_id, seed_case['infection_day'],
                                  previously_infected_index, seed_age, f'seed:{k}'))
+    elif source_profiles is not None:
+        # E84: source case k is found again by its contact type when it leaves the queue.
+        for k, (infection_day, profile) in enumerate(zip(infection_days, source_profiles,
+                                                         strict=True)):
+            profile_age = (np.nan if profile['age'] is None
+                           else _checked_source_age(profile['age']))
+            infection_queue.put((source_case_id, infection_day, previously_infected_index,
+                                 profile_age, f'profile:{k}'))
     else:
         for infection_day in infection_days:
             infection_queue.put((source_case_id, infection_day,
@@ -563,6 +585,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                 # Save contact network
                 transmission_digraph = transmission_digraph + \
                     [(source_case_id, case_id, infection_day, contact_type)]
+                index_profile = (source_profiles[int(contact_type[8:])]
+                                 if isinstance(contact_type, str)
+                                 and contact_type.startswith('profile:') else None)
                 seed_case = (first_wave_seeds[int(contact_type[5:])]
                              if isinstance(contact_type, str) and contact_type.startswith('seed:')
                              else None)
@@ -659,6 +684,8 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
                     course_of_disease_data.seed_case_id = seed_case['case_id']
                     # B82: kept so a scenario's output can be split by border-control regime.
                     course_of_disease_data.seed_arrival_date = seed_case['arrival_date']
+                if index_profile is not None:
+                    course_of_disease_data.index_profile = index_profile
                 natural_immunity_status_list.append(
                     course_of_disease_data.natural_immunity_status)
                 course_of_disease_data_tmp = get_saveable_data(

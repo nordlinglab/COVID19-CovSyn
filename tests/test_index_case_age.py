@@ -42,3 +42,42 @@ def test_an_age_outside_the_tables_is_refused(run10_vector, demographic_paramete
     """The age tables run from 0 to 100 whole years."""
     with pytest.raises(ValueError, match="source_age"):
         _run(0, run10_vector, demographic_parameters, source_age=age)
+
+
+def _profiles(n):
+    return [{"case_id": 1000 + k, "age": 20 + k % 60, "imported": k % 2 == 0,
+             "airport": False, "arrival_from_onset": 2 if k % 2 == 0 else None}
+            for k in range(n)]
+
+
+def test_each_source_case_takes_its_own_profile(run10_vector, demographic_parameters):
+    """cheng2020 mode's 100 index cases: each gets one profile, its age and its record."""
+    profiles = _profiles(100)
+    demographic, _, courses, _ = _run(3, run10_vector, demographic_parameters,
+                                      mode="cheng2020", source_profiles=profiles)
+    tagged = [(c["index_profile"], d["age"]) for c, d in zip(courses, demographic, strict=True)
+              if "index_profile" in c]
+    assert sorted(p["case_id"] for p, _ in tagged) == [p["case_id"] for p in profiles]
+    assert all(age == p["age"] for p, age in tagged)
+
+
+def test_without_profiles_the_course_records_have_no_profile_key(
+    run10_vector, demographic_parameters
+):
+    """The saved course data keep their old keys, so earlier output is unchanged."""
+    _, _, courses, _ = _run(3, run10_vector, demographic_parameters, mode="cheng2020")
+    assert all("index_profile" not in c for c in courses)
+
+
+def test_one_profile_per_source_case_is_required(run10_vector, demographic_parameters):
+    """99 profiles for 100 source cases is an error, not a partial assignment."""
+    with pytest.raises(ValueError, match="source_profiles"):
+        _run(0, run10_vector, demographic_parameters, mode="cheng2020",
+             source_profiles=_profiles(99))
+
+
+def test_an_age_and_profiles_together_are_refused(run10_vector, demographic_parameters):
+    """The profiles carry the ages."""
+    with pytest.raises(ValueError, match="source_profiles"):
+        _run(0, run10_vector, demographic_parameters, source_age=30,
+             source_profiles=_profiles(1))
