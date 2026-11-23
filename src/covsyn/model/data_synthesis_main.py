@@ -88,10 +88,14 @@ def imported_factor_for(arrival_date, factor):
     return 1.0 if str(arrival_date) < BORDER_CONTROL_DATE else factor
 
 
+# E84: the modes whose index cases are Cheng's cohort: Fig 6's cheng2020 and its single-process
+# twin 'test'.
+PROFILED_MODES = ('cheng2020', 'test')
+
+
 def source_profiles_for(mode, seed):
-    """E84: Cheng's cohort of index-case profiles for Fig 6's cheng2020 mode and its
-    single-process twin 'test', else None."""
-    if mode not in ('cheng2020', 'test'):
+    """E84: Cheng's cohort of index-case profiles for a mode of PROFILED_MODES, else None."""
+    if mode not in PROFILED_MODES:
         return None
     from covsyn.calibration import cheng_recording  # imports this module
     return cheng_recording.default_table().cohort(seed)
@@ -99,7 +103,7 @@ def source_profiles_for(mode, seed):
 
 def source_profiles_metadata(mode):
     """E84: what run_metadata.json records about the index-case profiles of this mode."""
-    if source_profiles_for(mode, 0) is None:
+    if mode not in PROFILED_MODES:
         return {}
     from covsyn.calibration import cheng_recording
     return {'source_profiles': cheng_recording.PROFILES.as_posix(),
