@@ -17,9 +17,10 @@ probe_cheng_arrival, 2026-11-23). Since then (user decision 2026-11-23):
 * each simulated index case takes the profile of one of Cheng's 100 cases (draw_profile): its
   age, and for an imported case its arrival, before which it met nobody in Taiwan, so nothing
   before arrival is recorded and an infection before arrival is not counted; a case found at
-  the airport has no recorded contact. Only the record changes, not the simulation, so the
-  other cost terms see the same transmission (design review
-  logic-review_openai_2026-11-23_2130_cost-change-design_reply.md, point 2).
+  the airport has no recorded contact. Arrival and airport isolation change only the record,
+  not the simulation (design review
+  logic-review_openai_2026-11-23_2130_cost-change-design_reply.md, point 2); the age does
+  change the simulation, so every cost term sees index cases of Cheng's ages.
 
 EXTENSION_SHARE = 0.9: the share for which the household contacts before onset match Cheng's
 100 of 151, between 0.85 and 0.92 under the two treatments of the 20 imported cases without
