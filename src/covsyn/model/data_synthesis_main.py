@@ -88,6 +88,14 @@ def imported_factor_for(arrival_date, factor):
     return 1.0 if str(arrival_date) < BORDER_CONTROL_DATE else factor
 
 
+def source_profiles_for(mode, seed):
+    """E84: Cheng's cohort of index-case profiles for Fig 6's cheng2020 mode, else None."""
+    if mode != 'cheng2020':
+        return None
+    from covsyn.calibration import cheng_recording  # imports this module
+    return cheng_recording.default_table().cohort(seed)
+
+
 def _checked_source_age(age):
     """age as an int, after checking it indexes the age tables (E84)."""
     if isinstance(age, bool) or not float(age).is_integer() or not 0 <= age <= 100:
@@ -1020,7 +1028,9 @@ def main() -> None:
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight,
-                                           quarantine_breach=quarantine_breach, **options)
+                                           quarantine_breach=quarantine_breach,
+                                           source_profiles=source_profiles_for(mode, seed),
+                                           **options)
                            for seed in seeds]
                 # A worker's exception used to stay inside its unread future, so a failed
                 # simulation left no file and no error; .result() raises it here.
@@ -1035,7 +1045,9 @@ def main() -> None:
                 futures = [executor.submit(run_covid, seed, input_P, demographic_parameters,
                                            save_file=True, result_path=result_path, mode=mode,
                                            contact_weight=contact_weight,
-                                           quarantine_breach=quarantine_breach, **options)
+                                           quarantine_breach=quarantine_breach,
+                                           source_profiles=source_profiles_for(mode, seed),
+                                           **options)
                            for seed in seeds]
                 for future in futures:
                     future.result()

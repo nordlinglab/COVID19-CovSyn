@@ -81,3 +81,15 @@ def test_an_age_and_profiles_together_are_refused(run10_vector, demographic_para
     with pytest.raises(ValueError, match="source_profiles"):
         _run(0, run10_vector, demographic_parameters, source_age=30,
              source_profiles=_profiles(1))
+
+
+def test_the_cheng2020_synthesis_gives_its_index_cases_chengs_cohort():
+    """Fig 6's mode: Cheng's 100 profiles, drawn from the seed; other modes: none."""
+    from covsyn.calibration import cheng_recording as cr
+    from covsyn.model.data_synthesis_main import source_profiles_for
+
+    cohort = source_profiles_for("cheng2020", 7)
+    assert cohort == cr.default_table().cohort(7)
+    assert len(cohort) == 100
+    assert source_profiles_for("spread_Taiwan_weight", 7) is None
+    assert source_profiles_for("result", 7) is None
