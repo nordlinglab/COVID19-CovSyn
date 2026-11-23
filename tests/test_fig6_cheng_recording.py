@@ -80,3 +80,22 @@ def test_the_cheng2020_metadata_names_the_profiles(tmp_path):
     assert record["source_profiles"] == "variable/cheng_period_profiles.csv"
     assert record["profile_stream"] == cr.PROFILE_STREAM
     assert source_profiles_metadata("spread_Taiwan_weight") == {}
+
+
+@pytest.mark.slow
+def test_the_test_mode_records_its_profiles_too(tmp_path):
+    """--mode test synthesises Cheng's cohort, so its metadata names the profile table."""
+    import json
+    import subprocess
+    import sys
+
+    from conftest import RUN10_BEST
+
+    done = subprocess.run(
+        [sys.executable, "-m", "covsyn.model.data_synthesis_main", "--mode", "test",
+         "--monte_carlo_number", "1", "--result_path", str(tmp_path),
+         "--parameter_path", str(RUN10_BEST.parent)],
+        capture_output=True, text=True, check=False)  # fmt: skip
+    assert done.returncode == 0, done.stderr[-2000:]
+    record = json.loads((tmp_path / "run_metadata.json").read_text())
+    assert record["source_profiles"] == "variable/cheng_period_profiles.csv"

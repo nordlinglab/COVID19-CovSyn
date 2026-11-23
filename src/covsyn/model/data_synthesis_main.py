@@ -1031,6 +1031,9 @@ def main() -> None:
                                      demographic_parameters=demographic_parameters, save_file=True,
                                      result_path=result_path, mode=mode,
                                      source_profiles=source_profiles_for(mode, seeds[i])))
+        # E84: the cohort's provenance, as for cheng2020; this mode's seeds start at 0.
+        write_run_metadata(result_path, mode=mode, seed_start=0, monte_carlo_number=mc_number,
+                           parameter_path=str(parameter_path), **source_profiles_metadata(mode))
         print("--- Done %s seconds ---" % (time.time() - start_time))
     else:
         full_batches = mc_number // cpu_cores
