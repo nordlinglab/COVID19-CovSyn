@@ -88,6 +88,13 @@ def imported_factor_for(arrival_date, factor):
     return 1.0 if str(arrival_date) < BORDER_CONTROL_DATE else factor
 
 
+def _checked_source_age(age):
+    """age as an int, after checking it indexes the age tables (E84)."""
+    if isinstance(age, bool) or not float(age).is_integer() or not 0 <= age <= 100:
+        raise ValueError(f'source_age must be a whole year in 0-100, got {age!r}')
+    return int(age)
+
+
 def load_first_wave_seeds(path):
     """The seed cases of the Taiwan first wave (B66), as a list of dicts.
 
@@ -283,7 +290,7 @@ STAGES = ('demographic', 'social', 'course_of_disease', 'contact_draw', 'queue')
 def run_covid(seed, input_P, demographic_parameters, save_file=False, result_path='.',
               mode='result', contact_weight=1.0, quarantine_breach='with_unclear',
               imported_isolation='imported_delay', imported_factor=IMPORTED_FACTOR, seed_file=None,
-              stage_times=None):
+              stage_times=None, source_age=None):
     """Simulate one Monte-Carlo run of the given mode.
 
     Args:
@@ -306,6 +313,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         stage_times: Task 5: a dictionary to add each of STAGES' time to, in nanoseconds of
             time.perf_counter_ns; None, the default, times nothing. Queue handling is taking a
             case off the queue and putting its infections on it.
+        source_age: E84: the age, a whole year in 0-100, of every source case of a mode without
+            seed table (the calibration gives its index case the age of a case from Cheng et
+            al. 2020's period); None, the default, draws it from the population.
 
     Returns:
         The demographic, social, course-of-disease and contact data of every case.
@@ -513,7 +523,7 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
         school_days = None
     else:
         school_days = SchoolCalendar(work_calendar.day_zero, dated=mode in FIRST_WAVE_SEED_FILES)
-    age = np.nan
+    age = np.nan if source_age is None else _checked_source_age(source_age)
     contact_type = np.nan
     transmission_digraph = []
     groups = {}  # B69: group id -> {'size': members including the first case, 'infected'}
