@@ -99,3 +99,36 @@ def test_the_test_mode_records_its_profiles_too(tmp_path):
     assert done.returncode == 0, done.stderr[-2000:]
     record = json.loads((tmp_path / "run_metadata.json").read_text())
     assert record["source_profiles"] == "variable/cheng_period_profiles.csv"
+
+
+def _cohort_run(tmp_path, run10_vector, demographic_parameters, edit):
+    _, _, courses, contacts = run_covid(
+        11, np.array(run10_vector), copy.deepcopy(demographic_parameters), save_file=False,
+        mode="cheng2020", source_profiles=source_profiles_for("cheng2020", 11))
+    edit(courses)
+    np.save(tmp_path / "course_of_disease_data_0.npy", np.array(courses, dtype=object))
+    np.save(tmp_path / "contact_data_0.npy", np.array(contacts, dtype=object))
+
+
+def test_fig6_refuses_a_run_missing_one_profile(tmp_path, run10_vector, demographic_parameters):
+    """Every one of Cheng's cases must be there, not just some."""
+    def drop_one(courses):
+        next(c for c in courses if "index_profile" in c).pop("index_profile")
+
+    _cohort_run(tmp_path, run10_vector, demographic_parameters, drop_one)
+    with pytest.raises(ValueError, match="index_profile"):
+        rw.cheng_bins(tmp_path, ["Household"])
+
+
+def test_fig6_checks_profiles_even_in_a_run_without_symptoms(
+    tmp_path, run10_vector, demographic_parameters
+):
+    """A run skipped for having no symptomatic case is still checked."""
+    def old_and_asymptomatic(courses):
+        for c in courses:
+            c.pop("index_profile", None)
+            c["incubation_period"] = np.nan
+
+    _cohort_run(tmp_path, run10_vector, demographic_parameters, old_and_asymptomatic)
+    with pytest.raises(ValueError, match="index_profile"):
+        rw.cheng_bins(tmp_path, ["Household"])

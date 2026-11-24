@@ -838,15 +838,19 @@ def cheng_bins(directory: Path, layers: list[str]) -> tuple[dict[str, np.ndarray
         f"{layer}|{q}": [] for layer in layers for q in ("contacts", "infections", "attack")
     }
     runs = 0
+    cohort = len(cheng_recording.default_profiles())
     for courses, contacts in iter_runs(directory):
+        # Checked before any run is skipped: every one of Cheng's cases must be there.
+        profiled = sum("index_profile" in c for c in courses)
+        if profiled != cohort:
+            raise ValueError(f"{directory}: {profiled} cases carry an index_profile, not "
+                             f"Cheng's {cohort}; resynthesise the cheng2020 data with E84's "
+                             "Cheng cohort")
         symptomatic = sum(not np.isnan(c["incubation_period"]) for c in courses)
         if symptomatic == 0:
             continue
         runs += 1
         scale = CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic
-        if not any("index_profile" in c for c in courses):
-            raise ValueError(f"{directory}: no index case carries an index_profile; "
-                             "resynthesise the cheng2020 data with E84's Cheng cohort")
         bins = cheng_recording.recorded_totals(courses, contacts)
         for layer in layers:
             contact = bins[group[layer], 0].sum(axis=0)
