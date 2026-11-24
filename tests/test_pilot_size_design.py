@@ -309,3 +309,10 @@ def test_a_resume_with_a_refused_recorded_design_says_so(tmp_path, capsys):
         ps.main(["--resume", str(out)])
     err = capsys.readouterr().err
     assert "recorded design" in err and "holds no pilot" not in err
+
+
+def test_a_record_of_another_rule_is_refused():
+    """A pilot begun under the earlier spread rule does not resume under the mean rule."""
+    record = RERUN.record() | {"rule": "spread"}
+    with pytest.raises(ValueError, match="spread"):
+        ps.Design.from_record(record)

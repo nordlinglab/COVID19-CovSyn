@@ -165,10 +165,14 @@ class Design(NamedTuple):
         """The design config.json records; PLAN for a pilot begun before designs existed."""
         if record is None:
             return PLAN
-        return cls(tuple(int(n) for n in record["pop_sizes"]),
-                   tuple(float(a) for a in record["alpha_0s"]),
-                   tuple(int(s) for s in record["streams"]),
-                   bool(record["without_warm_starts"])).check()  # fmt: skip
+        design = cls(tuple(int(n) for n in record["pop_sizes"]),
+                     tuple(float(a) for a in record["alpha_0s"]),
+                     tuple(int(s) for s in record["streams"]),
+                     bool(record["without_warm_starts"])).check()  # fmt: skip
+        if record.get("rule", design.rule) != design.rule:  # code review round 6
+            raise ValueError(f"the pilot was begun under the {record['rule']!r} rule, which "
+                             f"this version replaced by {design.rule!r}; start a new pilot")
+        return design
 
 
 PLAN = Design(POP_SIZES, ALPHA_0S, STREAMS, False)
