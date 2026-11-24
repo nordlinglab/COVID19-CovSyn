@@ -2259,7 +2259,11 @@ def main() -> None:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
     if args.without_warm_starts and mode != 'pilot':  # pilot 2 rerun (2026-11-24)
-        sys.exit(f'--without-warm-starts is for --mode pilot only, not --mode {mode}')
+        sys.exit(f'--without-warm-starts is for --mode pilot only, not --mode {mode}: '
+                 f'production always leaves the warm starts out, the other modes keep them')
+    # User decision 2026-11-24: production's result is to be the calibration's own, so it
+    # never starts from the warm starts, the fitted vectors of earlier runs.
+    without_warm_starts = args.without_warm_starts or mode == 'production'
     pop_size, betamin, gamma = OPTIMISER_MODES[mode]
     max_generations = step_schedule.MODE_GENERATIONS[mode]
     # Task 5: a profile has n = workers, 2 generations, and S from the command line.
@@ -2334,11 +2338,10 @@ def main() -> None:
     else:
         population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
         population = initial_population.load(population_file, pop_size, lower_bound, upper_bound,
-                                             without_warm_starts=args.without_warm_starts)
+                                             without_warm_starts=without_warm_starts)
         fa.run_settings['initial_population'] = initial_population.describe(population_file)
-        if mode == 'pilot':  # which rows a pilot run took (pilot 2 rerun, 2026-11-24)
-            fa.run_settings['initial_population']['without_warm_starts'] = (
-                args.without_warm_starts)
+        if mode in ('pilot', 'production'):  # which rows the run took (2026-11-24)
+            fa.run_settings['initial_population']['without_warm_starts'] = without_warm_starts
 
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:

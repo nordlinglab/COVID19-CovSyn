@@ -6,8 +6,8 @@ Pilot 2 of 2026-11-23 (9792f7f) returned run 19, row 2 of the initial population
 vector of 11 of its 12 runs: kept in the elite from generation 0, it was never beaten, so every
 setting "agreed" and the rule compared nothing (user decision 2026-11-24: rerun without it).
 --without-warm-starts takes the literature vector and then the Latin hypercube rows, leaving out
-rows 1 to len(WARM_STARTS); for the pilot mode only, as the production's population is decided
-after this pilot.
+rows 1 to len(WARM_STARTS); a choice of the pilot mode, while production always leaves them out
+(user decision 2026-11-24: its result is to be the calibration's own).
 """
 
 from __future__ import annotations
@@ -75,7 +75,10 @@ def test_a_pilot_run_records_that_it_kept_them(started):  # noqa: F811
 
 @pytest.mark.parametrize("mode", ["train", "production"])
 def test_leaving_the_warm_starts_out_is_for_the_pilot_only(monkeypatch, tmp_path, mode):
-    """Refused in any other mode, before a run directory is claimed."""
+    """Refused in any other mode, before a run directory is claimed.
+
+    Production always leaves them out, the other modes keep them.
+    """
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", mode, "--without-warm-starts",
                                       "--run-dir", str(tmp_path / "r")])  # fmt: skip
     with pytest.raises(SystemExit, match="--without-warm-starts"):
@@ -102,3 +105,14 @@ def test_the_rows_left_out_are_the_file_s_own_warm_starts(tmp_path, monkeypatch)
     monkeypatch.setattr(ip, "WARM_STARTS", ("a.txt", "b.txt", "c.txt"))
     got = ip.load(path, 5, lower, upper, without_warm_starts=True)
     np.testing.assert_array_equal(got, np.vstack([rows[:1], rows[2:6]]))
+
+
+def test_production_always_starts_without_the_warm_starts(started):  # noqa: F811
+    """User decision 2026-11-24: production runs as the rerun pilot did, without them."""
+    from tests.test_task9_production import PRODUCTION
+
+    seen = started(*PRODUCTION)
+    lower, upper = _space()
+    want = ip.load(POPULATION, 48, lower, upper, without_warm_starts=True)
+    np.testing.assert_array_equal(seen["initial_population"], want)
+    assert seen["engine"].run_settings["initial_population"]["without_warm_starts"] is True
