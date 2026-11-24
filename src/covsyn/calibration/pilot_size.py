@@ -343,6 +343,9 @@ def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute
             args = optimiser_args(setting, simulations, run_dir, design)
         run_dir.mkdir(parents=True, exist_ok=True)
         status = execute(args, run_dir / "optimiser.log", resume, env)
+        if status == runs.NOT_RESUMABLE:  # retrying cannot help, as in the pipeline (round 18)
+            raise RuntimeError(f"run {run_dir.name} failed and cannot be resumed; see "
+                               f"{run_dir / 'optimiser.log'}")
         if status != 0:
             raise RuntimeError(f"run {run_dir.name} failed with status {status}; see "
                                f"{run_dir / 'optimiser.log'}, then resume the pilot")

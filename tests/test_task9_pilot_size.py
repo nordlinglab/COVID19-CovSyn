@@ -307,6 +307,20 @@ def test_a_failed_run_stops_the_pilot_before_any_scoring(tmp_path):
     assert not (tmp_path / "tables" / "p" / ps.SCREEN_FILE).exists()
 
 
+def test_a_run_that_cannot_be_resumed_is_not_to_be_resumed(tmp_path):
+    """Status 3 (runs.NOT_RESUMABLE) means retrying cannot help, as in the pipeline (round 18)."""
+
+    class Refuses(_Optimiser):
+        def __call__(self, args, output, append, env):
+            status = super().__call__(args, output, append, env)
+            return ps.runs.NOT_RESUMABLE if status == 1 else status
+
+    with pytest.raises(RuntimeError) as stopped:
+        _pilot(tmp_path, Refuses(fail_on="n48-a0p2-s2"))
+    assert "cannot be resumed" in str(stopped.value)
+    assert "resume the pilot" not in str(stopped.value)
+
+
 def test_a_resumed_pilot_skips_finished_runs_and_resumes_checkpointed_ones(tmp_path):
     """Finished runs are kept; a run with a checkpoint continues from it."""
     with pytest.raises(KeyboardInterrupt):
