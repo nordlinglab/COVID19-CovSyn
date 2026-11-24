@@ -327,9 +327,8 @@ def test_a_design_is_checked_from_any_directory(monkeypatch, tmp_path):
     assert RERUN.check() == RERUN
 
 
-def test_a_missing_population_file_is_named_with_the_command_that_makes_it(monkeypatch,
-                                                                            tmp_path):
-    """The command writes into the directory the check reads (code review round 10)."""
+def test_a_missing_population_file_is_to_be_restored_or_made(monkeypatch, tmp_path):
+    """Restored from the last commit, or made when never committed (rounds 10 and 17)."""
     from covsyn.calibration import initial_population as ip
 
     missing = tmp_path / "initial_population_v1.npz"
@@ -338,7 +337,7 @@ def test_a_missing_population_file_is_named_with_the_command_that_makes_it(monke
         RERUN.check()
     message = str(refusal.value)
     assert str(missing) in message
-    assert f"covsyn-initial-population --version 1 --out-dir {tmp_path}" in message
+    assert "last commit" in message and "covsyn-initial-population" in message
 
 
 def test_a_damaged_population_file_is_to_be_restored(monkeypatch, tmp_path):
@@ -429,16 +428,6 @@ def _unchecked(monkeypatch, path):
     return str(refusal.value)
 
 
-def test_the_command_that_remakes_a_missing_file_can_be_pasted(monkeypatch, tmp_path):
-    """A directory with a space is quoted for the shell (code review round 11)."""
-    import shlex
-
-    directory = tmp_path / "with space"
-    directory.mkdir()
-    message = _unchecked(monkeypatch, directory / "initial_population_v1.npz")
-    assert f"--out-dir {shlex.quote(str(directory))}" in message
-
-
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")
 def test_a_file_that_may_not_be_read_is_not_to_be_remade_or_restored(monkeypatch, tmp_path):
     """The file is there and intact: its permissions are the fault (code review round 11)."""
@@ -451,7 +440,7 @@ def test_a_file_that_may_not_be_read_is_not_to_be_remade_or_restored(monkeypatch
         message = _unchecked(monkeypatch, path)
     finally:
         path.chmod(0o644)
-    assert "permission" in message.lower()
+    assert "may read" in message
     assert "covsyn-initial-population" not in message and "restore" not in message
 
 

@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
-import shlex
 import sys
 import zipfile
 import zlib
@@ -242,24 +241,27 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
 
 
 def remedy(cause: BaseException | None, path: Path) -> str:
-    """What to do about a population file that could not be read, by why (rounds 11, 15, 16).
+    """What to do about a population file that could not be read: a direction, not a command.
 
-    A missing file is restored first, as a remade one may differ (the warm starts must be on
-    disk, and the Latin hypercube follows scipy's version); the command that makes it is for
-    a version never committed, and refuses a file that exists (round 10). Paths are quoted,
-    so the commands can be pasted.
+    Chosen by the kind of failure only, with no filesystem or git call that could fail in
+    turn, and no command whose premises (the repository, its index, the working directory)
+    go unchecked (contract of 2026-11-24, after code review rounds 11 to 17). The file is
+    restored, not remade, as a remade one may differ: the warm starts must be on disk, and
+    the Latin hypercube follows scipy's version.
     """
-    restore = f"git checkout -- {shlex.quote(str(path))}"
-    if isinstance(cause, IsADirectoryError) or (isinstance(cause, PermissionError)
-                                                and path.is_dir()):  # Windows says the latter
-        return f"it is a directory, not the file: move it away and restore the file with {restore}"
-    if isinstance(cause, FileNotFoundError):
-        return (f"restore it with {restore}, or, for a version never committed, make it with "
-                f"covsyn-initial-population --version {CURRENT_VERSION} --out-dir "
-                f"{shlex.quote(str(path.parent))}")
+    committed = f"restore variable/{path.name} in the CovSyn repository to its last commit"
     if isinstance(cause, PermissionError):
-        return "give this user permission to read it"
-    return f"restore the committed file with {restore}"
+        return "check that this user may read the file and every directory on its path"
+    if isinstance(cause, IsADirectoryError):
+        return f"a directory stands where the file should be; {committed}"
+    if isinstance(cause, NotADirectoryError):
+        return f"a part of its path that should be a directory is not one; {committed}"
+    if isinstance(cause, FileNotFoundError):
+        relative = ("" if path.is_absolute()
+                    else "it is read relative to the working directory, so check that too; ")
+        return (f"{relative}{committed}; a version never committed is made with "
+                f"covsyn-initial-population")
+    return committed
 
 
 def describe(path: Path) -> dict:

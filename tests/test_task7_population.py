@@ -13,7 +13,6 @@ rows, and a run whose bounds or dimension differ from those stored is refused, n
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 import sys
 import tomllib
@@ -159,7 +158,7 @@ def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, written
     with pytest.raises(SystemExit) as stopped:
         ip.load(path, 3, space.lower, space.upper)
     assert isinstance(stopped.value.code, str) and "cannot be read" in stopped.value.code
-    assert "restore the committed file" in stopped.value.code
+    assert "to its last commit" in stopped.value.code
     assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
     path.write_bytes(written.read_bytes())  # restored
     assert len(ip.load(path, 3, space.lower, space.upper)) == 3
@@ -191,23 +190,23 @@ def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, chang
     assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
 
 
-def test_a_missing_population_is_restored_first_or_made_by_a_command_that_works(tmp_path,
-                                                                               space):
-    """Restored, as a remade file may differ; else made by a command that can be pasted.
+@pytest.mark.parametrize("relative", [True, False])
+def test_a_missing_population_is_to_be_restored_from_the_last_commit(tmp_path, space,
+                                                                     monkeypatch, relative):
+    """A direction, by the kind of failure only: no command whose premises go unchecked.
 
-    Code review rounds 15 and 16: the command is run as printed, and the file then loads.
+    Code review rounds 15 to 17 and the contract of 2026-11-24: a relative path also points
+    to the working directory, which an absolute one does not depend on.
     """
-    directory = tmp_path / "with space"
-    directory.mkdir()
-    path = directory / "initial_population_v1.npz"
+    monkeypatch.chdir(tmp_path)
+    path = Path("variable/initial_population_v1.npz")
+    path = path if relative else tmp_path / path
     with pytest.raises(SystemExit) as stopped:
         ip.load(path, 3, space.lower, space.upper)
     message = stopped.value.code
-    assert f"git checkout -- {shlex.quote(str(path))}" in message
-    assert message.index("git checkout") < message.index("covsyn-initial-population")
-    command = shlex.split(message[message.index("covsyn-initial-population"):].rstrip(")"))
-    ip.main(command[1:])
-    assert len(ip.load(path, 3, space.lower, space.upper)) == 3
+    assert "last commit" in message and "covsyn-initial-population" in message
+    assert "git checkout" not in message
+    assert ("working directory" in message) == relative
 
 
 def test_a_directory_in_the_population_s_place_is_named_as_such(tmp_path, space):
@@ -216,7 +215,7 @@ def test_a_directory_in_the_population_s_place_is_named_as_such(tmp_path, space)
     path.mkdir()
     with pytest.raises(SystemExit) as stopped:
         ip.load(path, 3, space.lower, space.upper)
-    assert "is a directory" in stopped.value.code
+    assert "a directory stands where the file should be" in stopped.value.code
 
 
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")
@@ -230,7 +229,7 @@ def test_a_population_that_may_not_be_read_asks_for_permission(tmp_path, space, 
             ip.load(path, 3, space.lower, space.upper)
     finally:
         path.chmod(0o644)
-    assert "permission" in stopped.value.code.lower() and "restore" not in stopped.value.code
+    assert "may read" in stopped.value.code and "restore" not in stopped.value.code
 
 
 def test_a_bytes_path_loads_as_rows_available_counts(written, space):
