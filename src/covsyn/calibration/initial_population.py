@@ -176,10 +176,16 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 #    other exception is a programming error and raises as itself.
 # 3. load() checks in this order: the file and its contents, its SHA-256, n against the rows
 #    (RunSizeOutOfRange), the dimension, the bounds. No rows at all is a fault of the file.
-# 4. Only the optimiser maps RunSizeOutOfRange to runs.NOT_RESUMABLE; every other refusal
-#    exits 1, so none of them by itself makes a run not resumable.
+# 4. Of load()'s refusals, only RunSizeOutOfRange is mapped by the optimiser to
+#    runs.NOT_RESUMABLE; the others exit 1, so none of them by itself makes a run not
+#    resumable.
 # 5. The advice (remedy) follows the exception's type alone, makes no filesystem or git call,
 #    and gives a direction, never a command whose premises go unchecked.
+# Scope (code review round 18): the guarantees are load()'s and rows_available()'s; the
+# optimiser and pilot 2's design check pass their refusals on in those words. A command-line
+# entry point keeps its own status for its argument and design refusals (argparse exits 2),
+# the pilot reports a failed run as a RuntimeError naming the run's log (no resume suggested
+# for status runs.NOT_RESUMABLE), and a file changed between two reads is not covered.
 # Imprecision outside these guarantees, such as advice that suits only some repository
 # states, is not a defect.
 #
