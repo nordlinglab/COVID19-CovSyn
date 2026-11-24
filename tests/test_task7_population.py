@@ -177,6 +177,7 @@ def _arrays(path, **changed):
     {"lower": np.array(["a", "b"])},  # bounds not numbers
     {"normalized": np.zeros((0, 2))},  # no rows
     {"normalized": np.zeros((3, 0))},  # no parameters
+    {"lower": np.zeros(1), "upper": np.ones(1)},  # bounds of another length (round 16)
 ])  # fmt: skip
 def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, changed):
     """Refused as damaged and resumable once restored, not a traceback or a run size (round 15)."""

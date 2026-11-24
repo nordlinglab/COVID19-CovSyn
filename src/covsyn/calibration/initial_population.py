@@ -230,9 +230,10 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
                                    f"array of numbers)")
     if arrays["warm_starts"].ndim == 0:
         raise PopulationUnreadable(f"{shown} cannot be read (its warm starts are not a list)")
-    if any(arrays[key].ndim != 1 or arrays[key].dtype.kind not in "iuf"
-           for key in ("lower", "upper") if key in arrays):
-        raise PopulationUnreadable(f"{shown} cannot be read (its bounds are not numbers)")
+    if any(arrays[key].shape != rows.shape[1:] or arrays[key].dtype.kind not in "iuf"
+           for key in ("lower", "upper") if key in arrays):  # one bound a parameter (round 16)
+        raise PopulationUnreadable(f"{shown} cannot be read (its bounds are not one number a "
+                                   f"parameter)")
     return arrays
 
 
