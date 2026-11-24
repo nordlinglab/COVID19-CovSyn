@@ -97,9 +97,9 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
          without_warm_starts: bool = False) -> np.ndarray:
     """The first ``n`` rows of the population at ``path``, for a run with these bounds.
 
-    without_warm_starts leaves out rows 1 to len(WARM_STARTS), the fitted vectors of earlier
-    runs, so the run starts from the literature vector and the Latin hypercube (pilot 2 rerun,
-    user decision 2026-11-24).
+    without_warm_starts leaves out the warm starts the file records (rows 1 to their number),
+    the fitted vectors of earlier runs, so the run starts from the literature vector and the
+    Latin hypercube (pilot 2 rerun, user decision 2026-11-24).
 
     Raises:
         SystemExit: The file is missing or its rows do not match its SHA-256, n is not 1 to

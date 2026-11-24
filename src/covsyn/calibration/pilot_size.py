@@ -112,8 +112,11 @@ class Design(NamedTuple):
         """The design, if it can run.
 
         Raises:
-            ValueError: An empty or repeated list, fewer than two streams, an n below 2, an
-                alpha_0 not positive, or a stream outside the optimisation streams.
+            ValueError: An empty or repeated list, fewer than two streams, an n below 2 or
+                beyond the population's rows (without the warm starts if so), an n whose G
+                exceeds a stream's blocks, an alpha_0 not positive or below alpha_end,
+                alpha_0s that would share a run directory, or a stream outside the
+                optimisation streams.
         """
         for name, values in (("pop_sizes", self.pop_sizes), ("alpha_0s", self.alpha_0s),
                              ("streams", self.streams)):  # fmt: skip
