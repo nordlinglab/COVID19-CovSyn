@@ -114,7 +114,9 @@ class RunSizeOutOfRange(SystemExit):
 
     A SystemExit with its message, as load()'s other refusals; its own class so the optimiser
     can tell it apart: the n is the run's setting, which a resume keeps, so it exits with
-    runs.NOT_RESUMABLE (decision of 2026-11-24, code review round 12).
+    runs.NOT_RESUMABLE (decision of 2026-11-24, code review round 12). A profile's n is its
+    worker count, and a profile is run again, never resumed, so the status holds there too:
+    it is run again with fewer workers (code review round 22).
     """
 
 
