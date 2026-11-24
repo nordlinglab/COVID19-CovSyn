@@ -294,3 +294,19 @@ def test_a_refused_design_names_this_command_s_options(bad, words):
         ps.Design(**{**RERUN._asdict(), **bad}).check()
     assert all(w in str(refusal.value) for w in words), str(refusal.value)
     assert "--generations" not in str(refusal.value)
+
+
+def test_a_resume_with_a_refused_recorded_design_says_so(tmp_path, capsys):
+    """config.json and the runs are there; only the recorded design fails the checks."""
+    import json
+
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    record = ps.Design((8,), (0.2,), (1, 2, 3), True)._asdict() | {"rule": "spread"}
+    record = {k: list(v) if isinstance(v, tuple) else v for k, v in record.items()}
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300,
+                                                              "design": record}}))
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(out)])
+    err = capsys.readouterr().err
+    assert "recorded design" in err and "holds no pilot" not in err

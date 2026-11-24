@@ -483,10 +483,14 @@ def main(argv: list[str] | None = None) -> Path:
             config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8-sig"))
             recorded_simulations = config["settings"]["simulations"]
             recorded_workers = config.get("workers")
-            design = Design.from_record(config["settings"].get("design"))
+            recorded_design = config["settings"].get("design")
         # RecursionError: JSON nested too deep for json.loads
         except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
+        try:  # the pilot is there; its design may fail today's checks (code review round 5)
+            design = Design.from_record(recorded_design)
+        except (ValueError, KeyError, TypeError) as error:
+            parser.error(f"pilot 2 in {out}: the recorded design is refused: {error}")
         try:  # the pilot is there; a recorded value may be wrong
             # The rule pilot 1's choice and the optimiser's resume pass (run_size).
             simulations = run_size.check_simulations(recorded_simulations, "settings.simulations")
