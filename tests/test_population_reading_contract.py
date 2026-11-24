@@ -11,6 +11,7 @@ comment above initial_population.PopulationUnreadable.
 from __future__ import annotations
 
 import os
+import re
 
 import numpy as np
 import pytest
@@ -68,21 +69,25 @@ def _no_rows(path):
 
 
 def _a_forged_header(path):
-    """normalized.npy claims 10**11 rows and holds 48 bytes (code review round 18)."""
+    """The committed file but normalized.npy, which claims 10**11 rows and holds 48 bytes.
+
+    Complete otherwise, so no missing array refuses it first (code review rounds 18, 21).
+    """
     import io
     import zipfile
 
-    member = io.BytesIO()
+    with np.load(COMMITTED) as saved:
+        np.savez(path, **{key: saved[key] for key in saved.files})
+    with zipfile.ZipFile(path) as plain:
+        members = {name: plain.read(name) for name in plain.namelist()}
+    forged = io.BytesIO()
     np.lib.format.write_array_header_1_0(
-        member, {"descr": "<f8", "fortran_order": False, "shape": (10**11, 2)})
-    member.write(b"\0" * 48)
+        forged, {"descr": "<f8", "fortran_order": False, "shape": (10**11, 2)})
+    forged.write(b"\0" * 48)
+    members["normalized.npy"] = forged.getvalue()
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("normalized.npy", member.getvalue())
-        for name, array in (("lower", np.zeros(2)), ("upper", np.ones(2)),
-                            ("warm_starts", np.array(["a"]))):  # fmt: skip
-            stored = io.BytesIO()
-            np.save(stored, array)
-            archive.writestr(f"{name}.npy", stored.getvalue())
+        for name, data in members.items():
+            archive.writestr(name, data)
     return path
 
 
@@ -105,20 +110,24 @@ def _corrupt_lzma(path):
     return path
 
 
-# state, the advice it gets, whether putting the file right at the path fixes it
+# state, its reason (each its own, so no other fault refuses the file first; round 21), the
+# advice it gets, whether putting the file right at the path fixes it
 REFUSED = [
-    (_missing, "last commit", True),
-    (_a_directory, "a directory stands where the file should be", False),
-    (_a_file_for_a_directory, "should be a directory is not one", False),
-    (_empty, "last commit", True),
-    (_no_rows, "last commit", True),
-    (_a_forged_header, "last commit", True),
-    (_corrupt_lzma, "last commit", True),
+    (_missing, "FileNotFoundError", "last commit", True),
+    (_a_directory, "IsADirectoryError", "a directory stands where the file should be", False),
+    (_a_file_for_a_directory, "NotADirectoryError", "should be a directory is not one", False),
+    (_empty, "EOFError", "last commit", True),
+    (_no_rows, "not a non-empty 2-D array", "last commit", True),
+    # numpy allocates the claimed shape (MemoryError), or, where memory is overcommitted,
+    # finds the data short (ValueError)
+    (_a_forged_header, "MemoryError|ValueError", "last commit", True),
+    (_corrupt_lzma, "LZMAError", "last commit", True),
 ]
 
 
-@pytest.mark.parametrize(("state", "advice", "fixable"), REFUSED)
-def test_load_refuses_a_bad_file_in_words_and_resumably(place, space, state, advice, fixable):
+@pytest.mark.parametrize(("state", "reason", "advice", "fixable"), REFUSED)
+def test_load_refuses_a_bad_file_in_words_and_resumably(place, space, state, reason, advice,
+                                                        fixable):
     """Guarantees 2, 4, 5: a SystemExit with a message (exit 1), the path once, a direction."""
     path = state(place)
     with pytest.raises(SystemExit) as stopped:
@@ -126,19 +135,21 @@ def test_load_refuses_a_bad_file_in_words_and_resumably(place, space, state, adv
     message = stopped.value.code
     assert isinstance(message, str) and not isinstance(stopped.value, ip.RunSizeOutOfRange)
     assert message.count(str(path)) == 1 and advice in message
+    assert re.search(reason, message) and "KeyError" not in message
     assert "git " not in message and "--out-dir" not in message
     if fixable:
         _put_right(path)
         assert len(ip.load(path, 3, space.lower, space.upper)) == 3
 
 
-@pytest.mark.parametrize(("state", "advice", "fixable"), REFUSED)
-def test_rows_available_refuses_the_same_files(place, state, advice, fixable):
+@pytest.mark.parametrize(("state", "reason", "advice", "fixable"), REFUSED)
+def test_rows_available_refuses_the_same_files(place, state, reason, advice, fixable):
     """Guarantee 2: PopulationUnreadable naming the path once, its cause kept for the advice."""
     path = state(place)
     with pytest.raises(ip.PopulationUnreadable) as unreadable:
         ip.rows_available(path, True)
     assert str(unreadable.value).count(str(path)) == 1
+    assert re.search(reason, str(unreadable.value))
     assert advice in ip.remedy(unreadable.value.__cause__, path)
     if fixable:
         _put_right(path)
