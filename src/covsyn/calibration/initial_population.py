@@ -166,8 +166,8 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 
 # The reading contract of load() and rows_available() (user decision of 2026-11-24, after
 # code review rounds 11 to 17 and a logic review):
-# 1. A path that is not a path is a programming error, raised as TypeError before any file
-#    is touched.
+# 1. A path that is not a path is a programming error, raised before any file is touched:
+#    TypeError for another type, ValueError for a NUL byte, which no file name holds.
 # 2. A failure of the file -- opening, decoding, or contents load() cannot compute with --
 #    is a worded refusal naming the path once with a short reason, never a traceback; any
 #    other exception is a programming error and raises as itself.
@@ -234,6 +234,7 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
+        ValueError: ``path`` holds a NUL byte, so names no file (code review round 20).
         PopulationUnreadable: The file cannot be read or decoded (whatever numpy and zipfile
             raise reading it), holds one array instead of an archive, or its rows, warm
             starts or bounds are not what load() computes with.
@@ -241,6 +242,8 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
     if not isinstance(path, str | bytes | os.PathLike):  # what np.load takes
         raise TypeError(f"path must be a path, got {type(path).__name__}")
     shown = os.fsdecode(path)  # a bytes path named as text (code review round 13)
+    if "\0" in shown:  # names no file, so no remedy for a file applies (round 20)
+        raise ValueError(f"path holds a NUL byte: {shown!r}")
     try:
         saved = np.load(path)
         # A single .npy array loads as an array, not an archive (code review round 12).

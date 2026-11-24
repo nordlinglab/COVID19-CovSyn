@@ -178,6 +178,16 @@ def test_a_path_that_is_not_a_path_is_a_programming_error(space, path):
         ip.rows_available(path)
 
 
+@pytest.mark.parametrize("path", ["variable/nul\0x.npz", b"variable/nul\0x.npz"])
+def test_a_path_no_file_can_have_is_a_programming_error(space, path):
+    """Guarantee 1: a NUL byte names no file, so restoring cannot help (round 20)."""
+    for read in (lambda: ip.load(path, 3, space.lower, space.upper),
+                 lambda: ip.rows_available(path)):  # fmt: skip
+        with pytest.raises(ValueError, match="NUL") as refused:
+            read()
+        assert not isinstance(refused.value, ip.PopulationUnreadable)
+
+
 def test_a_file_edited_without_its_sha256_is_refused_by_load_only(place, space):
     """Guarantee 3: load() checks the SHA-256; rows_available() counts the rows."""
     with np.load(COMMITTED) as saved:
