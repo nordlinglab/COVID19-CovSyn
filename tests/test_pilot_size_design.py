@@ -214,3 +214,20 @@ def test_a_resume_refuses_a_design(tmp_path):
     out.mkdir(parents=True)
     with pytest.raises(SystemExit):
         ps.main(["--resume", str(out), "--streams", "1,2,3"])
+
+
+@pytest.mark.parametrize("bad", [
+    {"pop_sizes": (8, 24)},  # G = 1,249: more generations than a stream's 1,000 blocks
+    {"pop_sizes": (255,), "without_warm_starts": True},  # 254 rows are left
+    {"pop_sizes": (257,), "without_warm_starts": False},  # the population has 256
+    {"alpha_0s": (0.0005,)},  # below alpha_end 0.001: the steps would grow
+])  # fmt: skip
+def test_a_design_the_optimiser_would_refuse_is_refused_first(bad):
+    """Code review round 4: else the pilot records a design whose runs fail hours in."""
+    with pytest.raises(ValueError):
+        ps.Design(**{**RERUN._asdict(), **bad}).check()
+
+
+def test_the_largest_population_without_warm_starts_is_accepted():
+    """256 rows less the two warm starts."""
+    assert ps.Design((254,), (0.2,), (1, 2, 3), True).check()

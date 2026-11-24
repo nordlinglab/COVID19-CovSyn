@@ -47,7 +47,14 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
-from covsyn.calibration import block_scoring, revalidation, run_size, seed_streams, step_schedule
+from covsyn.calibration import (
+    block_scoring,
+    initial_population,
+    revalidation,
+    run_size,
+    seed_streams,
+    step_schedule,
+)
 from covsyn.calibration.revalidation import archive_candidates
 from covsyn.runtime import hardware, runs
 
@@ -120,6 +127,18 @@ class Design(NamedTuple):
             raise ValueError(f"alpha_0 must be positive, got {self.alpha_0s}")
         for stream in self.streams:
             seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
+        # What the optimiser refuses, refused here, before the pilot records the design and
+        # its runs fail hours in (code review round 4): n beyond the rows the population has
+        # without the warm starts, G beyond a stream's blocks, steps that would grow.
+        rows = run_size.POPULATION_ROWS - (
+            len(initial_population.WARM_STARTS) if self.without_warm_starts else 0)
+        for n in self.pop_sizes:
+            run_size.check_command("pilot", "--pop-size", n, range(2, rows + 1))
+            run_size.check_command("pilot", "--generations", generations(n),
+                                   run_size.GENERATIONS)
+            for a in self.alpha_0s:
+                step_schedule.checked_schedule(a, None, None, generations(n),
+                                               names=("--alpha-0", "--alpha-end", "--g-plan"))
         return self
 
     def record(self) -> dict[str, Any]:
