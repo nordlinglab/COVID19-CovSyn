@@ -245,6 +245,9 @@ def remedy(cause: BaseException | None, path: Path) -> str:
     so the commands can be pasted.
     """
     restore = f"git checkout -- {shlex.quote(str(path))}"
+    if isinstance(cause, IsADirectoryError) or (isinstance(cause, PermissionError)
+                                                and path.is_dir()):  # Windows says the latter
+        return f"it is a directory, not the file: move it away and restore the file with {restore}"
     if isinstance(cause, FileNotFoundError):
         return (f"restore it with {restore}, or, for a version never committed, make it with "
                 f"covsyn-initial-population --version {CURRENT_VERSION} --out-dir "

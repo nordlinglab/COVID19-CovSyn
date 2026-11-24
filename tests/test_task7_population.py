@@ -209,6 +209,15 @@ def test_a_missing_population_is_restored_first_or_made_by_a_command_that_works(
     assert len(ip.load(path, 3, space.lower, space.upper)) == 3
 
 
+def test_a_directory_in_the_population_s_place_is_named_as_such(tmp_path, space):
+    """Neither restoring over it nor a permission helps while it is there (round 16)."""
+    path = tmp_path / "initial_population_v1.npz"
+    path.mkdir()
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 3, space.lower, space.upper)
+    assert "is a directory" in stopped.value.code
+
+
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")
 def test_a_population_that_may_not_be_read_asks_for_permission(tmp_path, space, written):
     """Restoring would not help (code review round 15)."""
