@@ -142,9 +142,11 @@ class Design(NamedTuple):
         try:  # the file's count, as load() takes it
             rows = initial_population.rows_available(path, self.without_warm_starts)
         except initial_population.PopulationUnreadable as error:  # worded (rounds 9, 10)
-            raise ValueError(f"the initial population {path} cannot be read ({error}); make it "
-                             f"with covsyn-initial-population --version "
-                             f"{initial_population.CURRENT_VERSION}") from error
+            # Remade only when missing: the command refuses a file that exists (round 10).
+            remedy = (f"make it with covsyn-initial-population --version "
+                      f"{initial_population.CURRENT_VERSION} --out-dir {path.parent}"
+                      if not path.exists() else "restore the committed file from version control")
+            raise ValueError(f"{error}; {remedy}") from error
         # Worded in this command's options, naming the n at fault (code review round 5).
         without = " without the warm starts" if self.without_warm_starts else ""
         for n in self.pop_sizes:

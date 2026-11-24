@@ -324,11 +324,29 @@ def test_a_design_is_checked_from_any_directory(monkeypatch, tmp_path):
     assert RERUN.check() == RERUN
 
 
-def test_an_unreadable_population_file_is_named(monkeypatch, tmp_path):
-    """A missing file is refused as a design error naming the file and how to make it."""
+def test_a_missing_population_file_is_named_with_the_command_that_makes_it(monkeypatch,
+                                                                            tmp_path):
+    """The command writes into the directory the check reads (code review round 10)."""
     from covsyn.calibration import initial_population as ip
 
     missing = tmp_path / "initial_population_v1.npz"
     monkeypatch.setattr(ip, "population_path", lambda version, directory=None: missing)
-    with pytest.raises(ValueError, match="covsyn-initial-population"):
+    with pytest.raises(ValueError) as refusal:
         RERUN.check()
+    message = str(refusal.value)
+    assert str(missing) in message
+    assert f"covsyn-initial-population --version 1 --out-dir {tmp_path}" in message
+
+
+def test_a_damaged_population_file_is_to_be_restored(monkeypatch, tmp_path):
+    """Remaking a file that exists is refused, so the advice is to restore the committed one."""
+    from covsyn.calibration import initial_population as ip
+
+    damaged = tmp_path / "initial_population_v1.npz"
+    damaged.write_bytes(b"PK\x03\x04 truncated")
+    monkeypatch.setattr(ip, "population_path", lambda version, directory=None: damaged)
+    with pytest.raises(ValueError) as refusal:
+        RERUN.check()
+    message = str(refusal.value)
+    assert str(damaged) in message and "restore" in message
+    assert "covsyn-initial-population" not in message
