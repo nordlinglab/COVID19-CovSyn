@@ -149,6 +149,19 @@ def test_a_file_edited_without_its_sha256_is_refused_by_load_only(place, space):
     assert ip.rows_available(place) == ip.N_MAX
 
 
+@pytest.mark.parametrize("version", [None, np.array([1, 2])])
+def test_a_version_describe_cannot_read_is_refused_by_load(place, space, version):
+    """What describe() reads after load(), load() checks (guarantee 2, round 18)."""
+    with np.load(COMMITTED) as saved:
+        data = {key: saved[key] for key in saved.files if key != "version"}
+    if version is not None:
+        data["version"] = version
+    np.savez(place, **data)
+    with pytest.raises(SystemExit, match="cannot be read") as stopped:
+        ip.load(place, 3, space.lower, space.upper)
+    assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
+
+
 def test_an_n_beyond_a_good_file_is_a_run_size_not_a_file_fault(place, space):
     """Guarantees 3, 4: RunSizeOutOfRange, exit 1 here; only the optimiser maps it to 3."""
     _put_right(place)

@@ -102,7 +102,7 @@ def test_the_rows_left_out_are_the_file_s_own_warm_starts(tmp_path, monkeypatch)
         rows = saved["normalized"]
     path = tmp_path / "initial_population_v9.npz"
     np.savez(path, normalized=rows, lower=lower, upper=upper, warm_starts=np.array(["a.txt"]),
-             sha256=np.array(ip.digest(rows, lower, upper)))  # fmt: skip
+             sha256=np.array(ip.digest(rows, lower, upper)), version=np.array(9))  # fmt: skip
     monkeypatch.setattr(ip, "WARM_STARTS", ("a.txt", "b.txt", "c.txt"))
     got = ip.load(path, 5, lower, upper, without_warm_starts=True)
     np.testing.assert_array_equal(got, np.vstack([rows[:1], rows[2:6]]))

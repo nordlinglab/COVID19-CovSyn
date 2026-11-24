@@ -139,7 +139,8 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
     path = Path(os.fsdecode(path))  # the paths rows_available takes (code review round 14)
     # Missing or damaged: refused with a message, resumable once remedied (rounds 14, 15).
     try:
-        saved = _read(path, ("normalized", "lower", "upper", "sha256", "warm_starts"))
+        # version too, which the optimiser's describe() reads next (code review round 18)
+        saved = _read(path, ("normalized", "lower", "upper", "sha256", "warm_starts", "version"))
     except PopulationUnreadable as error:
         raise SystemExit(f"{error}; {remedy(error.__cause__, path)}") from error
     normalized = saved["normalized"]
@@ -257,6 +258,9 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
            for key in ("lower", "upper") if key in arrays):  # one bound a parameter (round 16)
         raise PopulationUnreadable(f"{shown} cannot be read (its bounds are not one number a "
                                    f"parameter)")
+    if "version" in arrays and (arrays["version"].ndim != 0
+                                or arrays["version"].dtype.kind not in "iu"):
+        raise PopulationUnreadable(f"{shown} cannot be read (its version is not a whole number)")
     return arrays
 
 
