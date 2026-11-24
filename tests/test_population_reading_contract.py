@@ -178,14 +178,27 @@ def test_a_path_that_is_not_a_path_is_a_programming_error(space, path):
         ip.rows_available(path)
 
 
-@pytest.mark.parametrize("path", ["variable/nul\0x.npz", b"variable/nul\0x.npz"])
-def test_a_path_no_file_can_have_is_a_programming_error(space, path):
-    """Guarantee 1: a NUL byte names no file, so restoring cannot help (round 20)."""
+@pytest.mark.parametrize(("path", "why"), [("variable/nul\0x.npz", "NUL"),
+                                           (b"variable/nul\0x.npz", "NUL"),
+                                           ("", "empty"), (b"", "empty")])  # fmt: skip
+def test_a_path_no_file_can_have_is_a_programming_error(space, path, why):
+    """Guarantee 1: a NUL byte or nothing names no file (code review rounds 20, 21)."""
     for read in (lambda: ip.load(path, 3, space.lower, space.upper),
                  lambda: ip.rows_available(path)):  # fmt: skip
-        with pytest.raises(ValueError, match="NUL") as refused:
+        with pytest.raises(ValueError, match=why) as refused:
             read()
         assert not isinstance(refused.value, ip.PopulationUnreadable)
+
+
+def test_both_entry_points_read_the_path_as_given(place, space):
+    """A trailing slash is not dropped by one and kept by the other (code review round 21)."""
+    _put_right(place)
+    given = f"{place}/"
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(given, 3, space.lower, space.upper)
+    with pytest.raises(ip.PopulationUnreadable) as unreadable:
+        ip.rows_available(given)
+    assert given in stopped.value.code and given in str(unreadable.value)
 
 
 def test_a_file_edited_without_its_sha256_is_refused_by_load_only(place, space):

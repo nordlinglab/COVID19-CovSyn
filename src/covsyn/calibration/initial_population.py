@@ -134,12 +134,12 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
         SystemExit: The file is missing, cannot be read, or its rows do not match its
             SHA-256, or the dimension or the bounds differ from those it was made with.
     """
-    path = Path(os.fsdecode(path))  # the paths rows_available takes (code review round 14)
     # Missing or damaged: refused with a message, resumable once remedied (rounds 14, 15).
     try:
-        saved = _read(path)
+        saved = _read(path)  # as given, as rows_available() reads it (code review round 21)
     except PopulationUnreadable as error:
-        raise SystemExit(f"{error}; {remedy(error.__cause__, path)}") from error
+        raise SystemExit(f"{error}; {remedy(error.__cause__, Path(os.fsdecode(path)))}") from error
+    path = os.fsdecode(path)  # named as given in the refusals below
     normalized = saved["normalized"]
     stored_lower, stored_upper = saved["lower"], saved["upper"]
     sha = str(saved["sha256"])
@@ -167,7 +167,8 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 # The reading contract of load() and rows_available() (user decision of 2026-11-24, after
 # code review rounds 11 to 17 and a logic review):
 # 1. A path that is not a path is a programming error, raised before any file is touched:
-#    TypeError for another type, ValueError for a NUL byte, which no file name holds.
+#    TypeError for another type, ValueError for an empty path or a NUL byte, which name no
+#    file.
 # 2. A failure of the file -- opening, decoding, or contents load() cannot compute with --
 #    is a worded refusal naming the path once with a short reason, never a traceback; any
 #    other exception is a programming error and raises as itself.
@@ -245,6 +246,8 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
     shown = os.fsdecode(path)  # a bytes path named as text (code review round 13)
     if "\0" in shown:  # names no file, so no remedy for a file applies (round 20)
         raise ValueError(f"path holds a NUL byte: {shown!r}")
+    if not shown:  # names no file either (round 21)
+        raise ValueError("path is empty")
     try:
         saved = np.load(path)
         # A single .npy array loads as an array, not an archive (code review round 12).
