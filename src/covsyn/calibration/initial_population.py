@@ -128,7 +128,10 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
     the fitted vectors of earlier runs, so the run starts from the literature vector and the
     Latin hypercube (pilot 2 rerun, user decision 2026-11-24).
 
+    Keeps the reading contract above READ_ERRORS.
+
     Raises:
+        TypeError: ``path`` is not a path.
         RunSizeOutOfRange: n is not 1 to the rows available.
         SystemExit: The file is missing, cannot be read, or its rows do not match its
             SHA-256, or the dimension or the bounds differ from those it was made with.
@@ -163,6 +166,22 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
     return normalized[:n].copy()
 
 
+# The reading contract of load() and rows_available() (user decision of 2026-11-24, after
+# code review rounds 11 to 17 and a logic review):
+# 1. A path that is not a path is a programming error, raised as TypeError before any file
+#    is touched.
+# 2. A failure of the file -- opening, decoding, or contents load() cannot compute with --
+#    is a worded refusal naming the path once with a short reason, never a traceback; any
+#    other exception is a programming error and raises as itself.
+# 3. load() checks in this order: the file and its contents, its SHA-256, n against the rows
+#    (RunSizeOutOfRange), the dimension, the bounds. No rows at all is a fault of the file.
+# 4. Only the optimiser maps RunSizeOutOfRange to runs.NOT_RESUMABLE; every other refusal
+#    exits 1, so none of them by itself makes a run not resumable.
+# 5. The advice (remedy) follows the exception's type alone, makes no filesystem or git call,
+#    and gives a direction, never a command whose premises go unchecked.
+# Imprecision outside these guarantees, such as advice that suits only some repository
+# states, is not a defect.
+#
 # What reading and decoding an .npz can raise: OSError (missing, unreadable), EOFError
 # (empty), ValueError (not an .npz, pickled data), KeyError (an array missing), BadZipFile
 # (truncated), zlib.error (a corrupt stream), NotImplementedError (an unknown compression),
@@ -178,8 +197,9 @@ class PopulationUnreadable(ValueError):
 def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = False) -> int:
     """How many fireflies a run can take from the population at ``path``, as load() counts.
 
-    The file's SHA-256 is not checked, so a file edited without being hashed again passes here
-    and load() refuses it (code review round 16).
+    Keeps the reading contract above READ_ERRORS. The file's SHA-256 is not checked, so a
+    file edited without being hashed again passes here and load() refuses it (code review
+    round 16).
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
