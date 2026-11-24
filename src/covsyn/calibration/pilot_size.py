@@ -481,6 +481,8 @@ def main(argv: list[str] | None = None) -> Path:
         try:
             design = Design(args.pop_sizes or POP_SIZES, args.alpha_0s or ALPHA_0S,
                             args.streams or STREAMS, args.without_warm_starts).check()
+        except PopulationUnchecked as error:  # the file's fault, as on resume (round 11)
+            parser.error(f"the design cannot be checked: {error}")
         except ValueError as error:
             parser.error(f"design: {error}")
     if args.resume is not None:

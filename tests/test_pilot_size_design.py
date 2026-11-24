@@ -404,3 +404,14 @@ def test_a_replaced_rule_is_reported_before_the_file_is_read():
     with pytest.raises(ValueError, match="rule") as refusal:
         ps.Design.from_record(record)
     assert not isinstance(refusal.value, ps.PopulationUnchecked)
+
+
+@pytest.mark.usefixtures("no_population")
+def test_a_new_pilot_with_an_unreadable_population_does_not_blame_the_design(tmp_path, capsys):
+    """The fault is the file, as on resume (code review round 11); nothing starts."""
+    with pytest.raises(SystemExit):
+        ps.main(["--noise", str(_noise(tmp_path)), "--results-root", str(tmp_path),
+                 "--streams", "1,2,3,4", "--without-warm-starts"])
+    err = capsys.readouterr().err
+    assert "cannot be checked" in err and "design: " not in err
+    assert not (tmp_path / "tables").exists()
