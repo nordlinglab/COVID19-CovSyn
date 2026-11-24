@@ -179,6 +179,9 @@ class PopulationUnreadable(ValueError):
 def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = False) -> int:
     """How many fireflies a run can take from the population at ``path``, as load() counts.
 
+    The file's SHA-256 is not checked, so a file edited without being hashed again passes here
+    and load() refuses it (code review round 16).
+
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
         PopulationUnreadable: The file cannot be read or decoded -- missing, empty,
@@ -187,7 +190,8 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
             any other failure, a programming error, raises as itself (code review rounds 7
             to 15).
     """
-    # Every array load() computes with but the digest, so what passes here loads (round 15).
+    # Every array load() computes with, so what passes here loads, unless its SHA-256 no
+    # longer matches, which only load() checks (rounds 15, 16).
     saved = _read(path, ("normalized", "lower", "upper", "warm_starts"))
     normalized, warm_starts = saved["normalized"], saved["warm_starts"]
     if not without_warm_starts:
