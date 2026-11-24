@@ -199,8 +199,14 @@ def _corrupt_deflate(path):
     return bytes(raw)
 
 
+def _an_npy(path):
+    with open(path, "wb") as f:  # one array, not an archive of them (code review round 12)
+        np.save(f, np.zeros(3))
+    return path.read_bytes()
+
+
 @pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated", _zero_d, _unknown_compression,
-                                     _corrupt_deflate])  # fmt: skip
+                                     _corrupt_deflate, _an_npy])  # fmt: skip
 def test_every_read_failure_is_one_exception(tmp_path, content):
     """Any failure reading the file is PopulationUnreadable, which callers catch alone."""
     path = tmp_path / "initial_population_v1.npz"

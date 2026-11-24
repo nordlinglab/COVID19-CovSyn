@@ -183,13 +183,19 @@ def rows_available(path: Path, without_warm_starts: bool = False) -> int:
     if not isinstance(path, str | os.PathLike):
         raise TypeError(f"path must be a path, got {type(path).__name__}")
     try:
-        with np.load(path) as saved:
-            normalized, warm_starts = saved["normalized"], saved["warm_starts"]
+        saved = np.load(path)
+        # A single .npy array loads as an array, not an archive (code review round 12).
+        archive = isinstance(saved, np.lib.npyio.NpzFile)
+        if archive:
+            with saved:
+                normalized, warm_starts = saved["normalized"], saved["warm_starts"]
     except READ_ERRORS as error:
         # An OSError's text repeats the path; its strerror does not (code review round 11).
         reason = error.strerror if isinstance(error, OSError) and error.strerror else error
         raise PopulationUnreadable(f"{path} cannot be read ({type(error).__name__}: "
                                    f"{reason})") from error
+    if not archive:
+        raise PopulationUnreadable(f"{path} cannot be read (one array, not an .npz archive)")
     if normalized.ndim == 0 or warm_starts.ndim == 0:  # len() of a 0-d array fails
         raise PopulationUnreadable(f"{path} cannot be read (its rows are not an array)")
     rows = len(normalized)
