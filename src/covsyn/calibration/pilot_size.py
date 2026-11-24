@@ -253,15 +253,16 @@ def choose(table: Sequence[Mapping[str, Any]], design: Design = PLAN) -> dict[st
 
     Agreement: the agreeing setting of lowest mean cost, none when none agree. Spread: the
     lowest mean, unless other settings lie within the SE of their difference from it,
-    sqrt(sd_lowest^2 / k + sd_other^2 / k); then the one of smallest run SD among it and them,
-    ties to the lower mean. within_se lists the settings it was weighed against.
+    sqrt(sd_lowest^2 / k_lowest + sd_other^2 / k_other); then the one of smallest run SD
+    among it and them, ties to the lower mean. within_se lists the settings it was weighed
+    against.
     """
     within: list[list] = []
     if design.rule == "spread":
         lowest = min(table, key=lambda line: line["mean_cost"])
         near = [line for line in table if line is not lowest and line["mean_cost"] - lowest[
-            "mean_cost"] <= np.sqrt((lowest["run_sd"] ** 2 + line["run_sd"] ** 2)
-                                    / lowest["runs"])]  # fmt: skip
+            "mean_cost"] <= np.sqrt(lowest["run_sd"] ** 2 / lowest["runs"]
+                                    + line["run_sd"] ** 2 / line["runs"])]  # fmt: skip
         best = min([lowest, *near], key=lambda line: (line["run_sd"], line["mean_cost"]))
         within = [[line["pop_size"], line["alpha_0"]] for line in [lowest, *near]
                   if line is not best]  # fmt: skip

@@ -251,3 +251,13 @@ def test_the_spread_needs_every_run_on_every_confirmation_block(drop):
                                         and r["block"] == 31)]  # fmt: skip
     with pytest.raises(ValueError, match="n12"):
         ps.compare_settings(rows, design)
+
+
+def test_the_se_takes_each_setting_s_own_number_of_runs():
+    """sqrt(1/4 + 4/1) = 2.06 > 1.5: within, so the steadier one wins; k = 4 for both says not."""
+    design = ps.Design((12, 24), (0.2,), (1, 2, 3, 4), True)
+    table = [{"pop_size": 12, "alpha_0": 0.2, "generations": 832, "mean_cost": 10.0,
+              "run_sd": 1.0, "runs": 4},
+             {"pop_size": 24, "alpha_0": 0.2, "generations": 415, "mean_cost": 11.5,
+              "run_sd": 2.0, "runs": 1}]  # fmt: skip
+    assert ps.choose(table, design)["within_se"] == [[24, 0.2]]
