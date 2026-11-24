@@ -271,6 +271,10 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
                                    f"{reason})") from error
     if not archive:
         raise PopulationUnreadable(f"{shown} cannot be read (one array, not an .npz archive)")
+    # NumPy returns raw bytes for archive members without an NPY header.
+    for key, value in arrays.items():
+        if not isinstance(value, np.ndarray):
+            raise PopulationUnreadable(f"{shown} cannot be read ({key} is not an NPY array)")
     # What load() computes with: rows it can stack and hash, at least one of them, of at least
     # one parameter (rounds 14, 15); a warm-start list it can count; bounds of numbers.
     rows = arrays["normalized"]

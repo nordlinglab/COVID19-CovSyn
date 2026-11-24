@@ -68,6 +68,17 @@ def _no_rows(path):
     return path
 
 
+def _a_non_array_member(path):
+    """A complete archive with a member that is not an NPY array."""
+    import zipfile
+
+    with zipfile.ZipFile(COMMITTED) as source, zipfile.ZipFile(path, "w") as target:
+        for name in source.namelist():
+            data = b"plain text" if name == "normalized.npy" else source.read(name)
+            target.writestr(name, data)
+    return path
+
+
 def _a_forged_header(path):
     """The committed file but normalized.npy, which claims 10**11 rows and holds 48 bytes.
 
@@ -117,6 +128,7 @@ REFUSED = [
     (_a_directory, "IsADirectoryError", "a directory stands where the file should be", False),
     (_a_file_for_a_directory, "NotADirectoryError", "should be a directory is not one", False),
     (_empty, "EOFError", "last commit", True),
+    (_a_non_array_member, "not an NPY array", "last commit", True),
     (_no_rows, "not a non-empty 2-D array", "last commit", True),
     # numpy allocates the claimed shape (MemoryError), or, where memory is overcommitted,
     # finds the data short (ValueError)
