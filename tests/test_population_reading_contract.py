@@ -103,6 +103,15 @@ def test_rows_available_refuses_the_same_files(place, state, advice, fixable):
         assert ip.rows_available(path, True) == ip.N_MAX - len(ip.WARM_STARTS)
 
 
+def test_the_relative_path_the_optimiser_reads_is_named_once(tmp_path, space, monkeypatch):
+    """Guarantee 2 on the path as the optimiser and pilot 1 give it (code review round 18)."""
+    monkeypatch.chdir(tmp_path)
+    path = ip.population_path(ip.CURRENT_VERSION)
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 3, space.lower, space.upper)
+    assert stopped.value.code.count(path.name) == 1, stopped.value.code
+
+
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")
 def test_a_file_this_user_may_not_read_gets_the_permission_direction(place, space):
     """Guarantee 5: restoring would not help, so it is not advised."""

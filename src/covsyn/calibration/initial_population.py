@@ -269,7 +269,8 @@ def remedy(cause: BaseException | None, path: Path) -> str:
     restored, not remade, as a remade one may differ: the warm starts must be on disk, and
     the Latin hypercube follows scipy's version.
     """
-    committed = f"restore variable/{path.name} in the CovSyn repository to its last commit"
+    # No path: the refusal names it already (guarantee 2, code review round 18).
+    committed = "restore the file in the CovSyn repository to its last commit"
     if isinstance(cause, PermissionError):
         return "check that this user may read the file and every directory on its path"
     if isinstance(cause, IsADirectoryError):
