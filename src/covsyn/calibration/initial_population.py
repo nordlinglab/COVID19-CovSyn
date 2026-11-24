@@ -342,6 +342,11 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
     if warm_starts.ndim != 1 or warm_starts.dtype.kind not in "US":
         raise PopulationUnreadable(f"{shown} cannot be read (its warm starts are not a list "
                                    f"of strings)")
+    slots = len(rows) - 1  # row 0 is reserved for the literature seed
+    if len(warm_starts) > slots:
+        raise PopulationUnreadable(
+            f"{shown} cannot be read (lists {len(warm_starts)} warm starts but holds only {slots})"
+        )
     lower, upper = arrays["lower"], arrays["upper"]
     if any(bound.shape != rows.shape[1:] or bound.dtype.kind not in "iuf"
            or bound.dtype.itemsize > 8 for bound in (lower, upper)):

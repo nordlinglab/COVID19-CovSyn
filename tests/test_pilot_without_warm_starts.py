@@ -279,13 +279,13 @@ def test_the_message_names_the_file_once(tmp_path):
     assert "No such file" in str(unreadable.value)
 
 
-@pytest.mark.parametrize(("rows", "left"), [(1, 1), (3, 1), (6, 1), (9, 4)])  # 0 is damaged
-def test_the_count_is_the_rows_load_keeps(tmp_path, rows, left):
-    """Row 0 stays and rows 1 to 5, the 5 warm starts, go (code review rounds 12 and 13)."""
+@pytest.mark.parametrize(("rows", "warm_count", "left"), [(1, 0, 1), (6, 5, 1), (9, 5, 4)])
+def test_the_count_is_the_rows_load_keeps(tmp_path, rows, warm_count, left):
+    """One row is reserved for the literature vector, even at either valid boundary."""
     path = tmp_path / "p.npz"
     np.savez(path, normalized=np.zeros((rows, 2)), lower=np.zeros(2), upper=np.ones(2),
-             warm_starts=np.array(list("abcde")), sha256=np.array("x"),
-             version=np.array(1))  # fmt: skip
+             warm_starts=np.array(list("abcde"[:warm_count]), dtype=str),
+             sha256=np.array("x"), version=np.array(1))  # fmt: skip
     assert ip.rows_available(path, True) == left
 
 
