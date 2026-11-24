@@ -15,7 +15,8 @@ import re
 
 import numpy as np
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from covsyn.calibration import initial_population as ip
 from covsyn.calibration import parameter_space
@@ -168,8 +169,11 @@ def test_rows_available_refuses_the_same_files(place, state, reason, advice, fix
 
 
 def test_compressed_population_preserves_rows_and_enforces_expanded_limit(
-    place, space, monkeypatch,
+    place,
+    space,
+    monkeypatch,
 ):
+    """Ordinary NumPy compression is supported within the expanded byte limit."""
     with np.load(COMMITTED) as saved:
         np.savez_compressed(place, **{key: saved[key] for key in saved.files})
 
@@ -181,6 +185,7 @@ def test_compressed_population_preserves_rows_and_enforces_expanded_limit(
 
 
 def test_inconsistent_header_is_refused_before_numpy_loads(place, monkeypatch):
+    """Refuse mismatched member lengths before decoding their arrays."""
     path = _a_forged_header(place)
 
     def unexpected_load(*args, **kwargs):
@@ -239,8 +244,10 @@ def test_a_path_no_file_can_have_is_a_programming_error(space, path, why):
 
 @given(name=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", max_size=40))
 def test_generated_population_paths_keep_argument_and_file_errors_distinct(
-    tmp_path_factory, name,
+    tmp_path_factory,
+    name,
 ):
+    """An invalid argument and an absent file take different error paths."""
     root = tmp_path_factory.getbasetemp()
     for path in ("", f"{name}\0.npz", f"{name}\ud800.npz"):
         with pytest.raises(ValueError) as invalid:

@@ -385,8 +385,11 @@ def test_the_command_takes_s_from_pilot_1(tmp_path, monkeypatch):
 
 
 def test_main_distinguishes_a_population_path_error_from_an_invalid_design(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
+    """Only an invalid pilot design is translated to a usage error here."""
+
     def bad_population_path(*args):
         raise ValueError("population path is empty")
 
