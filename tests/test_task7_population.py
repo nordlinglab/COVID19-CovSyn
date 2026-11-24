@@ -204,8 +204,8 @@ def test_a_missing_population_is_to_be_restored_from_the_last_commit(tmp_path, s
     with pytest.raises(SystemExit) as stopped:
         ip.load(path, 3, space.lower, space.upper)
     message = stopped.value.code
-    assert "last commit" in message and "covsyn-initial-population" in message
-    assert "git checkout" not in message
+    assert "last commit" in message and "never committed" in message
+    assert "git checkout" not in message and "covsyn-initial-population" not in message
     assert ("working directory" in message) == relative
 
 

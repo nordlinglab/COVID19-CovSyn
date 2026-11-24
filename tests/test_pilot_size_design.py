@@ -337,7 +337,10 @@ def test_a_missing_population_file_is_to_be_restored_or_made(monkeypatch, tmp_pa
         RERUN.check()
     message = str(refusal.value)
     assert str(missing) in message
-    assert "last commit" in message and "covsyn-initial-population" in message
+    # A direction only: the command writes under the working directory, which may not be the
+    # repository the check reads (code review round 18).
+    assert "last commit" in message and "never committed" in message
+    assert "covsyn-initial-population" not in message
 
 
 def test_a_damaged_population_file_is_to_be_restored(monkeypatch, tmp_path):

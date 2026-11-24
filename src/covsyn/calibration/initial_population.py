@@ -280,8 +280,9 @@ def remedy(cause: BaseException | None, path: Path) -> str:
     if isinstance(cause, FileNotFoundError):
         relative = ("" if path.is_absolute()
                     else "it is read relative to the working directory, so check that too; ")
-        return (f"{relative}{committed}; a version never committed is made with "
-                f"covsyn-initial-population")
+        # No command: covsyn-initial-population writes under the working directory, which may
+        # not be where the file is read (code review round 18).
+        return f"{relative}{committed}, or make it as a new version if it was never committed"
     return committed
 
 
