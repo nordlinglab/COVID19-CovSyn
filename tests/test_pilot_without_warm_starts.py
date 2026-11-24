@@ -199,14 +199,21 @@ def test_the_pipeline_checks_the_rows_from_any_directory(monkeypatch, tmp_path):
 def test_a_damaged_population_file_leaves_the_refusal_to_the_optimiser(
     monkeypatch, tmp_path, content
 ):
-    """An empty or truncated file does not crash reading the configuration."""
+    """An empty or truncated file does not crash reading the configuration.
+
+    n = 255 would be refused by a readable file, so its acceptance shows the damaged file was
+    read and left to the optimiser (code review round 8).
+    """
     from covsyn.pipeline import config as pc
     from tests.test_task9_production_pipeline import PRODUCTION
 
     broken = tmp_path / "initial_population_v1.npz"
     broken.write_bytes(content)
-    monkeypatch.setattr(ip, "population_path", lambda version, directory=None: broken)
-    assert pc.parse(PRODUCTION, "t").pop_size == 48
+    read = []
+    monkeypatch.setattr(ip, "population_path",
+                        lambda version, directory=None: read.append(version) or broken)
+    assert pc.parse(PRODUCTION.replace("pop_size = 48", "pop_size = 255"), "t").pop_size == 255
+    assert read
 
 
 def test_a_programming_error_in_the_row_check_is_not_hidden(monkeypatch):
