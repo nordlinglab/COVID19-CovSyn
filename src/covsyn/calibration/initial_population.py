@@ -182,11 +182,13 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
         PopulationUnreadable: The file cannot be read or decoded -- missing, empty,
-            truncated, a corrupt or unknown compression, rows that are not an array -- so a
-            caller catches this alone; any other failure, a programming error, raises as
-            itself (code review rounds 7 to 11).
+            truncated, a corrupt or unknown compression, rows that are not a non-empty 2-D
+            array of numbers, bounds that are not numbers -- so a caller catches this alone;
+            any other failure, a programming error, raises as itself (code review rounds 7
+            to 15).
     """
-    saved = _read(path, ("normalized", "warm_starts"))
+    # Every array load() computes with but the digest, so what passes here loads (round 15).
+    saved = _read(path, ("normalized", "lower", "upper", "warm_starts"))
     normalized, warm_starts = saved["normalized"], saved["warm_starts"]
     if not without_warm_starts:
         return len(normalized)
@@ -200,7 +202,8 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
         PopulationUnreadable: The file cannot be read or decoded (see READ_ERRORS), holds one
-            array instead of an archive, or its rows are not a 2-D array.
+            array instead of an archive, or its rows, warm starts or bounds are not what
+            load() computes with.
     """
     if not isinstance(path, str | bytes | os.PathLike):  # what np.load takes
         raise TypeError(f"path must be a path, got {type(path).__name__}")
@@ -219,9 +222,17 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
                                    f"{reason})") from error
     if not archive:
         raise PopulationUnreadable(f"{shown} cannot be read (one array, not an .npz archive)")
-    # len() of a 0-d array fails, and load() stacks rows, which a 1-D array is not (round 14).
-    if arrays["normalized"].ndim != 2 or arrays["warm_starts"].ndim == 0:
-        raise PopulationUnreadable(f"{shown} cannot be read (its rows are not a 2-D array)")
+    # What load() computes with: rows it can stack and hash, at least one of them, of at least
+    # one parameter (rounds 14, 15); a warm-start list it can count; bounds of numbers.
+    rows = arrays["normalized"]
+    if rows.ndim != 2 or 0 in rows.shape or rows.dtype.kind not in "iuf":
+        raise PopulationUnreadable(f"{shown} cannot be read (its rows are not a non-empty 2-D "
+                                   f"array of numbers)")
+    if arrays["warm_starts"].ndim == 0:
+        raise PopulationUnreadable(f"{shown} cannot be read (its warm starts are not a list)")
+    if any(arrays[key].ndim != 1 or arrays[key].dtype.kind not in "iuf"
+           for key in ("lower", "upper") if key in arrays):
+        raise PopulationUnreadable(f"{shown} cannot be read (its bounds are not numbers)")
     return arrays
 
 

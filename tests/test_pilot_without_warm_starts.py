@@ -242,7 +242,8 @@ def test_a_path_of_the_wrong_type_is_a_programming_error(path):
 def test_a_bug_in_the_body_is_not_taken_for_an_unreadable_file(tmp_path, monkeypatch):
     """A failure outside reading and decoding raises as itself."""
     path = tmp_path / "p.npz"
-    np.savez(path, normalized=np.zeros((5, 2)), warm_starts=np.array(["a"]))
+    np.savez(path, normalized=np.zeros((5, 2)), lower=np.zeros(2), upper=np.ones(2),
+             warm_starts=np.array(["a"]))  # fmt: skip
     monkeypatch.setattr(ip, "len", lambda value: 1 / 0, raising=False)
     with pytest.raises(ZeroDivisionError):
         ip.rows_available(path)
@@ -257,18 +258,20 @@ def test_the_message_names_the_file_once(tmp_path):
     assert "No such file" in str(unreadable.value)
 
 
-@pytest.mark.parametrize(("rows", "left"), [(0, 0), (1, 1), (3, 1), (6, 1), (9, 4)])
+@pytest.mark.parametrize(("rows", "left"), [(1, 1), (3, 1), (6, 1), (9, 4)])  # 0 is damaged
 def test_the_count_is_the_rows_load_keeps(tmp_path, rows, left):
     """Row 0 stays and rows 1 to 5, the 5 warm starts, go (code review rounds 12 and 13)."""
     path = tmp_path / "p.npz"
-    np.savez(path, normalized=np.zeros((rows, 2)), warm_starts=np.array(list("abcde")))
+    np.savez(path, normalized=np.zeros((rows, 2)), lower=np.zeros(2), upper=np.ones(2),
+             warm_starts=np.array(list("abcde")))  # fmt: skip
     assert ip.rows_available(path, True) == left
 
 
 def test_a_bytes_path_is_read(tmp_path):
     """np.load takes a bytes path, so the check does too (code review round 12)."""
     path = tmp_path / "p.npz"
-    np.savez(path, normalized=np.zeros((5, 2)), warm_starts=np.array(["a"]))
+    np.savez(path, normalized=np.zeros((5, 2)), lower=np.zeros(2), upper=np.ones(2),
+             warm_starts=np.array(["a"]))  # fmt: skip
     assert ip.rows_available(os.fsencode(path)) == 5
 
 

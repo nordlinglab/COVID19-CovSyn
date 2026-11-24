@@ -164,6 +164,31 @@ def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, written
     assert len(ip.load(path, 3, space.lower, space.upper)) == 3
 
 
+def _arrays(path, **changed):
+    """A population of 3 rows and 2 parameters, with these arrays changed."""
+    arrays = {"normalized": np.zeros((3, 2)), "lower": np.zeros(2), "upper": np.ones(2),
+              "sha256": np.array("x"), "warm_starts": np.array(["a"]), **changed}
+    np.savez(path, **arrays)
+
+
+@pytest.mark.parametrize("changed", [
+    {"normalized": np.array([["a", "b"]])},  # rows not numbers
+    {"lower": np.array(["a", "b"])},  # bounds not numbers
+    {"normalized": np.zeros((0, 2))},  # no rows
+    {"normalized": np.zeros((3, 0))},  # no parameters
+])  # fmt: skip
+def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, changed):
+    """Refused as damaged and resumable once restored, not a traceback or a run size (round 15)."""
+    path = tmp_path / "initial_population_v1.npz"
+    _arrays(path, **changed)
+    with pytest.raises(ip.PopulationUnreadable):
+        ip.rows_available(path)
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 1, space.lower, space.upper)
+    assert "cannot be read" in stopped.value.code
+    assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
+
+
 def test_a_missing_population_is_to_be_made_with_a_command_that_can_be_pasted(tmp_path, space):
     """The version and the directory filled in and quoted (code review round 15)."""
     import shlex
