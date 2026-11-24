@@ -7,11 +7,10 @@ Pilot 2 as planned (n in {24, 48, 96} x alpha_0 in {0.05, 0.2} on streams 1 and 
 agreement rule compared nothing. Its best setting lay at the corner of the grid (smallest n,
 largest alpha_0), and two streams could not measure how much runs differ. User decision
 2026-11-24: rerun on n in {12, 24, 48} x alpha_0 in {0.2, 0.4}, four streams each, without the
-warm starts, and compare the settings by the spread between their runs: each run's
-representative is scored on the confirmation blocks; a setting's cost is the mean of its runs'
-means, its spread the SD between them; the lowest is chosen unless another lies within the SE
-of their difference, sqrt(sd_a^2/k + sd_b^2/k), in which case the steadier (smaller SD) of
-those within it is chosen.
+warm starts. Each run's representative is scored on the confirmation blocks; a setting's cost is
+the mean of its runs' means, and the lowest is chosen (user decision 2026-11-24, as the OpenAI
+agent advised: production uses one search, so the mean cost is what it targets; a rule that let
+the SD of four runs decide could swap a better setting out). The SD between runs is reported.
 """
 
 from __future__ import annotations
@@ -32,10 +31,10 @@ def test_the_plan_is_the_default_design():
     assert ps.settings() == ps.settings(ps.PLAN)
 
 
-def test_more_than_two_streams_use_the_spread_rule():
-    """Two streams can only agree or not; three or more give a spread between runs."""
-    assert RERUN.rule == "spread"
-    assert ps.Design((24,), (0.2,), (1, 2, 3), False).rule == "spread"
+def test_more_than_two_streams_use_the_mean_rule():
+    """Two streams can only agree or not; three or more are compared by their mean."""
+    assert RERUN.rule == "mean"
+    assert ps.Design((24,), (0.2,), (1, 2, 3), False).rule == "mean"
 
 
 @pytest.mark.parametrize("bad", [
@@ -114,16 +113,16 @@ def test_a_clearly_lowest_setting_is_chosen():
     choice = ps.choose(ps.compare_settings(rows, design), design)
     assert (choice["pop_size"], choice["alpha_0"]) == (12, 0.2)
     assert choice["g_plan"] == choice["generations"] == 832
-    assert choice["within_se"] == []
 
 
-def test_within_the_se_the_steadier_setting_is_chosen():
-    """10 with run SD 6 against 11 with SD 1: SE sqrt(36/4 + 1/4) = 3.04 > 1, so 11 wins."""
+def test_the_lowest_mean_wins_even_when_less_steady():
+    """10 with run SD 6 against 11 with SD 1: the mean decides; the SDs are only reported."""
     design = ps.Design((12, 24), (0.2,), (1, 2, 3, 4), True)
     rows = _rows({(12, 0.2): 10.0, (24, 0.2): 11.0}, {(12, 0.2): 6.0, (24, 0.2): 1.0})
-    choice = ps.choose(ps.compare_settings(rows, design), design)
-    assert (choice["pop_size"], choice["alpha_0"]) == (24, 0.2)
-    assert choice["within_se"] == [[12, 0.2]]
+    table = ps.compare_settings(rows, design)
+    choice = ps.choose(table, design)
+    assert (choice["pop_size"], choice["alpha_0"]) == (12, 0.2)
+    assert {line["pop_size"]: round(line["run_sd"]) for line in table} == {12: 6, 24: 1}
 
 
 def test_the_planned_design_keeps_its_agreement_rule():
@@ -153,7 +152,7 @@ def test_the_pilot_runs_the_design_s_settings_and_chooses_by_its_rule(tmp_path):
     assert {(c["--pop-size"], c["--stream"]) for c in optimiser.calls} == {
         (str(n), str(s)) for n in (12, 24) for s in (1, 2, 3)}
     assert summary["design"] == SMALL.record()
-    assert "within_se" in summary["chosen"]
+    assert summary["chosen"]["pop_size"] in (12, 24)
     with open(out / ps.SETTINGS_FILE, newline="") as f:
         assert "run_sd" in f.readline()
 
@@ -240,7 +239,7 @@ def test_alpha_0s_that_name_the_same_run_are_refused():
 
 
 @pytest.mark.parametrize("drop", ["stream", "block"])
-def test_the_spread_needs_every_run_on_every_confirmation_block(drop):
+def test_the_mean_rule_needs_every_run_on_every_confirmation_block(drop):
     """A missing stream or block is an error, not a NaN that min() may or may not pick."""
     design = ps.Design((12, 24), (0.2,), (1, 2, 3, 4), True)
     rows = _rows({(12, 0.2): 10.0, (24, 0.2): 20.0}, {(12, 0.2): 1.0, (24, 0.2): 1.0})
@@ -253,14 +252,14 @@ def test_the_spread_needs_every_run_on_every_confirmation_block(drop):
         ps.compare_settings(rows, design)
 
 
-def test_the_se_takes_each_setting_s_own_number_of_runs():
-    """sqrt(1/4 + 4/1) = 2.06 > 1.5: within, so the steadier one wins; k = 4 for both says not."""
+def test_equal_means_go_to_the_setting_listed_first():
+    """A tie goes to the smaller n, then the smaller alpha_0, the order the design lists."""
     design = ps.Design((12, 24), (0.2,), (1, 2, 3, 4), True)
     table = [{"pop_size": 12, "alpha_0": 0.2, "generations": 832, "mean_cost": 10.0,
               "run_sd": 1.0, "runs": 4},
-             {"pop_size": 24, "alpha_0": 0.2, "generations": 415, "mean_cost": 11.5,
-              "run_sd": 2.0, "runs": 1}]  # fmt: skip
-    assert ps.choose(table, design)["within_se"] == [[24, 0.2]]
+             {"pop_size": 24, "alpha_0": 0.2, "generations": 415, "mean_cost": 10.0,
+              "run_sd": 0.5, "runs": 4}]  # fmt: skip
+    assert ps.choose(table, design)["pop_size"] == 12
 
 
 def test_the_rows_left_come_from_the_population_file(monkeypatch):
@@ -302,7 +301,7 @@ def test_a_resume_with_a_refused_recorded_design_says_so(tmp_path, capsys):
 
     out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
     out.mkdir(parents=True)
-    record = ps.Design((8,), (0.2,), (1, 2, 3), True)._asdict() | {"rule": "spread"}
+    record = ps.Design((8,), (0.2,), (1, 2, 3), True)._asdict() | {"rule": "mean"}
     record = {k: list(v) if isinstance(v, tuple) else v for k, v in record.items()}
     (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300,
                                                               "design": record}}))

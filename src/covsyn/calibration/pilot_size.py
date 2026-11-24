@@ -19,8 +19,8 @@ agreeing chooses none, for the professor to decide.
 Rerun of 2026-11-24 (user decision): the planned pilot (9792f7f) returned run 19, a warm start
 of the initial population, from 11 of its 12 runs, so agreement compared nothing; its best
 setting lay at the grid's corner. A Design gives the grid, the streams and whether the runs
-leave the warm starts out; three or more streams compare the settings by the spread between
-their runs (choose). Without options the plan runs unchanged.
+leave the warm starts out; three or more streams compare the settings by the mean of their
+runs (choose), reporting the SD between them. Without options the plan runs unchanged.
 
 Usage (repository root, after uv sync and pilot 1):
     uv run covsyn-pilot-size --noise results/tables/<pilot-1 run-id> [--workers N]
@@ -93,7 +93,7 @@ class Design(NamedTuple):
     """The grid a pilot 2 runs, its streams, and whether its runs leave the warm starts out.
 
     The plan's design (PLAN) runs two streams and compares them with the agreement rule. A
-    design of three or more streams uses the spread rule instead (pilot 2 rerun, user decision
+    design of three or more streams uses the mean rule instead (pilot 2 rerun, user decision
     2026-11-24): the planned pilot's runs all returned run 19, a warm start, so agreement
     compared nothing, and two streams cannot measure how much runs differ.
     """
@@ -105,8 +105,8 @@ class Design(NamedTuple):
 
     @property
     def rule(self) -> str:
-        """'agreement' for two streams, 'spread' for more."""
-        return "agreement" if len(self.streams) == 2 else "spread"
+        """'agreement' for two streams, 'mean' for more."""
+        return "agreement" if len(self.streams) == 2 else "mean"
 
     def check(self) -> Design:
         """The design, if it can run.
@@ -213,13 +213,13 @@ def compare_settings(rows: Sequence[Mapping[str, Any]],
                      design: Design = PLAN) -> list[dict[str, Any]]:
     """Each setting's runs over the confirmation blocks, by the design's rule.
 
-    Agreement: the paired comparison of its two runs. Spread: the mean and SD of its runs'
-    mean costs.
+    Agreement: the paired comparison of its two runs. Mean: the mean and SD of its runs' mean
+    costs.
     """
     cost = {(int(r["pop_size"]), float(r["alpha_0"]), int(r["stream"]), int(r["block"])):
             float(r["cost"]) for r in rows}  # fmt: skip
-    if design.rule == "spread":
-        return _spread_table(cost, design)
+    if design.rule == "mean":
+        return _mean_table(cost, design)
     table = []
     for n in design.pop_sizes:
         for a in design.alpha_0s:
@@ -242,7 +242,7 @@ def compare_settings(rows: Sequence[Mapping[str, Any]],
 def _require_blocks(cost: Mapping[tuple, float], n: int, a: float, s: int) -> None:
     """Refuse a run without every confirmation block (code review rounds 4 and 5).
 
-    A missing block gave the spread rule a NaN mean and the agreement rule a KeyError, or a
+    A missing block gave the mean rule a NaN mean and the agreement rule a KeyError, or a
     silent gap when both streams lacked it.
     """
     blocks = {b for (n_, a_, s_, b) in cost if (n_, a_, s_) == (n, a, s)}
@@ -251,7 +251,7 @@ def _require_blocks(cost: Mapping[tuple, float], n: int, a: float, s: int) -> No
                          f"{len(CONFIRM_BLOCKS)} confirmation blocks")
 
 
-def _spread_table(cost: Mapping[tuple, float], design: Design) -> list[dict[str, Any]]:
+def _mean_table(cost: Mapping[tuple, float], design: Design) -> list[dict[str, Any]]:
     """Per setting: its runs' mean costs over the confirmation blocks, their mean and SD."""
     table = []
     for n in design.pop_sizes:
@@ -271,21 +271,13 @@ def _spread_table(cost: Mapping[tuple, float], design: Design) -> list[dict[str,
 def choose(table: Sequence[Mapping[str, Any]], design: Design = PLAN) -> dict[str, Any] | None:
     """The chosen setting, with its G as G_plan; None when none qualifies.
 
-    Agreement: the agreeing setting of lowest mean cost, none when none agree. Spread: the
-    lowest mean, unless other settings lie within the SE of their difference from it,
-    sqrt(sd_lowest^2 / k_lowest + sd_other^2 / k_other); then the one of smallest run SD
-    among it and them, ties to the lower mean. within_se lists the settings it was weighed
-    against.
+    Agreement: the agreeing setting of lowest mean cost, none when none agree. Mean: the setting
+    of lowest mean of its runs' means, a tie to the one listed first (user decision 2026-11-24,
+    as the OpenAI agent advised: production uses one search, so the mean cost is what it
+    targets; letting the SD of four runs decide could swap a better setting out).
     """
-    within: list[list] = []
-    if design.rule == "spread":
-        lowest = min(table, key=lambda line: line["mean_cost"])
-        near = [line for line in table if line is not lowest and line["mean_cost"] - lowest[
-            "mean_cost"] <= np.sqrt(lowest["run_sd"] ** 2 / lowest["runs"]
-                                    + line["run_sd"] ** 2 / line["runs"])]  # fmt: skip
-        best = min([lowest, *near], key=lambda line: (line["run_sd"], line["mean_cost"]))
-        within = [[line["pop_size"], line["alpha_0"]] for line in [lowest, *near]
-                  if line is not best]  # fmt: skip
+    if design.rule == "mean":
+        best = min(table, key=lambda line: line["mean_cost"])  # min keeps the first of ties
     else:
         agreeing = [line for line in table if line["agree"]]
         if not agreeing:
@@ -295,8 +287,6 @@ def choose(table: Sequence[Mapping[str, Any]], design: Design = PLAN) -> dict[st
               "generations": best["generations"], "g_plan": best["generations"],
               "alpha_end": step_schedule.DEFAULT_ALPHA_END,  # the pilot mode's
               "mean_cost": best["mean_cost"]}  # fmt: skip
-    if design.rule == "spread":
-        choice["within_se"] = within
     return choice
 
 
@@ -455,7 +445,7 @@ def main(argv: list[str] | None = None) -> Path:
                         help=f"alpha_0 values, comma-separated (default {_listed(ALPHA_0S)})")
     parser.add_argument("--streams", type=_whole_numbers, default=None,
                         help=f"optimisation streams per setting, comma-separated (default "
-                             f"{_listed(STREAMS)}); three or more compare by the spread rule")
+                             f"{_listed(STREAMS)}); three or more compare by their mean")
     parser.add_argument("--without-warm-starts", action="store_true",
                         help="start every run without the warm starts (earlier runs' vectors)")
     hardware.add_workers_argument(parser)
