@@ -13,6 +13,7 @@ rows, and a run whose bounds or dimension differ from those stored is refused, n
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -189,16 +190,23 @@ def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, chang
     assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
 
 
-def test_a_missing_population_is_to_be_made_with_a_command_that_can_be_pasted(tmp_path, space):
-    """The version and the directory filled in and quoted (code review round 15)."""
-    import shlex
+def test_a_missing_population_is_restored_first_or_made_by_a_command_that_works(tmp_path,
+                                                                               space):
+    """Restored, as a remade file may differ; else made by a command that can be pasted.
 
+    Code review rounds 15 and 16: the command is run as printed, and the file then loads.
+    """
     directory = tmp_path / "with space"
     directory.mkdir()
+    path = directory / "initial_population_v1.npz"
     with pytest.raises(SystemExit) as stopped:
-        ip.load(directory / "initial_population_v1.npz", 3, space.lower, space.upper)
-    assert (f"covsyn-initial-population --version {ip.CURRENT_VERSION} --out-dir "
-            f"{shlex.quote(str(directory))}") in stopped.value.code
+        ip.load(path, 3, space.lower, space.upper)
+    message = stopped.value.code
+    assert f"git checkout -- {shlex.quote(str(path))}" in message
+    assert message.index("git checkout") < message.index("covsyn-initial-population")
+    command = shlex.split(message[message.index("covsyn-initial-population"):].rstrip(")"))
+    ip.main(command[1:])
+    assert len(ip.load(path, 3, space.lower, space.upper)) == 3
 
 
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")

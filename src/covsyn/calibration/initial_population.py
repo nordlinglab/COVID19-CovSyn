@@ -237,17 +237,21 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
 
 
 def remedy(cause: BaseException | None, path: Path) -> str:
-    """What to do about a population file that could not be read, by why (rounds 11, 15).
+    """What to do about a population file that could not be read, by why (rounds 11, 15, 16).
 
-    Remade only when missing, as the command refuses a file that exists (round 10); the
-    directory is quoted, so the command can be pasted.
+    A missing file is restored first, as a remade one may differ (the warm starts must be on
+    disk, and the Latin hypercube follows scipy's version); the command that makes it is for
+    a version never committed, and refuses a file that exists (round 10). Paths are quoted,
+    so the commands can be pasted.
     """
+    restore = f"git checkout -- {shlex.quote(str(path))}"
     if isinstance(cause, FileNotFoundError):
-        return (f"make it with covsyn-initial-population --version "
-                f"{CURRENT_VERSION} --out-dir {shlex.quote(str(path.parent))}")
+        return (f"restore it with {restore}, or, for a version never committed, make it with "
+                f"covsyn-initial-population --version {CURRENT_VERSION} --out-dir "
+                f"{shlex.quote(str(path.parent))}")
     if isinstance(cause, PermissionError):
         return "give this user permission to read it"
-    return "restore the committed file from version control"
+    return f"restore the committed file with {restore}"
 
 
 def describe(path: Path) -> dict:
