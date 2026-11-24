@@ -127,16 +127,16 @@ def test_a_run_takes_the_first_n_rows(written, space):
 
 
 @pytest.mark.parametrize("n", [0, 257])
-def test_more_fireflies_than_rows_or_none_are_refused(written, space, n, capsys):
+def test_more_fireflies_than_rows_or_none_are_refused(written, space, n):
     """A population cannot start more fireflies than it holds, nor none.
 
-    The n is the run's setting, which a resume keeps, so the refusal is not resumable
-    (runs.NOT_RESUMABLE, decision of 2026-11-24): the pipeline then suggests no resume.
+    As its own exception, which the optimiser turns into runs.NOT_RESUMABLE (decision of
+    2026-11-24); another caller, pilot 1 say, exits 1 with the message (code review round 12).
     """
-    with pytest.raises(SystemExit) as stopped:
+    with pytest.raises(ip.RunSizeOutOfRange, match=f"a run of {n} cannot start") as stopped:
         ip.load(written, n, space.lower, space.upper)
-    assert stopped.value.code == runs.NOT_RESUMABLE
-    assert f"a run of {n} cannot start" in capsys.readouterr().err
+    # A message for code: Python prints it and exits 1.
+    assert isinstance(stopped.value, SystemExit) and isinstance(stopped.value.code, str)
 
 
 def test_a_missing_population_stays_resumable(tmp_path, space):

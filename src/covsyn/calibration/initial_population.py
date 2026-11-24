@@ -111,6 +111,15 @@ def write(path: Path, normalized: np.ndarray, space: ParameterSpace,
     temporary.replace(path)
 
 
+class RunSizeOutOfRange(SystemExit):
+    """The run's n is below 1 or beyond the rows the population holds.
+
+    A SystemExit with its message, as load()'s other refusals; its own class so the optimiser
+    can tell it apart: the n is the run's setting, which a resume keeps, so it exits with
+    runs.NOT_RESUMABLE (decision of 2026-11-24, code review round 12).
+    """
+
+
 def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
          without_warm_starts: bool = False) -> np.ndarray:
     """The first ``n`` rows of the population at ``path``, for a run with these bounds.
@@ -120,10 +129,9 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
     Latin hypercube (pilot 2 rerun, user decision 2026-11-24).
 
     Raises:
+        RunSizeOutOfRange: n is not 1 to the rows available.
         SystemExit: The file is missing or its rows do not match its SHA-256, or the
-            dimension or the bounds differ from those it was made with; with code
-            runs.NOT_RESUMABLE, after the reason on stderr, when n is not 1 to the rows
-            available.
+            dimension or the bounds differ from those it was made with.
     """
     path = Path(path)
     if not path.is_file():
@@ -140,14 +148,9 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
     if without_warm_starts:
         normalized = np.vstack([normalized[:1], normalized[1 + warm_starts:]])
     if not 1 <= n <= len(normalized):
-        from covsyn.runtime import runs
-
         without = " without the warm starts" if without_warm_starts else ""
-        print(f"{path} holds {len(normalized)} fireflies{without}; a run of {n} cannot start",
-              file=sys.stderr)
-        # The n is the run's setting, which a resume keeps: retrying cannot help, so the
-        # pipeline suggests no resume (decision of 2026-11-24).
-        raise SystemExit(runs.NOT_RESUMABLE)
+        raise RunSizeOutOfRange(f"{path} holds {len(normalized)} fireflies{without}; a run "
+                                f"of {n} cannot start")
     if len(lower) != normalized.shape[1]:
         raise SystemExit(f"{path} was made for dimension {normalized.shape[1]}, not {len(lower)}; "
                          f"make a new version")  # fmt: skip
