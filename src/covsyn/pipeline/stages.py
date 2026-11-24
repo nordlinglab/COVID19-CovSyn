@@ -102,14 +102,15 @@ class Context:
             return self.layout.run / "revalidation"
         return self.layout.run
 
-    def must(self, args: list, what: str, resuming: bool = False, **options) -> None:
+    def must(self, args: list, what: str, optimiser: bool = False, **options) -> None:
         """Run a step the chain stopped on.
 
-        ``resuming``: the optimiser continuing a run, whose status runs.NOT_RESUMABLE means
-        retrying cannot help; from any other step, that status is an ordinary failure.
+        ``optimiser``: the step is the optimiser, starting or continuing a run, whose status
+        runs.NOT_RESUMABLE means retrying cannot help, as a resume keeps the settings it
+        refused (2026-11-24); from any other step, that status is an ordinary failure.
         """
         status = self.step(args, **options)
-        if resuming and status == runs.NOT_RESUMABLE:
+        if optimiser and status == runs.NOT_RESUMABLE:
             log = options.get("output")
             raise StageFailed(
                 f"{what} failed: the run cannot be resumed (see {log})", resumable=False
@@ -133,7 +134,7 @@ def optimise(ctx: Context, resume: bool) -> None:
             raise StageFailed(problem, resumable=False)
         args = ["-m", "covsyn.calibration.firefly_optimizer", "--resume", run]
         # It runs only the generations left, so its memory is not the whole stage's.
-        ctx.must(args, "the optimiser", resuming=True, partial=True, output=log, append=True)
+        ctx.must(args, "the optimiser", optimiser=True, partial=True, output=log, append=True)
         return
     if resume:
         # Killed before its first checkpoint (while scoring the initial population): nothing
@@ -158,7 +159,7 @@ def optimise(ctx: Context, resume: bool) -> None:
                         ("--pilot", ctx.config.pilot)):
         if value is not None:
             args += [flag, str(value)]
-    ctx.must(args, "the optimiser", output=log)
+    ctx.must(args, "the optimiser", optimiser=True, output=log)
 
 
 def has_checkpoint(run: Path) -> bool:

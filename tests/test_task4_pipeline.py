@@ -838,8 +838,24 @@ def test_a_directory_without_a_pipeline_run_is_reported(tmp_path, monkeypatch, c
     assert "holds no pipeline run" in capsys.readouterr().err
 
 
+def test_a_starting_optimiser_that_refuses_its_settings_gets_no_resume_hint(tmp_path, config,
+                                                                            capsys):
+    """Status 3 from a new run's optimiser too: a resume keeps the settings it refused."""
+
+    class Refuses(Recorder):
+        def __call__(self, args, output, append, env):
+            super().__call__(args, output, append, env)
+            return pr.runs.NOT_RESUMABLE
+
+    capsys.readouterr()
+    status, run_dir = run_pipeline(tmp_path, config, Refuses())
+    out = capsys.readouterr().out
+    assert status == 1 and "cannot be resumed" in out and "Resume with" not in out
+    assert str(run_dir / "optimiser.log") in out  # where the reason is
+
+
 def test_status_3_from_another_step_is_an_ordinary_failure(tmp_path, config, capsys):
-    """Only the resuming optimiser's status 3 means 'cannot be resumed'."""
+    """Only the optimiser's status 3 means 'cannot be resumed'."""
 
     class Three(Recorder):
         def __call__(self, args, output, append, env):
