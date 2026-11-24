@@ -41,6 +41,7 @@ import json
 import re
 import shlex
 import sys
+import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -137,10 +138,15 @@ class Design(NamedTuple):
         # What the optimiser refuses, refused here, before the pilot records the design and
         # its runs fail hours in (code review round 4): n beyond the rows the population has
         # without the warm starts, G beyond a stream's blocks, steps that would grow.
-        rows = initial_population.rows_available(  # the file's count, as load() takes it;
-            initial_population.population_path(  # the repository's, from any directory
-                initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable"),
-            self.without_warm_starts)
+        path = initial_population.population_path(  # the repository's, from any directory
+            initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable")
+        try:  # the file's count, as load() takes it
+            rows = initial_population.rows_available(path, self.without_warm_starts)
+        except (OSError, EOFError, KeyError, ValueError, TypeError, RuntimeError,
+                zipfile.BadZipFile) as error:  # worded, not a traceback (code review round 9)
+            raise ValueError(f"the initial population {path} cannot be read ({error}); make it "
+                             f"with covsyn-initial-population --version "
+                             f"{initial_population.CURRENT_VERSION}") from error
         # Worded in this command's options, naming the n at fault (code review round 5).
         without = " without the warm starts" if self.without_warm_starts else ""
         for n in self.pop_sizes:

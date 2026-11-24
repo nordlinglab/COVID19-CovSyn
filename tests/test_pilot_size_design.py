@@ -322,3 +322,13 @@ def test_a_design_is_checked_from_any_directory(monkeypatch, tmp_path):
     """The population file is the repository's, wherever the command is started."""
     monkeypatch.chdir(tmp_path)
     assert RERUN.check() == RERUN
+
+
+def test_an_unreadable_population_file_is_named(monkeypatch, tmp_path):
+    """A missing file is refused as a design error naming the file and how to make it."""
+    from covsyn.calibration import initial_population as ip
+
+    missing = tmp_path / "initial_population_v1.npz"
+    monkeypatch.setattr(ip, "population_path", lambda version, directory=None: missing)
+    with pytest.raises(ValueError, match="covsyn-initial-population"):
+        RERUN.check()
