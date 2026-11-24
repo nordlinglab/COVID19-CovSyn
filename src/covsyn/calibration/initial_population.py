@@ -186,9 +186,11 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 # What reading and decoding an .npz can raise: OSError (missing, unreadable), EOFError
 # (empty), ValueError (not an .npz, pickled data), KeyError (an array missing), BadZipFile
 # (truncated), zlib.error (a corrupt stream), NotImplementedError (an unknown compression),
-# RuntimeError (zipfile's other refusals).
+# RuntimeError (zipfile's other refusals), MemoryError and OverflowError (a header claiming
+# a shape too large to allocate or index, code review round 18). The file is 256 rows, so a
+# MemoryError while reading it is taken for a damaged header, not a machine out of memory.
 READ_ERRORS = (OSError, EOFError, ValueError, KeyError, zipfile.BadZipFile, zlib.error,
-               NotImplementedError, RuntimeError)
+               NotImplementedError, RuntimeError, MemoryError, OverflowError)
 
 
 class PopulationUnreadable(ValueError):

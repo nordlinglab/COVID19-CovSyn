@@ -65,6 +65,25 @@ def _no_rows(path):
     return path
 
 
+def _a_forged_header(path):
+    """normalized.npy claims 10**11 rows and holds 48 bytes (code review round 18)."""
+    import io
+    import zipfile
+
+    member = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        member, {"descr": "<f8", "fortran_order": False, "shape": (10**11, 2)})
+    member.write(b"\0" * 48)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("normalized.npy", member.getvalue())
+        for name, array in (("lower", np.zeros(2)), ("upper", np.ones(2)),
+                            ("warm_starts", np.array(["a"]))):  # fmt: skip
+            stored = io.BytesIO()
+            np.save(stored, array)
+            archive.writestr(f"{name}.npy", stored.getvalue())
+    return path
+
+
 # state, the advice it gets, whether putting the file right at the path fixes it
 REFUSED = [
     (_missing, "last commit", True),
@@ -72,6 +91,7 @@ REFUSED = [
     (_a_file_for_a_directory, "should be a directory is not one", False),
     (_empty, "last commit", True),
     (_no_rows, "last commit", True),
+    (_a_forged_header, "last commit", True),
 ]
 
 
