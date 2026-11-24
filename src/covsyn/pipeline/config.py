@@ -179,11 +179,30 @@ def _check_production(values: dict[str, Any], source: str) -> None:
         if missing:
             raise ValueError(f"{source}: [optimise] mode \"production\" needs "
                              f"{', '.join(missing)}, pilot 2's choice")
+        _check_production_rows(values["pop_size"], source)
         return
     given = [key for key in ("pop_size", "simulations", "pilot") if values.get(key) is not None]
     if given:
         raise ValueError(f"{source}: [optimise] {', '.join(given)} is for mode \"production\" "
                          f"only; mode {mode!r} fixes it")
+
+
+def _check_production_rows(pop_size: int, source: str) -> None:
+    """Refuse an n beyond the rows production has without the warm starts (2026-11-24).
+
+    Read from the population file, as the optimiser counts them; a file that cannot be read
+    leaves the refusal to the optimiser, which loads it before claiming its run directory.
+    """
+    from covsyn.calibration import initial_population
+
+    try:
+        rows = initial_population.rows_available(
+            initial_population.population_path(initial_population.CURRENT_VERSION), True)
+    except (OSError, KeyError, ValueError):
+        return
+    if pop_size > rows:
+        raise ValueError(f"{source}: [optimise] pop_size is {pop_size}, but production starts "
+                         f"without the warm starts, which leaves {rows} fireflies")
 
 
 def _check_schedule(values: dict[str, Any], source: str) -> None:

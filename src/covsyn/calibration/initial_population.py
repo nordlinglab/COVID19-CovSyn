@@ -17,11 +17,12 @@ import argparse
 import hashlib
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.stats import qmc
 
-from covsyn.calibration import parameter_space
+if TYPE_CHECKING:
+    from covsyn.calibration.parameter_space import ParameterSpace
 
 N_MAX = 256
 # The rework plan's date; any fixed value would do, but it must never change for a version.
@@ -32,6 +33,17 @@ WARM_STARTS = ("results/models/phaseD_run10/firefly_best.txt",
                "results/models/phaseD_run19/firefly_best.txt")  # fmt: skip
 VARIABLE = Path("./variable")
 CURRENT_VERSION = 1  # the population every run starts from
+
+
+def _parameter_space():
+    """The parameter space module, imported when a population is built or clipped.
+
+    It loads the model and with it scipy, which the pipeline's configuration check, reading
+    this module for the rows a run may take, does without.
+    """
+    from covsyn.calibration import parameter_space
+
+    return parameter_space
 
 
 def population_path(version: int, directory: Path = VARIABLE) -> Path:
@@ -54,7 +66,7 @@ def normalise(vector: np.ndarray, lower: np.ndarray, upper: np.ndarray, label: s
     """
     span = np.where(upper > lower, upper - lower, 1.0)
     return np.clip(
-        (parameter_space.clip_warm_start(vector, lower, upper, label) - lower) / span, 0, 1
+        (_parameter_space().clip_warm_start(vector, lower, upper, label) - lower) / span, 0, 1
     )
 
 
@@ -64,16 +76,19 @@ def best_of(path: Path) -> np.ndarray:
     return rows[int(np.argmin(rows[:, -1])), 1:-1].copy()
 
 
-def build(space: parameter_space.ParameterSpace, root: Path = Path(".")) -> np.ndarray:
+def build(space: ParameterSpace, root: Path = Path(".")) -> np.ndarray:
     """The N_MAX rows of a population, from the bounds, the literature vector and WARM_STARTS.
 
     Raises:
         SystemExit: A warm start does not have the bounds' dimension once padded (B54).
     """
+    # Imported here: the pipeline's configuration check reads this module and loads no scipy.
+    from scipy.stats import qmc
+
     lower, upper = space.lower, space.upper
     rows = [normalise(space.literature, lower, upper, "literature vector")]
     for source in WARM_STARTS:
-        vector = parameter_space.pad_pre_b54_vector(best_of(root / source), space.literature)
+        vector = _parameter_space().pad_pre_b54_vector(best_of(root / source), space.literature)
         if vector.shape != lower.shape:
             raise SystemExit(f"warm start {source}: {vector.size} parameters, "
                              f"expected {lower.size}")  # fmt: skip
@@ -82,7 +97,7 @@ def build(space: parameter_space.ParameterSpace, root: Path = Path(".")) -> np.n
     return np.vstack([np.array(rows), hypercube])
 
 
-def write(path: Path, normalized: np.ndarray, space: parameter_space.ParameterSpace,
+def write(path: Path, normalized: np.ndarray, space: ParameterSpace,
           version: int, command: str) -> None:  # fmt: skip
     """Write the population and what it was made from, under a temporary name first."""
     temporary = path.with_name(path.stem + ".tmp.npz")
@@ -160,7 +175,7 @@ def main(argv: list[str] | None = None) -> Path:
     path = population_path(args.version, args.out_dir)
     if path.exists():
         raise SystemExit(f"{path} exists; a new population is a new version")
-    space = parameter_space.load()
+    space = _parameter_space().load()
     command = " ".join(["covsyn-initial-population", *argv])
     args.out_dir.mkdir(parents=True, exist_ok=True)
     write(path, build(space), space, args.version, command)

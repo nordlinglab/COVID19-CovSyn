@@ -159,3 +159,27 @@ def test_a_production_run_begun_without_them_resumes(monkeypatch, tmp_path):
     run = _production_run(tmp_path, {"version": 1, "sha256": "x", "without_warm_starts": True})
     seen = _resume(monkeypatch, run)
     assert seen["engine"].pop_size == 4
+
+
+@pytest.mark.parametrize(("n", "ok"), [(254, True), (255, False), (256, False)])
+def test_the_pipeline_refuses_a_production_larger_than_the_rows_left(n, ok):
+    """Without the two warm starts 254 rows are left; more is refused when the file is read."""
+    from covsyn.pipeline import config as pc
+    from tests.test_task9_production_pipeline import PRODUCTION
+
+    text = PRODUCTION.replace("pop_size = 48", f"pop_size = {n}")
+    if ok:
+        assert pc.parse(text, "t").pop_size == n
+    else:
+        with pytest.raises(ValueError, match="warm starts"):
+            pc.parse(text, "t")
+
+
+def test_the_population_module_loads_no_scipy():
+    """The pipeline's configuration check reads it; only building a population needs scipy."""
+    import subprocess
+
+    code = ("import sys; import covsyn.calibration.initial_population; "
+            "print('scipy' in sys.modules)")  # fmt: skip
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"
