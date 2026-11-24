@@ -194,10 +194,11 @@ def _check_production_rows(pop_size: int, source: str) -> None:
     leaves the refusal to the optimiser, which loads it before claiming its run directory.
     """
     from covsyn.calibration import initial_population
+    from covsyn.runtime import runs
 
-    try:
-        rows = initial_population.rows_available(
-            initial_population.population_path(initial_population.CURRENT_VERSION), True)
+    try:  # the repository's file, wherever the pipeline is started (code review round 7)
+        rows = initial_population.rows_available(initial_population.population_path(
+            initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable"), True)
     except (OSError, KeyError, ValueError):
         return
     if pop_size > rows:

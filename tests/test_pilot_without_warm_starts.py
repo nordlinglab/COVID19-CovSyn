@@ -183,3 +183,13 @@ def test_the_population_module_loads_no_scipy():
             "print('scipy' in sys.modules)")  # fmt: skip
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+def test_the_pipeline_checks_the_rows_from_any_directory(monkeypatch, tmp_path):
+    """The population file is the repository's, wherever the pipeline is started."""
+    from covsyn.pipeline import config as pc
+    from tests.test_task9_production_pipeline import PRODUCTION
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="warm starts"):
+        pc.parse(PRODUCTION.replace("pop_size = 48", "pop_size = 255"), "t")
