@@ -136,7 +136,8 @@ It chooses the setting with the lowest mean cost whose two runs agree, the mean 
 with three or more streams it chooses the setting with the lowest mean of its runs' confirmation means and reports the SD between the runs.
 The production run, `--mode production` or `mode = "production"` in `[optimise]`, takes pilot 2's n (`pop_size`), S (`simulations`), α_0, α_end, G_plan and run id (`pilot`), all required.
 It starts from the initial population without the warm starts, the fitted vectors of earlier runs, so its result is the calibration's own, and records this in its `config.json`;
-`pop_size` is therefore at most the rows left, and a production run begun with the warm starts is not resumed.
+`pop_size` is therefore at most the rows left, 254 in version 1: the optimiser refuses a larger one before any simulation, and the pipeline then suggests no resume;
+a production run begun with the warm starts is not resumed.
 It scores each new elite vector on blocks 0 to 4 of monitoring stream 100, and stops when the best monitored vector has improved by no more than one paired standard error over 5 generations, or at G_max = 1,000 generations;
 the reason goes into `run.log`, and the monitoring's cost into `monitoring.json` beside `progress.csv`.
 Its revalidation re-scores the archive's 10 best distinct vectors, by ascending mean, at its S on 30 blocks of its validation stream (Task 10), and refuses another number of blocks.

@@ -179,34 +179,13 @@ def _check_production(values: dict[str, Any], source: str) -> None:
         if missing:
             raise ValueError(f"{source}: [optimise] mode \"production\" needs "
                              f"{', '.join(missing)}, pilot 2's choice")
-        _check_production_rows(values["pop_size"], source)
+        # pop_size beyond the population's rows is the optimiser's to refuse: it is the first
+        # stage, and refuses before any simulation (decision of 2026-11-24).
         return
     given = [key for key in ("pop_size", "simulations", "pilot") if values.get(key) is not None]
     if given:
         raise ValueError(f"{source}: [optimise] {', '.join(given)} is for mode \"production\" "
                          f"only; mode {mode!r} fixes it")
-
-
-def _check_production_rows(pop_size: int, source: str) -> None:
-    """Refuse an n beyond the rows production has without the warm starts (2026-11-24).
-
-    Read from the population file, as the optimiser counts them, without checking its SHA-256;
-    a file that cannot be read, or whose digest no longer matches, is refused by the optimiser,
-    which loads it before claiming its run directory.
-    """
-    from covsyn.calibration import initial_population
-    from covsyn.runtime import runs
-
-    try:  # the repository's file, wherever the pipeline is started (code review round 7)
-        rows = initial_population.rows_available(initial_population.population_path(
-            initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable"), True)
-    # An unreadable file is the optimiser's to refuse (code review rounds 7 to 10); anything
-    # else, a programming error, raises.
-    except initial_population.PopulationUnreadable:
-        return
-    if pop_size > rows:
-        raise ValueError(f"{source}: [optimise] pop_size is {pop_size}, but production starts "
-                         f"without the warm starts, which leaves {rows} fireflies")
 
 
 def _check_schedule(values: dict[str, Any], source: str) -> None:

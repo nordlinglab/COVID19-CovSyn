@@ -162,38 +162,14 @@ def test_a_production_run_begun_without_them_resumes(monkeypatch, tmp_path):
     assert seen["engine"].pop_size == 4
 
 
-@pytest.mark.parametrize(("n", "ok"), [(254, True), (255, False), (256, False)])
-def test_the_pipeline_refuses_a_production_larger_than_the_rows_left(n, ok):
-    """Without the two warm starts 254 rows are left; more is refused when the file is read."""
-    from covsyn.pipeline import config as pc
-    from tests.test_task9_production_pipeline import PRODUCTION
-
-    text = PRODUCTION.replace("pop_size = 48", f"pop_size = {n}")
-    if ok:
-        assert pc.parse(text, "t").pop_size == n
-    else:
-        with pytest.raises(ValueError, match="warm starts"):
-            pc.parse(text, "t")
-
-
 def test_the_population_module_loads_no_scipy():
-    """The pipeline's configuration check reads it; only building a population needs scipy."""
+    """The pilot's design check reads it; only building a population needs scipy."""
     import subprocess
 
     code = ("import sys; import covsyn.calibration.initial_population; "
             "print('scipy' in sys.modules)")  # fmt: skip
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
-
-
-def test_the_pipeline_checks_the_rows_from_any_directory(monkeypatch, tmp_path):
-    """The population file is the repository's, wherever the pipeline is started."""
-    from covsyn.pipeline import config as pc
-    from tests.test_task9_production_pipeline import PRODUCTION
-
-    monkeypatch.chdir(tmp_path)
-    with pytest.raises(ValueError, match="warm starts"):
-        pc.parse(PRODUCTION.replace("pop_size = 48", "pop_size = 255"), "t")
 
 
 def _zero_d(path):
@@ -212,37 +188,6 @@ def _unknown_compression(path):
         offset = 8 if header == b"PK\x03\x04" else 10
         raw[at + offset:at + offset + 2] = (99).to_bytes(2, "little")
     return bytes(raw)
-
-
-@pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated", _zero_d, _unknown_compression])
-def test_a_damaged_population_file_leaves_the_refusal_to_the_optimiser(
-    monkeypatch, tmp_path, content
-):
-    """An empty or truncated file does not crash reading the configuration.
-
-    n = 255 would be refused by a readable file, so its acceptance shows the damaged file was
-    read and left to the optimiser (code review round 8).
-    """
-    from covsyn.pipeline import config as pc
-    from tests.test_task9_production_pipeline import PRODUCTION
-
-    broken = tmp_path / "initial_population_v1.npz"
-    broken.write_bytes(content if isinstance(content, bytes) else content(broken))
-    read = []
-    monkeypatch.setattr(ip, "population_path",
-                        lambda version, directory=None: read.append(version) or broken)
-    assert pc.parse(PRODUCTION.replace("pop_size = 48", "pop_size = 255"), "t").pop_size == 255
-    assert read
-
-
-def test_a_programming_error_in_the_row_check_is_not_hidden(monkeypatch):
-    """Only an unreadable file is left to the optimiser; a missing function still raises."""
-    from covsyn.pipeline import config as pc
-    from tests.test_task9_production_pipeline import PRODUCTION
-
-    monkeypatch.delattr(ip, "rows_available")
-    with pytest.raises(AttributeError):
-        pc.parse(PRODUCTION, "t")
 
 
 def _corrupt_deflate(path):
