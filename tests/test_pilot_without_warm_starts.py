@@ -242,3 +242,34 @@ def test_a_programming_error_in_the_row_check_is_not_hidden(monkeypatch):
     monkeypatch.delattr(ip, "rows_available")
     with pytest.raises(AttributeError):
         pc.parse(PRODUCTION, "t")
+
+
+def _corrupt_deflate(path):
+    np.savez_compressed(path, normalized=np.arange(4000.0).reshape(40, 100),
+                        warm_starts=np.array(["a"]))  # fmt: skip
+    raw = bytearray(path.read_bytes())
+    for i in range(200, 240):
+        raw[i] ^= 0xFF
+    return bytes(raw)
+
+
+@pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated", _zero_d, _unknown_compression,
+                                     _corrupt_deflate])  # fmt: skip
+def test_every_read_failure_is_one_exception(tmp_path, content):
+    """Any failure reading the file is PopulationUnreadable, which callers catch alone."""
+    path = tmp_path / "initial_population_v1.npz"
+    path.write_bytes(content if isinstance(content, bytes) else content(path))
+    with pytest.raises(ip.PopulationUnreadable):
+        ip.rows_available(path, True)
+
+
+def test_a_missing_file_is_unreadable_too(tmp_path):
+    """Missing is one of the ways a file cannot be read."""
+    with pytest.raises(ip.PopulationUnreadable):
+        ip.rows_available(tmp_path / "absent.npz")
+
+
+def test_a_wrong_call_is_not_taken_for_an_unreadable_file(tmp_path):
+    """A programming error at the call raises as itself (code review round 10)."""
+    with pytest.raises(TypeError):
+        ip.rows_available(tmp_path / "absent.npz", True, "extra")

@@ -149,11 +149,26 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
     return normalized[:n].copy()
 
 
+class PopulationUnreadable(ValueError):
+    """The population file is missing or cannot be read, whatever the reason."""
+
+
 def rows_available(path: Path, without_warm_starts: bool = False) -> int:
-    """How many fireflies a run can take from the population at ``path``, as load() counts."""
-    with np.load(path) as saved:
-        rows = len(saved["normalized"])
-        return rows - len(saved["warm_starts"]) if without_warm_starts else rows
+    """How many fireflies a run can take from the population at ``path``, as load() counts.
+
+    Raises:
+        PopulationUnreadable: Any failure reading the file -- missing, empty, truncated, a
+            corrupt or unknown compression, rows that are not an array -- so a caller catches
+            this alone and a programming error at the call still raises as itself (code
+            review rounds 7 to 10).
+    """
+    try:
+        with np.load(path) as saved:
+            rows = len(saved["normalized"])
+            return rows - len(saved["warm_starts"]) if without_warm_starts else rows
+    except Exception as error:  # only the file is read here
+        raise PopulationUnreadable(f"{path} cannot be read ({type(error).__name__}: "
+                                   f"{error})") from error
 
 
 def describe(path: Path) -> dict:
