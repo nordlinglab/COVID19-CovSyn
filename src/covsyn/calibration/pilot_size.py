@@ -16,8 +16,15 @@ block by block over the confirmation blocks, is at most SD(d) / sqrt(30); the ch
 the lowest mean of its two representatives' confirmation costs among those that agree, and none
 agreeing chooses none, for the professor to decide.
 
+Rerun of 2026-11-24 (user decision): the planned pilot (9792f7f) returned run 19, a warm start
+of the initial population, from 11 of its 12 runs, so agreement compared nothing; its best
+setting lay at the grid's corner. A Design gives the grid, the streams and whether the runs
+leave the warm starts out; three or more streams compare the settings by the spread between
+their runs (choose). Without options the plan runs unchanged.
+
 Usage (repository root, after uv sync and pilot 1):
     uv run covsyn-pilot-size --noise results/tables/<pilot-1 run-id> [--workers N]
+        [--pop-sizes 12,24,48 --alpha-0s 0.2,0.4 --streams 1,2,3,4 --without-warm-starts]
     uv run covsyn-pilot-size --resume results/tables/<run-id>
 
 Each run is an optimiser run in results/models/<run-id>_pilot-size-n<n>-a<alpha_0>-s<stream>;
@@ -75,6 +82,66 @@ def generations(pop_size: int) -> int:
     return (BUDGET - pop_size) // pop_size
 
 
+class Design(NamedTuple):
+    """The grid a pilot 2 runs, its streams, and whether its runs leave the warm starts out.
+
+    The plan's design (PLAN) runs two streams and compares them with the agreement rule. A
+    design of three or more streams uses the spread rule instead (pilot 2 rerun, user decision
+    2026-11-24): the planned pilot's runs all returned run 19, a warm start, so agreement
+    compared nothing, and two streams cannot measure how much runs differ.
+    """
+
+    pop_sizes: tuple[int, ...]
+    alpha_0s: tuple[float, ...]
+    streams: tuple[int, ...]
+    without_warm_starts: bool
+
+    @property
+    def rule(self) -> str:
+        """'agreement' for two streams, 'spread' for more."""
+        return "agreement" if len(self.streams) == 2 else "spread"
+
+    def check(self) -> Design:
+        """The design, if it can run.
+
+        Raises:
+            ValueError: An empty or repeated list, fewer than two streams, an n below 2, an
+                alpha_0 not positive, or a stream outside the optimisation streams.
+        """
+        for name, values in (("pop_sizes", self.pop_sizes), ("alpha_0s", self.alpha_0s),
+                             ("streams", self.streams)):  # fmt: skip
+            if not values or len(set(values)) != len(values):
+                raise ValueError(f"{name} must be distinct values, got {values!r}")
+        if len(self.streams) < 2:
+            raise ValueError("a setting needs at least two streams to compare its runs")
+        if min(self.pop_sizes) < 2:
+            raise ValueError(f"a population needs at least 2 fireflies, got {self.pop_sizes}")
+        if not all(np.isfinite(a) and a > 0 for a in self.alpha_0s):
+            raise ValueError(f"alpha_0 must be positive, got {self.alpha_0s}")
+        for stream in self.streams:
+            seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
+        return self
+
+    def record(self) -> dict[str, Any]:
+        """The design as config.json keeps it."""
+        return {"pop_sizes": list(self.pop_sizes), "alpha_0s": list(self.alpha_0s),
+                "streams": list(self.streams), "without_warm_starts": self.without_warm_starts,
+                "rule": self.rule}  # fmt: skip
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any] | None) -> Design:
+        """The design config.json records; PLAN for a pilot begun before designs existed."""
+        if record is None:
+            return PLAN
+        return cls(tuple(int(n) for n in record["pop_sizes"]),
+                   tuple(float(a) for a in record["alpha_0s"]),
+                   tuple(int(s) for s in record["streams"]),
+                   bool(record["without_warm_starts"])).check()  # fmt: skip
+
+
+PLAN = Design(POP_SIZES, ALPHA_0S, STREAMS, False)
+
+
 class Setting(NamedTuple):
     """One run of the pilot."""
 
@@ -88,9 +155,10 @@ class Setting(NamedTuple):
         return generations(self.pop_size)
 
 
-def settings() -> list[Setting]:
-    """The pilot's twelve runs, in the order they run."""
-    return [Setting(n, a, s) for n in POP_SIZES for a in ALPHA_0S for s in STREAMS]
+def settings(design: Design = PLAN) -> list[Setting]:
+    """The pilot's runs, in the order they run: each n, each alpha_0, each stream."""
+    return [Setting(n, a, s) for n in design.pop_sizes for a in design.alpha_0s
+            for s in design.streams]
 
 
 def run_name(prefix: str, setting: Setting) -> str:
@@ -99,24 +167,33 @@ def run_name(prefix: str, setting: Setting) -> str:
     return f"{prefix}_pilot-size-n{setting.pop_size}-a{alpha}-s{setting.stream}"
 
 
-def optimiser_args(setting: Setting, simulations: int, run_dir: Path) -> list[str]:
+def optimiser_args(setting: Setting, simulations: int, run_dir: Path,
+                   design: Design = PLAN) -> list[str]:
     """The optimiser's command for a fresh run; G_plan = G is the pilot mode's default."""
+    without = ["--without-warm-starts"] if design.without_warm_starts else []
     return ["-m", OPTIMISER, "--mode", "pilot", "--pop-size", str(setting.pop_size),
             "--generations", str(setting.generations), "--simulations", str(simulations),
             "--alpha-0", f"{setting.alpha_0:g}", "--stream", str(setting.stream),
-            "--run-dir", str(run_dir)]  # fmt: skip
+            "--run-dir", str(run_dir), *without]  # fmt: skip
 
 
-def compare_settings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Each setting's paired comparison of its two runs over the confirmation blocks."""
+def compare_settings(rows: Sequence[Mapping[str, Any]],
+                     design: Design = PLAN) -> list[dict[str, Any]]:
+    """Each setting's runs over the confirmation blocks, by the design's rule.
+
+    Agreement: the paired comparison of its two runs. Spread: the mean and SD of its runs'
+    mean costs.
+    """
     cost = {(int(r["pop_size"]), float(r["alpha_0"]), int(r["stream"]), int(r["block"])):
             float(r["cost"]) for r in rows}  # fmt: skip
+    if design.rule == "spread":
+        return _spread_table(cost, design)
     table = []
-    for n in POP_SIZES:
-        for a in ALPHA_0S:
+    for n in design.pop_sizes:
+        for a in design.alpha_0s:
             blocks = sorted({b for (n_, a_, _, b) in cost if (n_, a_) == (n, a)})
-            first = np.array([cost[(n, a, STREAMS[0], b)] for b in blocks])
-            second = np.array([cost[(n, a, STREAMS[1], b)] for b in blocks])
+            first = np.array([cost[(n, a, design.streams[0], b)] for b in blocks])
+            second = np.array([cost[(n, a, design.streams[1], b)] for b in blocks])
             d = first - second
             se = float(np.std(d, ddof=1) / np.sqrt(len(d)))
             table.append({"pop_size": n, "alpha_0": a, "generations": generations(n),
@@ -128,16 +205,51 @@ def compare_settings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return table
 
 
-def choose(table: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
-    """The agreeing setting of lowest mean cost, with its G as G_plan; None when none agree."""
-    agreeing = [line for line in table if line["agree"]]
-    if not agreeing:
-        return None
-    best = min(agreeing, key=lambda line: line["mean_cost"])
-    return {"pop_size": best["pop_size"], "alpha_0": best["alpha_0"],
-            "generations": best["generations"], "g_plan": best["generations"],
-            "alpha_end": step_schedule.DEFAULT_ALPHA_END,  # the pilot mode's
-            "mean_cost": best["mean_cost"]}  # fmt: skip
+def _spread_table(cost: Mapping[tuple, float], design: Design) -> list[dict[str, Any]]:
+    """Per setting: its runs' mean costs over the confirmation blocks, their mean and SD."""
+    table = []
+    for n in design.pop_sizes:
+        for a in design.alpha_0s:
+            means = [float(np.mean([c for (n_, a_, s_, _), c in cost.items()
+                                    if (n_, a_, s_) == (n, a, s)]))
+                     for s in design.streams]  # fmt: skip
+            table.append({"pop_size": n, "alpha_0": a, "generations": generations(n),
+                          **{f"cost_stream_{s}": m for s, m in zip(design.streams, means,
+                                                                   strict=True)},
+                          "mean_cost": float(np.mean(means)),
+                          "run_sd": float(np.std(means, ddof=1)), "runs": len(means)})
+    return table
+
+
+def choose(table: Sequence[Mapping[str, Any]], design: Design = PLAN) -> dict[str, Any] | None:
+    """The chosen setting, with its G as G_plan; None when none qualifies.
+
+    Agreement: the agreeing setting of lowest mean cost, none when none agree. Spread: the
+    lowest mean, unless other settings lie within the SE of their difference from it,
+    sqrt(sd_lowest^2 / k + sd_other^2 / k); then the one of smallest run SD among it and them,
+    ties to the lower mean. within_se lists the settings it was weighed against.
+    """
+    within: list[list] = []
+    if design.rule == "spread":
+        lowest = min(table, key=lambda line: line["mean_cost"])
+        near = [line for line in table if line is not lowest and line["mean_cost"] - lowest[
+            "mean_cost"] <= np.sqrt((lowest["run_sd"] ** 2 + line["run_sd"] ** 2)
+                                    / lowest["runs"])]  # fmt: skip
+        best = min([lowest, *near], key=lambda line: (line["run_sd"], line["mean_cost"]))
+        within = [[line["pop_size"], line["alpha_0"]] for line in [lowest, *near]
+                  if line is not best]  # fmt: skip
+    else:
+        agreeing = [line for line in table if line["agree"]]
+        if not agreeing:
+            return None
+        best = min(agreeing, key=lambda line: line["mean_cost"])
+    choice = {"pop_size": best["pop_size"], "alpha_0": best["alpha_0"],
+              "generations": best["generations"], "g_plan": best["generations"],
+              "alpha_end": step_schedule.DEFAULT_ALPHA_END,  # the pilot mode's
+              "mean_cost": best["mean_cost"]}  # fmt: skip
+    if design.rule == "spread":
+        choice["within_se"] = within
+    return choice
 
 
 def _evaluations(run_dir: Path) -> int | None:
@@ -156,7 +268,7 @@ def _evaluations(run_dir: Path) -> int | None:
 
 
 def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute,
-              workers: int | None) -> None:
+              workers: int | None, design: Design = PLAN) -> None:
     """Run each setting not yet finished: afresh, or from its checkpoint (as the pipeline).
 
     Each run takes workers through COVSYN_WORKERS, a resumed one included; None passes none.
@@ -164,7 +276,7 @@ def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute
     env = {} if workers is None else {hardware.ENV_VARIABLE: str(workers)}
     from covsyn.pipeline import stages
 
-    for setting in settings():
+    for setting in settings(design):
         run_dir = Path(models_root) / run_name(prefix, setting)
         if (run_dir / FINISHED).is_file():  # the optimiser's last file: the run finished
             continue
@@ -174,7 +286,7 @@ def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute
         else:
             if run_dir.exists():  # killed before its first checkpoint: its claim would refuse
                 stages.discard_optimiser_output(run_dir)
-            args = optimiser_args(setting, simulations, run_dir)
+            args = optimiser_args(setting, simulations, run_dir, design)
         run_dir.mkdir(parents=True, exist_ok=True)
         status = execute(args, run_dir / "optimiser.log", resume, env)
         if status != 0:
@@ -182,11 +294,11 @@ def _optimise(models_root: Path, prefix: str, simulations: int, execute: Execute
                                f"{run_dir / 'optimiser.log'}, then resume the pilot")
 
 
-def _screen_tasks(models_root: Path, prefix: str, simulations: int,
-                  done: set) -> tuple[list[dict[str, Any]], dict[str, np.ndarray]]:
+def _screen_tasks(models_root: Path, prefix: str, simulations: int, done: set,
+                  design: Design = PLAN) -> tuple[list[dict[str, Any]], dict[str, np.ndarray]]:
     """Each run's candidates on the screening blocks, those not yet scored."""
     candidates, todo = {}, []
-    for setting in settings():
+    for setting in settings(design):
         name = run_name(prefix, setting)
         candidates[name] = archive_candidates(Path(models_root) / name / "firefly_archive.txt",
                                              CANDIDATES)
@@ -211,7 +323,7 @@ def representatives(rows: Sequence[Mapping[str, Any]]) -> dict[str, int]:
 
 def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute: Execute,
         evaluate: block_scoring.Evaluate, make_pool: block_scoring.MakePool,
-        workers: int | None = None) -> dict[str, Any]:
+        workers: int | None = None, design: Design = PLAN) -> dict[str, Any]:
     """Run, screen and confirm whatever is not yet done, then write the summaries.
 
     workers: every optimiser run's workers, given it as COVSYN_WORKERS; main() passes the
@@ -219,12 +331,12 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
     None, as in a test, passes none.
     """
     out_dir = Path(out_dir)
-    _optimise(models_root, prefix, simulations, execute, workers)
+    _optimise(models_root, prefix, simulations, execute, workers, design)
 
     screen_path = out_dir / SCREEN_FILE
     screened = block_scoring.read_table(screen_path)  # warns if marked now
     done = {(r["run"], int(r["candidate"]), int(r["block"])) for r in screened.rows}
-    todo, candidates = _screen_tasks(models_root, prefix, simulations, done)
+    todo, candidates = _screen_tasks(models_root, prefix, simulations, done, design)
     block_scoring.score(screen_path, todo, SCREEN_COLUMNS,
                         lambda t: candidates[t["run"]][t["candidate"]], evaluate, make_pool,
                         exists=screened.exists)  # appended to as found, or created afresh
@@ -235,7 +347,7 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
     confirmations = block_scoring.read_table(confirm_path)  # warns if marked now
     confirmed = {(r["run"], int(r["block"])) for r in confirmations.rows}
     todo = []
-    for setting in settings():
+    for setting in settings(design):
         name = run_name(prefix, setting)
         for b in CONFIRM_BLOCKS:
             if (name, b) not in confirmed:
@@ -249,10 +361,10 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
                         exists=confirmations.exists)  # appended to as found, or created afresh
 
     table = compare_settings(block_scoring.read_table(
-        confirm_path, warn=not confirmations.marked, required=True).rows)  # fmt: skip
-    choice = choose(table)
+        confirm_path, warn=not confirmations.marked, required=True).rows, design)  # fmt: skip
+    choice = choose(table, design)
     runs_table = []
-    for setting in settings():
+    for setting in settings(design):
         name = run_name(prefix, setting)
         runs_table.append({"run": name, **setting._asdict(), "generations": setting.generations,
                            "evaluations": _evaluations(Path(models_root) / name),
@@ -264,7 +376,7 @@ def run(out_dir: Path, models_root: Path, prefix: str, simulations: int, execute
                "validation_stream": VALIDATION_STREAM,
                "screen_blocks": [SCREEN_BLOCKS.start, SCREEN_BLOCKS.stop - 1],
                "confirm_blocks": [CONFIRM_BLOCKS.start, CONFIRM_BLOCKS.stop - 1],
-               "candidates_per_run": CANDIDATES}  # fmt: skip
+               "candidates_per_run": CANDIDATES, "design": design.record()}  # fmt: skip
     (out_dir / CHOICE_FILE).write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     return summary
 
@@ -287,10 +399,32 @@ def main(argv: list[str] | None = None) -> Path:
                         help="continue the pilot in this results/tables/<run-id> directory")
     parser.add_argument("--results-root", type=Path, default=runs.RESULTS_ROOT,
                         help=argparse.SUPPRESS)  # tests
+    # The design (pilot 2 rerun, user decision 2026-11-24); a new pilot only, the plan's grid
+    # by default.
+    parser.add_argument("--pop-sizes", type=_whole_numbers, default=None,
+                        help=f"n values, comma-separated (default {_listed(POP_SIZES)})")
+    parser.add_argument("--alpha-0s", type=_positive_numbers, default=None,
+                        help=f"alpha_0 values, comma-separated (default {_listed(ALPHA_0S)})")
+    parser.add_argument("--streams", type=_whole_numbers, default=None,
+                        help=f"optimisation streams per setting, comma-separated (default "
+                             f"{_listed(STREAMS)}); three or more compare by the spread rule")
+    parser.add_argument("--without-warm-starts", action="store_true",
+                        help="start every run without the warm starts (earlier runs' vectors)")
     hardware.add_workers_argument(parser)
     args = parser.parse_args(argv)
     if (args.noise is None) == (args.resume is None):
         parser.error("give --noise for a new pilot or --resume for one begun")
+    given = [flag for flag, value in (("--pop-sizes", args.pop_sizes),
+                                      ("--alpha-0s", args.alpha_0s), ("--streams", args.streams),
+                                      ("--without-warm-starts", args.without_warm_starts or None))
+             if value is not None]  # fmt: skip
+    if args.resume is not None and given:
+        parser.error(f"a resume runs the pilot's own design; remove {', '.join(given)}")
+    try:
+        design = Design(args.pop_sizes or POP_SIZES, args.alpha_0s or ALPHA_0S,
+                        args.streams or STREAMS, args.without_warm_starts).check()
+    except ValueError as error:
+        parser.error(f"design: {error}")
     if args.resume is not None:
         # Absolute, as the optimiser runs from the repository root, without "..", and not
         # resolved, so a linked tables directory keeps its results/ siblings.
@@ -303,6 +437,7 @@ def main(argv: list[str] | None = None) -> Path:
             config = json.loads((out / CONFIG_FILE).read_text(encoding="utf-8-sig"))
             recorded_simulations = config["settings"]["simulations"]
             recorded_workers = config.get("workers")
+            design = Design.from_record(config["settings"].get("design"))
         # RecursionError: JSON nested too deep for json.loads
         except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
@@ -352,7 +487,8 @@ def main(argv: list[str] | None = None) -> Path:
                                                           else argv)]),
             "commit": (runs._git("rev-parse", "HEAD") or "").strip() or None,
             "noise": str(args.noise), "simulations": simulations,
-            "runs": [s._asdict() | {"generations": s.generations} for s in settings()],
+            "runs": [s._asdict() | {"generations": s.generations} for s in settings(design)],
+            "design": design.record(),
             "budget": BUDGET, "candidates_per_run": CANDIDATES,
             "validation_stream": VALIDATION_STREAM,
             "screen_blocks": [SCREEN_BLOCKS.start, SCREEN_BLOCKS.stop - 1],
@@ -363,13 +499,33 @@ def main(argv: list[str] | None = None) -> Path:
     execute = functools.partial(run_module, keep_fds=())
     try:
         summary = run(out, root / "models", prefix, simulations, execute, evaluate, make_pool,
-                      workers=workers)
+                      workers=workers, design=design)
     # A table gone or out of place, or one the system refuses: say which, with its path.
     # Other errors, a full disk or a worker's, keep their tracebacks.
     except block_scoring.TableError as error:
         parser.error(str(error))
     print(json.dumps(summary, indent=1))
     return out
+
+
+def _listed(values: Sequence) -> str:
+    return ",".join(f"{v:g}" for v in values)
+
+
+def _whole_numbers(text: str) -> tuple[int, ...]:
+    """A comma-separated list of whole numbers, for argparse."""
+    try:
+        return tuple(int(part) for part in text.split(","))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not comma-separated whole numbers") from None
+
+
+def _positive_numbers(text: str) -> tuple[float, ...]:
+    """A comma-separated list of numbers, for argparse; Design.check refuses non-positive ones."""
+    try:
+        return tuple(float(part) for part in text.split(","))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not comma-separated numbers") from None
 
 
 def cli() -> int:
