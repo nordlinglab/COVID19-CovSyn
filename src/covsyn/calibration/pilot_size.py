@@ -134,8 +134,9 @@ class Design(NamedTuple):
         # What the optimiser refuses, refused here, before the pilot records the design and
         # its runs fail hours in (code review round 4): n beyond the rows the population has
         # without the warm starts, G beyond a stream's blocks, steps that would grow.
-        rows = run_size.POPULATION_ROWS - (
-            len(initial_population.WARM_STARTS) if self.without_warm_starts else 0)
+        rows = initial_population.rows_available(  # the file's count, as load() takes it
+            initial_population.population_path(initial_population.CURRENT_VERSION),
+            self.without_warm_starts)
         for n in self.pop_sizes:
             run_size.check_command("pilot", "--pop-size", n, range(2, rows + 1))
             run_size.check_command("pilot", "--generations", generations(n),
@@ -448,11 +449,12 @@ def main(argv: list[str] | None = None) -> Path:
              if value is not None]  # fmt: skip
     if args.resume is not None and given:
         parser.error(f"a resume runs the pilot's own design; remove {', '.join(given)}")
-    try:
-        design = Design(args.pop_sizes or POP_SIZES, args.alpha_0s or ALPHA_0S,
-                        args.streams or STREAMS, args.without_warm_starts).check()
-    except ValueError as error:
-        parser.error(f"design: {error}")
+    if args.resume is None:  # a resume's design is its config.json's
+        try:
+            design = Design(args.pop_sizes or POP_SIZES, args.alpha_0s or ALPHA_0S,
+                            args.streams or STREAMS, args.without_warm_starts).check()
+        except ValueError as error:
+            parser.error(f"design: {error}")
     if args.resume is not None:
         # Absolute, as the optimiser runs from the repository root, without "..", and not
         # resolved, so a linked tables directory keeps its results/ siblings.

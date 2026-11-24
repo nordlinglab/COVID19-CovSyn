@@ -261,3 +261,13 @@ def test_the_se_takes_each_setting_s_own_number_of_runs():
              {"pop_size": 24, "alpha_0": 0.2, "generations": 415, "mean_cost": 11.5,
               "run_sd": 2.0, "runs": 1}]  # fmt: skip
     assert ps.choose(table, design)["within_se"] == [[24, 0.2]]
+
+
+def test_the_rows_left_come_from_the_population_file(monkeypatch):
+    """The file records two warm starts; the code's list changing does not move the bound."""
+    from covsyn.calibration import initial_population as ip
+
+    monkeypatch.setattr(ip, "WARM_STARTS", ("a", "b", "c"))
+    assert ps.Design((254,), (0.2,), (1, 2, 3), True).check()
+    with pytest.raises(ValueError):
+        ps.Design((255,), (0.2,), (1, 2, 3), True).check()

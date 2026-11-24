@@ -134,6 +134,13 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
     return normalized[:n].copy()
 
 
+def rows_available(path: Path, without_warm_starts: bool = False) -> int:
+    """How many fireflies a run can take from the population at ``path``, as load() counts."""
+    with np.load(path) as saved:
+        rows = len(saved["normalized"])
+        return rows - len(saved["warm_starts"]) if without_warm_starts else rows
+
+
 def describe(path: Path) -> dict:
     """The version and SHA-256 config.json records for the population at ``path``."""
     with np.load(path) as saved:
