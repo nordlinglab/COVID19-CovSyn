@@ -39,8 +39,8 @@ CURRENT_VERSION = 1  # the population every run starts from
 def _parameter_space():
     """The parameter space module, imported when a population is built or clipped.
 
-    It loads the model and with it scipy, which the pipeline's configuration check, reading
-    this module for the rows a run may take, does without.
+    It loads the model and with it scipy, which reading a population does without; only
+    building or clipping one needs it.
     """
     from covsyn.calibration import parameter_space
 
@@ -83,7 +83,7 @@ def build(space: ParameterSpace, root: Path = Path(".")) -> np.ndarray:
     Raises:
         SystemExit: A warm start does not have the bounds' dimension once padded (B54).
     """
-    # Imported here: the pipeline's configuration check reads this module and loads no scipy.
+    # Imported here: reading a population loads no scipy; only building one does.
     from scipy.stats import qmc
 
     lower, upper = space.lower, space.upper
@@ -130,6 +130,7 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 
     Raises:
         TypeError: ``path`` is not a path.
+        ValueError: ``path`` is empty or holds a NUL byte, so names no file.
         RunSizeOutOfRange: n is not 1 to the rows available.
         SystemExit: The file is missing, cannot be read, or its rows do not match its
             SHA-256, or the dimension or the bounds differ from those it was made with.
@@ -210,6 +211,7 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
+        ValueError: ``path`` is empty or holds a NUL byte, so names no file (rounds 20, 21).
         PopulationUnreadable: The file cannot be read or decoded -- missing, empty,
             truncated, a corrupt or unknown compression, rows that are not a non-empty 2-D
             array of numbers, bounds that are not numbers -- so a caller catches this alone;
@@ -236,7 +238,7 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
-        ValueError: ``path`` holds a NUL byte, so names no file (code review round 20).
+        ValueError: ``path`` is empty or holds a NUL byte, so names no file (rounds 20, 21).
         PopulationUnreadable: The file cannot be read or decoded (whatever numpy and zipfile
             raise reading it), holds one array instead of an archive, or its rows, warm
             starts or bounds are not what load() computes with.
