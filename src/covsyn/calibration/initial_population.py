@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import sys
+import zipfile
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -155,6 +158,14 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
     return normalized[:n].copy()
 
 
+# What reading and decoding an .npz can raise: OSError (missing, unreadable), EOFError
+# (empty), ValueError (not an .npz, pickled data), KeyError (an array missing), BadZipFile
+# (truncated), zlib.error (a corrupt stream), NotImplementedError (an unknown compression),
+# RuntimeError (zipfile's other refusals).
+READ_ERRORS = (OSError, EOFError, ValueError, KeyError, zipfile.BadZipFile, zlib.error,
+               NotImplementedError, RuntimeError)
+
+
 class PopulationUnreadable(ValueError):
     """The population file is missing or cannot be read, whatever the reason."""
 
@@ -163,18 +174,24 @@ def rows_available(path: Path, without_warm_starts: bool = False) -> int:
     """How many fireflies a run can take from the population at ``path``, as load() counts.
 
     Raises:
-        PopulationUnreadable: Any failure reading the file -- missing, empty, truncated, a
-            corrupt or unknown compression, rows that are not an array -- so a caller catches
-            this alone and a programming error at the call still raises as itself (code
-            review rounds 7 to 10).
+        TypeError: ``path`` is not a path, a programming error (code review round 11).
+        PopulationUnreadable: The file cannot be read or decoded -- missing, empty,
+            truncated, a corrupt or unknown compression, rows that are not an array -- so a
+            caller catches this alone; any other failure, a programming error, raises as
+            itself (code review rounds 7 to 11).
     """
+    if not isinstance(path, str | os.PathLike):
+        raise TypeError(f"path must be a path, got {type(path).__name__}")
     try:
         with np.load(path) as saved:
-            rows = len(saved["normalized"])
-            return rows - len(saved["warm_starts"]) if without_warm_starts else rows
-    except Exception as error:  # only the file is read here
+            normalized, warm_starts = saved["normalized"], saved["warm_starts"]
+    except READ_ERRORS as error:
         raise PopulationUnreadable(f"{path} cannot be read ({type(error).__name__}: "
                                    f"{error})") from error
+    if normalized.ndim == 0 or warm_starts.ndim == 0:  # len() of a 0-d array fails
+        raise PopulationUnreadable(f"{path} cannot be read (its rows are not an array)")
+    rows = len(normalized)
+    return rows - len(warm_starts) if without_warm_starts else rows
 
 
 def describe(path: Path) -> dict:

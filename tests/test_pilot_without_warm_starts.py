@@ -219,3 +219,19 @@ def test_a_wrong_call_is_not_taken_for_an_unreadable_file(tmp_path):
     """A programming error at the call raises as itself (code review round 10)."""
     with pytest.raises(TypeError):
         ip.rows_available(tmp_path / "absent.npz", True, "extra")
+
+
+@pytest.mark.parametrize("path", [None, 3])
+def test_a_path_of_the_wrong_type_is_a_programming_error(path):
+    """Not a file that cannot be read (code review round 11)."""
+    with pytest.raises(TypeError):
+        ip.rows_available(path)
+
+
+def test_a_bug_in_the_body_is_not_taken_for_an_unreadable_file(tmp_path, monkeypatch):
+    """A failure outside reading and decoding raises as itself."""
+    path = tmp_path / "p.npz"
+    np.savez(path, normalized=np.zeros((5, 2)), warm_starts=np.array(["a"]))
+    monkeypatch.setattr(ip, "len", lambda value: 1 / 0, raising=False)
+    with pytest.raises(ZeroDivisionError):
+        ip.rows_available(path)
