@@ -160,6 +160,14 @@ def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, damage)
     assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
 
 
+def test_a_bytes_path_loads_as_rows_available_counts(written, space):
+    """The two take the same paths (code review round 14)."""
+    import os
+
+    path = os.fsencode(written)
+    assert len(ip.load(path, ip.rows_available(path), space.lower, space.upper)) == ip.N_MAX
+
+
 def test_a_missing_population_stays_resumable(tmp_path, space):
     """A file put back makes a retry succeed, so a missing one is an ordinary failure."""
     with pytest.raises(SystemExit) as stopped:

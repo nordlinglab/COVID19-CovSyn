@@ -120,7 +120,7 @@ class RunSizeOutOfRange(SystemExit):
     """
 
 
-def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
+def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.ndarray,
          without_warm_starts: bool = False) -> np.ndarray:
     """The first ``n`` rows of the population at ``path``, for a run with these bounds.
 
@@ -133,7 +133,7 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
         SystemExit: The file is missing, cannot be read, or its rows do not match its
             SHA-256, or the dimension or the bounds differ from those it was made with.
     """
-    path = Path(path)
+    path = Path(os.fsdecode(path))  # the paths rows_available takes (code review round 14)
     if not path.is_file():
         raise SystemExit(f"{path} not found: make it with covsyn-initial-population --version N")
     try:  # a damaged file refused with a message, resumable once restored (round 14)
