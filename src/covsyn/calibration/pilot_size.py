@@ -233,9 +233,13 @@ def _spread_table(cost: Mapping[tuple, float], design: Design) -> list[dict[str,
     table = []
     for n in design.pop_sizes:
         for a in design.alpha_0s:
-            means = [float(np.mean([c for (n_, a_, s_, _), c in cost.items()
-                                    if (n_, a_, s_) == (n, a, s)]))
-                     for s in design.streams]  # fmt: skip
+            means = []
+            for s in design.streams:
+                blocks = {b for (n_, a_, s_, b) in cost if (n_, a_, s_) == (n, a, s)}
+                if blocks != set(CONFIRM_BLOCKS):  # code review round 4: no NaN means
+                    raise ValueError(f"run n{n}-a{a:g}-s{s} has {len(blocks)} of the "
+                                     f"{len(CONFIRM_BLOCKS)} confirmation blocks")
+                means.append(float(np.mean([cost[(n, a, s, b)] for b in CONFIRM_BLOCKS])))
             table.append({"pop_size": n, "alpha_0": a, "generations": generations(n),
                           **{f"cost_stream_{s}": m for s, m in zip(design.streams, means,
                                                                    strict=True)},

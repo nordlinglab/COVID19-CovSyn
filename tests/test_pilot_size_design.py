@@ -237,3 +237,17 @@ def test_alpha_0s_that_name_the_same_run_are_refused():
     """0.2 and 0.2000001 both name ...-a0p2-...: two settings would share one run."""
     with pytest.raises(ValueError, match="alpha_0"):
         ps.Design((24,), (0.2, 0.2000001), (1, 2, 3), True).check()
+
+
+@pytest.mark.parametrize("drop", ["stream", "block"])
+def test_the_spread_needs_every_run_on_every_confirmation_block(drop):
+    """A missing stream or block is an error, not a NaN that min() may or may not pick."""
+    design = ps.Design((12, 24), (0.2,), (1, 2, 3, 4), True)
+    rows = _rows({(12, 0.2): 10.0, (24, 0.2): 20.0}, {(12, 0.2): 1.0, (24, 0.2): 1.0})
+    if drop == "stream":
+        rows = [r for r in rows if not (r["pop_size"] == 12 and r["stream"] == 3)]
+    else:
+        rows = [r for r in rows if not (r["pop_size"] == 12 and r["stream"] == 3
+                                        and r["block"] == 31)]  # fmt: skip
+    with pytest.raises(ValueError, match="n12"):
+        ps.compare_settings(rows, design)
