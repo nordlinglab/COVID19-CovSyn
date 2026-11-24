@@ -183,6 +183,14 @@ def _arrays(path, **changed):
     ({"warm_starts": np.array("a")}, "warm starts are not a list"),
     ({"lower": np.array(["a", "b"])}, "not one number a parameter"),  # bounds not numbers
     ({"lower": np.zeros(1), "upper": np.ones(1)}, "not one number a parameter"),  # length
+    ({"normalized": np.full((3, 2), np.nan)}, "rows must be finite"),
+    ({"normalized": np.full((3, 2), 1.1)}, "rows must fall within"),
+    ({"upper": np.full(2, np.inf)}, "bounds must be finite"),
+    ({"upper": np.full(2, -1)}, "lower bounds exceed upper bounds"),
+    ({"warm_starts": np.array([["a"]])}, "warm starts are not a list"),
+    ({"warm_starts": np.array([1])}, "warm starts are not a list"),
+    ({"sha256": np.array(["x", "y"])}, "SHA-256 is not a string scalar"),
+    ({"version": np.array(0)}, "version must be positive"),
     ({"version": np.array([1, 2])}, "version is not a whole number"),
 ])  # fmt: skip
 def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, changed, reason):

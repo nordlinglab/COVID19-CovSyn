@@ -330,17 +330,35 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
     # What load() computes with: rows it can stack and hash, at least one of them, of at least
     # one parameter (rounds 14, 15); a warm-start list it can count; bounds of numbers.
     rows = arrays["normalized"]
-    if rows.ndim != 2 or 0 in rows.shape or rows.dtype.kind not in "iuf":
+    if (rows.ndim != 2 or 0 in rows.shape or rows.dtype.kind not in "iuf"
+            or rows.dtype.itemsize > 8):
         raise PopulationUnreadable(f"{shown} cannot be read (its rows are not a non-empty 2-D "
                                    f"array of numbers)")
-    if arrays["warm_starts"].ndim == 0:
-        raise PopulationUnreadable(f"{shown} cannot be read (its warm starts are not a list)")
-    if any(arrays[key].shape != rows.shape[1:] or arrays[key].dtype.kind not in "iuf"
-           for key in ("lower", "upper")):  # one bound a parameter (round 16)
+    if not np.isfinite(rows).all():
+        raise PopulationUnreadable(f"{shown} cannot be read (its rows must be finite)")
+    if np.any((rows < 0) | (rows > 1)):
+        raise PopulationUnreadable(f"{shown} cannot be read (its rows must fall within [0, 1])")
+    warm_starts = arrays["warm_starts"]
+    if warm_starts.ndim != 1 or warm_starts.dtype.kind not in "US":
+        raise PopulationUnreadable(f"{shown} cannot be read (its warm starts are not a list "
+                                   f"of strings)")
+    lower, upper = arrays["lower"], arrays["upper"]
+    if any(bound.shape != rows.shape[1:] or bound.dtype.kind not in "iuf"
+           or bound.dtype.itemsize > 8 for bound in (lower, upper)):
         raise PopulationUnreadable(f"{shown} cannot be read (its bounds are not one number a "
                                    f"parameter)")
-    if arrays["version"].ndim != 0 or arrays["version"].dtype.kind not in "iu":
+    if not (np.isfinite(lower).all() and np.isfinite(upper).all()):
+        raise PopulationUnreadable(f"{shown} cannot be read (its bounds must be finite)")
+    if np.any(lower > upper):
+        raise PopulationUnreadable(f"{shown} cannot be read (its lower bounds exceed upper bounds)")
+    version = arrays["version"]
+    if version.ndim != 0 or version.dtype.kind not in "iu":
         raise PopulationUnreadable(f"{shown} cannot be read (its version is not a whole number)")
+    if int(version) < 1:
+        raise PopulationUnreadable(f"{shown} cannot be read (its version must be positive)")
+    sha256 = arrays["sha256"]
+    if sha256.ndim != 0 or sha256.dtype.kind != "U":
+        raise PopulationUnreadable(f"{shown} cannot be read (its SHA-256 is not a string scalar)")
     return arrays
 
 
