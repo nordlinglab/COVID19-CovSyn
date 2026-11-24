@@ -201,9 +201,11 @@ def _check_production_rows(pop_size: int, source: str) -> None:
     try:  # the repository's file, wherever the pipeline is started (code review round 7)
         rows = initial_population.rows_available(initial_population.population_path(
             initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable"), True)
-    # Any unreadable file -- missing, empty or truncated -- is the optimiser's to refuse (code
-    # review round 7); only read errors, so a programming error still raises (round 8).
-    except (OSError, EOFError, KeyError, ValueError, zipfile.BadZipFile):
+    # Any unreadable file -- missing, empty, truncated, of an unknown compression (a
+    # RuntimeError) or with a 0-d array (a TypeError) -- is the optimiser's to refuse (code
+    # review rounds 7 and 9); only read errors, so a missing function still raises (round 8).
+    except (OSError, EOFError, KeyError, ValueError, TypeError, RuntimeError,
+            zipfile.BadZipFile):
         return
     if pop_size > rows:
         raise ValueError(f"{source}: [optimise] pop_size is {pop_size}, but production starts "

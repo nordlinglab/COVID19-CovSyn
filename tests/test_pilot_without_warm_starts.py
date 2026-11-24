@@ -195,7 +195,25 @@ def test_the_pipeline_checks_the_rows_from_any_directory(monkeypatch, tmp_path):
         pc.parse(PRODUCTION.replace("pop_size = 48", "pop_size = 255"), "t")
 
 
-@pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated"])
+def _zero_d(path):
+    np.savez(path, normalized=np.float64(1.0), warm_starts=np.array(["a"]))
+    return path.read_bytes()
+
+
+def _unknown_compression(path):
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("normalized.npy", b"x")
+    raw = bytearray(path.read_bytes())
+    for header in (b"PK\x03\x04", b"PK\x01\x02"):  # method 99 in both headers
+        at = raw.find(header)
+        offset = 8 if header == b"PK\x03\x04" else 10
+        raw[at + offset:at + offset + 2] = (99).to_bytes(2, "little")
+    return bytes(raw)
+
+
+@pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated", _zero_d, _unknown_compression])
 def test_a_damaged_population_file_leaves_the_refusal_to_the_optimiser(
     monkeypatch, tmp_path, content
 ):
@@ -208,7 +226,7 @@ def test_a_damaged_population_file_leaves_the_refusal_to_the_optimiser(
     from tests.test_task9_production_pipeline import PRODUCTION
 
     broken = tmp_path / "initial_population_v1.npz"
-    broken.write_bytes(content)
+    broken.write_bytes(content if isinstance(content, bytes) else content(broken))
     read = []
     monkeypatch.setattr(ip, "population_path",
                         lambda version, directory=None: read.append(version) or broken)
