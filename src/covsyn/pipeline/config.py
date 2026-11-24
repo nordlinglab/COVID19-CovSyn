@@ -190,8 +190,9 @@ def _check_production(values: dict[str, Any], source: str) -> None:
 def _check_production_rows(pop_size: int, source: str) -> None:
     """Refuse an n beyond the rows production has without the warm starts (2026-11-24).
 
-    Read from the population file, as the optimiser counts them; a file that cannot be read
-    leaves the refusal to the optimiser, which loads it before claiming its run directory.
+    Read from the population file, as the optimiser counts them, without checking its SHA-256;
+    a file that cannot be read, or whose digest no longer matches, is refused by the optimiser,
+    which loads it before claiming its run directory.
     """
     from covsyn.calibration import initial_population
     from covsyn.runtime import runs
