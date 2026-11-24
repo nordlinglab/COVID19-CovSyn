@@ -231,3 +231,9 @@ def test_a_design_the_optimiser_would_refuse_is_refused_first(bad):
 def test_the_largest_population_without_warm_starts_is_accepted():
     """256 rows less the two warm starts."""
     assert ps.Design((254,), (0.2,), (1, 2, 3), True).check()
+
+
+def test_alpha_0s_that_name_the_same_run_are_refused():
+    """0.2 and 0.2000001 both name ...-a0p2-...: two settings would share one run."""
+    with pytest.raises(ValueError, match="alpha_0"):
+        ps.Design((24,), (0.2, 0.2000001), (1, 2, 3), True).check()

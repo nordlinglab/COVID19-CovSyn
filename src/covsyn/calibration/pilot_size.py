@@ -125,6 +125,10 @@ class Design(NamedTuple):
             raise ValueError(f"a population needs at least 2 fireflies, got {self.pop_sizes}")
         if not all(np.isfinite(a) and a > 0 for a in self.alpha_0s):
             raise ValueError(f"alpha_0 must be positive, got {self.alpha_0s}")
+        names = {run_name("", Setting(2, a, 1)) for a in self.alpha_0s}
+        if len(names) != len(self.alpha_0s):  # code review round 4
+            raise ValueError(f"alpha_0s {self.alpha_0s} would share run directories, whose "
+                             f"names keep 6 significant digits")
         for stream in self.streams:
             seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
         # What the optimiser refuses, refused here, before the pilot records the design and
