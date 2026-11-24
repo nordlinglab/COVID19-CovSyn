@@ -137,8 +137,9 @@ class Design(NamedTuple):
         # What the optimiser refuses, refused here, before the pilot records the design and
         # its runs fail hours in (code review round 4): n beyond the rows the population has
         # without the warm starts, G beyond a stream's blocks, steps that would grow.
-        rows = initial_population.rows_available(  # the file's count, as load() takes it
-            initial_population.population_path(initial_population.CURRENT_VERSION),
+        rows = initial_population.rows_available(  # the file's count, as load() takes it;
+            initial_population.population_path(  # the repository's, from any directory
+                initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable"),
             self.without_warm_starts)
         # Worded in this command's options, naming the n at fault (code review round 5).
         without = " without the warm starts" if self.without_warm_starts else ""

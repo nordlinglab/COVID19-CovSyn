@@ -316,3 +316,9 @@ def test_a_record_of_another_rule_is_refused():
     record = RERUN.record() | {"rule": "spread"}
     with pytest.raises(ValueError, match="spread"):
         ps.Design.from_record(record)
+
+
+def test_a_design_is_checked_from_any_directory(monkeypatch, tmp_path):
+    """The population file is the repository's, wherever the command is started."""
+    monkeypatch.chdir(tmp_path)
+    assert RERUN.check() == RERUN
