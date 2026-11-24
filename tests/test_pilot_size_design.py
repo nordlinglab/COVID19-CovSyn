@@ -15,6 +15,9 @@ the SD of four runs decide could swap a better setting out). The SD between runs
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -415,3 +418,50 @@ def test_a_new_pilot_with_an_unreadable_population_does_not_blame_the_design(tmp
     err = capsys.readouterr().err
     assert "cannot be checked" in err and "design: " not in err
     assert not (tmp_path / "tables").exists()
+
+
+def _unchecked(monkeypatch, path):
+    from covsyn.calibration import initial_population as ip
+
+    monkeypatch.setattr(ip, "population_path", lambda version, directory=None: path)
+    with pytest.raises(ps.PopulationUnchecked) as refusal:
+        RERUN.check()
+    return str(refusal.value)
+
+
+def test_the_command_that_remakes_a_missing_file_can_be_pasted(monkeypatch, tmp_path):
+    """A directory with a space is quoted for the shell (code review round 11)."""
+    import shlex
+
+    directory = tmp_path / "with space"
+    directory.mkdir()
+    message = _unchecked(monkeypatch, directory / "initial_population_v1.npz")
+    assert f"--out-dir {shlex.quote(str(directory))}" in message
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")
+def test_a_file_that_may_not_be_read_is_not_to_be_remade_or_restored(monkeypatch, tmp_path):
+    """The file is there and intact: its permissions are the fault (code review round 11)."""
+    from covsyn.calibration import initial_population as ip
+
+    path = tmp_path / "initial_population_v1.npz"
+    path.write_bytes(ip.population_path(1).read_bytes())
+    path.chmod(0)
+    try:
+        message = _unchecked(monkeypatch, path)
+    finally:
+        path.chmod(0o644)
+    assert "permission" in message.lower()
+    assert "covsyn-initial-population" not in message and "restore" not in message
+
+
+def test_a_file_that_vanishes_after_failing_to_decode_is_still_to_be_restored(monkeypatch,
+                                                                             tmp_path):
+    """The advice follows why the read failed, not the file's state when the advice is written."""
+    damaged = tmp_path / "initial_population_v1.npz"
+    damaged.write_bytes(b"PK\x03\x04 truncated")
+    real_exists = Path.exists
+    monkeypatch.setattr(Path, "exists",
+                        lambda self, **kw: False if self == damaged else real_exists(self, **kw))
+    message = _unchecked(monkeypatch, damaged)
+    assert "restore" in message and "covsyn-initial-population" not in message
