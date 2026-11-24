@@ -130,7 +130,7 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 
     Raises:
         TypeError: ``path`` is not a path.
-        ValueError: ``path`` is empty or holds a NUL byte, so names no file.
+        ValueError: ``path`` is empty, holds a NUL byte or cannot be encoded.
         RunSizeOutOfRange: n is not 1 to the rows available.
         SystemExit: The file is missing, cannot be read, or its rows do not match its
             SHA-256, or the dimension or the bounds differ from those it was made with.
@@ -167,9 +167,10 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 
 # The reading contract of load() and rows_available() (user decision of 2026-11-24, after
 # code review rounds 11 to 17 and a logic review):
-# 1. A path that is not a path is a programming error, raised before any file is touched:
-#    TypeError for another type, ValueError for an empty path or a NUL byte, which name no
-#    file.
+# 1. A path the string alone shows to name no file is a programming error, raised before
+#    any file is touched: TypeError for another type, ValueError for an empty path, a NUL
+#    byte, or a str the filesystem cannot encode (UnicodeEncodeError). Whatever the system
+#    says on opening it, a name too long included, is a failure of the file (guarantee 2).
 # 2. A failure of the file -- opening, decoding, or contents load() cannot compute with --
 #    is a worded refusal naming the path once with a short reason, never a traceback; any
 #    other exception is a programming error and raises as itself.
@@ -211,7 +212,8 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
-        ValueError: ``path`` is empty or holds a NUL byte, so names no file (rounds 20, 21).
+        ValueError: ``path`` is empty, holds a NUL byte or cannot be encoded, so names no
+            file (code review rounds 20 to 22).
         PopulationUnreadable: The file cannot be read or decoded -- missing, empty,
             truncated, a corrupt or unknown compression, rows that are not a non-empty 2-D
             array of numbers, bounds that are not numbers -- so a caller catches this alone;
@@ -238,7 +240,8 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
-        ValueError: ``path`` is empty or holds a NUL byte, so names no file (rounds 20, 21).
+        ValueError: ``path`` is empty, holds a NUL byte or cannot be encoded, so names no
+            file (code review rounds 20 to 22).
         PopulationUnreadable: The file cannot be read or decoded (whatever numpy and zipfile
             raise reading it), holds one array instead of an archive, or its rows, warm
             starts or bounds are not what load() computes with.
@@ -250,6 +253,7 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
         raise ValueError(f"path holds a NUL byte: {shown!r}")
     if not shown:  # names no file either (round 21)
         raise ValueError("path is empty")
+    os.fsencode(path)  # a str the filesystem cannot encode: UnicodeEncodeError (round 22)
     try:
         saved = np.load(path)
         # A single .npy array loads as an array, not an archive (code review round 12).

@@ -191,9 +191,10 @@ def test_a_path_that_is_not_a_path_is_a_programming_error(space, path):
 
 @pytest.mark.parametrize(("path", "why"), [("variable/nul\0x.npz", "NUL"),
                                            (b"variable/nul\0x.npz", "NUL"),
-                                           ("", "empty"), (b"", "empty")])  # fmt: skip
+                                           ("", "empty"), (b"", "empty"),
+                                           ("\ud800/x.npz", "encode")])  # fmt: skip
 def test_a_path_no_file_can_have_is_a_programming_error(space, path, why):
-    """Guarantee 1: a NUL byte or nothing names no file (code review rounds 20, 21)."""
+    """Guarantee 1: what the string alone shows names no file (rounds 20 to 22)."""
     for read in (lambda: ip.load(path, 3, space.lower, space.upper),
                  lambda: ip.rows_available(path)):  # fmt: skip
         with pytest.raises(ValueError, match=why) as refused:
