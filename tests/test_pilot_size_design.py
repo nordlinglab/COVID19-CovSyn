@@ -281,3 +281,16 @@ def test_the_agreement_rule_needs_every_run_on_every_confirmation_block(streams)
             if not (n == 48 and a == 0.2 and s in streams and b == 31)]  # fmt: skip
     with pytest.raises(ValueError, match="n48"):
         ps.compare_settings(rows)
+
+
+@pytest.mark.parametrize(("bad", "words"), [
+    ({"pop_sizes": (8, 24)}, ["--pop-sizes", "n = 8", "1249"]),
+    ({"pop_sizes": (255,)}, ["--pop-sizes", "n = 255", "254"]),
+    ({"alpha_0s": (0.0005,)}, ["--alpha-0s"]),
+])  # fmt: skip
+def test_a_refused_design_names_this_command_s_options(bad, words):
+    """Not the optimiser's --generations or --alpha-0, which this command does not take."""
+    with pytest.raises(ValueError) as refusal:
+        ps.Design(**{**RERUN._asdict(), **bad}).check()
+    assert all(w in str(refusal.value) for w in words), str(refusal.value)
+    assert "--generations" not in str(refusal.value)

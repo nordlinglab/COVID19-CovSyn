@@ -137,13 +137,18 @@ class Design(NamedTuple):
         rows = initial_population.rows_available(  # the file's count, as load() takes it
             initial_population.population_path(initial_population.CURRENT_VERSION),
             self.without_warm_starts)
+        # Worded in this command's options, naming the n at fault (code review round 5).
+        without = " without the warm starts" if self.without_warm_starts else ""
         for n in self.pop_sizes:
-            run_size.check_command("pilot", "--pop-size", n, range(2, rows + 1))
-            run_size.check_command("pilot", "--generations", generations(n),
-                                   run_size.GENERATIONS)
+            if n > rows:
+                raise ValueError(f"--pop-sizes: n = {n} is more than the {rows} fireflies the "
+                                 f"population has{without}")
+            if generations(n) not in run_size.GENERATIONS:
+                raise ValueError(f"--pop-sizes: n = {n} gives G = {generations(n)} generations, "
+                                 f"more than a stream's {run_size.GENERATIONS.stop - 1} blocks")
             for a in self.alpha_0s:
                 step_schedule.checked_schedule(a, None, None, generations(n),
-                                               names=("--alpha-0", "--alpha-end", "--g-plan"))
+                                               names=("--alpha-0s", "alpha_end", "G_plan"))
         return self
 
     def record(self) -> dict[str, Any]:
