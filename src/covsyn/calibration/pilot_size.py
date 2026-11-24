@@ -89,6 +89,10 @@ def generations(pop_size: int) -> int:
     return (BUDGET - pop_size) // pop_size
 
 
+class PopulationUnchecked(ValueError):
+    """The design could not be checked: the population file cannot be read."""
+
+
 class Design(NamedTuple):
     """The grid a pilot 2 runs, its streams, and whether its runs leave the warm starts out.
 
@@ -146,7 +150,7 @@ class Design(NamedTuple):
             remedy = (f"make it with covsyn-initial-population --version "
                       f"{initial_population.CURRENT_VERSION} --out-dir {path.parent}"
                       if not path.exists() else "restore the committed file from version control")
-            raise ValueError(f"{error}; {remedy}") from error
+            raise PopulationUnchecked(f"{error}; {remedy}") from error
         # Worded in this command's options, naming the n at fault (code review round 5).
         without = " without the warm starts" if self.without_warm_starts else ""
         for n in self.pop_sizes:
@@ -493,6 +497,8 @@ def main(argv: list[str] | None = None) -> Path:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
         try:  # the pilot is there; its design may fail today's checks (code review round 5)
             design = Design.from_record(recorded_design)
+        except PopulationUnchecked as error:  # the file's fault, not the design's (round 10)
+            parser.error(f"pilot 2 in {out}: its design cannot be checked: {error}")
         except (ValueError, KeyError, TypeError) as error:
             parser.error(f"pilot 2 in {out}: the recorded design is refused: {error}")
         try:  # the pilot is there; a recorded value may be wrong

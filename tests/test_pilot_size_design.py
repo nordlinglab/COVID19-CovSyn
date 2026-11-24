@@ -350,3 +350,23 @@ def test_a_damaged_population_file_is_to_be_restored(monkeypatch, tmp_path):
     message = str(refusal.value)
     assert str(damaged) in message and "restore" in message
     assert "covsyn-initial-population" not in message
+
+
+def test_a_resume_with_an_unreadable_population_does_not_blame_the_design(
+    monkeypatch, tmp_path, capsys
+):
+    """The fault is the file: the recorded design is not called refused (code review round 10)."""
+    import json
+
+    from covsyn.calibration import initial_population as ip
+
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    (out / "config.json").write_text(json.dumps({"settings": {"simulations": 300,
+                                                              "design": RERUN.record()}}))
+    missing = tmp_path / "initial_population_v1.npz"
+    monkeypatch.setattr(ip, "population_path", lambda version, directory=None: missing)
+    with pytest.raises(SystemExit):
+        ps.main(["--resume", str(out)])
+    err = capsys.readouterr().err
+    assert "cannot be checked" in err and "refused" not in err
