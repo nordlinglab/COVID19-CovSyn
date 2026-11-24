@@ -854,6 +854,16 @@ def test_a_starting_optimiser_that_refuses_its_settings_gets_no_resume_hint(tmp_
     assert str(run_dir / "optimiser.log") in out  # where the reason is
 
 
+def test_a_failed_step_names_the_log_that_holds_its_reason(tmp_path, config, capsys):
+    """pipeline.log points to the step's own output, where its error message went."""
+    capsys.readouterr()
+    status, run_dir = run_pipeline(tmp_path, config,
+                                   Recorder(fail={"covsyn.calibration.firefly_optimizer"}))
+    out = capsys.readouterr().out
+    assert status == 1 and "Resume with" in out
+    assert f"the optimiser failed (see {run_dir / 'optimiser.log'})" in out
+
+
 def test_status_3_from_another_step_is_an_ordinary_failure(tmp_path, config, capsys):
     """Only the optimiser's status 3 means 'cannot be resumed'."""
 

@@ -115,8 +115,9 @@ class Context:
             raise StageFailed(
                 f"{what} failed: the run cannot be resumed (see {log})", resumable=False
             )
-        if status != 0:
-            raise StageFailed(f"{what} failed")
+        if status != 0:  # the step's reason is in its own output, not pipeline.log
+            log = options.get("output")
+            raise StageFailed(f"{what} failed" + ("" if log is None else f" (see {log})"))
 
     def may(self, args: list, what: str, **options) -> None:
         """Run a step the chain only warned about."""
