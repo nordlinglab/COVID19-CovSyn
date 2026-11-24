@@ -24,6 +24,7 @@ from scipy.stats import qmc
 
 from covsyn.calibration import initial_population as ip
 from covsyn.calibration import parameter_space
+from covsyn.runtime import runs
 from tests.conftest import REPO_ROOT, best_vector
 
 
@@ -126,10 +127,23 @@ def test_a_run_takes_the_first_n_rows(written, space):
 
 
 @pytest.mark.parametrize("n", [0, 257])
-def test_more_fireflies_than_rows_or_none_are_refused(written, space, n):
-    """A population cannot start more fireflies than it holds, nor none."""
-    with pytest.raises(SystemExit, match="firefl"):
+def test_more_fireflies_than_rows_or_none_are_refused(written, space, n, capsys):
+    """A population cannot start more fireflies than it holds, nor none.
+
+    The n is the run's setting, which a resume keeps, so the refusal is not resumable
+    (runs.NOT_RESUMABLE, decision of 2026-11-24): the pipeline then suggests no resume.
+    """
+    with pytest.raises(SystemExit) as stopped:
         ip.load(written, n, space.lower, space.upper)
+    assert stopped.value.code == runs.NOT_RESUMABLE
+    assert f"a run of {n} cannot start" in capsys.readouterr().err
+
+
+def test_a_missing_population_stays_resumable(tmp_path, space):
+    """A file put back makes a retry succeed, so a missing one is an ordinary failure."""
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(tmp_path / "initial_population_v1.npz", 3, space.lower, space.upper)
+    assert stopped.value.code != runs.NOT_RESUMABLE
 
 
 def test_other_bounds_are_refused_not_clipped(written, space):

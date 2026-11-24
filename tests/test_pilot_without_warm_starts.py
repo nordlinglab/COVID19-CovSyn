@@ -49,13 +49,14 @@ def test_with_warm_starts_the_rows_are_unchanged():
     np.testing.assert_array_equal(ip.load(ip.population_path(1), 24, lower, upper), first)
 
 
-def test_without_warm_starts_fewer_fireflies_fit():
+def test_without_warm_starts_fewer_fireflies_fit(capsys):
     """N_MAX - len(WARM_STARTS) rows are left; one more is refused."""
     lower, upper = _space()
     most = ip.N_MAX - len(ip.WARM_STARTS)
     assert len(ip.load(ip.population_path(1), most, lower, upper, without_warm_starts=True)) == most
-    with pytest.raises(SystemExit, match="warm starts"):
+    with pytest.raises(SystemExit):
         ip.load(ip.population_path(1), most + 1, lower, upper, without_warm_starts=True)
+    assert "without the warm starts" in capsys.readouterr().err
 
 
 def test_a_pilot_run_can_start_without_the_warm_starts(started):  # noqa: F811

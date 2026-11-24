@@ -117,9 +117,10 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
     Latin hypercube (pilot 2 rerun, user decision 2026-11-24).
 
     Raises:
-        SystemExit: The file is missing or its rows do not match its SHA-256, n is not 1 to
-            the rows available, or the dimension or the bounds differ from those it was made
-            with.
+        SystemExit: The file is missing or its rows do not match its SHA-256, or the
+            dimension or the bounds differ from those it was made with; with code
+            runs.NOT_RESUMABLE, after the reason on stderr, when n is not 1 to the rows
+            available.
     """
     path = Path(path)
     if not path.is_file():
@@ -136,9 +137,14 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
     if without_warm_starts:
         normalized = np.vstack([normalized[:1], normalized[1 + warm_starts:]])
     if not 1 <= n <= len(normalized):
+        from covsyn.runtime import runs
+
         without = " without the warm starts" if without_warm_starts else ""
-        raise SystemExit(f"{path} holds {len(normalized)} fireflies{without}; a run of {n} "
-                         f"cannot start")
+        print(f"{path} holds {len(normalized)} fireflies{without}; a run of {n} cannot start",
+              file=sys.stderr)
+        # The n is the run's setting, which a resume keeps: retrying cannot help, so the
+        # pipeline suggests no resume (decision of 2026-11-24).
+        raise SystemExit(runs.NOT_RESUMABLE)
     if len(lower) != normalized.shape[1]:
         raise SystemExit(f"{path} was made for dimension {normalized.shape[1]}, not {len(lower)}; "
                          f"make a new version")  # fmt: skip
