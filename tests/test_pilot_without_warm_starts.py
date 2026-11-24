@@ -235,3 +235,12 @@ def test_a_bug_in_the_body_is_not_taken_for_an_unreadable_file(tmp_path, monkeyp
     monkeypatch.setattr(ip, "len", lambda value: 1 / 0, raising=False)
     with pytest.raises(ZeroDivisionError):
         ip.rows_available(path)
+
+
+def test_the_message_names_the_file_once(tmp_path):
+    """The OS error repeats the path; the message gives it once (code review round 11)."""
+    path = tmp_path / "absent.npz"
+    with pytest.raises(ip.PopulationUnreadable) as unreadable:
+        ip.rows_available(path)
+    assert str(unreadable.value).count(str(path)) == 1
+    assert "No such file" in str(unreadable.value)
