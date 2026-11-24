@@ -4,8 +4,8 @@
 
 The screen behind the decision whether the energy term, or the Cheng terms (contacts and attack
 rates), can leave the objective (professor, 2026-11-23): a parameter that only those terms
-respond to would be left unconstrained without them. Design reviewed by the OpenAI agent
-(work-backup logic-review_openai_2026-11-23_1504_energy-test-design_reply.md).
+respond to would be left unconstrained without them. Design reviewed by a second AI agent
+(logic review of 2026-11-23).
 
 Bases: run 19, the literature vector, the lowest-cost row of pilot 1's population spread, the
 low-cost row farthest from it, and a middle-cost row. Each free parameter moves STEP of its

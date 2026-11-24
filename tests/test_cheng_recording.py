@@ -7,8 +7,8 @@ to 4 days before symptom onset when epidemiologically indicated) and ended at th
 COVID-19 confirmation." A contact's bin is the first day of exposure inside that period. An
 imported index case met nobody in Taiwan before it arrived, and one found at the airport met
 nobody the investigation recorded. A share g of investigations is extended; the objective
-mixes the two records' counts in expectation (user decision 2026-11-23, design reviewed in
-logic-review_openai_2026-11-23_2130_cost-change-design_reply.md).
+mixes the two records' counts in expectation (user decision 2026-11-23, design reviewed by a
+second AI agent the same day).
 """
 
 from __future__ import annotations
