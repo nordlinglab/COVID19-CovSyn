@@ -205,8 +205,13 @@ def _an_npy(path):
     return path.read_bytes()
 
 
+def _one_d(path):
+    np.savez(path, normalized=np.zeros(9), warm_starts=np.array(list("abcde")))  # round 14
+    return path.read_bytes()
+
+
 @pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated", _zero_d, _unknown_compression,
-                                     _corrupt_deflate, _an_npy])  # fmt: skip
+                                     _corrupt_deflate, _an_npy, _one_d])  # fmt: skip
 def test_every_read_failure_is_one_exception(tmp_path, content):
     """Any failure reading the file is PopulationUnreadable, which callers catch alone."""
     path = tmp_path / "initial_population_v1.npz"

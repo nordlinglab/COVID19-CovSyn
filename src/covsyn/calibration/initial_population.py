@@ -200,8 +200,9 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
                                    f"{reason})") from error
     if not archive:
         raise PopulationUnreadable(f"{shown} cannot be read (one array, not an .npz archive)")
-    if normalized.ndim == 0 or warm_starts.ndim == 0:  # len() of a 0-d array fails
-        raise PopulationUnreadable(f"{shown} cannot be read (its rows are not an array)")
+    # len() of a 0-d array fails, and load() stacks rows, which a 1-D array is not (round 14).
+    if normalized.ndim != 2 or warm_starts.ndim == 0:
+        raise PopulationUnreadable(f"{shown} cannot be read (its rows are not a 2-D array)")
     if not without_warm_starts:
         return len(normalized)
     # As load() takes them: row 0 stays, rows 1 to w go (code review round 12).
