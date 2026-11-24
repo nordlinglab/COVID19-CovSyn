@@ -154,7 +154,8 @@ class Design(NamedTuple):
         try:  # the file's count, as load() takes it
             rows = initial_population.rows_available(path, self.without_warm_starts)
         except initial_population.PopulationUnreadable as error:  # worded (rounds 9, 10)
-            raise PopulationUnchecked(f"{error}; {_remedy(error.__cause__, path)}") from error
+            remedy = initial_population.remedy(error.__cause__, path)
+            raise PopulationUnchecked(f"{error}; {remedy}") from error
         # Worded in this command's options, naming the n at fault (code review round 5).
         without = " without the warm starts" if self.without_warm_starts else ""
         for n in self.pop_sizes:
@@ -184,20 +185,6 @@ class Design(NamedTuple):
             raise ValueError(f"the pilot was begun under the {record['rule']!r} rule, which "
                              f"this version replaced by {design.rule!r}; start a new pilot")
         return design.check()
-
-
-def _remedy(cause: BaseException | None, path: Path) -> str:
-    """What to do about a population file that could not be read, by why (code review round 11).
-
-    Remade only when missing, as the command refuses a file that exists (round 10); the
-    directory is quoted, so the command can be pasted.
-    """
-    if isinstance(cause, FileNotFoundError):
-        return (f"make it with covsyn-initial-population --version "
-                f"{initial_population.CURRENT_VERSION} --out-dir {shlex.quote(str(path.parent))}")
-    if isinstance(cause, PermissionError):
-        return "give this user permission to read it"
-    return "restore the committed file from version control"
 
 
 PLAN = Design(POP_SIZES, ALPHA_0S, STREAMS, False)

@@ -12,6 +12,7 @@ rows, and a run whose bounds or dimension differ from those stored is refused, n
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tomllib
@@ -150,14 +151,43 @@ def _no_sha256(path):
 
 
 @pytest.mark.parametrize("damage", [_one_array, _no_sha256, lambda path: path.write_bytes(b"")])
-def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, damage):
-    """Not a traceback, and resumable: restoring the file makes a retry succeed (round 14)."""
+def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, written, damage):
+    """Not a traceback, and resumable: restoring the file makes a retry succeed (rounds 14, 15)."""
     path = tmp_path / "initial_population_v1.npz"
     damage(path)
     with pytest.raises(SystemExit) as stopped:
         ip.load(path, 3, space.lower, space.upper)
     assert isinstance(stopped.value.code, str) and "cannot be read" in stopped.value.code
+    assert "restore the committed file" in stopped.value.code
     assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
+    path.write_bytes(written.read_bytes())  # restored
+    assert len(ip.load(path, 3, space.lower, space.upper)) == 3
+
+
+def test_a_missing_population_is_to_be_made_with_a_command_that_can_be_pasted(tmp_path, space):
+    """The version and the directory filled in and quoted (code review round 15)."""
+    import shlex
+
+    directory = tmp_path / "with space"
+    directory.mkdir()
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(directory / "initial_population_v1.npz", 3, space.lower, space.upper)
+    assert (f"covsyn-initial-population --version {ip.CURRENT_VERSION} --out-dir "
+            f"{shlex.quote(str(directory))}") in stopped.value.code
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")
+def test_a_population_that_may_not_be_read_asks_for_permission(tmp_path, space, written):
+    """Restoring would not help (code review round 15)."""
+    path = tmp_path / "initial_population_v1.npz"
+    path.write_bytes(written.read_bytes())
+    path.chmod(0)
+    try:
+        with pytest.raises(SystemExit) as stopped:
+            ip.load(path, 3, space.lower, space.upper)
+    finally:
+        path.chmod(0o644)
+    assert "permission" in stopped.value.code.lower() and "restore" not in stopped.value.code
 
 
 def test_a_bytes_path_loads_as_rows_available_counts(written, space):

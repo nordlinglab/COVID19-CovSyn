@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import shlex
 import sys
 import zipfile
 import zlib
@@ -134,12 +135,11 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
             SHA-256, or the dimension or the bounds differ from those it was made with.
     """
     path = Path(os.fsdecode(path))  # the paths rows_available takes (code review round 14)
-    if not path.is_file():
-        raise SystemExit(f"{path} not found: make it with covsyn-initial-population --version N")
-    try:  # a damaged file refused with a message, resumable once restored (round 14)
+    # Missing or damaged: refused with a message, resumable once remedied (rounds 14, 15).
+    try:
         saved = _read(path, ("normalized", "lower", "upper", "sha256", "warm_starts"))
     except PopulationUnreadable as error:
-        raise SystemExit(f"{error}; restore the committed file from version control") from error
+        raise SystemExit(f"{error}; {remedy(error.__cause__, path)}") from error
     normalized = saved["normalized"]
     stored_lower, stored_upper = saved["lower"], saved["upper"]
     sha = str(saved["sha256"])
@@ -223,6 +223,20 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
     if arrays["normalized"].ndim != 2 or arrays["warm_starts"].ndim == 0:
         raise PopulationUnreadable(f"{shown} cannot be read (its rows are not a 2-D array)")
     return arrays
+
+
+def remedy(cause: BaseException | None, path: Path) -> str:
+    """What to do about a population file that could not be read, by why (rounds 11, 15).
+
+    Remade only when missing, as the command refuses a file that exists (round 10); the
+    directory is quoted, so the command can be pasted.
+    """
+    if isinstance(cause, FileNotFoundError):
+        return (f"make it with covsyn-initial-population --version "
+                f"{CURRENT_VERSION} --out-dir {shlex.quote(str(path.parent))}")
+    if isinstance(cause, PermissionError):
+        return "give this user permission to read it"
+    return "restore the committed file from version control"
 
 
 def describe(path: Path) -> dict:
