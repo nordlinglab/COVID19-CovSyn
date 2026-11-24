@@ -139,8 +139,16 @@ class Design(NamedTuple):
         for stream in self.streams:
             seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
         # What the optimiser refuses, refused here, before the pilot records the design and
-        # its runs fail hours in (code review round 4): n beyond the rows the population has
-        # without the warm starts, G beyond a stream's blocks, steps that would grow.
+        # its runs fail hours in (code review round 4): G beyond a stream's blocks, steps that
+        # would grow, n beyond the rows the population has without the warm starts. What needs
+        # no file comes first, so the file's state hides no fault of the design (round 11).
+        for n in self.pop_sizes:
+            if generations(n) not in run_size.GENERATIONS:
+                raise ValueError(f"--pop-sizes: n = {n} gives G = {generations(n)} generations, "
+                                 f"more than a stream's {run_size.GENERATIONS.stop - 1} blocks")
+            for a in self.alpha_0s:
+                step_schedule.checked_schedule(a, None, None, generations(n),
+                                               names=("--alpha-0s", "alpha_end", "G_plan"))
         path = initial_population.population_path(  # the repository's, from any directory
             initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable")
         try:  # the file's count, as load() takes it
@@ -157,12 +165,6 @@ class Design(NamedTuple):
             if n > rows:
                 raise ValueError(f"--pop-sizes: n = {n} is more than the {rows} fireflies the "
                                  f"population has{without}")
-            if generations(n) not in run_size.GENERATIONS:
-                raise ValueError(f"--pop-sizes: n = {n} gives G = {generations(n)} generations, "
-                                 f"more than a stream's {run_size.GENERATIONS.stop - 1} blocks")
-            for a in self.alpha_0s:
-                step_schedule.checked_schedule(a, None, None, generations(n),
-                                               names=("--alpha-0s", "alpha_end", "G_plan"))
         return self
 
     def record(self) -> dict[str, Any]:
@@ -179,11 +181,13 @@ class Design(NamedTuple):
         design = cls(tuple(int(n) for n in record["pop_sizes"]),
                      tuple(float(a) for a in record["alpha_0s"]),
                      tuple(int(s) for s in record["streams"]),
-                     bool(record["without_warm_starts"])).check()  # fmt: skip
-        if record.get("rule", design.rule) != design.rule:  # code review round 6
+                     bool(record["without_warm_starts"]))  # fmt: skip
+        # Before check(), which reads the population file: a replaced rule ends the resume
+        # whatever the file's state (code review rounds 6 and 11).
+        if record.get("rule", design.rule) != design.rule:
             raise ValueError(f"the pilot was begun under the {record['rule']!r} rule, which "
                              f"this version replaced by {design.rule!r}; start a new pilot")
-        return design
+        return design.check()
 
 
 PLAN = Design(POP_SIZES, ALPHA_0S, STREAMS, False)

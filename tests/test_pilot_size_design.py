@@ -370,3 +370,37 @@ def test_a_resume_with_an_unreadable_population_does_not_blame_the_design(
         ps.main(["--resume", str(out)])
     err = capsys.readouterr().err
     assert "cannot be checked" in err and "refused" not in err
+
+
+@pytest.fixture
+def no_population(monkeypatch, tmp_path):
+    """The population file missing: any read of it fails."""
+    from covsyn.calibration import initial_population as ip
+
+    missing = tmp_path / "initial_population_v1.npz"
+    monkeypatch.setattr(ip, "population_path", lambda version, directory=None: missing)
+    return missing
+
+
+@pytest.mark.usefixtures("no_population")
+@pytest.mark.parametrize(("design", "words"), [
+    (ps.Design((9,), (0.2,), (1, 2, 3), True), "G = "),  # G beyond a stream's blocks
+    (ps.Design((24,), (0.0001,), (1, 2, 3), True), "alpha"),  # a step that would grow
+])
+def test_a_fault_in_the_design_is_reported_before_the_file_is_read(design, words):
+    """What needs no file is checked first, so the file's state hides no fault of the design.
+
+    Code review round 11.
+    """
+    with pytest.raises(ValueError, match=words) as refusal:
+        design.check()
+    assert not isinstance(refusal.value, ps.PopulationUnchecked)
+
+
+@pytest.mark.usefixtures("no_population")
+def test_a_replaced_rule_is_reported_before_the_file_is_read():
+    """A resume under a replaced rule cannot go on, whatever the file's state (round 11)."""
+    record = {**RERUN.record(), "rule": "spread"}
+    with pytest.raises(ValueError, match="rule") as refusal:
+        ps.Design.from_record(record)
+    assert not isinstance(refusal.value, ps.PopulationUnchecked)
