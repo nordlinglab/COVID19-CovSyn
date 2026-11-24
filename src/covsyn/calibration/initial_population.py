@@ -185,7 +185,8 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 # Scope (code review rounds 18, 19): the guarantees are load()'s and rows_available()'s; the
 # optimiser, pilot 1 (which exits 1 for every refusal of load(), RunSizeOutOfRange
 # included) and pilot 2's design check pass their refusals on in those words. A command-line
-# entry point keeps its own status for its argument and design refusals (argparse exits 2),
+# entry point keeps its own status for its argument and design refusals (argparse exits 2;
+# pilot 2 so reports a population its design check cannot read, round 22),
 # pilot 2 reports a failed run as a RuntimeError naming the run's log, the pipeline as "the
 # optimiser failed (see <its log>)"; neither suggests a resume for status runs.NOT_RESUMABLE,
 # a fresh start included (rounds 18, 20). A file changed between two reads is not covered.
