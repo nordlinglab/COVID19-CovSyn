@@ -250,3 +250,11 @@ def test_the_message_names_the_file_once(tmp_path):
         ip.rows_available(path)
     assert str(unreadable.value).count(str(path)) == 1
     assert "No such file" in str(unreadable.value)
+
+
+@pytest.mark.parametrize(("rows", "left"), [(0, 0), (1, 1), (3, 1), (6, 1), (9, 4)])
+def test_the_count_is_the_rows_load_keeps(tmp_path, rows, left):
+    """Row 0 stays and rows 1 to 5, the 5 warm starts, go (code review rounds 12 and 13)."""
+    path = tmp_path / "p.npz"
+    np.savez(path, normalized=np.zeros((rows, 2)), warm_starts=np.array(list("abcde")))
+    assert ip.rows_available(path, True) == left

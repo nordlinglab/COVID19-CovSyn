@@ -198,8 +198,10 @@ def rows_available(path: Path, without_warm_starts: bool = False) -> int:
         raise PopulationUnreadable(f"{path} cannot be read (one array, not an .npz archive)")
     if normalized.ndim == 0 or warm_starts.ndim == 0:  # len() of a 0-d array fails
         raise PopulationUnreadable(f"{path} cannot be read (its rows are not an array)")
-    rows = len(normalized)
-    return rows - len(warm_starts) if without_warm_starts else rows
+    if not without_warm_starts:
+        return len(normalized)
+    # As load() takes them: row 0 stays, rows 1 to w go (code review round 12).
+    return len(normalized[:1]) + len(normalized[1 + len(warm_starts):])
 
 
 def describe(path: Path) -> dict:
