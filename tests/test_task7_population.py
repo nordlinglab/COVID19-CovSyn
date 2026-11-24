@@ -139,6 +139,27 @@ def test_more_fireflies_than_rows_or_none_are_refused(written, space, n):
     assert isinstance(stopped.value, SystemExit) and isinstance(stopped.value.code, str)
 
 
+def _one_array(path):
+    with open(path, "wb") as f:
+        np.save(f, np.zeros(3))
+
+
+def _no_sha256(path):
+    np.savez(path, normalized=np.zeros((3, 2)), lower=np.zeros(2), upper=np.ones(2),
+             warm_starts=np.array(["a"]))  # fmt: skip
+
+
+@pytest.mark.parametrize("damage", [_one_array, _no_sha256, lambda path: path.write_bytes(b"")])
+def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, damage):
+    """Not a traceback, and resumable: restoring the file makes a retry succeed (round 14)."""
+    path = tmp_path / "initial_population_v1.npz"
+    damage(path)
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 3, space.lower, space.upper)
+    assert isinstance(stopped.value.code, str) and "cannot be read" in stopped.value.code
+    assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
+
+
 def test_a_missing_population_stays_resumable(tmp_path, space):
     """A file put back makes a retry succeed, so a missing one is an ordinary failure."""
     with pytest.raises(SystemExit) as stopped:

@@ -130,19 +130,22 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
 
     Raises:
         RunSizeOutOfRange: n is not 1 to the rows available.
-        SystemExit: The file is missing or its rows do not match its SHA-256, or the
-            dimension or the bounds differ from those it was made with.
+        SystemExit: The file is missing, cannot be read, or its rows do not match its
+            SHA-256, or the dimension or the bounds differ from those it was made with.
     """
     path = Path(path)
     if not path.is_file():
         raise SystemExit(f"{path} not found: make it with covsyn-initial-population --version N")
-    with np.load(path) as saved:
-        normalized = saved["normalized"]
-        stored_lower, stored_upper = saved["lower"], saved["upper"]
-        sha = str(saved["sha256"])
-        # The file's own warm starts, which the code's WARM_STARTS may no longer match
-        # (code review round 4).
-        warm_starts = len(saved["warm_starts"])
+    try:  # a damaged file refused with a message, resumable once restored (round 14)
+        saved = _read(path, ("normalized", "lower", "upper", "sha256", "warm_starts"))
+    except PopulationUnreadable as error:
+        raise SystemExit(f"{error}; restore the committed file from version control") from error
+    normalized = saved["normalized"]
+    stored_lower, stored_upper = saved["lower"], saved["upper"]
+    sha = str(saved["sha256"])
+    # The file's own warm starts, which the code's WARM_STARTS may no longer match
+    # (code review round 4).
+    warm_starts = len(saved["warm_starts"])
     if digest(normalized, stored_lower, stored_upper) != sha:
         raise SystemExit(f"{path}: the rows or bounds no longer match its SHA-256")
     if without_warm_starts:
@@ -183,6 +186,22 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
             caller catches this alone; any other failure, a programming error, raises as
             itself (code review rounds 7 to 11).
     """
+    saved = _read(path, ("normalized", "warm_starts"))
+    normalized, warm_starts = saved["normalized"], saved["warm_starts"]
+    if not without_warm_starts:
+        return len(normalized)
+    # As load() takes them: row 0 stays, rows 1 to w go (code review round 12).
+    return len(normalized[:1]) + len(normalized[1 + len(warm_starts):])
+
+
+def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, np.ndarray]:
+    """The arrays ``keys`` of the population file, for load() and rows_available() alike.
+
+    Raises:
+        TypeError: ``path`` is not a path, a programming error (code review round 11).
+        PopulationUnreadable: The file cannot be read or decoded (see READ_ERRORS), holds one
+            array instead of an archive, or its rows are not a 2-D array.
+    """
     if not isinstance(path, str | bytes | os.PathLike):  # what np.load takes
         raise TypeError(f"path must be a path, got {type(path).__name__}")
     shown = os.fsdecode(path)  # a bytes path named as text (code review round 13)
@@ -192,7 +211,7 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
         archive = isinstance(saved, np.lib.npyio.NpzFile)
         if archive:
             with saved:
-                normalized, warm_starts = saved["normalized"], saved["warm_starts"]
+                arrays = {key: saved[key] for key in keys}
     except READ_ERRORS as error:
         # An OSError's text repeats the path; its strerror does not (code review round 11).
         reason = error.strerror if isinstance(error, OSError) and error.strerror else error
@@ -201,12 +220,9 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
     if not archive:
         raise PopulationUnreadable(f"{shown} cannot be read (one array, not an .npz archive)")
     # len() of a 0-d array fails, and load() stacks rows, which a 1-D array is not (round 14).
-    if normalized.ndim != 2 or warm_starts.ndim == 0:
+    if arrays["normalized"].ndim != 2 or arrays["warm_starts"].ndim == 0:
         raise PopulationUnreadable(f"{shown} cannot be read (its rows are not a 2-D array)")
-    if not without_warm_starts:
-        return len(normalized)
-    # As load() takes them: row 0 stays, rows 1 to w go (code review round 12).
-    return len(normalized[:1]) + len(normalized[1 + len(warm_starts):])
+    return arrays
 
 
 def describe(path: Path) -> dict:
