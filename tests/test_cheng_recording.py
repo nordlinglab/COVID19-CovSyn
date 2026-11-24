@@ -408,3 +408,13 @@ def test_contact_rows_without_any_day_record_nothing():
     contact["household_contacts_matrix"] = np.zeros((2, 0), dtype=bool)
     contact["household_effective_contacts_infection_time"] = [np.nan, np.nan]
     assert cr.recorded_bins(_course(), contact, back=4).sum() == 0
+
+
+def test_a_wrong_event_mask_is_refused_even_without_days():
+    """The mask's length is checked whether or not the rows have day columns."""
+    contact = _contact()
+    contact["municipality_contacts_matrix"] = np.zeros((3, 0), dtype=bool)
+    contact["municipality_event_mask"] = [False] * 5
+    contact["municipality_event_expected_contacts"] = np.zeros(20)
+    with pytest.raises(ValueError, match="municipality_event_mask"):
+        cr.recorded_bins(_course(), contact, back=4)

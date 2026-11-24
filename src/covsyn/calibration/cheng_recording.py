@@ -216,14 +216,15 @@ def _record_layer(out, contact, layer, onset, start, end, arrival):
         expected = contact.get("municipality_event_expected_contacts")
         if mask is not None and expected is not None:
             events = np.asarray(mask, dtype=bool)
+    if matrix.ndim == 2 and matrix.shape[0] and events is not None and (
+            len(events) != matrix.shape[0]):
+        raise ValueError(f"municipality_event_mask has {len(events)} entries for "
+                         f"{matrix.shape[0]} contact rows")
     if matrix.ndim == 2 and matrix.shape[0] and matrix.shape[1]:  # rows with no day: nothing
         times = np.full(matrix.shape[0], np.nan)
         recorded = np.asarray(contact.get(f"{layer}_effective_contacts_infection_time") or [],
                               dtype=float)
         times[:len(recorded)] = recorded  # the loop stops when the population runs out
-        if events is not None and len(events) != matrix.shape[0]:
-            raise ValueError(f"municipality_event_mask has {len(events)} entries for "
-                             f"{matrix.shape[0]} contact rows")
         # Vectorised over the contacts: the Python loop per row cost the objective's profile
         # its 80% run_covid share (Task 5 criterion; Mac test 2026-11-23).
         keep = np.ones(matrix.shape[0], dtype=bool) if events is None else ~events
