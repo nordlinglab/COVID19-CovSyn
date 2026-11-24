@@ -170,7 +170,7 @@ class PopulationUnreadable(ValueError):
     """The population file is missing or cannot be read, whatever the reason."""
 
 
-def rows_available(path: Path, without_warm_starts: bool = False) -> int:
+def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = False) -> int:
     """How many fireflies a run can take from the population at ``path``, as load() counts.
 
     Raises:
@@ -180,8 +180,9 @@ def rows_available(path: Path, without_warm_starts: bool = False) -> int:
             caller catches this alone; any other failure, a programming error, raises as
             itself (code review rounds 7 to 11).
     """
-    if not isinstance(path, str | os.PathLike):
+    if not isinstance(path, str | bytes | os.PathLike):  # what np.load takes
         raise TypeError(f"path must be a path, got {type(path).__name__}")
+    shown = os.fsdecode(path)  # a bytes path named as text (code review round 13)
     try:
         saved = np.load(path)
         # A single .npy array loads as an array, not an archive (code review round 12).
@@ -192,12 +193,12 @@ def rows_available(path: Path, without_warm_starts: bool = False) -> int:
     except READ_ERRORS as error:
         # An OSError's text repeats the path; its strerror does not (code review round 11).
         reason = error.strerror if isinstance(error, OSError) and error.strerror else error
-        raise PopulationUnreadable(f"{path} cannot be read ({type(error).__name__}: "
+        raise PopulationUnreadable(f"{shown} cannot be read ({type(error).__name__}: "
                                    f"{reason})") from error
     if not archive:
-        raise PopulationUnreadable(f"{path} cannot be read (one array, not an .npz archive)")
+        raise PopulationUnreadable(f"{shown} cannot be read (one array, not an .npz archive)")
     if normalized.ndim == 0 or warm_starts.ndim == 0:  # len() of a 0-d array fails
-        raise PopulationUnreadable(f"{path} cannot be read (its rows are not an array)")
+        raise PopulationUnreadable(f"{shown} cannot be read (its rows are not an array)")
     if not without_warm_starts:
         return len(normalized)
     # As load() takes them: row 0 stays, rows 1 to w go (code review round 12).

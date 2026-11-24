@@ -12,6 +12,7 @@ rows 1 to len(WARM_STARTS); a choice of the pilot mode, while production always 
 
 from __future__ import annotations
 
+import os
 import sys
 
 import numpy as np
@@ -258,3 +259,18 @@ def test_the_count_is_the_rows_load_keeps(tmp_path, rows, left):
     path = tmp_path / "p.npz"
     np.savez(path, normalized=np.zeros((rows, 2)), warm_starts=np.array(list("abcde")))
     assert ip.rows_available(path, True) == left
+
+
+def test_a_bytes_path_is_read(tmp_path):
+    """np.load takes a bytes path, so the check does too (code review round 12)."""
+    path = tmp_path / "p.npz"
+    np.savez(path, normalized=np.zeros((5, 2)), warm_starts=np.array(["a"]))
+    assert ip.rows_available(os.fsencode(path)) == 5
+
+
+def test_a_bytes_path_is_named_as_text(tmp_path):
+    """Not as b'...' in the message the user reads (code review round 13)."""
+    path = tmp_path / "absent.npz"
+    with pytest.raises(ip.PopulationUnreadable) as unreadable:
+        ip.rows_available(os.fsencode(path))
+    assert str(unreadable.value).startswith(f"{path} cannot be read")
