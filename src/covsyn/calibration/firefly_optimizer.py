@@ -2345,13 +2345,14 @@ def main() -> None:
     else:
         population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
         try:
-            population = initial_population.load(population_file, pop_size, lower_bound,
-                                                 upper_bound,
-                                                 without_warm_starts=without_warm_starts)
+            population, metadata = initial_population.load_with_metadata(
+                population_file, pop_size, lower_bound, upper_bound,
+                without_warm_starts=without_warm_starts,
+            )
         # n below 1 or beyond the rows: a resume keeps the n (2026-11-24)
         except initial_population.RunSizeOutOfRange as error:
             not_resumable(str(error))
-        fa.run_settings['initial_population'] = initial_population.describe(population_file)
+        fa.run_settings['initial_population'] = metadata
         if mode in ('pilot', 'production'):  # which rows the run took (2026-11-24)
             fa.run_settings['initial_population']['without_warm_starts'] = without_warm_starts
 

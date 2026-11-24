@@ -125,7 +125,19 @@ class RunSizeOutOfRange(SystemExit):
 
 def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.ndarray,
          without_warm_starts: bool = False) -> np.ndarray:
-    """The first ``n`` rows of the population at ``path``, for a run with these bounds.
+    """Return the first ``n`` validated rows, optionally excluding warm starts."""
+    rows, _ = load_with_metadata(path, n, lower, upper, without_warm_starts)
+    return rows
+
+
+def load_with_metadata(
+    path: str | bytes | os.PathLike,
+    n: int,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    without_warm_starts: bool = False,
+) -> tuple[np.ndarray, dict[str, int | str]]:
+    """The first ``n`` rows and verified metadata from a single read of ``path``.
 
     without_warm_starts leaves out the warm starts the file records (rows 1 to their number),
     the fitted vectors of earlier runs, so the run starts from the literature vector and the
@@ -167,7 +179,7 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
         moved = np.flatnonzero((lower != stored_lower) | (upper != stored_upper))
         raise SystemExit(f"{path} was made for other bounds (P[{', '.join(map(str, moved))}] "
                          f"differ); make a new version rather than clip")  # fmt: skip
-    return normalized[:n].copy()
+    return normalized[:n].copy(), {"version": int(saved["version"]), "sha256": sha}
 
 
 # The reading contract of load() and rows_available() (user decision of 2026-11-24, after
@@ -194,7 +206,7 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 # pilot 2 so reports a population its design check cannot read, round 22),
 # pilot 2 reports a failed run as a RuntimeError naming the run's log, the pipeline as "the
 # optimiser failed (see <its log>)"; neither suggests a resume for status runs.NOT_RESUMABLE,
-# a fresh start included (rounds 18, 20). A file changed between two reads is not covered.
+# a fresh start included (rounds 18, 20).
 # Imprecision outside these guarantees, such as advice that suits only some repository
 # states, is not a defect.
 #
@@ -234,8 +246,7 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
     return len(normalized[:1]) + len(normalized[1 + len(warm_starts):])
 
 
-# The arrays load() reads, version included, which the optimiser's describe() reads next
-# (round 18); rows_available() reads them all too, so the two cannot drift apart (round 19).
+# Both load() and rows_available() decode the same members (code review round 19).
 ARRAYS = ("normalized", "lower", "upper", "sha256", "warm_starts", "version")
 
 
@@ -359,10 +370,10 @@ def remedy(cause: BaseException | None, path: Path) -> str:
     return committed
 
 
-def describe(path: Path) -> dict:
-    """The version and SHA-256 config.json records for the population at ``path``."""
-    with np.load(path) as saved:
-        return {"version": int(saved["version"]), "sha256": str(saved["sha256"])}
+def describe(path: Path) -> dict[str, int | str]:
+    """Return the stored version and SHA-256 without verifying the digest."""
+    saved = _read(path)
+    return {"version": int(saved["version"]), "sha256": str(saved["sha256"])}
 
 
 def main(argv: list[str] | None = None) -> Path:
