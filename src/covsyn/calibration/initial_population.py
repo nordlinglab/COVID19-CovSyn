@@ -17,8 +17,6 @@ import argparse
 import hashlib
 import os
 import sys
-import zipfile
-import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -128,7 +126,7 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
     the fitted vectors of earlier runs, so the run starts from the literature vector and the
     Latin hypercube (pilot 2 rerun, user decision 2026-11-24).
 
-    Keeps the reading contract above READ_ERRORS.
+    Keeps the reading contract above PopulationUnreadable.
 
     Raises:
         TypeError: ``path`` is not a path.
@@ -189,15 +187,12 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 # Imprecision outside these guarantees, such as advice that suits only some repository
 # states, is not a defect.
 #
-# What reading and decoding an .npz can raise: OSError (missing, unreadable), EOFError
-# (empty), ValueError (not an .npz, pickled data), KeyError (an array missing), BadZipFile
-# (truncated), zlib.error (a corrupt stream), NotImplementedError (an unknown compression),
-# RuntimeError (zipfile's other refusals), MemoryError and OverflowError (a header claiming
-# a shape too large to allocate or index, code review round 18). The file is 256 rows, so a
-# MemoryError while reading it is taken for a damaged header, not a machine out of memory.
-READ_ERRORS = (OSError, EOFError, ValueError, KeyError, zipfile.BadZipFile, zlib.error,
-               NotImplementedError, RuntimeError, MemoryError, OverflowError)
-
+# A file failure is told from a programming error by where it happens (code review round 19,
+# after a logic review): _read() checks its argument before touching the file and the
+# contents after reading them, and its try block holds nothing but numpy and zipfile reading
+# the archive. Whatever is raised in there is the file's: the set is open -- each
+# compression zipfile supports raises its own errors (zlib, bz2, LZMA), and numpy allocates
+# the shape a header claims before reading its data -- so no list of them can be complete.
 
 class PopulationUnreadable(ValueError):
     """The population file is missing or cannot be read, whatever the reason."""
@@ -206,9 +201,9 @@ class PopulationUnreadable(ValueError):
 def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = False) -> int:
     """How many fireflies a run can take from the population at ``path``, as load() counts.
 
-    Keeps the reading contract above READ_ERRORS. The file's SHA-256 is not checked, so a
-    file edited without being hashed again passes here and load() refuses it (code review
-    round 16).
+    Keeps the reading contract above PopulationUnreadable. The file's SHA-256 is not
+    checked, so a file edited without being hashed again passes here and load() refuses it
+    (code review round 16).
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
@@ -233,9 +228,9 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
-        PopulationUnreadable: The file cannot be read or decoded (see READ_ERRORS), holds one
-            array instead of an archive, or its rows, warm starts or bounds are not what
-            load() computes with.
+        PopulationUnreadable: The file cannot be read or decoded (whatever numpy and zipfile
+            raise reading it), holds one array instead of an archive, or its rows, warm
+            starts or bounds are not what load() computes with.
     """
     if not isinstance(path, str | bytes | os.PathLike):  # what np.load takes
         raise TypeError(f"path must be a path, got {type(path).__name__}")
@@ -247,7 +242,7 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
         if archive:
             with saved:
                 arrays = {key: saved[key] for key in keys}
-    except READ_ERRORS as error:
+    except Exception as error:  # only numpy and zipfile run here (see the contract above)
         # An OSError's text repeats the path; its strerror does not (code review round 11).
         reason = error.strerror if isinstance(error, OSError) and error.strerror else error
         raise PopulationUnreadable(f"{shown} cannot be read ({type(error).__name__}: "

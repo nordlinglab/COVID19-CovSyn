@@ -5,7 +5,7 @@
 Each file state of the contract, through both entry points: what each returns or raises,
 the exit status, the path named once (in a directory whose name ends in a parenthesis), the
 advice's direction, and that the file loads once put right. The contract itself is the
-comment above initial_population.READ_ERRORS.
+comment above initial_population.PopulationUnreadable.
 """
 
 from __future__ import annotations
@@ -84,6 +84,25 @@ def _a_forged_header(path):
     return path
 
 
+def _corrupt_lzma(path):
+    """An archive whose members are LZMA-compressed, the data corrupted (round 19)."""
+    import zipfile
+
+    with np.load(COMMITTED) as saved:
+        arrays = {key: saved[key] for key in saved.files}
+    np.savez(path, **arrays)
+    with zipfile.ZipFile(path) as plain:
+        members = {name: plain.read(name) for name in plain.namelist()}
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_LZMA) as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    raw = bytearray(path.read_bytes())
+    for i in range(200, 230):
+        raw[i] ^= 0xFF
+    path.write_bytes(bytes(raw))
+    return path
+
+
 # state, the advice it gets, whether putting the file right at the path fixes it
 REFUSED = [
     (_missing, "last commit", True),
@@ -92,6 +111,7 @@ REFUSED = [
     (_empty, "last commit", True),
     (_no_rows, "last commit", True),
     (_a_forged_header, "last commit", True),
+    (_corrupt_lzma, "last commit", True),
 ]
 
 
