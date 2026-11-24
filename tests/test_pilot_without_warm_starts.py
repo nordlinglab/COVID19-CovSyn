@@ -192,7 +192,8 @@ def _unknown_compression(path):
 
 def _corrupt_deflate(path):
     np.savez_compressed(path, normalized=np.arange(4000.0).reshape(40, 100),
-                        warm_starts=np.array(["a"]))  # fmt: skip
+                        warm_starts=np.array(["a"]), sha256=np.array("x"),
+             version=np.array(1))  # fmt: skip
     raw = bytearray(path.read_bytes())
     for i in range(200, 240):
         raw[i] ^= 0xFF
@@ -243,7 +244,8 @@ def test_a_bug_in_the_body_is_not_taken_for_an_unreadable_file(tmp_path, monkeyp
     """A failure outside reading and decoding raises as itself."""
     path = tmp_path / "p.npz"
     np.savez(path, normalized=np.zeros((5, 2)), lower=np.zeros(2), upper=np.ones(2),
-             warm_starts=np.array(["a"]))  # fmt: skip
+             warm_starts=np.array(["a"]), sha256=np.array("x"),
+             version=np.array(1))  # fmt: skip
     monkeypatch.setattr(ip, "len", lambda value: 1 / 0, raising=False)
     with pytest.raises(ZeroDivisionError):
         ip.rows_available(path)
@@ -263,7 +265,8 @@ def test_the_count_is_the_rows_load_keeps(tmp_path, rows, left):
     """Row 0 stays and rows 1 to 5, the 5 warm starts, go (code review rounds 12 and 13)."""
     path = tmp_path / "p.npz"
     np.savez(path, normalized=np.zeros((rows, 2)), lower=np.zeros(2), upper=np.ones(2),
-             warm_starts=np.array(list("abcde")))  # fmt: skip
+             warm_starts=np.array(list("abcde")), sha256=np.array("x"),
+             version=np.array(1))  # fmt: skip
     assert ip.rows_available(path, True) == left
 
 
@@ -271,7 +274,8 @@ def test_a_bytes_path_is_read(tmp_path):
     """np.load takes a bytes path, so the check does too (code review round 12)."""
     path = tmp_path / "p.npz"
     np.savez(path, normalized=np.zeros((5, 2)), lower=np.zeros(2), upper=np.ones(2),
-             warm_starts=np.array(["a"]))  # fmt: skip
+             warm_starts=np.array(["a"]), sha256=np.array("x"),
+             version=np.array(1))  # fmt: skip
     assert ip.rows_available(os.fsencode(path)) == 5
 
 

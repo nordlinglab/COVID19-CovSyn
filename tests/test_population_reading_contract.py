@@ -202,6 +202,15 @@ def test_a_version_describe_cannot_read_is_refused_by_load(place, space, version
     assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
 
 
+@pytest.mark.parametrize("dropped", ["version", "sha256"])
+def test_the_design_check_refuses_what_load_would(place, dropped):
+    """rows_available() reads every array load() does (code review round 19)."""
+    with np.load(COMMITTED) as saved:
+        np.savez(place, **{key: saved[key] for key in saved.files if key != dropped})
+    with pytest.raises(ip.PopulationUnreadable):
+        ip.rows_available(place)
+
+
 def test_an_n_beyond_a_good_file_is_a_run_size_not_a_file_fault(place, space):
     """Guarantees 3, 4: RunSizeOutOfRange, exit 1 here; only the optimiser maps it to 3."""
     _put_right(place)

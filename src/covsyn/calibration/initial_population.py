@@ -137,8 +137,7 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
     path = Path(os.fsdecode(path))  # the paths rows_available takes (code review round 14)
     # Missing or damaged: refused with a message, resumable once remedied (rounds 14, 15).
     try:
-        # version too, which the optimiser's describe() reads next (code review round 18)
-        saved = _read(path, ("normalized", "lower", "upper", "sha256", "warm_starts", "version"))
+        saved = _read(path)
     except PopulationUnreadable as error:
         raise SystemExit(f"{error}; {remedy(error.__cause__, path)}") from error
     normalized = saved["normalized"]
@@ -213,9 +212,9 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
             any other failure, a programming error, raises as itself (code review rounds 7
             to 15).
     """
-    # Every array load() computes with, so what passes here loads, unless its SHA-256 no
-    # longer matches, which only load() checks (rounds 15, 16).
-    saved = _read(path, ("normalized", "lower", "upper", "warm_starts"))
+    # The arrays load() reads, so what passes here loads, unless its SHA-256 no longer
+    # matches, which only load() checks (rounds 15, 16, 19).
+    saved = _read(path)
     normalized, warm_starts = saved["normalized"], saved["warm_starts"]
     if not without_warm_starts:
         return len(normalized)
@@ -223,8 +222,13 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
     return len(normalized[:1]) + len(normalized[1 + len(warm_starts):])
 
 
-def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, np.ndarray]:
-    """The arrays ``keys`` of the population file, for load() and rows_available() alike.
+# The arrays load() reads, version included, which the optimiser's describe() reads next
+# (round 18); rows_available() reads them all too, so the two cannot drift apart (round 19).
+ARRAYS = ("normalized", "lower", "upper", "sha256", "warm_starts", "version")
+
+
+def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
+    """The ARRAYS of the population file, for load() and rows_available() alike.
 
     Raises:
         TypeError: ``path`` is not a path, a programming error (code review round 11).
@@ -241,7 +245,7 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
         archive = isinstance(saved, np.lib.npyio.NpzFile)
         if archive:
             with saved:
-                arrays = {key: saved[key] for key in keys}
+                arrays = {key: saved[key] for key in ARRAYS}
     except Exception as error:  # only numpy and zipfile run here (see the contract above)
         # An OSError's text repeats the path; its strerror does not (code review round 11).
         reason = error.strerror if isinstance(error, OSError) and error.strerror else error
@@ -258,11 +262,10 @@ def _read(path: str | bytes | os.PathLike, keys: tuple[str, ...]) -> dict[str, n
     if arrays["warm_starts"].ndim == 0:
         raise PopulationUnreadable(f"{shown} cannot be read (its warm starts are not a list)")
     if any(arrays[key].shape != rows.shape[1:] or arrays[key].dtype.kind not in "iuf"
-           for key in ("lower", "upper") if key in arrays):  # one bound a parameter (round 16)
+           for key in ("lower", "upper")):  # one bound a parameter (round 16)
         raise PopulationUnreadable(f"{shown} cannot be read (its bounds are not one number a "
                                    f"parameter)")
-    if "version" in arrays and (arrays["version"].ndim != 0
-                                or arrays["version"].dtype.kind not in "iu"):
+    if arrays["version"].ndim != 0 or arrays["version"].dtype.kind not in "iu":
         raise PopulationUnreadable(f"{shown} cannot be read (its version is not a whole number)")
     return arrays
 
