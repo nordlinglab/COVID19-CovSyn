@@ -2288,7 +2288,14 @@ def main() -> None:
                     sys.exit(f"--mode production needs {flag}, pilot 2's choice")
         else:
             pop_size, _, simulations = recorded_size(args.resume)
-            args.pilot = recorded_settings(args.resume).get('pilot')
+            recorded = recorded_settings(args.resume)
+            args.pilot = recorded.get('pilot')
+            # Production never uses the warm starts (2026-11-24); a run begun with them,
+            # before that decision, is not to be continued (code review round 6).
+            population = recorded.get('initial_population')
+            if not (isinstance(population, dict) and population.get('without_warm_starts') is True):
+                not_resumable(f'{args.resume} cannot be resumed: it began with the warm starts, '
+                              f'which production no longer uses; start a new run')
     elif args.simulations is not None:
         sys.exit('--simulations changes the objective, so it is for --mode profile, pilot or '
                  'production only')

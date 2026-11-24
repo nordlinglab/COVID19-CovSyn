@@ -116,3 +116,46 @@ def test_production_always_starts_without_the_warm_starts(started):  # noqa: F81
     want = ip.load(POPULATION, 48, lower, upper, without_warm_starts=True)
     np.testing.assert_array_equal(seen["initial_population"], want)
     assert seen["engine"].run_settings["initial_population"]["without_warm_starts"] is True
+
+
+def _production_run(path, population):
+    """A production run's directory with a checkpoint, its config.json naming its population."""
+    import json
+
+    from tests.test_task4_resume import RESUMABLE
+
+    recorded = {"mode": "production", "pop_size": 4, "max_generations": 1000, "simulations": 300,
+                "pilot": "20261201-000000_abcdef0_pilot-size", **RESUMABLE,
+                "initial_population": population}  # fmt: skip
+    (path / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": recorded}))
+    (path / "checkpoints").mkdir()
+    (path / "checkpoints" / "initial.npz").write_text("x")
+    lower, upper = _space()
+    np.savetxt(path / "bound.txt", np.vstack((lower, upper)))
+    return path
+
+
+@pytest.mark.parametrize("population", [{"version": 1, "sha256": "x"},
+                                        {"version": 1, "sha256": "x",
+                                         "without_warm_starts": False}])  # fmt: skip
+def test_a_production_run_begun_with_the_warm_starts_does_not_resume(
+    monkeypatch, tmp_path, capsys, population
+):
+    """Code review round 6: its result would not be the calibration's own."""
+    from covsyn.runtime import runs
+
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume",
+                                      str(_production_run(tmp_path, population))])  # fmt: skip
+    with pytest.raises(SystemExit) as stop:
+        fo.main()
+    assert stop.value.code == runs.NOT_RESUMABLE
+    assert "warm starts" in capsys.readouterr().err
+
+
+def test_a_production_run_begun_without_them_resumes(monkeypatch, tmp_path):
+    """Recorded without the warm starts: the resume goes on."""
+    from tests.test_task9_pilot_mode import _resume
+
+    run = _production_run(tmp_path, {"version": 1, "sha256": "x", "without_warm_starts": True})
+    seen = _resume(monkeypatch, run)
+    assert seen["engine"].pop_size == 4
