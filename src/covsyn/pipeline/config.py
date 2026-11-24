@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import tomllib
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -200,7 +201,9 @@ def _check_production_rows(pop_size: int, source: str) -> None:
     try:  # the repository's file, wherever the pipeline is started (code review round 7)
         rows = initial_population.rows_available(initial_population.population_path(
             initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable"), True)
-    except Exception:  # any unreadable file: the optimiser loads and refuses it (round 7)
+    # Any unreadable file -- missing, empty or truncated -- is the optimiser's to refuse (code
+    # review round 7); only read errors, so a programming error still raises (round 8).
+    except (OSError, EOFError, KeyError, ValueError, zipfile.BadZipFile):
         return
     if pop_size > rows:
         raise ValueError(f"{source}: [optimise] pop_size is {pop_size}, but production starts "

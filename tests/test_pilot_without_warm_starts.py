@@ -207,3 +207,13 @@ def test_a_damaged_population_file_leaves_the_refusal_to_the_optimiser(
     broken.write_bytes(content)
     monkeypatch.setattr(ip, "population_path", lambda version, directory=None: broken)
     assert pc.parse(PRODUCTION, "t").pop_size == 48
+
+
+def test_a_programming_error_in_the_row_check_is_not_hidden(monkeypatch):
+    """Only an unreadable file is left to the optimiser; a missing function still raises."""
+    from covsyn.pipeline import config as pc
+    from tests.test_task9_production_pipeline import PRODUCTION
+
+    monkeypatch.delattr(ip, "rows_available")
+    with pytest.raises(AttributeError):
+        pc.parse(PRODUCTION, "t")
