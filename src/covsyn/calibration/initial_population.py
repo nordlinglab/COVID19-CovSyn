@@ -93,12 +93,18 @@ def write(path: Path, normalized: np.ndarray, space: parameter_space.ParameterSp
     temporary.replace(path)
 
 
-def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray) -> np.ndarray:
+def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
+         without_warm_starts: bool = False) -> np.ndarray:
     """The first ``n`` rows of the population at ``path``, for a run with these bounds.
+
+    without_warm_starts leaves out rows 1 to len(WARM_STARTS), the fitted vectors of earlier
+    runs, so the run starts from the literature vector and the Latin hypercube (pilot 2 rerun,
+    user decision 2026-11-24).
 
     Raises:
         SystemExit: The file is missing or its rows do not match its SHA-256, n is not 1 to
-            N_MAX, or the dimension or the bounds differ from those it was made with.
+            the rows available, or the dimension or the bounds differ from those it was made
+            with.
     """
     path = Path(path)
     if not path.is_file():
@@ -109,8 +115,12 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray) -> np.ndarray
         sha = str(saved["sha256"])
     if digest(normalized, stored_lower, stored_upper) != sha:
         raise SystemExit(f"{path}: the rows or bounds no longer match its SHA-256")
+    if without_warm_starts:
+        normalized = np.vstack([normalized[:1], normalized[1 + len(WARM_STARTS):]])
     if not 1 <= n <= len(normalized):
-        raise SystemExit(f"{path} holds {len(normalized)} fireflies; a run of {n} cannot start")
+        without = " without the warm starts" if without_warm_starts else ""
+        raise SystemExit(f"{path} holds {len(normalized)} fireflies{without}; a run of {n} "
+                         f"cannot start")
     if len(lower) != normalized.shape[1]:
         raise SystemExit(f"{path} was made for dimension {normalized.shape[1]}, not {len(lower)}; "
                          f"make a new version")  # fmt: skip

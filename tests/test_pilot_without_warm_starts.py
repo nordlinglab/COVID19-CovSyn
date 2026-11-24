@@ -1,0 +1,91 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""A pilot run can start without the warm starts, the fitted vectors of earlier runs.
+
+Pilot 2 of 2026-11-23 (9792f7f) returned run 19, row 2 of the initial population, as the best
+vector of 11 of its 12 runs: kept in the elite from generation 0, it was never beaten, so every
+setting "agreed" and the rule compared nothing (user decision 2026-11-24: rerun without it).
+--without-warm-starts takes the literature vector and then the Latin hypercube rows, leaving out
+rows 1 to len(WARM_STARTS); for the pilot mode only, as the production's population is decided
+after this pilot.
+"""
+
+from __future__ import annotations
+
+import sys
+
+import numpy as np
+import pytest
+
+from covsyn.calibration import firefly_optimizer as fo
+from covsyn.calibration import initial_population as ip
+from covsyn.calibration import parameter_space
+from tests.test_task7_optimiser import POPULATION, started  # noqa: F401 (a fixture)
+
+PILOT = ("--mode", "pilot", "--pop-size", "24", "--generations", "415", "--simulations", "3000",
+         "--alpha-0", "0.2")  # fmt: skip
+
+
+def _space():
+    space = parameter_space.load()
+    return space.lower, space.upper
+
+
+def test_without_warm_starts_the_rows_are_the_literature_then_the_hypercube():
+    """Row 0, then rows 1 + len(WARM_STARTS) onwards."""
+    lower, upper = _space()
+    rows = ip.load(ip.population_path(1), 24, lower, upper, without_warm_starts=True)
+    with np.load(ip.population_path(1)) as saved:
+        everything = saved["normalized"]
+    skip = 1 + len(ip.WARM_STARTS)
+    np.testing.assert_array_equal(rows, np.vstack([everything[:1], everything[skip:skip + 23]]))
+
+
+def test_with_warm_starts_the_rows_are_unchanged():
+    """The default still takes the first n rows."""
+    lower, upper = _space()
+    with np.load(ip.population_path(1)) as saved:
+        first = saved["normalized"][:24]
+    np.testing.assert_array_equal(ip.load(ip.population_path(1), 24, lower, upper), first)
+
+
+def test_without_warm_starts_fewer_fireflies_fit():
+    """N_MAX - len(WARM_STARTS) rows are left; one more is refused."""
+    lower, upper = _space()
+    most = ip.N_MAX - len(ip.WARM_STARTS)
+    assert len(ip.load(ip.population_path(1), most, lower, upper, without_warm_starts=True)) == most
+    with pytest.raises(SystemExit, match="warm starts"):
+        ip.load(ip.population_path(1), most + 1, lower, upper, without_warm_starts=True)
+
+
+def test_a_pilot_run_can_start_without_the_warm_starts(started):  # noqa: F811
+    """The optimiser takes those rows and records that it left the warm starts out."""
+    seen = started(*PILOT, "--without-warm-starts")
+    lower, upper = _space()
+    want = ip.load(POPULATION, 24, lower, upper, without_warm_starts=True)
+    np.testing.assert_array_equal(seen["initial_population"], want)
+    assert seen["engine"].run_settings["initial_population"]["without_warm_starts"] is True
+
+
+def test_a_pilot_run_records_that_it_kept_them(started):  # noqa: F811
+    """The default is recorded too, so every config.json says which rows the run took."""
+    seen = started(*PILOT)
+    assert seen["engine"].run_settings["initial_population"]["without_warm_starts"] is False
+
+
+@pytest.mark.parametrize("mode", ["train", "production"])
+def test_leaving_the_warm_starts_out_is_for_the_pilot_only(monkeypatch, tmp_path, mode):
+    """Refused in any other mode, before a run directory is claimed."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--mode", mode, "--without-warm-starts",
+                                      "--run-dir", str(tmp_path / "r")])  # fmt: skip
+    with pytest.raises(SystemExit, match="--without-warm-starts"):
+        fo.main()
+    assert not (tmp_path / "r").exists()
+
+
+def test_a_resume_refuses_the_flag(monkeypatch, tmp_path):
+    """A resumed run keeps the rows it started with."""
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(tmp_path),
+                                      "--without-warm-starts"])  # fmt: skip
+    with pytest.raises(SystemExit, match="--without-warm-starts"):
+        fo.main()

@@ -2157,6 +2157,8 @@ def resume_arguments(args: argparse.Namespace) -> str:
                                       ('--pop-size', getattr(args, 'pop_size', None)),
                                       ('--generations', getattr(args, 'generations', None)),
                                       ('--pilot', getattr(args, 'pilot', None)),
+                                      ('--without-warm-starts',
+                                       getattr(args, 'without_warm_starts', False) or None),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
@@ -2236,6 +2238,9 @@ def main() -> None:
                         help="planned run length G_plan (default: the mode's generations)")
     parser.add_argument('--stage-timings', action='store_true',
                         help="time run_covid's stages into timings_evaluation.csv")
+    parser.add_argument('--without-warm-starts', action='store_true',
+                        help='pilot mode: leave the warm starts (fitted vectors of earlier runs) '
+                             'out of the initial population')
     args = parser.parse_args()
     if args.warm_start is not None and args.resume is None:
         sys.exit('--warm_start is gone (Task 7): the warm starts are rows of the initial '
@@ -2253,6 +2258,8 @@ def main() -> None:
     if mode not in OPTIMISER_MODES:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
+    if args.without_warm_starts and mode != 'pilot':  # pilot 2 rerun (2026-11-24)
+        sys.exit(f'--without-warm-starts is for --mode pilot only, not --mode {mode}')
     pop_size, betamin, gamma = OPTIMISER_MODES[mode]
     max_generations = step_schedule.MODE_GENERATIONS[mode]
     # Task 5: a profile has n = workers, 2 generations, and S from the command line.
@@ -2326,8 +2333,12 @@ def main() -> None:
         check_resumed_bounds(args.resume, lower_bound, upper_bound)
     else:
         population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
-        population = initial_population.load(population_file, pop_size, lower_bound, upper_bound)
+        population = initial_population.load(population_file, pop_size, lower_bound, upper_bound,
+                                             without_warm_starts=args.without_warm_starts)
         fa.run_settings['initial_population'] = initial_population.describe(population_file)
+        if mode == 'pilot':  # which rows a pilot run took (pilot 2 rerun, 2026-11-24)
+            fa.run_settings['initial_population']['without_warm_starts'] = (
+                args.without_warm_starts)
 
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:
