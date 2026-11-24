@@ -89,6 +89,10 @@ def generations(pop_size: int) -> int:
     return (BUDGET - pop_size) // pop_size
 
 
+class DesignInvalid(ValueError):
+    """The requested or recorded pilot design is invalid."""
+
+
 class PopulationUnchecked(ValueError):
     """The design could not be checked: the population file cannot be read."""
 
@@ -116,7 +120,7 @@ class Design(NamedTuple):
         """The design, if it can run.
 
         Raises:
-            ValueError: An empty or repeated list, fewer than two streams, an n below 2 or
+            DesignInvalid: An empty or repeated list, fewer than two streams, an n below 2 or
                 beyond the population's rows (without the warm starts if so), an n whose G
                 exceeds a stream's blocks, an alpha_0 not positive or below alpha_end,
                 alpha_0s that would share a run directory, or a stream outside the
@@ -125,30 +129,36 @@ class Design(NamedTuple):
         for name, values in (("pop_sizes", self.pop_sizes), ("alpha_0s", self.alpha_0s),
                              ("streams", self.streams)):  # fmt: skip
             if not values or len(set(values)) != len(values):
-                raise ValueError(f"{name} must be distinct values, got {values!r}")
+                raise DesignInvalid(f"{name} must be distinct values, got {values!r}")
         if len(self.streams) < 2:
-            raise ValueError("a setting needs at least two streams to compare its runs")
+            raise DesignInvalid("a setting needs at least two streams to compare its runs")
         if min(self.pop_sizes) < 2:
-            raise ValueError(f"a population needs at least 2 fireflies, got {self.pop_sizes}")
+            raise DesignInvalid(f"a population needs at least 2 fireflies, got {self.pop_sizes}")
         if not all(np.isfinite(a) and a > 0 for a in self.alpha_0s):
-            raise ValueError(f"alpha_0 must be positive, got {self.alpha_0s}")
+            raise DesignInvalid(f"alpha_0 must be positive, got {self.alpha_0s}")
         names = {run_name("", Setting(2, a, 1)) for a in self.alpha_0s}
         if len(names) != len(self.alpha_0s):  # code review round 4
-            raise ValueError(f"alpha_0s {self.alpha_0s} would share run directories, whose "
+            raise DesignInvalid(f"alpha_0s {self.alpha_0s} would share run directories, whose "
                              f"names keep 6 significant digits")
         for stream in self.streams:
-            seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
+            try:
+                seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
+            except ValueError as error:
+                raise DesignInvalid(str(error)) from error
         # What the optimiser refuses, refused here, before the pilot records the design and
         # its runs fail hours in (code review round 4): G beyond a stream's blocks, steps that
         # would grow, n beyond the rows the population has without the warm starts. What needs
         # no file comes first, so the file's state hides no fault of the design (round 11).
         for n in self.pop_sizes:
             if generations(n) not in run_size.GENERATIONS:
-                raise ValueError(f"--pop-sizes: n = {n} gives G = {generations(n)} generations, "
+                raise DesignInvalid(f"--pop-sizes: n = {n} gives G = {generations(n)} generations, "
                                  f"more than a stream's {run_size.GENERATIONS.stop - 1} blocks")
             for a in self.alpha_0s:
-                step_schedule.checked_schedule(a, None, None, generations(n),
-                                               names=("--alpha-0s", "alpha_end", "G_plan"))
+                try:
+                    step_schedule.checked_schedule(a, None, None, generations(n),
+                                                   names=("--alpha-0s", "alpha_end", "G_plan"))
+                except ValueError as error:
+                    raise DesignInvalid(str(error)) from error
         path = initial_population.population_path(  # the repository's, from any directory
             initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable")
         try:  # the file's count, as load() takes it
@@ -160,7 +170,7 @@ class Design(NamedTuple):
         without = " without the warm starts" if self.without_warm_starts else ""
         for n in self.pop_sizes:
             if n > rows:
-                raise ValueError(f"--pop-sizes: n = {n} is more than the {rows} fireflies the "
+                raise DesignInvalid(f"--pop-sizes: n = {n} is more than the {rows} fireflies the "
                                  f"population has{without}")
         return self
 
@@ -175,14 +185,17 @@ class Design(NamedTuple):
         """The design config.json records; PLAN for a pilot begun before designs existed."""
         if record is None:
             return PLAN
-        design = cls(tuple(int(n) for n in record["pop_sizes"]),
-                     tuple(float(a) for a in record["alpha_0s"]),
-                     tuple(int(s) for s in record["streams"]),
-                     bool(record["without_warm_starts"]))  # fmt: skip
+        try:
+            design = cls(tuple(int(n) for n in record["pop_sizes"]),
+                         tuple(float(a) for a in record["alpha_0s"]),
+                         tuple(int(s) for s in record["streams"]),
+                         bool(record["without_warm_starts"]))  # fmt: skip
+        except (ValueError, KeyError, TypeError) as error:
+            raise DesignInvalid(str(error)) from error
         # Before check(), which reads the population file: a replaced rule ends the resume
         # whatever the file's state (code review rounds 6 and 11).
         if record.get("rule", design.rule) != design.rule:
-            raise ValueError(f"the pilot was begun under the {record['rule']!r} rule, which "
+            raise DesignInvalid(f"the pilot was begun under the {record['rule']!r} rule, which "
                              f"this version replaced by {design.rule!r}; start a new pilot")
         return design.check()
 
@@ -483,7 +496,7 @@ def main(argv: list[str] | None = None) -> Path:
                             args.streams or STREAMS, args.without_warm_starts).check()
         except PopulationUnchecked as error:  # the file's fault, as on resume (round 11)
             parser.error(f"the design cannot be checked: {error}")
-        except ValueError as error:
+        except DesignInvalid as error:
             parser.error(f"design: {error}")
     if args.resume is not None:
         # Absolute, as the optimiser runs from the repository root, without "..", and not
@@ -505,7 +518,7 @@ def main(argv: list[str] | None = None) -> Path:
             design = Design.from_record(recorded_design)
         except PopulationUnchecked as error:  # the file's fault, not the design's (round 10)
             parser.error(f"pilot 2 in {out}: its design cannot be checked: {error}")
-        except (ValueError, KeyError, TypeError) as error:
+        except DesignInvalid as error:
             parser.error(f"pilot 2 in {out}: the recorded design is refused: {error}")
         try:  # the pilot is there; a recorded value may be wrong
             # The rule pilot 1's choice and the optimiser's resume pass (run_size).

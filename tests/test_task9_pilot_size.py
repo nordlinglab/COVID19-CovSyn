@@ -384,6 +384,21 @@ def test_the_command_takes_s_from_pilot_1(tmp_path, monkeypatch):
     assert config["simulations"] == 3000 and config["noise"] == str(noise)
 
 
+def test_main_distinguishes_a_population_path_error_from_an_invalid_design(
+    tmp_path, monkeypatch,
+):
+    def bad_population_path(*args):
+        raise ValueError("population path is empty")
+
+    monkeypatch.setattr(ps.initial_population, "rows_available", bad_population_path)
+    args = ["--noise", str(tmp_path)]
+    with pytest.raises(SystemExit) as invalid_design:
+        ps.main([*args, "--pop-sizes", "1"])
+    assert invalid_design.value.code == 2
+    with pytest.raises(ValueError, match="population path is empty"):
+        ps.main(args)
+
+
 def test_the_command_refuses_a_pilot_1_that_chose_no_s(tmp_path):
     """No S met the criterion: the professor decides first (decision of 2026-11-21)."""
     noise = tmp_path / "noise"
