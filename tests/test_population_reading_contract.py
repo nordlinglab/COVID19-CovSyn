@@ -130,10 +130,8 @@ REFUSED = [
     (_empty, "EOFError", "last commit", True),
     (_a_non_array_member, "not an NPY array", "last commit", True),
     (_no_rows, "not a non-empty 2-D array", "last commit", True),
-    # numpy allocates the claimed shape (MemoryError), or, where memory is overcommitted,
-    # finds the data short (ValueError)
-    (_a_forged_header, "MemoryError|ValueError", "last commit", True),
-    (_corrupt_lzma, "LZMAError", "last commit", True),
+    (_a_forged_header, "header size does not match the member", "last commit", True),
+    (_corrupt_lzma, "unsupported ZIP compression for normalized", "last commit", True),
 ]
 
 
@@ -166,6 +164,30 @@ def test_rows_available_refuses_the_same_files(place, state, reason, advice, fix
     if fixable:
         _put_right(path)
         assert ip.rows_available(path, True) == ip.N_MAX - len(ip.WARM_STARTS)
+
+
+def test_compressed_population_preserves_rows_and_enforces_expanded_limit(
+    place, space, monkeypatch,
+):
+    with np.load(COMMITTED) as saved:
+        np.savez_compressed(place, **{key: saved[key] for key in saved.files})
+
+    expected = ip.load(COMMITTED, 3, space.lower, space.upper)
+    np.testing.assert_array_equal(ip.load(place, 3, space.lower, space.upper), expected)
+    monkeypatch.setattr(ip, "_POPULATION_BYTE_LIMIT", place.stat().st_size)
+    with pytest.raises(ip.PopulationUnreadable, match="expanded population archive exceeds"):
+        ip.rows_available(place)
+
+
+def test_inconsistent_header_is_refused_before_numpy_loads(place, monkeypatch):
+    path = _a_forged_header(place)
+
+    def unexpected_load(*args, **kwargs):
+        pytest.fail("NumPy was called before the archive member size was checked")
+
+    monkeypatch.setattr(ip.np, "load", unexpected_load)
+    with pytest.raises(ip.PopulationUnreadable, match="header size does not match the member"):
+        ip.rows_available(path)
 
 
 def test_the_relative_path_the_optimiser_reads_is_named_once(tmp_path, space, monkeypatch):

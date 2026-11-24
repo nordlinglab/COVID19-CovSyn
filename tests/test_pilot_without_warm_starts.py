@@ -260,7 +260,12 @@ def test_a_bug_in_the_body_is_not_taken_for_an_unreadable_file(tmp_path, monkeyp
     np.savez(path, normalized=np.zeros((5, 2)), lower=np.zeros(2), upper=np.ones(2),
              warm_starts=np.array(["a"]), sha256=np.array("x"),
              version=np.array(1))  # fmt: skip
-    monkeypatch.setattr(ip, "len", lambda value: 1 / 0, raising=False)
+    def fail_on_array(value):
+        if isinstance(value, np.ndarray):
+            raise ZeroDivisionError("unexpected failure after decoding")
+        return len(value)
+
+    monkeypatch.setattr(ip, "len", fail_on_array, raising=False)
     with pytest.raises(ZeroDivisionError):
         ip.rows_available(path)
 

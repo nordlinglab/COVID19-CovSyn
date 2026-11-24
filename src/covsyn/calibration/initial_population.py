@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
+import math
 import os
 import sys
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -198,9 +201,7 @@ def load(path: str | bytes | os.PathLike, n: int, lower: np.ndarray, upper: np.n
 # A file failure is told from a programming error by where it happens (code review round 19,
 # after a logic review): _read() checks its argument before touching the file and the
 # contents after reading them, and its try block holds nothing but numpy and zipfile reading
-# the archive. Whatever is raised in there is the file's: the set is open -- each
-# compression zipfile supports raises its own errors (zlib, bz2, LZMA), and numpy allocates
-# the shape a header claims before reading its data -- so no list of them can be complete.
+# the archive. The ZIP and NPY readers can raise different exceptions for damaged data.
 
 class PopulationUnreadable(ValueError):
     """The population file is missing or cannot be read, whatever the reason."""
@@ -238,6 +239,57 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
 ARRAYS = ("normalized", "lower", "upper", "sha256", "warm_starts", "version")
 
 
+# The committed v1 archive and its expanded members each take less than 0.5 MiB.
+# Leave room for wider future populations while bounding the ZIP and NPY reads.
+_POPULATION_BYTE_LIMIT = 8 * 1024 * 1024
+
+
+def _read_archive(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
+    """Read the required arrays from a bounded snapshot, checking headers before loading."""
+    with open(path, "rb") as source:
+        data = source.read(_POPULATION_BYTE_LIMIT + 1)
+    if not data:
+        raise EOFError("empty population file")
+    if len(data) > _POPULATION_BYTE_LIMIT:
+        raise ValueError("population archive exceeds its size limit")
+    if data.startswith(np.lib.format.MAGIC_PREFIX):
+        raise ValueError("one array, not an .npz archive")
+
+    arrays = {}
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        members = archive.infolist()
+        if len({member.filename for member in members}) != len(members):
+            raise ValueError("population archive contains duplicate member names")
+        if sum(member.file_size for member in members) > _POPULATION_BYTE_LIMIT:
+            raise ValueError("expanded population archive exceeds its size limit")
+        for key in ARRAYS:
+            member = archive.getinfo(f"{key}.npy")
+            # These are the methods used by np.savez and np.savez_compressed.
+            # ZipExtFile can bound its DEFLATE output during decompression.
+            if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                raise ValueError(f"unsupported ZIP compression for {key}")
+            with archive.open(member) as source:
+                payload = source.read(member.file_size + 1)
+            if not payload.startswith(np.lib.format.MAGIC_PREFIX):
+                raise ValueError(f"{key} is not an NPY array")
+            buffer = io.BytesIO(payload)
+            version = np.lib.format.read_magic(buffer)
+            if version == (1, 0):
+                shape, _, dtype = np.lib.format.read_array_header_1_0(buffer)
+            elif version == (2, 0):
+                shape, _, dtype = np.lib.format.read_array_header_2_0(buffer)
+            else:
+                raise ValueError(f"{key} uses unsupported NPY format {version}")
+            remaining = len(payload) - buffer.tell()
+            if dtype.hasobject or dtype.itemsize == 0 or any(size < 0 for size in shape):
+                raise ValueError(f"{key} has an unsupported NPY dtype or shape")
+            if math.prod(shape) * dtype.itemsize != remaining:
+                raise ValueError(f"{key} header size does not match the member")
+            buffer.seek(0)
+            arrays[key] = np.load(buffer, allow_pickle=False)
+    return arrays
+
+
 def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
     """The ARRAYS of the population file, for load() and rows_available() alike.
 
@@ -258,23 +310,12 @@ def _read(path: str | bytes | os.PathLike) -> dict[str, np.ndarray]:
         raise ValueError("path is empty")
     os.fsencode(path)  # a str the filesystem cannot encode: UnicodeEncodeError (round 22)
     try:
-        saved = np.load(path)
-        # A single .npy array loads as an array, not an archive (code review round 12).
-        archive = isinstance(saved, np.lib.npyio.NpzFile)
-        if archive:
-            with saved:
-                arrays = {key: saved[key] for key in ARRAYS}
-    except Exception as error:  # only numpy and zipfile run here (see the contract above)
+        arrays = _read_archive(path)
+    except Exception as error:  # archive I/O and decoding, as in the contract above
         # An OSError's text repeats the path; its strerror does not (code review round 11).
         reason = error.strerror if isinstance(error, OSError) and error.strerror else error
         raise PopulationUnreadable(f"{shown} cannot be read ({type(error).__name__}: "
                                    f"{reason})") from error
-    if not archive:
-        raise PopulationUnreadable(f"{shown} cannot be read (one array, not an .npz archive)")
-    # NumPy returns raw bytes for archive members without an NPY header.
-    for key, value in arrays.items():
-        if not isinstance(value, np.ndarray):
-            raise PopulationUnreadable(f"{shown} cannot be read ({key} is not an NPY array)")
     # What load() computes with: rows it can stack and hash, at least one of them, of at least
     # one parameter (rounds 14, 15); a warm-start list it can count; bounds of numbers.
     rows = arrays["normalized"]
