@@ -199,7 +199,7 @@ def _check_production_rows(pop_size: int, source: str) -> None:
     try:  # the repository's file, wherever the pipeline is started (code review round 7)
         rows = initial_population.rows_available(initial_population.population_path(
             initial_population.CURRENT_VERSION, runs.REPO_ROOT / "variable"), True)
-    except (OSError, KeyError, ValueError):
+    except Exception:  # any unreadable file: the optimiser loads and refuses it (round 7)
         return
     if pop_size > rows:
         raise ValueError(f"{source}: [optimise] pop_size is {pop_size}, but production starts "

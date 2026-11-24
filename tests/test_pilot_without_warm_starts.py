@@ -193,3 +193,17 @@ def test_the_pipeline_checks_the_rows_from_any_directory(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="warm starts"):
         pc.parse(PRODUCTION.replace("pop_size = 48", "pop_size = 255"), "t")
+
+
+@pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated"])
+def test_a_damaged_population_file_leaves_the_refusal_to_the_optimiser(
+    monkeypatch, tmp_path, content
+):
+    """An empty or truncated file does not crash reading the configuration."""
+    from covsyn.pipeline import config as pc
+    from tests.test_task9_production_pipeline import PRODUCTION
+
+    broken = tmp_path / "initial_population_v1.npz"
+    broken.write_bytes(content)
+    monkeypatch.setattr(ip, "population_path", lambda version, directory=None: broken)
+    assert pc.parse(PRODUCTION, "t").pop_size == 48
