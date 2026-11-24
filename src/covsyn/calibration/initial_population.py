@@ -113,10 +113,13 @@ def load(path: Path, n: int, lower: np.ndarray, upper: np.ndarray,
         normalized = saved["normalized"]
         stored_lower, stored_upper = saved["lower"], saved["upper"]
         sha = str(saved["sha256"])
+        # The file's own warm starts, which the code's WARM_STARTS may no longer match
+        # (code review round 4).
+        warm_starts = len(saved["warm_starts"])
     if digest(normalized, stored_lower, stored_upper) != sha:
         raise SystemExit(f"{path}: the rows or bounds no longer match its SHA-256")
     if without_warm_starts:
-        normalized = np.vstack([normalized[:1], normalized[1 + len(WARM_STARTS):]])
+        normalized = np.vstack([normalized[:1], normalized[1 + warm_starts:]])
     if not 1 <= n <= len(normalized):
         without = " without the warm starts" if without_warm_starts else ""
         raise SystemExit(f"{path} holds {len(normalized)} fireflies{without}; a run of {n} "
