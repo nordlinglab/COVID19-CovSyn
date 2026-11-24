@@ -271,3 +271,13 @@ def test_the_rows_left_come_from_the_population_file(monkeypatch):
     assert ps.Design((254,), (0.2,), (1, 2, 3), True).check()
     with pytest.raises(ValueError):
         ps.Design((255,), (0.2,), (1, 2, 3), True).check()
+
+
+@pytest.mark.parametrize("streams", [(2,), (1, 2)])
+def test_the_agreement_rule_needs_every_run_on_every_confirmation_block(streams):
+    """A block missing from one stream or from both is an error, not a KeyError or a gap."""
+    rows = [{"pop_size": n, "alpha_0": a, "stream": s, "block": b, "cost": 10.0 + n + a}
+            for n in (24, 48, 96) for a in (0.05, 0.2) for s in (1, 2) for b in range(30, 60)
+            if not (n == 48 and a == 0.2 and s in streams and b == 31)]  # fmt: skip
+    with pytest.raises(ValueError, match="n48"):
+        ps.compare_settings(rows)

@@ -215,7 +215,9 @@ def compare_settings(rows: Sequence[Mapping[str, Any]],
     table = []
     for n in design.pop_sizes:
         for a in design.alpha_0s:
-            blocks = sorted({b for (n_, a_, _, b) in cost if (n_, a_) == (n, a)})
+            for s in design.streams:
+                _require_blocks(cost, n, a, s)
+            blocks = list(CONFIRM_BLOCKS)
             first = np.array([cost[(n, a, design.streams[0], b)] for b in blocks])
             second = np.array([cost[(n, a, design.streams[1], b)] for b in blocks])
             d = first - second
@@ -229,6 +231,18 @@ def compare_settings(rows: Sequence[Mapping[str, Any]],
     return table
 
 
+def _require_blocks(cost: Mapping[tuple, float], n: int, a: float, s: int) -> None:
+    """Refuse a run without every confirmation block (code review rounds 4 and 5).
+
+    A missing block gave the spread rule a NaN mean and the agreement rule a KeyError, or a
+    silent gap when both streams lacked it.
+    """
+    blocks = {b for (n_, a_, s_, b) in cost if (n_, a_, s_) == (n, a, s)}
+    if blocks != set(CONFIRM_BLOCKS):
+        raise ValueError(f"run n{n}-a{a:g}-s{s} has {len(blocks & set(CONFIRM_BLOCKS))} of the "
+                         f"{len(CONFIRM_BLOCKS)} confirmation blocks")
+
+
 def _spread_table(cost: Mapping[tuple, float], design: Design) -> list[dict[str, Any]]:
     """Per setting: its runs' mean costs over the confirmation blocks, their mean and SD."""
     table = []
@@ -236,10 +250,7 @@ def _spread_table(cost: Mapping[tuple, float], design: Design) -> list[dict[str,
         for a in design.alpha_0s:
             means = []
             for s in design.streams:
-                blocks = {b for (n_, a_, s_, b) in cost if (n_, a_, s_) == (n, a, s)}
-                if blocks != set(CONFIRM_BLOCKS):  # code review round 4: no NaN means
-                    raise ValueError(f"run n{n}-a{a:g}-s{s} has {len(blocks)} of the "
-                                     f"{len(CONFIRM_BLOCKS)} confirmation blocks")
+                _require_blocks(cost, n, a, s)
                 means.append(float(np.mean([cost[(n, a, s, b)] for b in CONFIRM_BLOCKS])))
             table.append({"pop_size": n, "alpha_0": a, "generations": generations(n),
                           **{f"cost_stream_{s}": m for s, m in zip(design.streams, means,
