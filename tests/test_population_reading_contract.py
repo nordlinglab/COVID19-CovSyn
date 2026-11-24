@@ -60,8 +60,10 @@ def _empty(path):
 
 
 def _no_rows(path):
-    np.savez(path, normalized=np.zeros((0, 2)), lower=np.zeros(2), upper=np.ones(2),
-             sha256=np.array("x"), warm_starts=np.array(["a"]))  # fmt: skip
+    """The committed file with its rows emptied, else complete (code review round 20)."""
+    with np.load(COMMITTED) as saved:
+        arrays = {key: saved[key] for key in saved.files}
+    np.savez(path, **{**arrays, "normalized": arrays["normalized"][:0]})
     return path
 
 

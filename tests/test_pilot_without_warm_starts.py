@@ -172,9 +172,15 @@ def test_the_population_module_loads_no_scipy():
     assert out.stdout.strip() == "False"
 
 
-def _zero_d(path):
-    np.savez(path, normalized=np.float64(1.0), warm_starts=np.array(["a"]))
+def _complete(path, normalized):
+    """A complete population but for its rows (code review round 20)."""
+    np.savez(path, normalized=normalized, lower=np.zeros(2), upper=np.ones(2),
+             sha256=np.array("x"), warm_starts=np.array(["a"]), version=np.array(1))
     return path.read_bytes()
+
+
+def _zero_d(path):
+    return _complete(path, np.float64(1.0))
 
 
 def _unknown_compression(path):
@@ -207,8 +213,7 @@ def _an_npy(path):
 
 
 def _one_d(path):
-    np.savez(path, normalized=np.zeros(9), warm_starts=np.array(list("abcde")))  # round 14
-    return path.read_bytes()
+    return _complete(path, np.zeros(9))  # round 14
 
 
 @pytest.mark.parametrize("content", [b"", b"PK\x03\x04 truncated", _zero_d, _unknown_compression,
@@ -218,6 +223,15 @@ def test_every_read_failure_is_one_exception(tmp_path, content):
     path = tmp_path / "initial_population_v1.npz"
     path.write_bytes(content if isinstance(content, bytes) else content(path))
     with pytest.raises(ip.PopulationUnreadable):
+        ip.rows_available(path, True)
+
+
+@pytest.mark.parametrize("content", [_zero_d, _one_d])
+def test_rows_that_are_not_2_d_are_refused_for_that_reason(tmp_path, content):
+    """Their own check refuses them, not a missing array (code review round 20)."""
+    path = tmp_path / "initial_population_v1.npz"
+    content(path)
+    with pytest.raises(ip.PopulationUnreadable, match="not a non-empty 2-D array"):
         ip.rows_available(path, True)
 
 

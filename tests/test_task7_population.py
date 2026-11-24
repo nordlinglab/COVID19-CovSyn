@@ -165,28 +165,35 @@ def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, written
 
 
 def _arrays(path, **changed):
-    """A population of 3 rows and 2 parameters, with these arrays changed."""
+    """A complete population of 3 rows and 2 parameters, with only these arrays changed.
+
+    Complete, so each case reaches the check it was written for (code review round 20).
+    """
     arrays = {"normalized": np.zeros((3, 2)), "lower": np.zeros(2), "upper": np.ones(2),
-              "sha256": np.array("x"), "warm_starts": np.array(["a"]), **changed}
+              "sha256": np.array("x"), "warm_starts": np.array(["a"]), "version": np.array(1),
+              **changed}  # fmt: skip
     np.savez(path, **arrays)
 
 
-@pytest.mark.parametrize("changed", [
-    {"normalized": np.array([["a", "b"]])},  # rows not numbers
-    {"lower": np.array(["a", "b"])},  # bounds not numbers
-    {"normalized": np.zeros((0, 2))},  # no rows
-    {"normalized": np.zeros((3, 0))},  # no parameters
-    {"lower": np.zeros(1), "upper": np.ones(1)},  # bounds of another length (round 16)
+@pytest.mark.parametrize(("changed", "reason"), [
+    ({"normalized": np.array([["a", "b"]])}, "not a non-empty 2-D array of numbers"),
+    ({"normalized": np.zeros((0, 2))}, "not a non-empty 2-D array of numbers"),  # no rows
+    ({"normalized": np.zeros((3, 0))}, "not a non-empty 2-D array of numbers"),  # no parameter
+    ({"normalized": np.zeros(6)}, "not a non-empty 2-D array of numbers"),  # 1-D
+    ({"warm_starts": np.array("a")}, "warm starts are not a list"),
+    ({"lower": np.array(["a", "b"])}, "not one number a parameter"),  # bounds not numbers
+    ({"lower": np.zeros(1), "upper": np.ones(1)}, "not one number a parameter"),  # length
+    ({"version": np.array([1, 2])}, "version is not a whole number"),
 ])  # fmt: skip
-def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, changed):
-    """Refused as damaged and resumable once restored, not a traceback or a run size (round 15)."""
+def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, changed, reason):
+    """Refused for its own reason, resumably, not a traceback or a run size (rounds 15, 20)."""
     path = tmp_path / "initial_population_v1.npz"
     _arrays(path, **changed)
-    with pytest.raises(ip.PopulationUnreadable):
+    with pytest.raises(ip.PopulationUnreadable, match=reason):
         ip.rows_available(path)
     with pytest.raises(SystemExit) as stopped:
         ip.load(path, 1, space.lower, space.upper)
-    assert "cannot be read" in stopped.value.code
+    assert reason in stopped.value.code
     assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
 
 
