@@ -15,6 +15,7 @@ import re
 
 import numpy as np
 import pytest
+from hypothesis import given, strategies as st
 
 from covsyn.calibration import initial_population as ip
 from covsyn.calibration import parameter_space
@@ -234,6 +235,21 @@ def test_a_path_no_file_can_have_is_a_programming_error(space, path, why):
         with pytest.raises(ValueError, match=why) as refused:
             read()
         assert not isinstance(refused.value, ip.PopulationUnreadable)
+
+
+@given(name=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", max_size=40))
+def test_generated_population_paths_keep_argument_and_file_errors_distinct(
+    tmp_path_factory, name,
+):
+    root = tmp_path_factory.getbasetemp()
+    for path in ("", f"{name}\0.npz", f"{name}\ud800.npz"):
+        with pytest.raises(ValueError) as invalid:
+            ip.rows_available(path)
+        assert not isinstance(invalid.value, ip.PopulationUnreadable)
+
+    with pytest.raises(ip.PopulationUnreadable) as missing:
+        ip.rows_available(root / "missing-populations" / f"{name}.npz")
+    assert isinstance(missing.value.__cause__, FileNotFoundError)
 
 
 def test_both_entry_points_read_the_path_as_given(place, space):
