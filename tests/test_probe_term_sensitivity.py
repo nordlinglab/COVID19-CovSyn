@@ -89,3 +89,19 @@ def test_identical_differences_are_exact():
     """No spread: the interval is the point."""
     assert pts.classify([0.0] * 5, delta=0.1) == "within"
     assert pts.classify([0.3] * 5, delta=0.1) == "beyond"
+
+
+def test_a_string_case_row_only_fails_its_own_evaluation(monkeypatch):
+    """A failed row does not stop the next evaluation."""
+    rows = np.array([[20.0] * 9, [40.0] * 9])
+    monkeypatch.setattr(pts, "_TAIWAN", np.array([[10.0, 15.0], [50.0, 45.0]]))
+
+    def simulated(_p, seed, _clock):
+        cases = ["bad row", rows[0]] if seed == 1 else rows
+        return 12.0, {"cost_energy": 0.5}, (None, None, cases), None
+
+    monkeypatch.setattr(pts.fast_cost, "_simulate_and_score", simulated)
+    assert pts.score(None, 1) is None
+    result = pts.score(None, 2)
+    assert result["cost"] == 12.0
+    assert np.isfinite(result["energy_u"])

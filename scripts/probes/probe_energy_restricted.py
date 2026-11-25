@@ -93,6 +93,13 @@ def with_energy(rows: list[dict], column: str) -> list[dict]:
     return out
 
 
+def _scored_cases(rows) -> np.ndarray:
+    """Convert case records after excluding the failed-row diagnostic representation."""
+    if any(isinstance(row, str) for row in rows):
+        raise ValueError("a simulated case has no test-matrix row")
+    return complete_cases(np.array(rows, dtype=float))
+
+
 def score_energy(P, seed_offset):
     """One pool task: the cost, its old energy term, and the restricted term's two forms."""
     global _TAIWAN
@@ -101,10 +108,10 @@ def score_energy(P, seed_offset):
     clock = timings.TaskClock(False, fast_cost._WORKER_PROCESS)
     try:
         cost, parts, pooled, _ = fast_cost._simulate_and_score(P, seed_offset, clock)
+        simulated = _scored_cases(pooled[2])
     except Exception:
         traceback.print_exc()
         return fo.FAILED_EVALUATION_COST, float("nan"), float("nan"), float("nan"), -1
-    simulated = complete_cases(np.array(pooled[2], dtype=float))
     half_v, half_u = restricted_energy(_TAIWAN, simulated)
     return cost, parts["cost_energy"], half_v, half_u, len(simulated)
 

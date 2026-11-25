@@ -107,3 +107,22 @@ def test_with_energy_keeps_a_failed_evaluations_charge():
 def test_with_energy_of_no_rows_is_no_rows():
     """Empty in, empty out."""
     assert per.with_energy([], "energy_u") == []
+
+
+def test_a_string_case_row_only_fails_its_own_evaluation(monkeypatch):
+    """A failed row gets the existing sentinel and the next evaluation still succeeds."""
+    rows = np.array([[20.0] * 9, [40.0] * 9])
+    monkeypatch.setattr(per, "_TAIWAN", np.array([[10.0, 15.0], [50.0, 45.0]]))
+
+    def simulated(_p, seed, _clock):
+        cases = ["bad row", rows[0]] if seed == 1 else rows
+        return 12.0, {"cost_energy": 0.5}, (None, None, cases), None
+
+    monkeypatch.setattr(per.fast_cost, "_simulate_and_score", simulated)
+    failed = per.score_energy(None, 1)
+    assert failed[0] == per.fo.FAILED_EVALUATION_COST
+    assert all(np.isnan(value) for value in failed[1:4])
+    assert failed[4] == -1
+    success = per.score_energy(None, 2)
+    assert success[:2] == (12.0, 0.5) and success[4] == 2
+    assert all(np.isfinite(value) for value in success[2:4])
