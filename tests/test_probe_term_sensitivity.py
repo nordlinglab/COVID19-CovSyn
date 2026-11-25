@@ -10,6 +10,7 @@ differences over replications, reported with t intervals against a substantive t
 
 from __future__ import annotations
 
+import concurrent.futures
 import csv
 import json
 import sys
@@ -166,3 +167,43 @@ def test_analysis_uses_only_finite_pairs_per_term(tmp_path, energy, expected_cla
     valid = sum(np.isfinite(energy))
     assert result["energy_new"]["mean"] == (0.4 if valid else None)
     assert result["energy_new"]["sd"] == (0.0 if valid > 1 else None)
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_probe_resume_uses_saved_header_or_leaves_file_unchanged(tmp_path, monkeypatch, mismatch):
+    """Use the existing column order and reject schema drift before appending a row."""
+    path = tmp_path / "probe.csv"
+    original = b"base,row,param,replication,measured_old,cost\nrun19,2,-1,0,0.3,1.0\n"
+    path.write_bytes(original)
+    population = np.arange(5.0).reshape(5, 1)
+    monkeypatch.setattr(
+        pts.pilot_noise, "_population_and_bounds",
+        lambda: (population, np.zeros(1), np.zeros(1)),
+    )
+    pilot = {("spread", i, 1, 0): i for i in range(5)}
+    monkeypatch.setattr(pts.psb, "read_pilot", lambda *_: pilot)
+    monkeypatch.setattr(pts, "pilot_bases", lambda *a, **kw: (1, 3, 4))
+    monkeypatch.setattr(
+        pts.block_scoring, "objective_pools",
+        lambda _workers: (None, lambda _s: concurrent.futures.ThreadPoolExecutor(max_workers=1)),
+    )
+    monkeypatch.setattr(pts.concurrent.futures, "as_completed", lambda submitted: iter(submitted))
+    records = iter([
+        {"cost": 2.0, "measured_old": 0.4},
+        {"cost": 3.0, "measured_new" if mismatch else "measured_old": 0.5},
+        {"cost": 4.0, "measured_old": 0.6},
+        {"cost": 5.0, "measured_old": 0.7},
+    ])
+    monkeypatch.setattr(pts, "score", lambda *_: next(records))
+    args = SimpleNamespace(out=path, pilot_blocks=tmp_path / "unused", workers=1, replications=1)
+
+    if mismatch:
+        with pytest.raises(ValueError, match=r"extra.*measured_new.*missing.*measured_old"):
+            pts.run(args)
+        assert path.read_bytes() == original
+    else:
+        pts.run(args)
+        with path.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        assert [row["cost"] for row in rows] == [str(float(i)) for i in range(1, 6)]
+        assert rows[1]["measured_old"] == "0.4"

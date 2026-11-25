@@ -32,7 +32,10 @@ import concurrent.futures
 import csv
 import json
 import math
+import shutil
+import tempfile
 import traceback
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -138,13 +141,25 @@ def run(args) -> None:
     points += [(name, row, i) for name, row in bases.items() for i in free]
     path = Path(args.out)
     done = set()
+    columns = None
     if path.exists():
-        with open(path, encoding="utf-8") as f:
-            done = {(r["base"], int(r["param"]), int(r["replication"])) for r in csv.DictReader(f)}
+        with path.open(newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            columns = reader.fieldnames
+            done = {(r["base"], int(r["param"]), int(r["replication"])) for r in reader}
     _, make_pool = block_scoring.objective_pools(args.workers)
     offsets = [seed_streams.block_seeds(STREAM, b, S).start for b in range(args.replications)]
-    columns = None
-    with make_pool(S) as pool, open(path, "a", newline="", encoding="utf-8") as out:
+    resuming = columns is not None
+    with make_pool(S) as pool, ExitStack() as outputs:
+        if resuming:
+            # Leave the saved CSV intact unless every new row has its schema.
+            out = outputs.enter_context(tempfile.TemporaryFile(
+                mode="w+", newline="", encoding="utf-8"
+            ))
+            writer = csv.DictWriter(out, fieldnames=columns)
+        else:
+            out = outputs.enter_context(path.open("a", newline="", encoding="utf-8"))
+            writer = None
         futures = {}
         for name, row, i in points:
             x = population[row] if i < 0 else perturbed(population[row], i, STEP)
@@ -159,15 +174,27 @@ def run(args) -> None:
             if result is None:
                 continue
             record = {"base": name, "row": row, "param": i, "replication": rep, **result}
-            if columns is None:
-                columns = list(record)
-                writer = csv.DictWriter(out, fieldnames=columns)
-                if not done:
-                    writer.writeheader()
+            if writer is None:
+                writer = csv.DictWriter(out, fieldnames=list(record))
+                writer.writeheader()
+            if resuming:
+                expected = set(writer.fieldnames)
+                extra = record.keys() - expected
+                missing = expected - record.keys()
+                if extra or missing:
+                    raise ValueError(
+                        f"{path}: CSV columns differ for {name}, parameter {i}, "
+                        f"replication {rep}: "
+                        f"extra {sorted(extra)}, missing {sorted(missing)}"
+                    )
             writer.writerow(record)
             out.flush()
             if n % 200 == 0:
                 print(f"{n}/{len(futures)}", flush=True)
+        if resuming and out.tell():
+            out.seek(0)
+            with path.open("a", newline="", encoding="utf-8") as saved:
+                shutil.copyfileobj(out, saved)
 
 
 def _terms(r: dict) -> dict[str, float]:
