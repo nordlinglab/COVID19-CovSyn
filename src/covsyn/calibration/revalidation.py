@@ -280,26 +280,33 @@ def cost_uncertainty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     mean, a tie to the earlier row, the archive's order; d = candidate - best, block by block,
     with a paired t interval of n - 1 degrees of freedom. The best is chosen on these blocks,
     so the interval is exploratory (decision of 2026-11-22). A candidate whose interval holds 0
-    cannot be told apart from the best.
+    cannot be told apart from the best. Fewer than two blocks also count as
+    indistinguishable: the data are insufficient to estimate an SE or interval.
     """
     from scipy import stats
 
     costs = [np.array([float(r[k]) for k in sorted((k for k in r if k.startswith("block_")),
                                                    key=lambda k: int(k[6:]))])
              for r in rows]  # fmt: skip
-    means = [float(c.mean()) for c in costs]
+    means = [float(c.mean()) if len(c) else np.nan for c in costs]
     best = min(range(len(rows)), key=lambda i: (means[i], i))
     table = []
     for i, c in enumerate(costs):
         n = len(c)
         d = c - costs[best]
-        half = (float(stats.t.ppf(0.975, n - 1) * d.std(ddof=1) / np.sqrt(n))
-                if i != best and n > 1 else 0.0)  # fmt: skip
-        low, high = float(d.mean()) - half, float(d.mean()) + half
+        difference = float(d.mean()) if n else np.nan
+        if n < 2:
+            se = low = high = np.nan
+            indistinguishable = True
+        else:
+            se = float(c.std(ddof=1) / np.sqrt(n))
+            half = (float(stats.t.ppf(0.975, n - 1) * d.std(ddof=1) / np.sqrt(n))
+                    if i != best else 0.0)  # fmt: skip
+            low, high = difference - half, difference + half
+            indistinguishable = bool(low <= 0 <= high)
         table.append({"candidate": rows[i]["candidate"], "mean": means[i],
-                      "se": float(c.std(ddof=1) / np.sqrt(n)) if n > 1 else 0.0,
-                      "difference_to_best": float(d.mean()), "ci_low": low, "ci_high": high,
-                      "indistinguishable": bool(low <= 0 <= high), "best": i == best})
+                      "se": se, "difference_to_best": difference, "ci_low": low, "ci_high": high,
+                      "indistinguishable": indistinguishable, "best": i == best})
     return table
 
 

@@ -102,6 +102,14 @@ def test_the_best_is_indistinguishable_from_itself():
     assert rv.cost_uncertainty(_rows(costs))[0]["indistinguishable"]
 
 
+@pytest.mark.parametrize("costs", [[[], []], [[10.0], [12.0]]])
+def test_insufficient_blocks_leave_uncertainty_unknown(costs):
+    """Candidates are retained when no paired interval can distinguish them."""
+    table = rv.cost_uncertainty(_rows(costs))
+    assert all(row["indistinguishable"] for row in table)
+    assert all(np.isnan(row[key]) for row in table for key in ("se", "ci_low", "ci_high"))
+
+
 def test_the_command_rescoring_the_archive_at_s_writes_cost_uncertainty(tmp_path, monkeypatch):
     """--simulations S and --archive-best k: blocks of S seeds of the given stream."""
     run = tmp_path / "run"
