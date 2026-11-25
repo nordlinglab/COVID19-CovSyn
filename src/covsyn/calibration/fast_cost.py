@@ -56,6 +56,10 @@ CHENG_GROUPS = (('Household', ('Household',)),
                 ('Health care', ('Health care',)),
                 ('Cheng others', ('School', 'Workplace', 'Municipality')))
 
+# B95: the reported energy term does not contribute to the total cost.
+COST_INCLUDES_ENERGY = False
+
+
 _WORKER_DEMOGRAPHIC_PARAMETERS = None
 _WORKER_TAIWAN_MATRIX_COLUMNS = None
 _WORKER_STAGE_TIMING = False

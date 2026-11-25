@@ -13,7 +13,8 @@ place of the old, alone and with the sparse household bin dropped as well.
 Usage: uv run python scripts/probes/probe_energy_restricted.py OUT_DIR PILOT1_BLOCKS_CSV
     [--sparse-bins BINS_CSV] [--workers N]
 Writes OUT_DIR/energy.csv, one row per evaluation, and OUT_DIR/summary.json. OUT_DIR/energy.csv
-must not exist yet: a rerun goes to a new directory.
+must not exist yet: a rerun goes to a new directory. Re-scoring requires the historical
+objective that charged energy. The B95 objective reports energy separately.
 """
 
 from __future__ import annotations
@@ -78,11 +79,18 @@ def restricted_energy(taiwan: np.ndarray, simulated: np.ndarray) -> tuple[float,
     return energy_halves((taiwan - mean) / sd, (simulated - mean) / sd)
 
 
-def with_energy(rows: list[dict], column: str) -> list[dict]:
+def with_energy(
+    rows: list[dict], column: str, *, cost_includes_energy: bool | None = None
+) -> list[dict]:
     """The rows with each cost's old energy term replaced by the one in ``column``.
 
-    A failed evaluation (old term NaN) keeps its charge.
+    The caller must confirm that the archived total cost includes energy. A failed
+    evaluation (old term NaN) keeps its charge.
     """
+    if cost_includes_energy is not True:
+        raise ValueError(
+            "energy replacement requires confirmation that the total cost includes energy"
+        )
     out = []
     for r in rows:
         old = float(r["energy_old"])
@@ -138,15 +146,19 @@ def _spread_sd(rows: list[dict], column: str) -> float:
     return float(np.std([np.mean(v) for v in groups.values()], ddof=1))
 
 
-def summarise(rows: list[dict], sparse: dict | None) -> dict[str, Any]:
-    """Pilot 1's choice as it was, with each new form, and with the sparse bin dropped too."""
+def summarise(
+    rows: list[dict], sparse: dict | None, *, cost_includes_energy: bool | None = None
+) -> dict[str, Any]:
+    """Summarise historical totals that include the energy term being replaced."""
+    energy_v = with_energy(rows, "energy_v", cost_includes_energy=cost_includes_energy)
+    energy_u = with_energy(rows, "energy_u", cost_includes_energy=cost_includes_energy)
     scored = [r for r in rows if not np.isnan(float(r["energy_old"]))]
     out: dict[str, Any] = {
         "evaluations": len(rows),
         "failed": len(rows) - len(scored),
         "as_pilot_1": pilot_noise.summarise(rows)["choice"],
-        "energy_v": pilot_noise.summarise(with_energy(rows, "energy_v"))["choice"],
-        "energy_u": pilot_noise.summarise(with_energy(rows, "energy_u"))["choice"],
+        "energy_v": pilot_noise.summarise(energy_v)["choice"],
+        "energy_u": pilot_noise.summarise(energy_u)["choice"],
         "sd_old": _by_vector(scored, "energy_old", lambda v: np.std(v, ddof=1)),
         "sd_u": _by_vector(scored, "energy_u", lambda v: np.std(v, ddof=1)),
         "mean_old": _by_vector(scored, "energy_old", np.mean),
@@ -161,7 +173,7 @@ def summarise(rows: list[dict], sparse: dict | None) -> dict[str, Any]:
             {**r, "cost": float(r["cost"]) - float(sparse[_key(r)][term])}
             if not np.isnan(float(r["energy_old"]))
             else r
-            for r in with_energy(rows, "energy_u")
+            for r in energy_u
         ]
         out["energy_u_and_no_sparse_bin"] = pilot_noise.summarise(both)["choice"]
     return out
@@ -175,6 +187,10 @@ def main() -> None:
     parser.add_argument("--sparse-bins", type=Path, default=None)
     parser.add_argument("--workers", type=int, default=None)
     args = parser.parse_args()
+    if not fast_cost.COST_INCLUDES_ENERGY:
+        parser.error(
+            "the current total cost excludes energy (B95). Use the historical objective"
+        )
     pilot = psb.read_pilot(args.pilot_blocks)
     sparse = None
     if args.sparse_bins is not None:
@@ -211,7 +227,7 @@ def main() -> None:
                     writer.writerow(row)
                     out.flush()
                     rows.append({k: str(v) for k, v in row.items()})
-    summary = summarise(rows, sparse)
+    summary = summarise(rows, sparse, cost_includes_energy=fast_cost.COST_INCLUDES_ENERGY)
     (args.out_dir / "summary.json").write_text(json.dumps(summary, indent=1) + "\n",
                                                encoding="utf-8")  # fmt: skip
     print(json.dumps(summary, indent=1))

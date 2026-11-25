@@ -94,19 +94,42 @@ def test_the_same_sample_on_both_sides_gives_zero_v_form():
 def test_with_energy_swaps_the_term_in_every_cost():
     """The new term replaces the old one; the rest of the cost is untouched."""
     rows = [{"cost": "14.0", "energy_old": "-0.3", "energy_u": "0.05", "label": "run19"}]
-    out = per.with_energy(rows, "energy_u")
+    out = per.with_energy(rows, "energy_u", cost_includes_energy=True)
     assert out[0]["cost"] == pytest.approx(14.35) and out[0]["label"] == "run19"
 
 
 def test_with_energy_keeps_a_failed_evaluations_charge():
     """A failed simulation has no term to swap."""
     rows = [{"cost": "1000000.0", "energy_old": "nan", "energy_u": "nan"}]
-    assert per.with_energy(rows, "energy_u")[0]["cost"] == 1e6
+    assert per.with_energy(rows, "energy_u", cost_includes_energy=True)[0]["cost"] == 1e6
 
 
 def test_with_energy_of_no_rows_is_no_rows():
     """Empty in, empty out."""
-    assert per.with_energy([], "energy_u") == []
+    assert per.with_energy([], "energy_u", cost_includes_energy=True) == []
+
+
+@pytest.mark.parametrize("provenance", [False, None])
+def test_with_energy_refuses_unconfirmed_or_excluded_energy(provenance):
+    """Recorded energy alone does not show that it contributed to the total."""
+    rows = [{"cost": "14", "energy_old": "0.3", "energy_u": "0.2"}]
+    kwargs = {} if provenance is None else {"cost_includes_energy": provenance}
+    with pytest.raises(ValueError, match="total cost.*includes energy"):
+        per.with_energy(rows, "energy_u", **kwargs)
+
+
+def test_current_probe_refuses_before_rescoring_when_objective_excludes_energy(
+    tmp_path, capsys, monkeypatch
+):
+    """Post-B95 scoring cannot supply historical totals to this probe."""
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["probe", str(out), str(tmp_path / "blocks.csv")])
+    monkeypatch.setattr(per.psb, "read_pilot", lambda *_: pytest.fail("pilot input was read"))
+    with pytest.raises(SystemExit) as refused:
+        per.main()
+    assert refused.value.code == 2
+    assert "total cost excludes energy" in capsys.readouterr().err
+    assert not out.exists()
 
 
 def test_a_string_case_row_only_fails_its_own_evaluation(monkeypatch):
