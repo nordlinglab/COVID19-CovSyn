@@ -169,12 +169,13 @@ def test_analysis_uses_only_finite_pairs_per_term(tmp_path, energy, expected_cla
     assert result["energy_new"]["sd"] == (0.0 if valid > 1 else None)
 
 
-@pytest.mark.parametrize("mismatch", [False, True])
-def test_probe_resume_uses_saved_header_or_leaves_file_unchanged(tmp_path, monkeypatch, mismatch):
-    """Use the existing column order and reject schema drift before appending a row."""
+@pytest.mark.parametrize("case", ["valid", "mismatch", "interrupted", "new_missing"])
+def test_probe_appends_only_matching_columns_and_preserves_progress(tmp_path, monkeypatch, case):
+    """Preserve each valid row and reject only the incompatible or failed evaluation."""
     path = tmp_path / "probe.csv"
     original = b"base,row,param,replication,measured_old,cost\nrun19,2,-1,0,0.3,1.0\n"
-    path.write_bytes(original)
+    if case != "new_missing":
+        path.write_bytes(original)
     population = np.arange(5.0).reshape(5, 1)
     monkeypatch.setattr(
         pts.pilot_noise, "_population_and_bounds",
@@ -188,22 +189,42 @@ def test_probe_resume_uses_saved_header_or_leaves_file_unchanged(tmp_path, monke
         lambda _workers: (None, lambda _s: concurrent.futures.ThreadPoolExecutor(max_workers=1)),
     )
     monkeypatch.setattr(pts.concurrent.futures, "as_completed", lambda submitted: iter(submitted))
-    records = iter([
-        {"cost": 2.0, "measured_old": 0.4},
-        {"cost": 3.0, "measured_new" if mismatch else "measured_old": 0.5},
-        {"cost": 4.0, "measured_old": 0.6},
-        {"cost": 5.0, "measured_old": 0.7},
+    second = {"cost": 3.0, "measured_old": 0.5}
+    if case == "mismatch":
+        second = {"cost": 3.0, "measured_new": 0.5}
+    elif case == "new_missing":
+        second = {"cost": 3.0}
+    records = iter([{"cost": 2.0, "measured_old": 0.4}, second] + [
+        {"cost": float(i), "measured_old": i / 10} for i in range(4, 7)
     ])
-    monkeypatch.setattr(pts, "score", lambda *_: next(records))
+
+    def score(*_):
+        record = next(records)
+        if case == "interrupted" and record["cost"] == 3.0:
+            raise RuntimeError("evaluation interrupted")
+        return record
+
+    monkeypatch.setattr(pts, "score", score)
     args = SimpleNamespace(out=path, pilot_blocks=tmp_path / "unused", workers=1, replications=1)
 
-    if mismatch:
+    if case == "mismatch":
         with pytest.raises(ValueError, match=r"extra.*measured_new.*missing.*measured_old"):
             pts.run(args)
-        assert path.read_bytes() == original
+    elif case == "new_missing":
+        with pytest.raises(ValueError, match=r"extra.*missing.*measured_old"):
+            pts.run(args)
+    elif case == "interrupted":
+        with pytest.raises(RuntimeError, match="evaluation interrupted"):
+            pts.run(args)
     else:
         pts.run(args)
-        with path.open(newline="", encoding="utf-8") as stream:
-            rows = list(csv.DictReader(stream))
-        assert [row["cost"] for row in rows] == [str(float(i)) for i in range(1, 6)]
-        assert rows[1]["measured_old"] == "0.4"
+    with path.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    expected = {
+        "valid": ["1.0", "2.0", "3.0", "4.0", "5.0"],
+        "mismatch": ["1.0", "2.0"],
+        "interrupted": ["1.0", "2.0"],
+        "new_missing": ["2.0"],
+    }
+    assert [row["cost"] for row in rows] == expected[case]
+    assert rows[0 if case == "new_missing" else 1]["measured_old"] == "0.4"
