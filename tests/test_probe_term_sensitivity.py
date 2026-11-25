@@ -10,8 +10,11 @@ differences over replications, reported with t intervals against a substantive t
 
 from __future__ import annotations
 
+import csv
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -127,3 +130,39 @@ def test_an_unexpected_energy_exception_propagates(monkeypatch):
     monkeypatch.setattr(pts.per, "restricted_energy", broken_energy)
     with pytest.raises(IndexError, match="unexpected energy error"):
         pts.score(None, 1)
+
+
+@pytest.mark.parametrize(("energy", "expected_class"), [
+    ([np.nan, 0.4, 0.4], "beyond"),
+    ([np.nan, np.nan, 0.4], "imprecise"),
+    ([np.nan, np.nan, np.nan], "imprecise"),
+])
+def test_analysis_uses_only_finite_pairs_per_term(tmp_path, energy, expected_class):
+    """An invalid energy replication neither removes non-energy pairs nor leaks NaN to JSON."""
+    path = tmp_path / "score.csv"
+    output = tmp_path / "summary.json"
+    rows = []
+    for index, value in enumerate(energy):
+        for param, energy_u in [(-1, 0.0), (0, value)]:
+            rows.append({
+                "base": "one", "param": param, "replication": index,
+                "cost_contact": 0.2 if param < 0 else 0.6,
+                "cost_attack_rate": 0.0, "cost_energy": 0.0, "energy_u": energy_u,
+                "cost_outcome": 0.0, "cost_penalty": 0.0,
+            })
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    pts.analyse(SimpleNamespace(out=path, json=output))
+    result = json.loads(
+        output.read_text(encoding="utf-8"),
+        parse_constant=lambda value: pytest.fail(f"Nonstandard JSON value: {value}"),
+    )["one|0"]
+    assert result["contact"]["class_0.1"] == "beyond"
+    assert result["contact"]["mean"] == pytest.approx(0.4)
+    assert result["energy_new"]["class_0.1"] == expected_class
+    valid = sum(np.isfinite(energy))
+    assert result["energy_new"]["mean"] == (0.4 if valid else None)
+    assert result["energy_new"]["sd"] == (0.0 if valid > 1 else None)

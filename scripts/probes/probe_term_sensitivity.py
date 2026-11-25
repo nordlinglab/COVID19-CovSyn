@@ -74,6 +74,8 @@ def pilot_bases(x, costs, exclude, low_share=0.1, middle_quantile=0.5):
 def classify(differences, delta: float) -> str:
     """'beyond', 'within' or 'imprecise': the 95% t interval of the mean against +-delta."""
     d = np.asarray(differences, dtype=float)
+    if len(d) < 2:
+        return "imprecise"
     half = (
         0.0
         if d.std(ddof=1) == 0
@@ -110,7 +112,10 @@ def score(P, seed_offset):
 
 
 def run(args) -> None:
-    """Evaluate every base and every one-at-a-time step on the same replications."""
+    """Evaluate every base and every one-at-a-time step on the same replications.
+
+    Resume keeps every saved evaluation, including NaN energy because the seed is unchanged.
+    """
     population, lower, upper = pilot_noise._population_and_bounds()
     pilot = psb.read_pilot(args.pilot_blocks)
     spread = {row: np.mean([c for (kind, r, s, b), c in pilot.items()
@@ -170,7 +175,7 @@ def _terms(r: dict) -> dict[str, float]:
 
 
 def analyse(args) -> None:
-    """Paired effects per base, parameter and term, classified against each threshold."""
+    """Classify finite paired effects per term without discarding other terms' pairs."""
     with open(args.out, encoding="utf-8") as f:
         rows = [
             {k: (v if k == "base" else float(v)) for k, v in r.items()} for r in csv.DictReader(f)
@@ -188,11 +193,24 @@ def analyse(args) -> None:
             continue
         entry = {}
         for term in reps[common[0]]:
-            d = [reps[k][term] - ref[k][term] for k in common]
+            paired = (
+                reps[k][term] - ref[k][term]
+                for k in common
+                if math.isfinite(reps[k][term]) and math.isfinite(ref[k][term])
+            )
+            d = [difference for difference in paired if math.isfinite(difference)]
             classes = {f"class_{delta}": classify(d, delta) for delta in DELTAS}
-            entry[term] = {"mean": float(np.mean(d)), "sd": float(np.std(d, ddof=1)), **classes}
+            mean = float(np.mean(d)) if d else math.nan
+            sd = float(np.std(d, ddof=1)) if len(d) > 1 else math.nan
+            entry[term] = {
+                "mean": mean if math.isfinite(mean) else None,
+                "sd": sd if math.isfinite(sd) else None,
+                **classes,
+            }
         result[f"{base}|{i}"] = entry
-    Path(args.json).write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
+    Path(args.json).write_text(
+        json.dumps(result, indent=1, allow_nan=False) + "\n", encoding="utf-8"
+    )
     print(f"{len(result)} base-parameter pairs analysed", flush=True)
 
 
