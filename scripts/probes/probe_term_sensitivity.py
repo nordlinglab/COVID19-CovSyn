@@ -77,7 +77,10 @@ def pilot_bases(x, costs, exclude, low_share=0.1, middle_quantile=0.5):
 
 
 def classify(differences, delta: float) -> str:
-    """'beyond', 'within' or 'imprecise': the 95% t interval of the mean against +-delta."""
+    """Classify the 95% t interval of the mean against the threshold.
+
+    Fewer than two finite pairs are classified as imprecise.
+    """
     d = np.asarray(differences, dtype=float)
     if len(d) < 2:
         return "imprecise"
