@@ -10,6 +10,11 @@ blocks.csv, keeps the old term and the new one (half the V- and the U-statistic,
 the present code's convention uses), and makes pilot 1's choice again with the new term in
 place of the old, alone and with the sparse household bin dropped as well.
 
+Acceptance scope (user decision 2026-11-25): this is a one-off analysis probe.
+Fix issues that change recorded results or silently give incorrect results on a rerun.
+Visible failures, extra runtime, and statistical edge cases absent from existing data
+are outside this scope.
+
 Usage: uv run python scripts/probes/probe_energy_restricted.py OUT_DIR PILOT1_BLOCKS_CSV
     [--sparse-bins BINS_CSV] [--workers N]
 Writes OUT_DIR/energy.csv, one row per evaluation, and OUT_DIR/summary.json. OUT_DIR/energy.csv

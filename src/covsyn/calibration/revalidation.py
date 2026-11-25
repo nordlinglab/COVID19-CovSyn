@@ -282,7 +282,9 @@ def cost_uncertainty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     so the interval is exploratory (decision of 2026-11-22). A candidate whose interval holds 0
     cannot be told apart from the best. Fewer than two blocks also count as
     indistinguishable: the data are insufficient to estimate an SE or interval.
-    Nonfinite block costs signal an upstream fault and are rejected.
+    The validation requires finite block costs. Failed evaluations use the finite
+    FAILED_EVALUATION_COST sentinel. Nonfinite values signal an upstream fault and are
+    rejected. Finite arithmetic overflow outside the observed cost scale is out of scope.
 
     Raises:
         ValueError: No candidates, mismatched block keys, or a nonfinite block cost.

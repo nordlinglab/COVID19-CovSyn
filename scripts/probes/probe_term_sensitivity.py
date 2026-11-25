@@ -14,6 +14,11 @@ normalised range towards the interior. Every point is evaluated on the same R re
 measured value and the restricted energy term. ``--analyse`` turns the table into paired
 effects with t intervals against weighted-cost thresholds.
 
+Acceptance scope (user decision 2026-11-25): this is a one-off analysis probe.
+Fix issues that change recorded results or silently give incorrect results on a rerun.
+Visible failures, extra runtime, and statistical edge cases absent from existing data
+are outside this scope.
+
 Usage:
     uv run python scripts/probes/probe_term_sensitivity.py run OUT_CSV PILOT1_BLOCKS_CSV
         [--replications R] [--workers N]
