@@ -119,6 +119,9 @@ class Design(NamedTuple):
     def check(self) -> Design:
         """The design, if it can run.
 
+        Older records with a rounded alpha_0 require a new pilot. Their optimiser runs
+        used the six-significant-digit value, which differs from the recorded design.
+
         Raises:
             DesignInvalid: An empty or repeated list, fewer than two streams, an n below 2 or
                 beyond the population's rows (without the warm starts if so), an n whose G
