@@ -32,6 +32,7 @@ import concurrent.futures
 import csv
 import json
 import math
+import os
 import traceback
 from pathlib import Path
 from typing import Any
@@ -121,11 +122,41 @@ def score(P, seed_offset):
             "energy_u": energy_u}  # fmt: skip
 
 
+def _read_resume_csv(path: Path) -> tuple[list[str] | None, set[tuple[str, int, int]]]:
+    """Read the saved header and completed evaluations, refusing partial CSV rows."""
+    done = set()
+    if not path.exists():
+        return None, done
+    with path.open("rb") as raw:
+        if not raw.seek(0, os.SEEK_END):
+            return None, done
+        raw.seek(-1, os.SEEK_END)
+        terminated = raw.read(1) in (b"\r", b"\n")
+    with path.open(newline="", encoding="utf-8") as saved:
+        if not terminated:
+            incomplete_line = sum(1 for _ in saved)
+        else:
+            reader = csv.DictReader(saved)
+            columns = reader.fieldnames
+            for row in reader:
+                if None in row.values():
+                    incomplete_line = reader.line_num
+                    break
+                done.add((row["base"], int(row["param"]), int(row["replication"])))
+            else:
+                return columns, done
+    raise ValueError(
+        f"{path}: incomplete CSV at line {incomplete_line}, delete this line before resuming"
+    )
+
+
 def run(args) -> None:
     """Evaluate every base and every one-at-a-time step on the same replications.
 
     Resume keeps every saved evaluation, including NaN energy because the seed is unchanged.
     """
+    path = Path(args.out)
+    columns, done = _read_resume_csv(path)
     population, lower, upper = pilot_noise._population_and_bounds()
     pilot = psb.read_pilot(args.pilot_blocks)
     spread = {row: np.mean([c for (kind, r, s, b), c in pilot.items()
@@ -138,14 +169,6 @@ def run(args) -> None:
     free = [i for i in range(population.shape[1]) if upper[i] > lower[i]]
     points = [(name, row, -1) for name, row in bases.items()]
     points += [(name, row, i) for name, row in bases.items() for i in free]
-    path = Path(args.out)
-    done = set()
-    columns = None
-    if path.exists():
-        with path.open(newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            columns = reader.fieldnames
-            done = {(r["base"], int(r["param"]), int(r["replication"])) for r in reader}
     _, make_pool = block_scoring.objective_pools(args.workers)
     offsets = [seed_streams.block_seeds(STREAM, b, S).start for b in range(args.replications)]
     with make_pool(S) as pool, path.open("a", newline="", encoding="utf-8") as out:

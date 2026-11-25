@@ -228,3 +228,29 @@ def test_probe_appends_only_matching_columns_and_preserves_progress(tmp_path, mo
     }
     assert [row["cost"] for row in rows] == expected[case]
     assert rows[0 if case == "new_missing" else 1]["measured_old"] == "0.4"
+
+
+@pytest.mark.parametrize(
+    "last_row", [b"literature,0,-1,0\n", b"literature,0,-1,0,2.0", b"low_a,1,-1,"]
+)
+def test_probe_resume_refuses_an_incomplete_last_line(tmp_path, monkeypatch, last_row):
+    """A partial row must be diagnosed without changing the saved CSV."""
+    path = tmp_path / "probe.csv"
+    original = b"base,row,param,replication,cost\nrun19,2,-1,0,1.0\n" + last_row
+    path.write_bytes(original)
+    population = np.arange(5.0).reshape(5, 1)
+    monkeypatch.setattr(
+        pts.pilot_noise, "_population_and_bounds",
+        lambda: (population, np.zeros(1), np.zeros(1)),
+    )
+    pilot = {("spread", i, 1, 0): i for i in range(5)}
+    monkeypatch.setattr(pts.psb, "read_pilot", lambda *_: pilot)
+    monkeypatch.setattr(pts, "pilot_bases", lambda *a, **kw: (1, 3, 4))
+    monkeypatch.setattr(
+        pts.block_scoring, "objective_pools", lambda *_: pytest.fail("pool started")
+    )
+    args = SimpleNamespace(out=path, pilot_blocks=tmp_path / "unused", workers=1, replications=1)
+
+    with pytest.raises(ValueError, match=r"line 3.*delete this line before resuming"):
+        pts.run(args)
+    assert path.read_bytes() == original
