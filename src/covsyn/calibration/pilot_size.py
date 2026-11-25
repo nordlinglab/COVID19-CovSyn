@@ -533,18 +533,18 @@ def main(argv: list[str] | None = None) -> Path:
         # RecursionError: JSON nested too deep for json.loads
         except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
             parser.error(f"{out} holds no pilot to resume ({error!r})")
-        try:  # the pilot is there; its design may fail today's checks (code review round 5)
-            design = Design.from_record(recorded_design)
-        except PopulationUnchecked as error:  # the file's fault, not the design's (round 10)
-            parser.error(f"pilot 2 in {out}: its design cannot be checked: {error}")
-        except DesignInvalid as error:
-            parser.error(f"pilot 2 in {out}: the recorded design is refused: {error}")
         try:  # the pilot is there; a recorded value may be wrong
             # The rule pilot 1's choice and the optimiser's resume pass (run_size).
             simulations = run_size.check_simulations(recorded_simulations, "settings.simulations")
             workers = block_scoring.pilot_workers(args.workers, os.environ, recorded_workers)
         except ValueError as error:
             parser.error(f"pilot 2 in {out}: {error}")
+        try:  # the pilot is there; its design may fail today's checks (code review round 5)
+            design = Design.from_record(recorded_design)
+        except PopulationUnchecked as error:  # the file's fault, not the design's (round 10)
+            parser.error(f"pilot 2 in {out}: its design cannot be checked: {error}")
+        except DesignInvalid as error:
+            parser.error(f"pilot 2 in {out}: the recorded design is refused: {error}")
         try:  # the pilot is there; only its record of the workers is at stake
             block_scoring.record_workers(out, workers)
         except PermissionError as error:  # refused: say what was refused

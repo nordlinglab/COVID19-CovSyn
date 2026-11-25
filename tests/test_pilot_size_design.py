@@ -349,6 +349,32 @@ def test_resume_refuses_invalid_recorded_design_before_reading_population(
     assert "recorded design is refused" in message and field in message
 
 
+@pytest.mark.parametrize(
+    ("simulations", "workers", "field"), [(0, 2, "settings.simulations"), (300, 0, "workers")]
+)
+def test_resume_checks_recorded_settings_before_population(
+    tmp_path, capsys, monkeypatch, simulations, workers, field
+):
+    """An invalid recorded setting must be reported before reading a missing population."""
+    import json
+
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    config = {
+        "settings": {"simulations": simulations, "design": RERUN.record()},
+        "workers": workers,
+    }
+    (out / "config.json").write_text(json.dumps(config))
+    monkeypatch.delenv(ps.hardware.ENV_VARIABLE, raising=False)
+    monkeypatch.setattr(
+        ps.initial_population, "rows_available", lambda *a: pytest.fail("population was read")
+    )
+    with pytest.raises(SystemExit) as stopped:
+        ps.main(["--resume", str(out)])
+    assert stopped.value.code == 2
+    assert field in capsys.readouterr().err
+
+
 def test_a_record_of_another_rule_is_refused():
     """A pilot begun under the earlier spread rule does not resume under the mean rule."""
     record = RERUN.record() | {"rule": "spread"}
