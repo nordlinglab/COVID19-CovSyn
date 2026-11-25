@@ -273,6 +273,14 @@ def score(
     return totals, {name: float(np.nanmean(v)) for name, v in outcomes.items()}
 
 
+def _finite_block_cost(value: float, candidate: int, block: str) -> float:
+    """Read a block cost and reject nonfinite input before using the candidate."""
+    cost = float(value)
+    if not np.isfinite(cost):
+        raise ValueError(f"candidate {candidate} has nonfinite cost for {block}")
+    return cost
+
+
 def cost_uncertainty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Each candidate's mean cost +- SE, and its paired difference to the best (Task 10).
 
@@ -302,13 +310,9 @@ def cost_uncertainty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ValueError(
                 f"candidate {row['candidate']} has different block keys from {reference}"
             )
-        values = []
-        for key in columns:
-            value = float(row[key])
-            if not np.isfinite(value):
-                raise ValueError(f"candidate {row['candidate']} has nonfinite cost for {key}")
-            values.append(value)
-        costs.append(np.array(values))
+        costs.append(np.array([
+            _finite_block_cost(row[key], row["candidate"], key) for key in columns
+        ]))
     means = [float(c.mean()) if len(c) else np.nan for c in costs]
     best = min(range(len(rows)), key=lambda i: (means[i], i))
     table = []
@@ -377,7 +381,6 @@ def main(argv: list[str] | None = None) -> None:
         seed_blocks = validation_seed_blocks(blocks, simulations, args.stream)
     except ValueError as error:
         parser.error(str(error))
-    out_dir.mkdir(parents=True, exist_ok=True)
     with open("./variable/demographic_parameters.pkl", "rb") as f:
         demo = pickle.load(f)
     with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
@@ -394,29 +397,33 @@ def main(argv: list[str] | None = None) -> None:
         flush=True,
     )
 
-    pool = concurrent.futures.ProcessPoolExecutor(
-        max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns)
-    )
     rows = []
-    for index, (vector, training_cost) in enumerate(zip(vectors, train, strict=True)):
-        totals, outcomes = score(vector, demo, pool, cheng, seed_blocks, simulations)
-        rows.append(
-            {
-                "candidate": index,
-                "training_cost": float(training_cost),
-                "validation_mean": float(np.mean(totals)),
-                "validation_sd": float(np.std(totals, ddof=1)) if blocks > 1 else 0.0,
-                **{f"block_{b}": t for b, t in enumerate(totals)},
-                **outcomes,
-            }
-        )
-        print(
-            f"{index:3d} train {training_cost:.4f} validation {np.mean(totals):.4f} "
-            f"(sd {rows[-1]['validation_sd']:.4f})",
-            flush=True,
-        )
-    pool.shutdown()
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=workers, initializer=fast_cost.init_worker, initargs=(demo, columns)
+    ) as pool:
+        for index, (vector, training_cost) in enumerate(zip(vectors, train, strict=True)):
+            totals, outcomes = score(vector, demo, pool, cheng, seed_blocks, simulations)
+            totals = [
+                _finite_block_cost(value, index, f"block_{block}")
+                for block, value in enumerate(totals)
+            ]
+            rows.append(
+                {
+                    "candidate": index,
+                    "training_cost": float(training_cost),
+                    "validation_mean": float(np.mean(totals)),
+                    "validation_sd": float(np.std(totals, ddof=1)) if blocks > 1 else 0.0,
+                    **{f"block_{b}": t for b, t in enumerate(totals)},
+                    **outcomes,
+                }
+            )
+            print(
+                f"{index:3d} train {training_cost:.4f} validation {np.mean(totals):.4f} "
+                f"(sd {rows[-1]['validation_sd']:.4f})",
+                flush=True,
+            )
 
+    out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "revalidation.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()

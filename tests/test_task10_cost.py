@@ -158,6 +158,26 @@ def test_the_command_rescoring_the_archive_at_s_writes_cost_uncertainty(tmp_path
     assert len(table) == 10 and sum(r["best"] == "True" for r in table) == 1
 
 
+def test_revalidation_stops_before_writing_when_a_candidate_has_nonfinite_cost(
+    tmp_path, monkeypatch,
+):
+    """An invalid first candidate stops scoring and leaves the output directory absent."""
+    vectors = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    monkeypatch.setattr(rv, "load_candidates", lambda *_: (vectors, [1.0, 2.0]))
+    evaluated = []
+
+    def score(vector, *_):
+        evaluated.append(vector[0])
+        return [1.0, np.nan], {}
+
+    monkeypatch.setattr(rv, "score", score)
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match=r"candidate 0.*block_1"):
+        rv.main([str(tmp_path), str(out), "2", "--workers", "1"])
+    assert evaluated == [1.0]
+    assert not out.exists()
+
+
 def test_a_simulation_count_a_block_cannot_hold_is_refused(tmp_path):
     """S must fit one block of a stream, as everywhere else."""
     with pytest.raises(SystemExit):
