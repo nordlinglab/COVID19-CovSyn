@@ -538,3 +538,16 @@ def test_a_file_that_vanishes_after_failing_to_decode_is_still_to_be_restored(mo
                         lambda self, **kw: False if self == damaged else real_exists(self, **kw))
     message = _unchecked(monkeypatch, damaged)
     assert "restore" in message and "covsyn-initial-population" not in message
+
+
+def test_alpha_0_must_match_the_value_passed_to_the_optimiser():
+    """Reject rounding at both new-run and resume design entry points."""
+    design = RERUN._replace(alpha_0s=(0.1234567,))
+    with pytest.raises(ps.DesignInvalid, match="alpha_0"):
+        design.check()
+    with pytest.raises(ps.DesignInvalid, match="alpha_0"):
+        ps.Design.from_record(design.record())
+
+    exact = RERUN._replace(alpha_0s=(0.2, 0.4, 0.05))
+    assert exact.check() == exact
+    assert ps.Design.from_record(exact.record()) == exact

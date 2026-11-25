@@ -123,7 +123,8 @@ class Design(NamedTuple):
             DesignInvalid: An empty or repeated list, fewer than two streams, an n below 2 or
                 beyond the population's rows (without the warm starts if so), an n whose G
                 exceeds a stream's blocks, an alpha_0 not positive or below alpha_end,
-                alpha_0s that would share a run directory, or a stream outside the
+                alpha_0s that would share a run directory or change when formatted for the
+                optimiser, or a stream outside the
                 optimisation streams.
             PopulationUnchecked: The population file could not be read or failed a format check.
         """
@@ -141,6 +142,9 @@ class Design(NamedTuple):
         if len(names) != len(self.alpha_0s):  # code review round 4
             raise DesignInvalid(f"alpha_0s {self.alpha_0s} would share run directories, whose "
                                 f"names keep 6 significant digits")
+        for a in self.alpha_0s:
+            if float(f"{a:g}") != a:
+                raise DesignInvalid(f"alpha_0 {a!r} changes to {a:g} when passed to the optimiser")
         for stream in self.streams:
             try:
                 seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
