@@ -129,6 +129,12 @@ def test_an_overflowing_paired_interval_keeps_the_candidate():
     assert all(np.isnan(table[1][key]) for key in ("se", "ci_low", "ci_high"))
 
 
+def test_cost_uncertainty_refuses_candidates_with_different_block_keys():
+    """A missing block must never be broadcast across the other candidate's costs."""
+    with pytest.raises(ValueError, match="candidate 1"):
+        rv.cost_uncertainty(_rows([[10.0], [12.0, 13.0]]))
+
+
 def test_the_command_rescoring_the_archive_at_s_writes_cost_uncertainty(tmp_path, monkeypatch):
     """--simulations S and --archive-best k: blocks of S seeds of the given stream."""
     run = tmp_path / "run"

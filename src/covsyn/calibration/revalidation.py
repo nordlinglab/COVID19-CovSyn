@@ -284,12 +284,24 @@ def cost_uncertainty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     indistinguishable: the data are insufficient to estimate an SE or interval.
     Nonfinite estimates likewise leave the interval unknown and retain the candidate.
     Finite means take precedence when selecting the best candidate.
+
+    Raises:
+        ValueError: No candidates, or candidates do not have the same block keys.
     """
     from scipy import stats
 
-    costs = [np.array([float(r[k]) for k in sorted((k for k in r if k.startswith("block_")),
-                                                   key=lambda k: int(k[6:]))])
-             for r in rows]  # fmt: skip
+    if not rows:
+        raise ValueError("cost uncertainty requires at least one candidate")
+    block_keys = {key for key in rows[0] if key.startswith("block_")}
+    columns = sorted(block_keys, key=lambda key: (int(key[6:]), key))
+    costs = []
+    for row in rows:
+        if {key for key in row if key.startswith("block_")} != block_keys:
+            reference = rows[0]["candidate"]
+            raise ValueError(
+                f"candidate {row['candidate']} has different block keys from {reference}"
+            )
+        costs.append(np.array([float(row[key]) for key in columns]))
     table = []
     with np.errstate(invalid="ignore", over="ignore"):
         means = [float(c.mean()) if len(c) else np.nan for c in costs]
