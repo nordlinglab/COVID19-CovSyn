@@ -169,13 +169,19 @@ def test_analysis_uses_only_finite_pairs_per_term(tmp_path, energy, expected_cla
     assert result["energy_new"]["sd"] == (0.0 if valid > 1 else None)
 
 
-@pytest.mark.parametrize("case", ["valid", "mismatch", "interrupted", "new_missing"])
+@pytest.mark.parametrize(
+    "case", ["valid", "mismatch", "interrupted", "new_missing", "empty_file", "header_only"]
+)
 def test_probe_appends_only_matching_columns_and_preserves_progress(tmp_path, monkeypatch, case):
     """Preserve each valid row and reject only the incompatible or failed evaluation."""
     path = tmp_path / "probe.csv"
-    original = b"base,row,param,replication,measured_old,cost\nrun19,2,-1,0,0.3,1.0\n"
-    if case != "new_missing":
-        path.write_bytes(original)
+    saved_header = b"base,row,param,replication,measured_old,cost\n"
+    if case == "empty_file":
+        path.write_bytes(b"")
+    elif case == "header_only":
+        path.write_bytes(saved_header)
+    elif case != "new_missing":
+        path.write_bytes(saved_header + b"run19,2,-1,0,0.3,1.0\n")
     population = np.arange(5.0).reshape(5, 1)
     monkeypatch.setattr(
         pts.pilot_noise, "_population_and_bounds",
@@ -225,9 +231,16 @@ def test_probe_appends_only_matching_columns_and_preserves_progress(tmp_path, mo
         "mismatch": ["1.0", "2.0"],
         "interrupted": ["1.0", "2.0"],
         "new_missing": ["2.0"],
+        "empty_file": ["2.0", "3.0", "4.0", "5.0", "6.0"],
+        "header_only": ["2.0", "3.0", "4.0", "5.0", "6.0"],
     }
     assert [row["cost"] for row in rows] == expected[case]
-    assert rows[0 if case == "new_missing" else 1]["measured_old"] == "0.4"
+    first_new_row = 0 if case in {"new_missing", "empty_file", "header_only"} else 1
+    assert rows[first_new_row]["measured_old"] == "0.4"
+    if case in {"empty_file", "header_only"}:
+        fresh_header = "base,row,param,replication,cost,measured_old"
+        header = saved_header.decode().strip() if case == "header_only" else fresh_header
+        assert path.read_text(encoding="utf-8").splitlines().count(header) == 1
 
 
 @pytest.mark.parametrize(
