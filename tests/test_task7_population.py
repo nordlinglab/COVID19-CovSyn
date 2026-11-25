@@ -297,6 +297,17 @@ def test_version_1_is_committed_and_matches_the_generator(written):
         assert str(a["sha256"]) == str(b["sha256"])
 
 
+def test_main_writes_an_empty_string_array_without_warm_starts(tmp_path, space, monkeypatch):
+    """The CLI writes a loadable new version when no warm starts are configured."""
+    monkeypatch.setattr(ip, "WARM_STARTS", ())
+    path = ip.main(["--version", "2", "--out-dir", str(tmp_path)])
+    with np.load(path) as saved:
+        assert saved["warm_starts"].shape == (0,)
+        assert saved["warm_starts"].dtype.kind == "U"
+    assert ip.rows_available(path, without_warm_starts=True) == ip.N_MAX
+    assert len(ip.load(path, 1, space.lower, space.upper, without_warm_starts=True)) == 1
+
+
 def test_making_a_population_does_not_load_the_optimiser():
     """The population needs the bounds and two helpers, not the optimiser: no import cycle."""
     code = ("import sys, numpy as np, covsyn.calibration.initial_population as ip; "

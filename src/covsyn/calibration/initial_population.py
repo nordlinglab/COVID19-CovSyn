@@ -107,7 +107,7 @@ def write(path: Path, normalized: np.ndarray, space: ParameterSpace,
     temporary = path.with_name(path.stem + ".tmp.npz")
     np.savez(temporary, normalized=normalized, lower=space.lower, upper=space.upper,
              dimension=len(space.lower), version=version, lhs_seed=LHS_SEED,
-             warm_starts=np.array(WARM_STARTS), command=np.array(command),
+             warm_starts=np.array(WARM_STARTS, dtype=str), command=np.array(command),
              sha256=np.array(digest(normalized, space.lower, space.upper)))  # fmt: skip
     temporary.replace(path)
 
