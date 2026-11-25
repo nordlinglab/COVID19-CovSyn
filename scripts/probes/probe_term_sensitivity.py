@@ -77,9 +77,11 @@ def pilot_bases(x, costs, exclude, low_share=0.1, middle_quantile=0.5):
 
 
 def classify(differences, delta: float) -> str:
-    """Classify the 95% t interval of the mean against the threshold.
+    """Classify the 95% t interval of the mean against ±delta.
 
-    Fewer than two finite pairs are classified as imprecise.
+    Return beyond if the interval lies entirely outside either threshold, within if it
+    lies inside both thresholds, and imprecise otherwise or with fewer than two differences.
+    analyse() drops pairs containing NaN before calling this function.
     """
     d = np.asarray(differences, dtype=float)
     if len(d) < 2:
