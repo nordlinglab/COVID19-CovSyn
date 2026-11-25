@@ -91,17 +91,23 @@ def test_identical_differences_are_exact():
     assert pts.classify([0.3] * 5, delta=0.1) == "beyond"
 
 
-def test_a_string_case_row_only_fails_its_own_evaluation(monkeypatch):
-    """A failed row does not stop the next evaluation."""
+def test_a_string_case_row_only_invalidates_energy(monkeypatch):
+    """An unusable energy row keeps costs and outcomes, and the next evaluation still runs."""
     rows = np.array([[20.0] * 9, [40.0] * 9])
     monkeypatch.setattr(pts, "_TAIWAN", np.array([[10.0, 15.0], [50.0, 45.0]]))
 
     def simulated(_p, seed, _clock):
         cases = ["bad row", rows[0]] if seed == 1 else rows
-        return 12.0, {"cost_energy": 0.5}, (None, None, cases), None
+        parts = {"cost_contact": 10.0, "cost_outcome": 2.0, "measured_example": 0.3}
+        return 12.0, parts, (None, None, cases), None
 
     monkeypatch.setattr(pts.fast_cost, "_simulate_and_score", simulated)
-    assert pts.score(None, 1) is None
+    failed_energy = pts.score(None, 1)
+    assert failed_energy["cost"] == 12.0
+    assert failed_energy["cost_contact"] == 10.0
+    assert failed_energy["cost_outcome"] == 2.0
+    assert failed_energy["measured_example"] == 0.3
+    assert np.isnan(failed_energy["energy_u"])
     result = pts.score(None, 2)
     assert result["cost"] == 12.0
     assert np.isfinite(result["energy_u"])

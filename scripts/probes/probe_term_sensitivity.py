@@ -95,11 +95,15 @@ def score(P, seed_offset):
     clock = timings.TaskClock(False, fast_cost._WORKER_PROCESS)
     try:
         cost, parts, pooled, _ = fast_cost._simulate_and_score(P, seed_offset, clock)
-        simulated = per._scored_cases(pooled[2])
     except Exception:
         traceback.print_exc()
         return None
-    _, energy_u = per.restricted_energy(_TAIWAN, simulated)
+    try:
+        simulated = per._scored_cases(pooled[2])
+        _, energy_u = per.restricted_energy(_TAIWAN, simulated)
+    except Exception:
+        traceback.print_exc()
+        energy_u = float("nan")
     return {"cost": cost, **{k: v for k, v in parts.items() if isinstance(v, float)},
             "energy_u": energy_u}  # fmt: skip
 
