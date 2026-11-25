@@ -10,8 +10,12 @@ comment above initial_population.PopulationUnreadable.
 
 from __future__ import annotations
 
+import io
 import os
+import random
 import re
+import struct
+import zipfile
 
 import numpy as np
 import pytest
@@ -72,8 +76,6 @@ def _no_rows(path):
 
 def _a_non_array_member(path):
     """A complete archive with a member that is not an NPY array."""
-    import zipfile
-
     with zipfile.ZipFile(COMMITTED) as source, zipfile.ZipFile(path, "w") as target:
         for name in source.namelist():
             data = b"plain text" if name == "normalized.npy" else source.read(name)
@@ -86,9 +88,6 @@ def _a_forged_header(path):
 
     Complete otherwise, so no missing array refuses it first (code review rounds 18, 21).
     """
-    import io
-    import zipfile
-
     with np.load(COMMITTED) as saved:
         np.savez(path, **{key: saved[key] for key in saved.files})
     with zipfile.ZipFile(path) as plain:
@@ -106,8 +105,6 @@ def _a_forged_header(path):
 
 def _corrupt_lzma(path):
     """An archive whose members are LZMA-compressed, the data corrupted (round 19)."""
-    import zipfile
-
     with np.load(COMMITTED) as saved:
         arrays = {key: saved[key] for key in saved.files}
     np.savez(path, **arrays)
@@ -129,7 +126,7 @@ REFUSED = [
     (_missing, "FileNotFoundError", "last commit", True),
     (_a_directory, "IsADirectoryError", "a directory stands where the file should be", False),
     (_a_file_for_a_directory, "NotADirectoryError", "should be a directory is not one", False),
-    (_empty, "EOFError", "last commit", True),
+    (_empty, "empty population file", "last commit", True),
     (_a_non_array_member, "not an NPY array", "last commit", True),
     (_no_rows, "not a non-empty 2-D array", "last commit", True),
     (_a_forged_header, "header size does not match the member", "last commit", True),
@@ -194,6 +191,63 @@ def test_inconsistent_header_is_refused_before_numpy_loads(place, monkeypatch):
     monkeypatch.setattr(ip.np, "load", unexpected_load)
     with pytest.raises(ip.PopulationUnreadable, match="header size does not match the member"):
         ip.rows_available(path)
+
+
+def test_unexpected_population_validation_error_propagates(place, monkeypatch):
+    """An error in our size calculation must leave with its original type."""
+    _put_right(place)
+    failure = ValueError("unexpected size calculation failure")
+
+    def fail_size(_shape):
+        raise failure
+
+    monkeypatch.setattr(ip.math, "prod", fail_size)
+    with pytest.raises(ValueError) as caught:
+        ip.rows_available(place)
+    assert caught.value is failure
+
+
+def test_seeded_population_format_failures_stay_at_the_file_boundary(place, space):
+    """Exercise both readers across repeatable archive and header read failures."""
+    rng = random.Random(1731)
+    original = COMMITTED.read_bytes()
+    with zipfile.ZipFile(io.BytesIO(original)) as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+    compressed = io.BytesIO()
+    with zipfile.ZipFile(compressed, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    del members["normalized.npy"]
+
+    def check_readers():
+        try:
+            ip.rows_available(place)
+        except ip.PopulationUnreadable as error:
+            assert str(error).count(str(place)) == 1
+        try:
+            ip.load(place, 1, space.lower, space.upper)
+        except SystemExit as error:
+            assert not isinstance(error, ip.RunSizeOutOfRange)
+            assert str(error).count(str(place)) == 1
+
+    for archive_bytes in (original, compressed.getvalue()):
+        for _ in range(64):
+            place.write_bytes(archive_bytes[:rng.randrange(len(archive_bytes))])
+            check_readers()
+        for _ in range(64):
+            damaged = bytearray(archive_bytes)
+            damaged[rng.randrange(len(damaged))] ^= 1 << rng.randrange(8)
+            place.write_bytes(damaged)
+            check_readers()
+
+    for _ in range(128):
+        header = b"{" + rng.randbytes(rng.randrange(1, 40)) + b"\n"
+        payload = np.lib.format.magic(1, 0) + struct.pack("<H", len(header)) + header
+        with zipfile.ZipFile(place, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("normalized.npy", payload)
+            for name, data in members.items():
+                archive.writestr(name, data)
+        check_readers()
 
 
 def test_the_relative_path_the_optimiser_reads_is_named_once(tmp_path, space, monkeypatch):
