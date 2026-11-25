@@ -15,11 +15,14 @@ the SD of four runs decide could swap a better setting out). The SD between runs
 
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 
 import numpy as np
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from covsyn.calibration import pilot_size as ps
 
@@ -551,3 +554,24 @@ def test_alpha_0_must_match_the_value_passed_to_the_optimiser():
     exact = RERUN._replace(alpha_0s=(0.2, 0.4, 0.05))
     assert exact.check() == exact
     assert ps.Design.from_record(exact.record()) == exact
+
+
+@given(st.lists(st.integers(-(2**63), 2**63 - 1), min_size=1, max_size=12))
+def test_cli_whole_numbers_round_trip(values):
+    """The integer parser preserves a comma-separated list, including signs and zero."""
+    assert ps._whole_numbers(",".join(map(str, values))) == tuple(values)
+
+
+@given(st.lists(st.floats(min_value=0, exclude_min=True, allow_infinity=False),
+                min_size=1, max_size=12))
+def test_cli_positive_numbers_round_trip(values):
+    """Round-trip finite positive steps using Python's lossless float text."""
+    assert ps._positive_numbers(",".join(map(repr, values))) == tuple(values)
+
+
+@given(bad=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1))
+def test_cli_number_lists_refuse_invalid_tokens(bad):
+    """A nonnumeric token must fail with argparse's usage error."""
+    for parse in (ps._whole_numbers, ps._positive_numbers):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse(f"1,x{bad},2")
