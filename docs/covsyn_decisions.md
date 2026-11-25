@@ -653,6 +653,10 @@ T 編號對應 covid19-research `doc/plan_Nordling2026_CovSynFireflyNordlingLab.
 - 2026-11-25 採用例外邊界 A，取代第 19 輪的廣泛捕捉。
   壓縮方式已限於 STORED 與 DEFLATE，各讀取操作只轉譯已知格式及 I/O 錯誤，應用程式檢查與其他例外維持原樣。
 
+- 採用選項 D，先驗證整份 ZIP 目錄的壓縮、旗標與位移，再開啟成員。
+  NPY 標頭限寫入端的格式，接受 little-endian float64、int64、Unicode 字串、C 順序及零至二軸。
+  超出格式的成員在交給 NumPy 的標頭解析器前拒絕，個別操作仍保留例外邊界 A。
+
 | Commit | 理由 |
 |---|---|
 | `d222e6d` | NumPy 可能將非 NPY 的成員回傳為原始位元組，必須先拒絕才能安全檢查陣列屬性。 |

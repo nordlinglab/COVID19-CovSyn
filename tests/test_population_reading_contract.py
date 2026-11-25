@@ -219,6 +219,43 @@ def test_member_offsets_are_checked_before_open(place, monkeypatch):
         ip.rows_available(place)
 
 
+@pytest.mark.parametrize(
+    "header",
+    [
+        b"{'descr': '<f8', 'fortran_order': False, 'shape': (), 1: 0, }",
+        b"{'descr': (), 'fortran_order': False, 'shape': (), }",
+        b"{'descr': '>f8', 'fortran_order': False, 'shape': (), }",
+        b"{'descr': '<f8', 'fortran_order': True, 'shape': (), }",
+        b"{'descr': '<f8', 'fortran_order': False, 'shape': (1, 1, 1), }",
+    ],
+)
+def test_noncanonical_npy_header_is_refused_before_parser(header, place, monkeypatch):
+    """Only supported header syntax may reach the NumPy header parser."""
+    header += b"\n"
+    payload = np.lib.format.magic(1, 0) + struct.pack("<H", len(header)) + header + bytes(8)
+    with zipfile.ZipFile(COMMITTED) as source, zipfile.ZipFile(place, "w") as target:
+        for name in source.namelist():
+            target.writestr(name, payload if name == "normalized.npy" else source.read(name))
+    monkeypatch.setattr(
+        np.lib.format, "read_array_header_1_0", lambda *_: pytest.fail("header reached NumPy")
+    )
+    with pytest.raises(ip.PopulationUnreadable, match="unsupported NPY header"):
+        ip.rows_available(place)
+
+
+@given(
+    shape=st.lists(st.integers(0, 8), max_size=2).map(tuple),
+    descriptor=st.sampled_from(("<f8", "<i8", "<U1", "<U64")),
+    version=st.sampled_from(((1, 0), (2, 0))),
+)
+def test_writer_headers_preflight_and_parse(shape, descriptor, version):
+    """Canonical scalar, vector and matrix headers agree with NumPy's parser."""
+    array = np.zeros(shape, dtype=descriptor)
+    buffer = io.BytesIO()
+    np.lib.format.write_array(buffer, array, version=version, allow_pickle=False)
+    np.testing.assert_array_equal(ip._decode_member(buffer.getvalue(), "member", "test"), array)
+
+
 def test_unexpected_population_validation_error_propagates(place, monkeypatch):
     """An error in our size calculation must leave with its original type."""
     _put_right(place)

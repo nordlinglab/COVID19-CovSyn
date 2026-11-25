@@ -18,6 +18,7 @@ import hashlib
 import io
 import math
 import os
+import re
 import sys
 import tokenize
 import zipfile
@@ -332,6 +333,16 @@ def _check_zip_members(members: list[zipfile.ZipInfo], size: int, shown: str) ->
             raise PopulationUnreadable(f"{shown} cannot be read (ZIP member outside the archive)")
 
 
+# These are the canonical fields and types emitted by the population writer.
+# Bound numeric tokens well above the archive capacity before NumPy parses them.
+_NPY_AXIS = rb"(?:0|[1-9][0-9]{0,11})"
+_NPY_HEADER = re.compile(
+    rb"\{'descr': '<(?:f8|i8|U[1-9][0-9]{0,6})', 'fortran_order': False, 'shape': \("
+    rb"(?:" + _NPY_AXIS + rb",(?: " + _NPY_AXIS + rb")?)?\), \} *\n"
+)
+_NPY_HEADER_LIMIT = 10_000
+
+
 def _decode_member(payload: bytes, key: str, shown: str) -> np.ndarray:
     """Check a member's claimed size before NumPy allocates its array."""
     if not payload.startswith(np.lib.format.MAGIC_PREFIX):
@@ -341,12 +352,20 @@ def _decode_member(payload: bytes, key: str, shown: str) -> np.ndarray:
         version = np.lib.format.read_magic(buffer)
     if version == (1, 0):
         read_header = np.lib.format.read_array_header_1_0
+        length_bytes = 2
     elif version == (2, 0):
         read_header = np.lib.format.read_array_header_2_0
+        length_bytes = 4
     else:
         raise PopulationUnreadable(
             f"{shown} cannot be read ({key} uses unsupported NPY format {version})"
         )
+    length_offset = buffer.tell()
+    start = length_offset + length_bytes
+    length = int.from_bytes(payload[length_offset:start], "little")
+    if (not 0 < length <= _NPY_HEADER_LIMIT or start + length > len(payload)
+            or not _NPY_HEADER.fullmatch(payload[start:start + length])):
+        raise PopulationUnreadable(f"{shown} cannot be read ({key} uses unsupported NPY header)")
     with _reading(shown, ValueError, OverflowError, tokenize.TokenError, SyntaxError):
         shape, _, dtype = read_header(buffer)
     remaining = len(payload) - buffer.tell()
