@@ -189,7 +189,8 @@ def main() -> None:
     args = parser.parse_args()
     if not fast_cost.COST_INCLUDES_ENERGY:
         parser.error(
-            "the current total cost excludes energy (B95). Use the historical objective"
+            "This probe is disabled since B95 (aeb0305). "
+            "To reproduce its results, check out a commit before aeb0305."
         )
     pilot = psb.read_pilot(args.pilot_blocks)
     sparse = None

@@ -128,7 +128,9 @@ def test_current_probe_refuses_before_rescoring_when_objective_excludes_energy(
     with pytest.raises(SystemExit) as refused:
         per.main()
     assert refused.value.code == 2
-    assert "total cost excludes energy" in capsys.readouterr().err
+    message = capsys.readouterr().err
+    assert "disabled" in message and "B95" in message and "aeb0305" in message
+    assert "before aeb0305" in message
     assert not out.exists()
 
 
