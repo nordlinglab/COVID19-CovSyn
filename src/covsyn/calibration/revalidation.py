@@ -381,6 +381,7 @@ def main(argv: list[str] | None = None) -> None:
         seed_blocks = validation_seed_blocks(blocks, simulations, args.stream)
     except ValueError as error:
         parser.error(str(error))
+    out_dir.mkdir(parents=True, exist_ok=True)
     with open("./variable/demographic_parameters.pkl", "rb") as f:
         demo = pickle.load(f)
     with open("./variable/processed_contact_tracing_data.pkl", "rb") as f:
@@ -423,7 +424,6 @@ def main(argv: list[str] | None = None) -> None:
                 flush=True,
             )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "revalidation.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()

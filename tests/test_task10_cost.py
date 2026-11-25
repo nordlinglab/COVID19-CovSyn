@@ -161,7 +161,7 @@ def test_the_command_rescoring_the_archive_at_s_writes_cost_uncertainty(tmp_path
 def test_revalidation_stops_before_writing_when_a_candidate_has_nonfinite_cost(
     tmp_path, monkeypatch,
 ):
-    """An invalid first candidate stops scoring and leaves the output directory absent."""
+    """An invalid first candidate stops scoring and leaves no output files."""
     vectors = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     monkeypatch.setattr(rv, "load_candidates", lambda *_: (vectors, [1.0, 2.0]))
     evaluated = []
@@ -175,7 +175,18 @@ def test_revalidation_stops_before_writing_when_a_candidate_has_nonfinite_cost(
     with pytest.raises(ValueError, match=r"candidate 0.*block_1"):
         rv.main([str(tmp_path), str(out), "2", "--workers", "1"])
     assert evaluated == [1.0]
-    assert not out.exists()
+    assert out.is_dir() and not list(out.iterdir())
+
+
+def test_revalidation_rejects_an_existing_output_file_before_scoring(tmp_path, monkeypatch):
+    """Check that the output directory can be created before evaluating any candidate."""
+    monkeypatch.setattr(rv, "load_candidates", lambda *_: (np.ones((1, DIM)), [1.0]))
+    monkeypatch.setattr(rv, "score", lambda *_: pytest.fail("candidate was evaluated"))
+    out = tmp_path / "output"
+    out.write_text("existing file", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        rv.main([str(tmp_path), str(out), "2", "--workers", "1"])
+    assert out.read_text(encoding="utf-8") == "existing file"
 
 
 def test_a_simulation_count_a_block_cannot_hold_is_refused(tmp_path):
