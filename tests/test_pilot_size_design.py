@@ -488,6 +488,21 @@ def test_a_new_pilot_with_an_unreadable_population_does_not_blame_the_design(tmp
     assert not (tmp_path / "tables").exists()
 
 
+@pytest.mark.usefixtures("no_population")
+def test_a_new_pilot_reports_an_invalid_noise_choice_before_the_population(tmp_path, capsys):
+    """The pilot 1 choice is checked even when the population file is unavailable."""
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    (noise / "choice.json").write_text('{"chosen_simulations": 0}', encoding="utf-8")
+    with pytest.raises(SystemExit) as stopped:
+        ps.main(["--noise", str(noise), "--results-root", str(tmp_path)])
+    assert stopped.value.code == 2
+    message = capsys.readouterr().err
+    assert "chosen_simulations" in message and str(noise) in message
+    assert "cannot be checked" not in message
+    assert not (tmp_path / "tables").exists()
+
+
 def _unchecked(monkeypatch, path):
     from covsyn.calibration import initial_population as ip
 

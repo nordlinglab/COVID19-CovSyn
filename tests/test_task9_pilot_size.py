@@ -387,6 +387,7 @@ def test_the_command_takes_s_from_pilot_1(tmp_path, monkeypatch):
 def test_main_distinguishes_a_population_path_error_from_an_invalid_design(
     tmp_path,
     monkeypatch,
+    capsys,
 ):
     """Only an invalid pilot design is translated to a usage error here."""
 
@@ -394,10 +395,12 @@ def test_main_distinguishes_a_population_path_error_from_an_invalid_design(
         raise ValueError("population path is empty")
 
     monkeypatch.setattr(ps.initial_population, "rows_available", bad_population_path)
+    (tmp_path / "choice.json").write_text('{"chosen_simulations": 300}', encoding="utf-8")
     args = ["--noise", str(tmp_path)]
     with pytest.raises(SystemExit) as invalid_design:
         ps.main([*args, "--pop-sizes", "1"])
     assert invalid_design.value.code == 2
+    assert "a population needs at least 2 fireflies" in capsys.readouterr().err
     with pytest.raises(ValueError, match="population path is empty"):
         ps.main(args)
 

@@ -509,14 +509,6 @@ def main(argv: list[str] | None = None) -> Path:
              if value is not None]  # fmt: skip
     if args.resume is not None and given:
         parser.error(f"a resume runs the pilot's own design; remove {', '.join(given)}")
-    if args.resume is None:  # a resume's design is its config.json's
-        try:
-            design = Design(args.pop_sizes or POP_SIZES, args.alpha_0s or ALPHA_0S,
-                            args.streams or STREAMS, args.without_warm_starts).check()
-        except PopulationUnchecked as error:  # the file's fault, as on resume (round 11)
-            parser.error(f"the design cannot be checked: {error}")
-        except DesignInvalid as error:
-            parser.error(f"design: {error}")
     if args.resume is not None:
         # Absolute, as the optimiser runs from the repository root, without "..", and not
         # resolved, so a linked tables directory keeps its results/ siblings.
@@ -578,6 +570,13 @@ def main(argv: list[str] | None = None) -> Path:
             parser.error(f"pilot 1 in {args.noise} chose no S: no S met its criterion, which "
                          f"the professor decides first")
         workers = hardware.resolve_workers(args.workers, os.environ, None)
+        try:
+            design = Design(args.pop_sizes or POP_SIZES, args.alpha_0s or ALPHA_0S,
+                            args.streams or STREAMS, args.without_warm_starts).check()
+        except PopulationUnchecked as error:  # the file's fault, as on resume (round 11)
+            parser.error(f"the design cannot be checked: {error}")
+        except DesignInvalid as error:
+            parser.error(f"design: {error}")
         root = Path(os.path.abspath(args.results_root))
         out = runs.run_directory(runs.make_run_id("pilot-size"), "tables", root, new=True)
         runs.write_config(out, {
