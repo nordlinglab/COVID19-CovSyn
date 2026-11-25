@@ -284,8 +284,8 @@ def test_a_file_edited_without_its_sha256_is_refused_by_load_only(place, space):
 
 
 @pytest.mark.parametrize("version", [None, np.array([1, 2])])
-def test_a_version_describe_cannot_read_is_refused_by_load(place, space, version):
-    """What describe() reads after load(), load() checks (guarantee 2, round 18)."""
+def test_invalid_version_metadata_is_refused_by_load(place, space, version):
+    """The version metadata is validated before a run records it."""
     with np.load(COMMITTED) as saved:
         data = {key: saved[key] for key in saved.files if key != "version"}
     if version is not None:

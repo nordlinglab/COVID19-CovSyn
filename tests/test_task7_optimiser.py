@@ -62,11 +62,17 @@ def test_a_run_starts_from_the_first_rows_of_the_population(started):
 
 def test_the_optimizer_records_metadata_without_reopening_the_file(started, monkeypatch):
     """The run records the version from the same file read that supplied the rows."""
-    def second_read(*args, **kwargs):
-        pytest.fail("population metadata must come from the original read")
+    read = fo.initial_population._read
+    opened = []
 
-    monkeypatch.setattr(fo.initial_population, "describe", second_read)
+    def record_read(path):
+        opened.append(path)
+        return read(path)
+
+    monkeypatch.setattr(fo.initial_population, "_read", record_read)
+    assert not hasattr(fo.initial_population, "describe")
     seen = started("--mode", "test")
+    assert len(opened) == 1
     assert seen["engine"].run_settings["initial_population"]["version"] == 1
 
 

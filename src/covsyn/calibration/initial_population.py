@@ -393,12 +393,6 @@ def remedy(cause: BaseException | None, path: Path) -> str:
     return committed
 
 
-def describe(path: Path) -> dict[str, int | str]:
-    """Return the stored version and SHA-256 without verifying the digest."""
-    saved = _read(path)
-    return {"version": int(saved["version"]), "sha256": str(saved["sha256"])}
-
-
 def main(argv: list[str] | None = None) -> Path:
     """Write a new version of the initial population (``covsyn-initial-population``)."""
     argv = sys.argv[1:] if argv is None else argv
