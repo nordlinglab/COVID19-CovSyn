@@ -139,7 +139,7 @@ class Design(NamedTuple):
         names = {run_name("", Setting(2, a, 1)) for a in self.alpha_0s}
         if len(names) != len(self.alpha_0s):  # code review round 4
             raise DesignInvalid(f"alpha_0s {self.alpha_0s} would share run directories, whose "
-                             f"names keep 6 significant digits")
+                                f"names keep 6 significant digits")
         for stream in self.streams:
             try:
                 seed_streams.require(stream, seed_streams.OPTIMISATION_STREAMS, "optimisation")
@@ -152,7 +152,7 @@ class Design(NamedTuple):
         for n in self.pop_sizes:
             if generations(n) not in run_size.GENERATIONS:
                 raise DesignInvalid(f"--pop-sizes: n = {n} gives G = {generations(n)} generations, "
-                                 f"more than a stream's {run_size.GENERATIONS.stop - 1} blocks")
+                                    f"more than a stream's {run_size.GENERATIONS.stop - 1} blocks")
             for a in self.alpha_0s:
                 try:
                     step_schedule.checked_schedule(a, None, None, generations(n),
@@ -171,7 +171,7 @@ class Design(NamedTuple):
         for n in self.pop_sizes:
             if n > rows:
                 raise DesignInvalid(f"--pop-sizes: n = {n} is more than the {rows} fireflies the "
-                                 f"population has{without}")
+                                    f"population has{without}")
         return self
 
     def record(self) -> dict[str, Any]:
@@ -196,7 +196,7 @@ class Design(NamedTuple):
         # whatever the file's state (code review rounds 6 and 11).
         if record.get("rule", design.rule) != design.rule:
             raise DesignInvalid(f"the pilot was begun under the {record['rule']!r} rule, which "
-                             f"this version replaced by {design.rule!r}; start a new pilot")
+                                f"this version replaced by {design.rule!r}; start a new pilot")
         return design.check()
 
 
