@@ -119,8 +119,7 @@ class Design(NamedTuple):
     def check(self) -> Design:
         """The design, if it can run.
 
-        Older records with a rounded alpha_0 require a new pilot. Their optimiser runs
-        used the six-significant-digit value, which differs from the recorded design.
+        See from_record() for how rounded step sizes affect older pilot records.
 
         Raises:
             DesignInvalid: An empty or repeated list, fewer than two streams, an n below 2 or
@@ -192,7 +191,11 @@ class Design(NamedTuple):
 
     @classmethod
     def from_record(cls, record: Mapping[str, Any] | None) -> Design:
-        """The design config.json records; PLAN for a pilot begun before designs existed."""
+        """Read the design from config.json, or use PLAN for a pilot without a design.
+
+        Older records with a rounded alpha_0 require a new pilot. Their optimiser runs
+        used the six-significant-digit value, which differs from the recorded design.
+        """
         if record is None:
             return PLAN.check()
         if not isinstance(record, Mapping):
