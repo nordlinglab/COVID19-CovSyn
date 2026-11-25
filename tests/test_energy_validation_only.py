@@ -66,6 +66,24 @@ def test_the_reference_objective_charges_the_same_terms(
     assert math.isfinite(parts["cost_energy"])
 
 
+def test_energy_provenance_matches_both_objective_totals(
+    monkeypatch, run10_vector, demographic_parameters, cheng_data, cost_pool
+):
+    """Both real objective paths must agree with the energy provenance marker."""
+    fast_total, fast_parts = _candidate(
+        monkeypatch, demographic_parameters, cheng_data, run10_vector
+    )
+    monkeypatch.setattr(fo, "SIMULATIONS_PER_EVALUATION", 10)
+    reference_total = fo.cost_function(run10_vector, demographic_parameters, cost_pool, *cheng_data)
+    reference_parts = dict(LAST_COST_PARTS)
+
+    assert type(fast_cost.COST_INCLUDES_ENERGY) is bool
+    charged = (*CHARGED, "cost_energy") if fast_cost.COST_INCLUDES_ENERGY else CHARGED
+    for total, parts in ((fast_total, fast_parts), (reference_total, reference_parts)):
+        assert math.isfinite(parts["cost_energy"]) and parts["cost_energy"] != 0
+        assert total == pytest.approx(sum(parts[key] for key in charged), rel=1e-12)
+
+
 def _raise(*args, **kwargs):
     raise ValueError("energy failed")
 
