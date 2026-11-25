@@ -396,7 +396,7 @@ def test_main_distinguishes_a_population_path_error_from_an_invalid_design(
 
     monkeypatch.setattr(ps.initial_population, "rows_available", bad_population_path)
     (tmp_path / "choice.json").write_text('{"chosen_simulations": 300}', encoding="utf-8")
-    args = ["--noise", str(tmp_path)]
+    args = ["--noise", str(tmp_path), "--results-root", str(tmp_path)]
     with pytest.raises(SystemExit) as invalid_design:
         ps.main([*args, "--pop-sizes", "1"])
     assert invalid_design.value.code == 2
