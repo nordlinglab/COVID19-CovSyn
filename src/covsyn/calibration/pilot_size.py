@@ -125,6 +125,7 @@ class Design(NamedTuple):
                 exceeds a stream's blocks, an alpha_0 not positive or below alpha_end,
                 alpha_0s that would share a run directory, or a stream outside the
                 optimisation streams.
+            PopulationUnchecked: The population file could not be read or failed a format check.
         """
         for name, values in (("pop_sizes", self.pop_sizes), ("alpha_0s", self.alpha_0s),
                              ("streams", self.streams)):  # fmt: skip

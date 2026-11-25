@@ -153,8 +153,10 @@ def load_with_metadata(
         TypeError: ``path`` is not a path.
         ValueError: ``path`` is empty, holds a NUL byte or cannot be encoded.
         RunSizeOutOfRange: n is not 1 to the rows available.
-        SystemExit: The file is missing, cannot be read, or its rows do not match its
-            SHA-256, or the dimension or the bounds differ from those it was made with.
+        SystemExit: A known read error, invalid format, a SHA-256 mismatch, or a mismatch
+            in dimension or bounds.
+
+    Unexpected library exceptions propagate unchanged.
     """
     # Missing or damaged: refused with a message, resumable once remedied (rounds 14, 15).
     try:
@@ -233,11 +235,9 @@ def rows_available(path: str | bytes | os.PathLike, without_warm_starts: bool = 
         TypeError: ``path`` is not a path, a programming error (code review round 11).
         ValueError: ``path`` is empty, holds a NUL byte or cannot be encoded, so names no
             file (code review rounds 20 to 22).
-        PopulationUnreadable: The file cannot be read or decoded -- missing, empty,
-            truncated, a corrupt or unknown compression, rows that are not a non-empty 2-D
-            array of numbers, bounds that are not numbers -- so a caller catches this alone;
-            any other failure, a programming error, raises as itself (code review rounds 7
-            to 15).
+        PopulationUnreadable: A known read error or failed format check.
+
+    Unexpected library exceptions propagate unchanged.
     """
     # The arrays load() reads, so what passes here loads, unless its SHA-256 no longer
     # matches, which only load() checks (rounds 15, 16, 19).
