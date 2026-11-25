@@ -404,10 +404,13 @@ def main(argv: list[str] | None = None) -> None:
     ) as pool:
         for index, (vector, training_cost) in enumerate(zip(vectors, train, strict=True)):
             totals, outcomes = score(vector, demo, pool, cheng, seed_blocks, simulations)
-            totals = [
-                _finite_block_cost(value, index, f"block_{block}")
-                for block, value in enumerate(totals)
-            ]
+            try:
+                totals = [
+                    _finite_block_cost(value, index, f"block_{block}")
+                    for block, value in enumerate(totals)
+                ]
+            except ValueError as error:
+                raise SystemExit(str(error)) from None
             rows.append(
                 {
                     "candidate": index,

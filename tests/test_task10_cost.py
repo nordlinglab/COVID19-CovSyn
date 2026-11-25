@@ -172,8 +172,9 @@ def test_revalidation_stops_before_writing_when_a_candidate_has_nonfinite_cost(
 
     monkeypatch.setattr(rv, "score", score)
     out = tmp_path / "out"
-    with pytest.raises(ValueError, match=r"candidate 0.*block_1"):
+    with pytest.raises(SystemExit, match=r"candidate 0.*block_1") as stopped:
         rv.main([str(tmp_path), str(out), "2", "--workers", "1"])
+    assert len(str(stopped.value).splitlines()) == 1
     assert evaluated == [1.0]
     assert out.is_dir() and not list(out.iterdir())
 
