@@ -185,7 +185,7 @@ class Design(NamedTuple):
     def from_record(cls, record: Mapping[str, Any] | None) -> Design:
         """The design config.json records; PLAN for a pilot begun before designs existed."""
         if record is None:
-            return PLAN
+            return PLAN.check()
         if not isinstance(record, Mapping):
             raise DesignInvalid("design must be a JSON object")
 
