@@ -191,6 +191,8 @@ def main() -> None:
     parser.add_argument("--sparse-bins", type=Path, default=None)
     parser.add_argument("--workers", type=int, default=None)
     args = parser.parse_args()
+    # Rescoring and summarising here are retained for checkouts before B95 (aeb0305),
+    # when the objective included the energy term being replaced.
     if not fast_cost.COST_INCLUDES_ENERGY:
         parser.error(
             "This probe is disabled since B95 (aeb0305). "
