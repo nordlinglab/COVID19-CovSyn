@@ -215,6 +215,10 @@ def load_with_metadata(
 # pilot 2 reports a failed run as a RuntimeError naming the run's log, the pipeline as "the
 # optimiser failed (see <its log>)"; neither suggests a resume for status runs.NOT_RESUMABLE,
 # a fresh start included (rounds 18, 20).
+# An archive is usable if the required members can be read with valid CRCs and pass the
+# content checks, and the digest matches when load() is used. Structural inconsistencies
+# that do not affect those results are outside this contract. The writer's format is the
+# reference. Other representations may be accepted or refused.
 # Imprecision outside these guarantees, such as advice that suits only some repository
 # states, is not a defect.
 #
@@ -309,7 +313,7 @@ def _read_archive(path: str | bytes | os.PathLike, shown: str) -> dict[str, np.n
             member = by_name.get(f"{key}.npy")
             if member is None:
                 raise PopulationUnreadable(f"{shown} cannot be read (missing ZIP member {key}.npy)")
-            with _reading(shown, zipfile.BadZipFile, ValueError):
+            with _reading(shown, zipfile.BadZipFile, UnicodeDecodeError):
                 source = archive.open(member)
             with source:
                 with _reading(shown, zipfile.BadZipFile, EOFError, zlib.error):

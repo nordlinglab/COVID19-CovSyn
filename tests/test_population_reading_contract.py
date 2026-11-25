@@ -292,6 +292,20 @@ def test_writer_headers_preflight_and_parse(shape, descriptor, version):
     np.testing.assert_array_equal(ip._decode_member(buffer.getvalue(), "member", "test"), array)
 
 
+def test_unexpected_zip_member_open_error_propagates(place, monkeypatch):
+    """A library state failure is distinct from corrupt member metadata."""
+    _put_right(place)
+    failure = ValueError("unexpected ZIP member open failure")
+
+    def fail_open(*args):
+        raise failure
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", fail_open)
+    with pytest.raises(ValueError) as caught:
+        ip.rows_available(place)
+    assert caught.value is failure
+
+
 def test_unexpected_population_validation_error_propagates(place, monkeypatch):
     """An error in our size calculation must leave with its original type."""
     _put_right(place)
