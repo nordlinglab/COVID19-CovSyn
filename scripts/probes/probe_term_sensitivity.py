@@ -100,10 +100,11 @@ def score(P, seed_offset):
         return None
     try:
         simulated = per._scored_cases(pooled[2])
-        _, energy_u = per.restricted_energy(_TAIWAN, simulated)
-    except Exception:
+    except per.CaseRowUnavailable:
         traceback.print_exc()
         energy_u = float("nan")
+    else:
+        _, energy_u = per.restricted_energy(_TAIWAN, simulated)
     return {"cost": cost, **{k: v for k, v in parts.items() if isinstance(v, float)},
             "energy_u": energy_u}  # fmt: skip
 

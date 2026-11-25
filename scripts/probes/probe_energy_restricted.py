@@ -101,10 +101,14 @@ def with_energy(
     return out
 
 
+class CaseRowUnavailable(ValueError):
+    """A simulated case returned a diagnostic instead of a test-matrix row."""
+
+
 def _scored_cases(rows) -> np.ndarray:
     """Convert case records after excluding the failed-row diagnostic representation."""
     if any(isinstance(row, str) for row in rows):
-        raise ValueError("a simulated case has no test-matrix row")
+        raise CaseRowUnavailable("a simulated case has no test-matrix row")
     return complete_cases(np.array(rows, dtype=float))
 
 

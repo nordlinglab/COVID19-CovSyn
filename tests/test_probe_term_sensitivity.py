@@ -111,3 +111,19 @@ def test_a_string_case_row_only_invalidates_energy(monkeypatch):
     result = pts.score(None, 2)
     assert result["cost"] == 12.0
     assert np.isfinite(result["energy_u"])
+
+
+def test_an_unexpected_energy_exception_propagates(monkeypatch):
+    """Only the known failed-row diagnostic is converted to NaN."""
+    monkeypatch.setattr(pts, "_TAIWAN", np.zeros((2, 2)))
+    monkeypatch.setattr(
+        pts.fast_cost, "_simulate_and_score",
+        lambda *_: (12.0, {}, (None, None, np.zeros((2, 9))), None),
+    )
+
+    def broken_energy(*_):
+        raise IndexError("unexpected energy error")
+
+    monkeypatch.setattr(pts.per, "restricted_energy", broken_energy)
+    with pytest.raises(IndexError, match="unexpected energy error"):
+        pts.score(None, 1)
