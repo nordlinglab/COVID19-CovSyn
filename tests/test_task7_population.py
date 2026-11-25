@@ -189,6 +189,7 @@ def _arrays(path, **changed):
     ({"upper": np.full(2, -1)}, "lower bounds exceed upper bounds"),
     ({"warm_starts": np.array([["a"]])}, "warm starts are not a list"),
     ({"warm_starts": np.array([1])}, "warm starts are not a list"),
+    ({"warm_starts": np.array([1.0])}, "warm starts are not a list"),
     ({"warm_starts": np.array(["a", "b", "c"])}, "lists 3 warm starts but holds only 2"),
     ({"warm_starts": np.array(["a", "b", "c", "d"])}, "lists 4 warm starts but holds only 2"),
     ({"sha256": np.array(["x", "y"])}, "SHA-256 is not a string scalar"),
