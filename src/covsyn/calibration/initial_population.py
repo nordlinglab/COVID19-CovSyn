@@ -19,6 +19,7 @@ import io
 import math
 import os
 import re
+import struct
 import sys
 import tokenize
 import zipfile
@@ -303,7 +304,7 @@ def _read_archive(path: str | bytes | os.PathLike, shown: str) -> dict[str, np.n
             raise PopulationUnreadable(
                 f"{shown} cannot be read (expanded population archive exceeds its size limit)"
             )
-        _check_zip_members(members, len(data), shown)
+        _check_zip_members(members, data, archive.start_dir, shown)
         for key in ARRAYS:
             member = by_name.get(f"{key}.npy")
             if member is None:
@@ -317,9 +318,15 @@ def _read_archive(path: str | bytes | os.PathLike, shown: str) -> dict[str, np.n
     return arrays
 
 
-def _check_zip_members(members: list[zipfile.ZipInfo], size: int, shown: str) -> None:
-    """Apply container rules even to entries whose contents we do not use."""
-    for member in members:
+def _check_zip_members(
+    members: list[zipfile.ZipInfo], data: bytes, directory_start: int, shown: str
+) -> None:
+    """Apply physical bounds even to entries whose contents we do not use."""
+    if not 0 <= directory_start <= len(data):
+        raise PopulationUnreadable(f"{shown} cannot be read (ZIP directory outside the archive)")
+
+    boundary = directory_start
+    for member in sorted(members, key=lambda entry: entry.header_offset, reverse=True):
         name = member.filename.removesuffix(".npy")
         if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
             raise PopulationUnreadable(
@@ -327,10 +334,26 @@ def _check_zip_members(members: list[zipfile.ZipInfo], size: int, shown: str) ->
             )
         if member.flag_bits & _UNSUPPORTED_ZIP_FLAGS:
             raise PopulationUnreadable(f"{shown} cannot be read (unsupported ZIP flags for {name})")
-        # The fixed local header occupies 30 bytes before any name or extra data.
-        end = member.header_offset + 30 + member.compress_size
-        if member.header_offset < 0 or not 0 <= member.compress_size <= size or end > size:
+        if member.compress_type == zipfile.ZIP_STORED and member.compress_size != member.file_size:
+            raise PopulationUnreadable(
+                f"{shown} cannot be read (inconsistent ZIP stored sizes for {name})"
+            )
+
+        offset = member.header_offset
+        fixed_header_end = offset + 30
+        if not 0 <= offset < fixed_header_end <= boundary <= directory_start:
             raise PopulationUnreadable(f"{shown} cannot be read (ZIP member outside the archive)")
+        if data[offset:offset + 4] != b"PK\x03\x04":
+            raise PopulationUnreadable(
+                f"{shown} cannot be read (invalid ZIP local header for {name})"
+            )
+        name_size, extra_size = struct.unpack_from("<HH", data, offset + 26)
+        payload_end = fixed_header_end + name_size + extra_size + member.compress_size
+        # A streamed member leaves room for at least the CRC and two sizes after its data.
+        descriptor_min = 12 if member.flag_bits & (1 << 3) else 0
+        if member.compress_size < 0 or payload_end + descriptor_min > boundary:
+            raise PopulationUnreadable(f"{shown} cannot be read (ZIP member outside the archive)")
+        boundary = offset
 
 
 # These are the canonical fields and types emitted by the population writer.

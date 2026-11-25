@@ -103,20 +103,12 @@ def _a_forged_header(path):
     return path
 
 
-def _corrupt_lzma(path):
-    """An archive whose members are LZMA-compressed, the data corrupted (round 19)."""
-    with np.load(COMMITTED) as saved:
-        arrays = {key: saved[key] for key in saved.files}
-    np.savez(path, **arrays)
-    with zipfile.ZipFile(path) as plain:
-        members = {name: plain.read(name) for name in plain.namelist()}
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_LZMA) as archive:
-        for name, data in members.items():
-            archive.writestr(name, data)
-    raw = bytearray(path.read_bytes())
-    for i in range(200, 230):
-        raw[i] ^= 0xFF
-    path.write_bytes(bytes(raw))
+def _unsupported_lzma(path):
+    """Change only the compression of the required normalized member."""
+    with zipfile.ZipFile(COMMITTED) as source, zipfile.ZipFile(path, "w") as target:
+        for name in source.namelist():
+            method = zipfile.ZIP_LZMA if name == "normalized.npy" else zipfile.ZIP_STORED
+            target.writestr(name, source.read(name), compress_type=method)
     return path
 
 
@@ -130,7 +122,7 @@ REFUSED = [
     (_a_non_array_member, "not an NPY array", "last commit", True),
     (_no_rows, "not a non-empty 2-D array", "last commit", True),
     (_a_forged_header, "header size does not match the member", "last commit", True),
-    (_corrupt_lzma, "unsupported ZIP compression for normalized", "last commit", True),
+    (_unsupported_lzma, "unsupported ZIP compression for normalized", "last commit", True),
 ]
 
 
@@ -217,6 +209,50 @@ def test_member_offsets_are_checked_before_open(place, monkeypatch):
     monkeypatch.setattr(zipfile.ZipFile, "open", lambda *_: pytest.fail("member was opened"))
     with pytest.raises(ip.PopulationUnreadable, match="ZIP member outside the archive"):
         ip.rows_available(place)
+
+
+@pytest.mark.parametrize(
+    ("damage", "reason"),
+    [("overlap", "ZIP member outside the archive"), ("sizes", "inconsistent ZIP stored sizes")],
+)
+def test_zip_member_metadata_is_consistent_before_open(place, monkeypatch, damage, reason):
+    """Unused members must fit their own region and have consistent stored sizes."""
+    _put_right(place)
+    infolist = zipfile.ZipFile.infolist
+
+    def invalid_entries(archive):
+        entries = sorted(infolist(archive), key=lambda entry: entry.header_offset)
+        index = next(i for i, entry in enumerate(entries) if entry.filename == "command.npy")
+        entry = entries[index]
+        if damage == "overlap":
+            entry.compress_size = entries[index + 1].header_offset - entry.header_offset - 30
+            entry.file_size = entry.compress_size
+        else:
+            entry.file_size += 1
+        return entries
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", invalid_entries)
+    monkeypatch.setattr(zipfile.ZipFile, "open", lambda *_: pytest.fail("member was opened"))
+    with pytest.raises(ip.PopulationUnreadable, match=reason):
+        ip.rows_available(place)
+
+
+def test_streaming_zip_data_descriptors_are_supported(place, space):
+    """Writing to a non-seekable stream still produces a readable population."""
+
+    class Stream(io.BytesIO):
+        def seek(self, *args):
+            raise io.UnsupportedOperation("stream cannot seek")
+
+    stream = Stream()
+    with zipfile.ZipFile(COMMITTED) as source, zipfile.ZipFile(
+        stream, "w", zipfile.ZIP_DEFLATED
+    ) as target:
+        for name in source.namelist():
+            target.writestr(name, source.read(name))
+    place.write_bytes(stream.getvalue())
+    expected = ip.load(COMMITTED, 3, space.lower, space.upper)
+    np.testing.assert_array_equal(ip.load(place, 3, space.lower, space.upper), expected)
 
 
 @pytest.mark.parametrize(
