@@ -314,6 +314,41 @@ def test_a_resume_with_a_refused_recorded_design_says_so(tmp_path, capsys):
     assert "recorded design" in err and "holds no pilot" not in err
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("pop_sizes", [float("inf")]),
+        ("pop_sizes", "24"),
+        ("pop_sizes", [24.0]),
+        ("streams", [True, 2]),
+        ("without_warm_starts", "false"),
+        ("alpha_0s", ["0.2"]),
+        ("alpha_0s", [float("inf")]),
+        ("alpha_0s", [10**400]),
+    ],
+)
+def test_resume_refuses_invalid_recorded_design_before_reading_population(
+    tmp_path, capsys, monkeypatch, field, value
+):
+    """A corrupt setting must yield exit 2 before checking the population or starting a run."""
+    import json
+
+    out = tmp_path / "results" / "tables" / "20261121-000000_abcdef0_pilot-size"
+    out.mkdir(parents=True)
+    record = RERUN.record() | {field: value}
+    (out / "config.json").write_text(
+        json.dumps({"settings": {"simulations": 300, "design": record}})
+    )
+    monkeypatch.setattr(
+        ps.initial_population, "rows_available", lambda *a: pytest.fail("population was read")
+    )
+    with pytest.raises(SystemExit) as stopped:
+        ps.main(["--resume", str(out)])
+    assert stopped.value.code == 2
+    message = capsys.readouterr().err
+    assert "recorded design is refused" in message and field in message
+
+
 def test_a_record_of_another_rule_is_refused():
     """A pilot begun under the earlier spread rule does not resume under the mean rule."""
     record = RERUN.record() | {"rule": "spread"}

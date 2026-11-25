@@ -185,13 +185,31 @@ class Design(NamedTuple):
         """The design config.json records; PLAN for a pilot begun before designs existed."""
         if record is None:
             return PLAN
+        if not isinstance(record, Mapping):
+            raise DesignInvalid("design must be a JSON object")
+
+        pop_sizes = record.get("pop_sizes")
+        streams = record.get("streams")
+        for field, values in (("pop_sizes", pop_sizes), ("streams", streams)):
+            if not isinstance(values, list) or any(type(value) is not int for value in values):
+                raise DesignInvalid(f"{field} must be an array of integers")
+
+        alpha_0s = record.get("alpha_0s")
+        if not isinstance(alpha_0s, list) or any(
+            type(value) not in (int, float) for value in alpha_0s
+        ):
+            raise DesignInvalid("alpha_0s must be an array of finite numbers")
         try:
-            design = cls(tuple(int(n) for n in record["pop_sizes"]),
-                         tuple(float(a) for a in record["alpha_0s"]),
-                         tuple(int(s) for s in record["streams"]),
-                         bool(record["without_warm_starts"]))  # fmt: skip
-        except (ValueError, KeyError, TypeError) as error:
-            raise DesignInvalid(str(error)) from error
+            steps = tuple(float(value) for value in alpha_0s)
+        except OverflowError as error:
+            raise DesignInvalid("alpha_0s must be an array of finite numbers") from error
+        if not all(np.isfinite(step) for step in steps):
+            raise DesignInvalid("alpha_0s must be an array of finite numbers")
+
+        without_warm_starts = record.get("without_warm_starts")
+        if type(without_warm_starts) is not bool:
+            raise DesignInvalid("without_warm_starts must be a boolean")
+        design = cls(tuple(pop_sizes), steps, tuple(streams), without_warm_starts)
         # Before check(), which reads the population file: a replaced rule ends the resume
         # whatever the file's state (code review rounds 6 and 11).
         if record.get("rule", design.rule) != design.rule:
