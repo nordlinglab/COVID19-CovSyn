@@ -17,7 +17,9 @@ effects with t intervals against weighted-cost thresholds.
 Acceptance scope (user decision 2026-11-25): this is a one-off analysis probe.
 Fix issues that change recorded results or silently give incorrect results on a rerun.
 Visible failures, extra runtime, and statistical edge cases absent from existing data
-are outside this scope.
+are outside this scope. Resume supports CSV files written by this version and rejects an
+interrupted final row. Acceptance or rejection of manually edited files or files corrupted
+by older versions is outside this scope.
 
 Usage:
     uv run python scripts/probes/probe_term_sensitivity.py run OUT_CSV PILOT1_BLOCKS_CSV
@@ -82,7 +84,7 @@ def classify(differences, delta: float) -> str:
 
     Return beyond if the interval lies entirely outside either threshold, within if it
     lies inside both thresholds, and imprecise otherwise or with fewer than two differences.
-    analyse() drops pairs containing NaN before calling this function.
+    analyse() drops non-finite pairs before calling this function.
     """
     d = np.asarray(differences, dtype=float)
     if len(d) < 2:
