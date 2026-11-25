@@ -302,20 +302,11 @@ def _read_archive(path: str | bytes | os.PathLike, shown: str) -> dict[str, np.n
             raise PopulationUnreadable(
                 f"{shown} cannot be read (expanded population archive exceeds its size limit)"
             )
+        _check_zip_members(members, len(data), shown)
         for key in ARRAYS:
             member = by_name.get(f"{key}.npy")
             if member is None:
                 raise PopulationUnreadable(f"{shown} cannot be read (missing ZIP member {key}.npy)")
-            # These are the methods used by np.savez and np.savez_compressed.
-            # ZipExtFile can bound its DEFLATE output during decompression.
-            if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
-                raise PopulationUnreadable(
-                    f"{shown} cannot be read (unsupported ZIP compression for {key})"
-                )
-            if member.flag_bits & _UNSUPPORTED_ZIP_FLAGS:
-                raise PopulationUnreadable(
-                    f"{shown} cannot be read (unsupported ZIP flags for {key})"
-                )
             with _reading(shown, zipfile.BadZipFile, ValueError):
                 source = archive.open(member)
             with source:
@@ -323,6 +314,22 @@ def _read_archive(path: str | bytes | os.PathLike, shown: str) -> dict[str, np.n
                     payload = source.read(member.file_size + 1)
             arrays[key] = _decode_member(payload, key, shown)
     return arrays
+
+
+def _check_zip_members(members: list[zipfile.ZipInfo], size: int, shown: str) -> None:
+    """Apply container rules even to entries whose contents we do not use."""
+    for member in members:
+        name = member.filename.removesuffix(".npy")
+        if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            raise PopulationUnreadable(
+                f"{shown} cannot be read (unsupported ZIP compression for {name})"
+            )
+        if member.flag_bits & _UNSUPPORTED_ZIP_FLAGS:
+            raise PopulationUnreadable(f"{shown} cannot be read (unsupported ZIP flags for {name})")
+        # The fixed local header occupies 30 bytes before any name or extra data.
+        end = member.header_offset + 30 + member.compress_size
+        if member.header_offset < 0 or not 0 <= member.compress_size <= size or end > size:
+            raise PopulationUnreadable(f"{shown} cannot be read (ZIP member outside the archive)")
 
 
 def _decode_member(payload: bytes, key: str, shown: str) -> np.ndarray:

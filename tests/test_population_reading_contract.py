@@ -193,6 +193,32 @@ def test_inconsistent_header_is_refused_before_numpy_loads(place, monkeypatch):
         ip.rows_available(path)
 
 
+def test_unused_zip_members_obey_compression_policy(place):
+    """The ZIP allowlist covers metadata members even when the reader skips their contents."""
+    with zipfile.ZipFile(COMMITTED) as source, zipfile.ZipFile(place, "w") as target:
+        for name in source.namelist():
+            method = zipfile.ZIP_BZIP2 if name == "command.npy" else zipfile.ZIP_STORED
+            target.writestr(name, source.read(name), compress_type=method)
+    with pytest.raises(ip.PopulationUnreadable, match="unsupported ZIP compression for command"):
+        ip.rows_available(place)
+
+
+def test_member_offsets_are_checked_before_open(place, monkeypatch):
+    """A directory entry outside the file is refused before any member opens."""
+    _put_right(place)
+    infolist = zipfile.ZipFile.infolist
+
+    def out_of_bounds(archive):
+        entries = infolist(archive)
+        entries[0].header_offset = place.stat().st_size
+        return entries
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", out_of_bounds)
+    monkeypatch.setattr(zipfile.ZipFile, "open", lambda *_: pytest.fail("member was opened"))
+    with pytest.raises(ip.PopulationUnreadable, match="ZIP member outside the archive"):
+        ip.rows_available(place)
+
+
 def test_unexpected_population_validation_error_propagates(place, monkeypatch):
     """An error in our size calculation must leave with its original type."""
     _put_right(place)
