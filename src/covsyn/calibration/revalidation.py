@@ -282,31 +282,41 @@ def cost_uncertainty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     so the interval is exploratory (decision of 2026-11-22). A candidate whose interval holds 0
     cannot be told apart from the best. Fewer than two blocks also count as
     indistinguishable: the data are insufficient to estimate an SE or interval.
+    Nonfinite estimates likewise leave the interval unknown and retain the candidate.
+    Finite means take precedence when selecting the best candidate.
     """
     from scipy import stats
 
     costs = [np.array([float(r[k]) for k in sorted((k for k in r if k.startswith("block_")),
                                                    key=lambda k: int(k[6:]))])
              for r in rows]  # fmt: skip
-    means = [float(c.mean()) if len(c) else np.nan for c in costs]
-    best = min(range(len(rows)), key=lambda i: (means[i], i))
     table = []
-    for i, c in enumerate(costs):
-        n = len(c)
-        d = c - costs[best]
-        difference = float(d.mean()) if n else np.nan
-        if n < 2:
+    with np.errstate(invalid="ignore", over="ignore"):
+        means = [float(c.mean()) if len(c) else np.nan for c in costs]
+        best = min(
+            range(len(rows)),
+            key=lambda i: (0, means[i], i) if np.isfinite(means[i]) else (1, 0.0, i),
+        )
+        for i, c in enumerate(costs):
+            n = len(c)
+            d = c - costs[best]
+            difference = float(d.mean()) if n else np.nan
+            if not np.isfinite(difference):
+                difference = np.nan
             se = low = high = np.nan
-            indistinguishable = True
-        else:
-            se = float(c.std(ddof=1) / np.sqrt(n))
-            half = (float(stats.t.ppf(0.975, n - 1) * d.std(ddof=1) / np.sqrt(n))
-                    if i != best else 0.0)  # fmt: skip
-            low, high = difference - half, difference + half
-            indistinguishable = bool(low <= 0 <= high)
-        table.append({"candidate": rows[i]["candidate"], "mean": means[i],
-                      "se": se, "difference_to_best": difference, "ci_low": low, "ci_high": high,
-                      "indistinguishable": indistinguishable, "best": i == best})
+            if n > 1 and np.isfinite(difference):
+                candidate_se = float(c.std(ddof=1) / np.sqrt(n))
+                half = (float(stats.t.ppf(0.975, n - 1) * d.std(ddof=1) / np.sqrt(n))
+                        if i != best else 0.0)  # fmt: skip
+                bounds = (difference - half, difference + half)
+                if np.isfinite((candidate_se, *bounds)).all():
+                    se = candidate_se
+                    low, high = bounds
+            table.append({"candidate": rows[i]["candidate"], "mean": means[i],
+                          "se": se, "difference_to_best": difference,
+                          "ci_low": low, "ci_high": high,
+                          "indistinguishable": bool(np.isnan(low) or low <= 0 <= high),
+                          "best": i == best})
     return table
 
 

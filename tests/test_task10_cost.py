@@ -110,6 +110,25 @@ def test_insufficient_blocks_leave_uncertainty_unknown(costs):
     assert all(np.isnan(row[key]) for row in table for key in ("se", "ci_low", "ci_high"))
 
 
+@pytest.mark.parametrize("bad_first", [True, False])
+def test_nonfinite_costs_do_not_win_or_exclude_a_candidate(bad_first):
+    """A finite mean wins and an unusable interval leaves the bad row indistinguishable."""
+    rows = _rows([[np.nan, 20.0], [10.0, 12.0]])
+    table = rv.cost_uncertainty(rows if bad_first else rows[::-1])
+    by_candidate = {row["candidate"]: row for row in table}
+    assert by_candidate[1]["best"]
+    row = by_candidate[0]
+    assert not row["best"] and row["indistinguishable"]
+    assert all(np.isnan(row[key]) for key in ("se", "ci_low", "ci_high"))
+
+
+def test_an_overflowing_paired_interval_keeps_the_candidate():
+    """Nonfinite interval arithmetic is not evidence of a difference."""
+    table = rv.cost_uncertainty(_rows([[0.0, 0.0], [-1e308, 1e308]]))
+    assert table[1]["indistinguishable"]
+    assert all(np.isnan(table[1][key]) for key in ("se", "ci_low", "ci_high"))
+
+
 def test_the_command_rescoring_the_archive_at_s_writes_cost_uncertainty(tmp_path, monkeypatch):
     """--simulations S and --archive-best k: blocks of S seeds of the given stream."""
     run = tmp_path / "run"
