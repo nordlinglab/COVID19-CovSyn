@@ -349,6 +349,9 @@ def run_covid(seed, input_P, demographic_parameters, save_file=False, result_pat
     Returns:
         The demographic, social, course-of-disease and contact data of every case.
     """
+    if source_age is not None and mode in FIRST_WAVE_SEED_FILES:
+        raise ValueError(f'source_age is not supported for mode {mode!r}')
+
     # Load parameters
     # Load demographic and social data
     # demographic_parameters = np.load(

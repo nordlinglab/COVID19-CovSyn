@@ -44,6 +44,13 @@ def test_an_age_outside_the_tables_is_refused(run10_vector, demographic_paramete
         _run(0, run10_vector, demographic_parameters, source_age=age)
 
 
+@pytest.mark.parametrize("age", [0, 30])
+def test_a_first_wave_mode_refuses_source_age(run10_vector, demographic_parameters, age):
+    """First-wave sources take ages from their own seed groups."""
+    with pytest.raises(ValueError, match="source_age"):
+        _run(0, run10_vector, demographic_parameters, mode="taiwan_first_outbreak", source_age=age)
+
+
 def _profiles(n):
     return [{"case_id": 1000 + k, "age": 20 + k % 60, "imported": k % 2 == 0,
              "airport": False, "arrival_from_onset": 2 if k % 2 == 0 else None}
