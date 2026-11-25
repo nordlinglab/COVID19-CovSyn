@@ -141,6 +141,8 @@ class Design(NamedTuple):
             raise DesignInvalid(f"a population needs at least 2 fireflies, got {self.pop_sizes}")
         if not all(np.isfinite(a) and a > 0 for a in self.alpha_0s):
             raise DesignInvalid(f"alpha_0 must be positive, got {self.alpha_0s}")
+        # Report collisions between distinct inputs first. The round-trip check then
+        # covers a value that changes even when its run name is unique.
         names = {run_name("", Setting(2, a, 1)) for a in self.alpha_0s}
         if len(names) != len(self.alpha_0s):  # code review round 4
             raise DesignInvalid(f"alpha_0s {self.alpha_0s} would share run directories, whose "
