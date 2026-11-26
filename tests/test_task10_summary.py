@@ -664,6 +664,35 @@ def test_a_killed_attempt_s_staging_is_named(tmp_path):
         ts.summarise(_five(tmp_path), main=1, out=out)
 
 
+def test_a_second_summary_cannot_claim_an_output_another_holds(tmp_path):
+    """Two summaries into one out: the second is refused, not interleaved with the first."""
+    out = tmp_path / "out"
+    out.mkdir()
+    ts.claim(out)
+    with pytest.raises(FileExistsError):
+        ts.claim(out)
+
+
+def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
+    """A file another writer put in out while this one failed stays."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.shutil.copyfile
+    calls = []
+
+    def failing(source, target):
+        calls.append(target)
+        if len(calls) == 3:
+            (out / "theirs.txt").write_text("not ours")
+            raise OSError(28, "No space left on device")
+        return real(source, target)
+
+    monkeypatch.setattr(ts.shutil, "copyfile", failing)
+    with pytest.raises(OSError):
+        ts.summarise(runs, main=1, out=out)
+    assert sorted(p.name for p in out.iterdir()) == ["theirs.txt"]
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)

@@ -362,6 +362,22 @@ def _write(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+# Made with O_EXCL in out before anything is written, and removed once the summary is whole.
+LOCK = ".summary-lock"
+
+
+def claim(out: Path) -> None:
+    """Claim out for this summary, or refuse.
+
+    Raises:
+        FileExistsError: Another summary holds out, or one was killed while writing it.
+    """
+    try:
+        os.close(os.open(Path(out) / LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+    except FileExistsError:
+        raise FileExistsError(f"{out} is held by another summary ({LOCK})") from None
+
+
 def summarise(
     runs: list[Path], main: int, out: Path, competitor: list[Path] | None = None
 ) -> dict[str, Any]:
@@ -422,7 +438,9 @@ def summarise(
     if created:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.mkdir()
+    claim(out)  # a second summary into out is refused, not interleaved with this one
     staging = out / f".partial-{os.getpid()}"
+    moved: list[Path] = []
     try:
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)
@@ -436,13 +454,14 @@ def summarise(
         (staging / "summary.json").write_text(text, encoding="utf-8")
         for path in sorted(staging.iterdir()):
             path.rename(out / path.name)
+            moved.append(out / path.name)
         staging.rmdir()
+        (out / LOCK).unlink()
     except BaseException:
-        for path in out.iterdir():  # only this attempt wrote here: out was empty
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
+        shutil.rmtree(staging, ignore_errors=True)  # only what this attempt wrote
+        for path in moved:
+            path.unlink()
+        (out / LOCK).unlink()
         if created:
             out.rmdir()
         raise
