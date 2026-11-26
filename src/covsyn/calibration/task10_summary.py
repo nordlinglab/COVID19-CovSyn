@@ -252,7 +252,9 @@ def check_streams(runs: list[Path], competitor: list[Path] | None) -> None:
 
 
 # The settings pilot 2 chose, which every run of one configuration shares.
-CONFIGURATION = ("pop_size", "alpha_0", "alpha_end", "g_plan", "pilot")
+CONFIGURATION = ("pop_size", "alpha_0", "alpha_end", "g_plan")
+# The settings both configurations share, so their validation costs compare.
+SHARED = ("pilot", "revalidation_blocks", "select_top")
 
 
 def check_configurations(runs: list[Path], competitor: list[Path] | None) -> None:
@@ -262,7 +264,8 @@ def check_configurations(runs: list[Path], competitor: list[Path] | None) -> Non
     its streams; their pipeline.toml tells them apart.
 
     Raises:
-        ValueError: A list of two configurations, or the runner-up on production's.
+        ValueError: A list of two configurations, the runner-up on production's, or runs that
+            differ in a setting both share (SHARED).
     """
     keys = []
     for what, group in (("production", runs), ("competitor", competitor or [])):
@@ -276,6 +279,11 @@ def check_configurations(runs: list[Path], competitor: list[Path] | None) -> Non
         keys.append(tuple(getattr(configs[0], name) for name in CONFIGURATION))
     if len(keys) == 2 and keys[0] == keys[1]:
         raise ValueError("the runner-up runs the same configuration as production")
+    every = [pc.load(str(Path(r) / "pipeline.toml")) for r in [*runs, *(competitor or [])]]
+    for name in SHARED:
+        values = {getattr(c, name) for c in every}
+        if len(values) != 1:
+            raise ValueError(f"the runs differ in {name}: {sorted(map(str, values))}")
     check_pilot_choice(runs)
 
 

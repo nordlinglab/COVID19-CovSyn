@@ -48,6 +48,7 @@ def _run(
     simulations=3000,
     chosen=1,
     pop_size=24,
+    **changes,
 ):
     """A production run's files as the pipeline leaves them.
 
@@ -99,6 +100,7 @@ def _run(
         g_plan=415,
         revalidation_blocks=30,
     )
+    config = pc.replace(config, **changes)
     (run / "pipeline.toml").write_text(pc.to_toml(config))
     settings = {"mode": "production", "stop_rule": monitoring.STOP_RULE}
     (run / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": settings}))
@@ -450,6 +452,19 @@ def test_a_run_without_pilot_2_s_choice_is_named(tmp_path):
     (tmp_path / "results" / "tables" / "pilot-2" / "choice.json").unlink()
     with pytest.raises(FileNotFoundError, match="choice.json"):
         ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
+@pytest.mark.parametrize("changes", [{"pilot": "pilot-3"}, {"select_top": 3}])
+def test_a_runner_up_with_other_shared_settings_is_refused(tmp_path, changes):
+    """Only n and the step schedule may differ; the rest is the comparison's common ground."""
+    others = [_run(tmp_path, f"b{i}", [0.1 * i, i + 0.5, 0.2 * i],
+                   [[0.5, 5.0, 1.0], [0.9, 9.0, 1.9], [0.4, 4.0, 0.8]],
+                   [(0, 10.0, 0.5, True, True), (1, 15.0, 0.5, False, False),
+                    (2, 11.0, 0.5, True, False)],
+                   streams=(4 + i, 202 + i), pop_size=48, **changes)
+              for i in range(1, 6)]  # fmt: skip
+    with pytest.raises(ValueError, match=next(iter(changes))):
+        ts.summarise(_five(tmp_path), main=1, out=tmp_path / "out", competitor=others)
 
 
 def test_a_run_in_both_lists_is_refused(tmp_path):
