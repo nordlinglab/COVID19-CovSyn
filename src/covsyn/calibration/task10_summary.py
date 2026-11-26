@@ -31,6 +31,7 @@ import numpy as np
 
 from covsyn.calibration import parameter_uncertainty as pu
 from covsyn.calibration.monitoring import EVENT as STOP_EVENT
+from covsyn.pipeline import config as pc
 from covsyn.runtime import runs as rt
 
 COST_TABLE = Path("revalidation") / "cost_uncertainty.csv"
@@ -130,6 +131,44 @@ def run_record(run: Path) -> dict[str, Any]:
     }
 
 
+def settings(run: Path) -> tuple[int, int, int]:
+    """The run's optimisation stream, validation stream and S, from its pipeline.toml."""
+    path = Path(run) / "pipeline.toml"
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: missing")
+    config = pc.load(str(path))
+    if config.mode != "production" or config.simulations is None:
+        raise ValueError(f"{path}: not a production run")
+    return config.stream, config.validation_stream, config.simulations
+
+
+def check_streams(runs: list[Path], competitor: list[Path] | None) -> None:
+    """One S throughout, a stream pair per run, and the runner-up's run i on run i's pair.
+
+    The comparison pairs run i with the runner-up's run i on their shared validation blocks;
+    out of order, the pairs' differences would hold the blocks' noise too.
+
+    Raises:
+        ValueError: Another S, a stream two runs share, or a pair on other streams.
+    """
+    pairs = [settings(r) for r in runs]
+    others = [] if competitor is None else [settings(r) for r in competitor]
+    sizes = {s for _, _, s in pairs + others}
+    if len(sizes) != 1:
+        raise ValueError(f"the runs are at different S: {sorted(sizes)}")
+    for index, kind in ((0, "optimisation"), (1, "validation")):
+        used = [p[index] for p in pairs]
+        for stream in used:
+            if used.count(stream) > 1:
+                raise ValueError(f"two runs share {kind} stream {stream}")
+    for run, other, mine, theirs in zip(runs, competitor or [], pairs, others, strict=False):
+        if mine[:2] != theirs[:2]:
+            raise ValueError(
+                f"{other} runs on streams {theirs[:2]}, not its pair {run}'s "
+                f"{mine[:2]}; give the runner-up's runs in the same order"
+            )
+
+
 def _check_runs(runs: list[Path], what: str) -> None:
     if len(runs) != pu.RUNS:
         raise ValueError(f"{what}: {pu.RUNS} runs are needed, not {len(runs)}")
@@ -192,6 +231,7 @@ def summarise(
         _check_runs(competitor, "competitor")
     if not 1 <= main <= pu.RUNS:
         raise ValueError(f"the main run must be 1 to {pu.RUNS}, not {main}")
+    check_streams(runs, competitor)
     lower, upper = bounds(runs[0])
     for run in runs[1:]:
         other = bounds(run)

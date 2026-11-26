@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from covsyn.calibration import task10_summary as ts
+from covsyn.pipeline import config as pc
 
 DIM = 3
 LOWER = np.zeros(DIM)
@@ -30,7 +31,17 @@ def _write_rows(path, rows):
         writer.writerows(rows)
 
 
-def _run(root, name, selected, candidates, uncertainty, stop="no improvement", bounds=None):
+def _run(
+    root,
+    name,
+    selected,
+    candidates,
+    uncertainty,
+    stop="no improvement",
+    bounds=None,
+    streams=(5, 203),
+    simulations=3000,
+):
     """A production run's files as the pipeline leaves them.
 
     candidates: revalidation/firefly_best.txt's vectors, by candidate number;
@@ -56,6 +67,19 @@ def _run(root, name, selected, candidates, uncertainty, stop="no improvement", b
         {"stage": "revalidate", "seconds": 20.0},
     ]
     (run / "run.log").write_text("".join(json.dumps(line) + "\n" for line in lines))
+    config = pc.PipelineConfig(
+        mode="production",
+        stream=streams[0],
+        validation_stream=streams[1],
+        pop_size=24,
+        simulations=simulations,
+        pilot="pilot-2",
+        alpha_0=0.4,
+        alpha_end=0.001,
+        g_plan=415,
+        revalidation_blocks=30,
+    )
+    (run / "pipeline.toml").write_text(pc.to_toml(config))
     return run
 
 
@@ -69,7 +93,16 @@ def _five(root, prefix="a", best_means=(10.0, 11.0, 12.0, 13.0, 14.0)):
             (1, mean + 5, 0.5, False, False),
             (2, mean + 1, 0.5, True, False),
         ]
-        runs.append(_run(root, f"{prefix}{i}", [0.1 * i, i, 0.2 * i], candidates, uncertainty))
+        runs.append(
+            _run(
+                root,
+                f"{prefix}{i}",
+                [0.1 * i, i, 0.2 * i],
+                candidates,
+                uncertainty,
+                streams=(4 + i, 202 + i),
+            )
+        )
     return runs
 
 
@@ -195,7 +228,8 @@ def test_208_parameters_are_summarised(tmp_path):
     rng = np.random.default_rng(0)
     bounds = np.vstack((np.zeros(208), np.ones(208)))
     runs = [_run(tmp_path, f"r{i}", rng.random(208), rng.random((10, 208)),
-                 [(c, 10.0 + c, 0.5, c < 3, c == 0) for c in range(10)], bounds=bounds)
+                 [(c, 10.0 + c, 0.5, c < 3, c == 0) for c in range(10)], bounds=bounds,
+                 streams=(4 + i, 202 + i))
             for i in range(1, 6)]  # fmt: skip
     out = tmp_path / "out"
     ts.summarise(runs, main=1, out=out)
@@ -225,6 +259,40 @@ def test_a_main_run_outside_one_to_five_is_refused(tmp_path, main):
     """The main run is numbered 1 to 5."""
     with pytest.raises(ValueError, match="main"):
         ts.summarise(_five(tmp_path), main=main, out=tmp_path / "out")
+
+
+def test_a_runner_up_out_of_stream_order_is_refused(tmp_path):
+    """Pair i must share its optimisation and validation streams, or the pairing is noise."""
+    with pytest.raises(ValueError, match="streams"):
+        ts.summarise(
+            _five(tmp_path), main=1, out=tmp_path / "out", competitor=_five(tmp_path, "b")[::-1]
+        )
+
+
+def test_two_runs_on_one_validation_stream_are_refused(tmp_path):
+    """Each run takes a stream not used before (Task 10, item 1)."""
+    runs = _five(tmp_path)
+    toml = runs[1] / "pipeline.toml"
+    toml.write_text(toml.read_text().replace("stream = 204", "stream = 203"))
+    with pytest.raises(ValueError, match="validation stream 203"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
+def test_runs_at_another_s_are_refused(tmp_path):
+    """Their costs are not comparable."""
+    runs = _five(tmp_path)
+    toml = runs[2] / "pipeline.toml"
+    toml.write_text(toml.read_text().replace("simulations = 3000", "simulations = 1000"))
+    with pytest.raises(ValueError, match="S"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
+def test_a_run_without_its_pipeline_toml_is_named(tmp_path):
+    """Its streams and S come from it."""
+    runs = _five(tmp_path)
+    (runs[3] / "pipeline.toml").unlink()
+    with pytest.raises(FileNotFoundError, match="a4"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
 def test_the_same_run_twice_is_refused(tmp_path):
