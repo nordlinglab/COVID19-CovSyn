@@ -735,6 +735,22 @@ def test_an_interrupt_right_after_a_move_leaves_nothing(tmp_path, monkeypatch):
     assert not out.exists()
 
 
+def test_an_output_another_creates_first_is_claimed(tmp_path, monkeypatch):
+    """The output appears between the check and mkdir: the lock decides, not 'File exists'."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.Path.mkdir
+
+    def raced(self, *args, **kwargs):
+        if self == out and not out.exists():
+            real(self)  # the other summary made it first
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", raced)
+    ts.summarise(runs, main=1, out=out)
+    assert (out / "summary.json").exists()
+
+
 def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
     """A file another writer put in out while this one failed stays."""
     runs = _five(tmp_path)

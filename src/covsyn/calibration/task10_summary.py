@@ -451,8 +451,11 @@ def summarise(
     try:
         if not out.exists():
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.mkdir()
-            created = True
+            try:
+                out.mkdir()
+                created = True
+            except FileExistsError:  # another summary made it first: the claim decides
+                pass
         claim(out)  # a second summary into out is refused, not interleaved with this one
         if any(p.name != LOCK for p in out.iterdir()):  # another finished before the claim
             (out / LOCK).unlink()
