@@ -308,9 +308,11 @@ def check_pilot_choice(runs: list[Path]) -> None:
         FileNotFoundError: choice.json is missing.
     """
     config = pc.load(str(Path(runs[0]) / "pipeline.toml"))
-    path = (
-        Path(os.path.abspath(runs[0])).parent.parent / "tables" / str(config.pilot) / "choice.json"
-    )
+    # abspath, as the pipeline uses (runner.py, stages.py): it keeps a linked run directory's
+    # own place, and collapses '..' by name, so a path through a link and then '..' is not
+    # supported here or there.
+    results = Path(os.path.abspath(runs[0])).parent.parent
+    path = results / "tables" / str(config.pilot) / "choice.json"
     if not path.is_file():
         raise FileNotFoundError(f"{path}: missing, pilot 2's choice that production runs")
     try:
