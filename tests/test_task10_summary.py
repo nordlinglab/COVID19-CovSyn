@@ -589,6 +589,32 @@ def test_an_existing_output_directory_is_refused(tmp_path, files):
     assert sorted(p.name for p in out.iterdir()) == files
 
 
+def test_an_empty_output_behind_a_link_is_refused(tmp_path):
+    """Round 3 accepted it; the decision of 2026-11-26 does not, and the target stays empty."""
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    out = tmp_path / "out"
+    out.symlink_to(target)
+    with pytest.raises(FileExistsError, match="exists"):
+        ts.summarise(_five(tmp_path), main=1, out=out)
+    assert list(target.iterdir()) == []
+
+
+def test_an_empty_output_in_a_read_only_parent_is_refused(tmp_path):
+    """Round 3 accepted it; the decision of 2026-11-26 does not."""
+    runs = _five(tmp_path)
+    parent = tmp_path / "tables"
+    out = parent / "out"
+    out.mkdir(parents=True)
+    parent.chmod(0o555)
+    try:
+        with pytest.raises(FileExistsError, match="exists"):
+            ts.summarise(runs, main=1, out=out)
+    finally:
+        parent.chmod(0o755)
+    assert list(out.iterdir()) == []
+
+
 def test_an_output_another_summary_creates_first_is_refused(tmp_path, monkeypatch):
     """It appears between the check and mkdir: the mkdir that loses is refused."""
     runs = _five(tmp_path)
