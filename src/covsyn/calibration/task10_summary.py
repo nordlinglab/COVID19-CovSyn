@@ -309,7 +309,9 @@ def check_pilot_choice(runs: list[Path]) -> None:
         FileNotFoundError: choice.json is missing.
     """
     config = pc.load(str(Path(runs[0]) / "pipeline.toml"))
-    path = Path(runs[0]).absolute().parent.parent / "tables" / str(config.pilot) / "choice.json"
+    path = (
+        Path(os.path.abspath(runs[0])).parent.parent / "tables" / str(config.pilot) / "choice.json"
+    )
     if not path.is_file():
         raise FileNotFoundError(f"{path}: missing, pilot 2's choice that production runs")
     try:

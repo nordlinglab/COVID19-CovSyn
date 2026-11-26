@@ -476,6 +476,14 @@ def test_a_malformed_choice_json_is_refused_by_name(tmp_path, text):
         ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
+def test_a_run_path_through_dot_dot_finds_pilot_2_s_choice(tmp_path):
+    """--runs ../run1 from inside another run: '..' is a directory up, not a name."""
+    runs = _five(tmp_path)
+    runs = [r.parent / runs[1].name / ".." / r.name for r in runs]
+    ts.summarise(runs, main=1, out=tmp_path / "out")
+    assert (tmp_path / "out" / "summary.json").exists()
+
+
 def test_a_run_without_pilot_2_s_choice_is_named(tmp_path):
     """choice.json is read from results/tables/<pilot>/ beside the runs."""
     runs = _five(tmp_path)
