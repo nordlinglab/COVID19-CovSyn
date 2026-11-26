@@ -694,6 +694,24 @@ def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
     assert sorted(p.name for p in out.iterdir()) == ["theirs.txt"]
 
 
+@pytest.mark.parametrize(
+    "left",
+    [
+        [".summary-lock"],
+        [".summary-lock", "comparison.csv"],
+        [".partial-9", ".summary-lock", "cost_uncertainty.csv"],
+    ],
+)
+def test_an_output_left_part_written_is_named_incomplete(tmp_path, left):
+    """Killed while moving files up: some are in out, which is not a finished summary."""
+    out = tmp_path / "out"
+    out.mkdir()
+    for name in left:
+        (out / name).mkdir() if name.startswith(".partial-") else (out / name).write_text("")
+    with pytest.raises(FileExistsError, match="incomplete"):
+        ts.summarise(_five(tmp_path), main=1, out=out)
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)

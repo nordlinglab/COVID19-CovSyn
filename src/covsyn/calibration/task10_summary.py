@@ -421,11 +421,13 @@ def summarise(
         comparison = (*compare(runs, competitor), [run_record(r) for r in competitor])
     out = Path(out)
     if out.exists() and any(out.iterdir()):
-        left = [p.name for p in out.iterdir()]
-        if all(name.startswith(".partial-") for name in left):
+        marks = sorted(p.name for p in out.iterdir()
+                       if p.name == LOCK or p.name.startswith(".partial-"))  # fmt: skip
+        if marks:  # with or without files already moved up: not a finished summary
             raise FileExistsError(
-                f"{out} holds {', '.join(left)}, left by a summary that was "
-                f"killed while writing; delete it and run again"
+                f"{out} is incomplete: it holds {', '.join(marks)}, left by a summary that was "
+                f"killed while writing, or held by one still running; if none is running, "
+                f"delete {out} and run again"
             )
         raise FileExistsError(f"{out} holds files; give a new directory")
     summary: dict[str, Any] = {
