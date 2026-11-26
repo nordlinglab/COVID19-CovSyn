@@ -300,13 +300,19 @@ def check_pilot_choice(runs: list[Path]) -> None:
     choice.json is read from results/tables/<pilot>/, beside results/models/<run-id>/.
 
     Raises:
-        ValueError: The production runs' n, alpha_0, alpha_end or G_plan is not pilot 2's.
+        ValueError: The production runs' n, alpha_0, alpha_end or G_plan is not pilot 2's, or
+            choice.json is not JSON or has no chosen setting.
+        FileNotFoundError: choice.json is missing.
     """
     config = pc.load(str(Path(runs[0]) / "pipeline.toml"))
     path = Path(runs[0]).absolute().parent.parent / "tables" / str(config.pilot) / "choice.json"
     if not path.is_file():
         raise FileNotFoundError(f"{path}: missing, pilot 2's choice that production runs")
-    chosen = json.loads(path.read_text(encoding="utf-8-sig")).get("chosen")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except ValueError as error:  # JSONDecodeError, or text that is not UTF-8
+        raise ValueError(f"{path}: not JSON ({error})") from None
+    chosen = data.get("chosen") if isinstance(data, dict) else None
     if not isinstance(chosen, dict):
         raise ValueError(f"{path}: no chosen setting")
     for name in ("pop_size", "alpha_0", "alpha_end", "g_plan"):

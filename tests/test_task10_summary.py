@@ -467,6 +467,15 @@ def test_a_run_directory_behind_a_link_finds_pilot_2_s_choice(tmp_path):
     assert (tmp_path / "out" / "summary.json").exists()
 
 
+@pytest.mark.parametrize("text", ["[]", '"x"', '{"chosen": null}', "{"])
+def test_a_malformed_choice_json_is_refused_by_name(tmp_path, text):
+    """As config.json: a clear refusal naming the file, not a traceback."""
+    runs = _five(tmp_path)
+    (tmp_path / "results" / "tables" / "pilot-2" / "choice.json").write_text(text)
+    with pytest.raises(ValueError, match="choice.json"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
 def test_a_run_without_pilot_2_s_choice_is_named(tmp_path):
     """choice.json is read from results/tables/<pilot>/ beside the runs."""
     runs = _five(tmp_path)
