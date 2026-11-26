@@ -385,6 +385,11 @@ def _refuse_existing(out: Path) -> None:
             f"{out} is incomplete: it holds {STAGING}, left by a summary that "
             f"was killed while writing; delete {out} and run again"
         )
+    if out.is_dir() and not any(out.iterdir()):  # a summary killed between the two mkdirs
+        raise FileExistsError(
+            f"{out} exists and is empty, perhaps left by a summary that was "
+            f"killed as it started; delete it or give a new directory"
+        )
     raise FileExistsError(f"{out} exists; give a new directory")
 
 

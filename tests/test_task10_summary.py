@@ -680,6 +680,31 @@ def test_a_cleanup_that_cannot_finish_keeps_the_incomplete_mark(tmp_path, monkey
         ts.summarise(runs, main=1, out=out)
 
 
+def test_an_interrupt_before_staging_leaves_no_output(tmp_path, monkeypatch):
+    """Between out's mkdir and the staging's: out goes, as after any other failure."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.Path.mkdir
+
+    def interrupted(self, *args, **kwargs):
+        if self.name == ts.STAGING:
+            raise KeyboardInterrupt
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        ts.summarise(runs, main=1, out=out)
+    assert not out.exists()
+
+
+def test_an_empty_existing_output_says_a_killed_summary_may_have_left_it(tmp_path):
+    """Refused all the same; a SIGKILL between the two mkdirs leaves out empty."""
+    out = tmp_path / "out"
+    out.mkdir()
+    with pytest.raises(FileExistsError, match="exists and is empty"):
+        ts.summarise(_five(tmp_path), main=1, out=out)
+
+
 def test_the_output_directory_has_the_umask_s_mode(tmp_path):
     """As every other results/tables directory."""
     import os
