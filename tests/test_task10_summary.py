@@ -577,13 +577,33 @@ def test_an_unknown_candidate_number_is_refused(tmp_path):
         ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
-def test_an_output_directory_with_files_is_not_overwritten(tmp_path):
-    """An earlier summary stays."""
+@pytest.mark.parametrize("files", [["summary.json"], []])
+def test_an_existing_output_directory_is_refused(tmp_path, files):
+    """The output must be new, empty or not (decision of 2026-11-26): mkdir claims it whole."""
     out = tmp_path / "out"
     out.mkdir()
-    (out / "summary.json").write_text("{}")
-    with pytest.raises(FileExistsError):
+    for name in files:
+        (out / name).write_text("{}")
+    with pytest.raises(FileExistsError, match="exists"):
         ts.summarise(_five(tmp_path), main=1, out=out)
+    assert sorted(p.name for p in out.iterdir()) == files
+
+
+def test_an_output_another_summary_creates_first_is_refused(tmp_path, monkeypatch):
+    """It appears between the check and mkdir: the mkdir that loses is refused."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.Path.mkdir
+
+    def raced(self, *args, **kwargs):
+        if self == out and not out.exists():
+            real(self)  # the other summary made it first
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", raced)
+    with pytest.raises(FileExistsError, match="exists"):
+        ts.summarise(runs, main=1, out=out)
+    assert list(out.iterdir()) == []  # the other summary's, untouched
 
 
 def test_a_failure_while_writing_leaves_no_output(tmp_path, monkeypatch):
@@ -601,122 +621,17 @@ def test_a_failure_while_writing_leaves_no_output(tmp_path, monkeypatch):
         return real(source, target)
 
     monkeypatch.setattr(ts.shutil, "copyfile", failing)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         ts.summarise(runs, main=1, out=out)
+    assert raised.value.errno == 28
     assert sorted(p.name for p in tmp_path.iterdir()) == before  # no staging left, hidden too
     monkeypatch.setattr(ts.shutil, "copyfile", real)
     ts.summarise(runs, main=1, out=out)
     assert (out / "summary.json").exists()
 
 
-def test_an_empty_output_directory_is_used(tmp_path):
-    """Made beforehand and empty: the summary goes into it."""
-    out = tmp_path / "out"
-    out.mkdir()
-    ts.summarise(_five(tmp_path), main=1, out=out)
-    assert (out / "summary.json").exists()
-
-
-def test_the_output_directory_has_the_umask_s_mode(tmp_path):
-    """As every other results/tables directory, not the 0700 of a temporary one."""
-    import os
-
-    old = os.umask(0o022)
-    try:
-        out = tmp_path / "out"
-        ts.summarise(_five(tmp_path), main=1, out=out)
-    finally:
-        os.umask(old)
-    assert out.stat().st_mode & 0o777 == 0o755
-
-
-def test_an_empty_output_directory_keeps_its_mode(tmp_path):
-    """Made beforehand with its own mode, which the summary keeps."""
-    out = tmp_path / "out"
-    out.mkdir()
-    out.chmod(0o750)
-    ts.summarise(_five(tmp_path), main=1, out=out)
-    assert out.stat().st_mode & 0o777 == 0o750
-
-
-def test_an_empty_output_directory_behind_a_link_is_used(tmp_path):
-    """The project follows links: out may be one to an empty directory elsewhere."""
-    runs = _five(tmp_path)
-    target = tmp_path / "elsewhere"
-    target.mkdir()
-    out = tmp_path / "out"
-    out.symlink_to(target)
-    ts.summarise(runs, main=1, out=out)
-    assert out.is_symlink() and (target / "summary.json").exists()
-
-
-def test_an_empty_output_directory_in_a_read_only_parent_is_used(tmp_path):
-    """Only out itself need be writable."""
-    runs = _five(tmp_path)
-    parent = tmp_path / "tables"
-    out = parent / "out"
-    out.mkdir(parents=True)
-    parent.chmod(0o555)
-    try:
-        ts.summarise(runs, main=1, out=out)
-    finally:
-        parent.chmod(0o755)
-    assert (out / "summary.json").exists()
-
-
-def test_a_killed_attempt_s_staging_is_named(tmp_path):
-    """A kill leaves .partial-<pid> in out; the refusal says what it is and that it can go."""
-    out = tmp_path / "out"
-    (out / ".partial-123").mkdir(parents=True)
-    with pytest.raises(FileExistsError, match="left by a summary that was killed"):
-        ts.summarise(_five(tmp_path), main=1, out=out)
-
-
-def test_a_second_summary_cannot_claim_an_output_another_holds(tmp_path):
-    """Two summaries into one out: the second is refused, not interleaved with the first."""
-    out = tmp_path / "out"
-    out.mkdir()
-    ts.claim(out)
-    with pytest.raises(FileExistsError):
-        ts.claim(out)
-
-
-def test_a_summary_finished_before_the_claim_is_not_overwritten(tmp_path, monkeypatch):
-    """Another summary finishes between this one's emptiness check and its claim."""
-    runs = _five(tmp_path)
-    out = tmp_path / "out"
-    real = ts.claim
-
-    def finish_another_first(directory):
-        monkeypatch.setattr(ts, "claim", real)
-        ts.summarise(runs, main=2, out=directory)  # the other summary, whole
-        real(directory)
-
-    monkeypatch.setattr(ts, "claim", finish_another_first)
-    with pytest.raises(FileExistsError, match="holds files"):
-        ts.summarise(runs, main=1, out=out)
-    assert json.loads((out / "summary.json").read_text())["main"] == 2
-    assert not (out / ts.LOCK).exists()
-
-
-def test_a_failure_to_release_the_lock_keeps_the_finished_summary(tmp_path, monkeypatch):
-    """Every file is in place by then; the summary stands, and the lock says so."""
-    runs = _five(tmp_path)
-    out = tmp_path / "out"
-    real = ts.Path.unlink
-
-    def refuse_lock(self, *args, **kwargs):
-        if self.name == ts.LOCK:
-            raise OSError(16, "Device or resource busy")
-        return real(self, *args, **kwargs)
-
-    monkeypatch.setattr(ts.Path, "unlink", refuse_lock)
-    ts.summarise(runs, main=1, out=out)
-    assert (out / "summary.json").exists() and (out / "parameter_uncertainty.csv").exists()
-
-
 def test_an_interrupt_right_after_a_move_leaves_nothing(tmp_path, monkeypatch):
-    """Ctrl-C between a file's rename and its record: that file is removed too."""
+    """Ctrl-C while files move into place: out goes whole."""
     runs = _five(tmp_path)
     out = tmp_path / "out"
     real = ts.Path.rename
@@ -735,57 +650,26 @@ def test_an_interrupt_right_after_a_move_leaves_nothing(tmp_path, monkeypatch):
     assert not out.exists()
 
 
-def test_an_output_another_creates_first_is_claimed(tmp_path, monkeypatch):
-    """The output appears between the check and mkdir: the lock decides, not 'File exists'."""
-    runs = _five(tmp_path)
-    out = tmp_path / "out"
-    real = ts.Path.mkdir
+def test_the_output_directory_has_the_umask_s_mode(tmp_path):
+    """As every other results/tables directory."""
+    import os
 
-    def raced(self, *args, **kwargs):
-        if self == out and not out.exists():
-            real(self)  # the other summary made it first
-        return real(self, *args, **kwargs)
-
-    monkeypatch.setattr(ts.Path, "mkdir", raced)
-    ts.summarise(runs, main=1, out=out)
-    assert (out / "summary.json").exists()
+    old = os.umask(0o022)
+    try:
+        out = tmp_path / "out"
+        ts.summarise(_five(tmp_path), main=1, out=out)
+    finally:
+        os.umask(old)
+    assert out.stat().st_mode & 0o777 == 0o755
 
 
-def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
-    """A file another writer put in out while this one failed stays."""
-    runs = _five(tmp_path)
-    out = tmp_path / "out"
-    real = ts.shutil.copyfile
-    calls = []
-
-    def failing(source, target):
-        calls.append(target)
-        if len(calls) == 3:
-            (out / "theirs.txt").write_text("not ours")
-            raise OSError(28, "No space left on device")
-        return real(source, target)
-
-    monkeypatch.setattr(ts.shutil, "copyfile", failing)
-    with pytest.raises(OSError) as raised:
-        ts.summarise(runs, main=1, out=out)
-    assert raised.value.errno == 28  # the cause, not the cleanup's failure to remove out
-    assert sorted(p.name for p in out.iterdir()) == ["theirs.txt"]
-
-
-@pytest.mark.parametrize(
-    "left",
-    [
-        [".summary-lock"],
-        [".summary-lock", "comparison.csv"],
-        [".partial-9", ".summary-lock", "cost_uncertainty.csv"],
-    ],
-)
-def test_an_output_left_part_written_is_named_incomplete(tmp_path, left):
-    """Killed while moving files up: some are in out, which is not a finished summary."""
+@pytest.mark.parametrize("left", [[".partial"], [".partial", "comparison.csv"]])
+def test_an_output_a_killed_summary_left_is_named_incomplete(tmp_path, left):
+    """Killed while writing: out holds the staging directory, perhaps files moved up too."""
     out = tmp_path / "out"
     out.mkdir()
     for name in left:
-        (out / name).mkdir() if name.startswith(".partial-") else (out / name).write_text("")
+        (out / name).mkdir() if name == ".partial" else (out / name).write_text("")
     with pytest.raises(FileExistsError, match="incomplete"):
         ts.summarise(_five(tmp_path), main=1, out=out)
 

@@ -33,7 +33,6 @@ Usage (repository root):
 from __future__ import annotations
 
 import argparse
-import contextlib
 import csv
 import json
 import os
@@ -368,20 +367,22 @@ def _write(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-# Made with O_EXCL in out before anything is written, and removed once the summary is whole.
-LOCK = ".summary-lock"
+# Inside a new output, where a killed summary leaves it; the output is then incomplete.
+STAGING = ".partial"
 
 
-def claim(out: Path) -> None:
-    """Claim out for this summary, or refuse.
+def _refuse_existing(out: Path) -> None:
+    """Refuse an output that exists, saying when a killed summary left it incomplete.
 
     Raises:
-        FileExistsError: Another summary holds out, or one was killed while writing it.
+        FileExistsError: Always.
     """
-    try:
-        os.close(os.open(Path(out) / LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
-    except FileExistsError:
-        raise FileExistsError(f"{out} is held by another summary ({LOCK})") from None
+    if (out / STAGING).exists():
+        raise FileExistsError(
+            f"{out} is incomplete: it holds {STAGING}, left by a summary that "
+            f"was killed while writing; delete {out} and run again"
+        )
+    raise FileExistsError(f"{out} exists; give a new directory")
 
 
 def summarise(
@@ -392,16 +393,16 @@ def summarise(
     Args:
         runs: The five production run directories, in stream order.
         main: The main run, 1 to 5, named before the runs started.
-        out: The directory to write; it must not hold files yet.
+        out: The directory to write, which must not exist yet.
         competitor: The runner-up's five runs, pair by pair with ``runs``.
 
     Raises:
         ValueError: Runs that cannot be summarised together (see the module docstring),
             main outside 1-5, or a malformed file (see candidates, selected_vector, cost_rows,
             indistinguishable_set and run_record).
-        FileNotFoundError: A run's file or pilot 2's choice.json is missing, or ``out`` links to
-            nothing; the message names it.
-        FileExistsError: ``out`` holds files, or is held or left incomplete by another summary.
+        FileNotFoundError: A run's file or pilot 2's choice.json is missing, or ``out`` or a
+            directory above it links to nothing; the message names it.
+        FileExistsError: ``out`` exists, perhaps left incomplete by a killed summary.
     """
     runs = [Path(r) for r in runs]
     _check_runs(runs, "production")
@@ -426,42 +427,25 @@ def summarise(
     if competitor is not None:
         comparison = (*compare(runs, competitor), [run_record(r) for r in competitor])
     out = Path(out)
-    if out.exists() and any(out.iterdir()):
-        marks = sorted(p.name for p in out.iterdir()
-                       if p.name == LOCK or p.name.startswith(".partial-"))  # fmt: skip
-        if marks:  # with or without files already moved up: not a finished summary
-            raise FileExistsError(
-                f"{out} is incomplete: it holds {', '.join(marks)}, left by a summary that was "
-                f"killed while writing, or held by one still running; if none is running, "
-                f"delete {out} and run again"
-            )
-        raise FileExistsError(f"{out} holds files; give a new directory")
+    for level in (out, *out.parents):  # a link to an unmounted disk, here or above
+        if level.is_symlink() and not level.exists():
+            raise FileNotFoundError(f"{level} links to {os.readlink(level)}, which does not exist")
+    if out.exists():
+        _refuse_existing(out)
     summary: dict[str, Any] = {
         "main": main, "runs": records,
         "not_identified": sum(bool(row["not_identified"]) for row in table),
         "fixed": sum(bool(row["fixed"]) for row in table), "parameters": len(table),
     }  # fmt: skip
-    # Staged inside out and moved up file by file, so a failure part-way leaves out as it was;
-    # inside, so out may be a link or in a read-only parent, and keeps its mode, or the umask's.
-    for level in (out, *out.parents):  # a link to an unmounted disk, here or above
-        if level.is_symlink() and not level.exists():
-            raise FileNotFoundError(f"{level} links to {os.readlink(level)}, which does not exist")
-    created = claimed = False
-    staging = out / f".partial-{os.getpid()}"
-    moved: list[Path] = []
+    # out must be new (decision of 2026-11-26): the mkdir that makes it is the claim, so no
+    # other summary writes there, and a failure removes it whole.
+    out.parent.mkdir(parents=True, exist_ok=True)
     try:
-        if not out.exists():
-            out.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                out.mkdir()
-                created = True
-            except FileExistsError:  # another summary made it first: the claim decides
-                pass
-        claim(out)  # a second summary into out is refused, not interleaved with this one
-        if any(p.name != LOCK for p in out.iterdir()):  # another finished before the claim
-            (out / LOCK).unlink()
-            raise FileExistsError(f"{out} holds files; give a new directory")
-        claimed = True
+        out.mkdir()
+    except FileExistsError:  # another summary made it after the check above
+        _refuse_existing(out)
+    try:
+        staging = out / STAGING  # files move up only once all are written
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)
         shutil.copyfile(runs[main - 1] / COST_TABLE, staging / "cost_uncertainty.csv")
@@ -473,23 +457,11 @@ def summarise(
         text = json.dumps(summary, indent=1) + "\n"
         (staging / "summary.json").write_text(text, encoding="utf-8")
         for path in sorted(staging.iterdir()):
-            moved.append(out / path.name)  # before the move, so an interrupt after it is cleaned
             path.rename(out / path.name)
         staging.rmdir()
     except BaseException:
-        # Only what this attempt wrote; a cleanup that fails must not hide the cause.
-        if claimed:
-            shutil.rmtree(staging, ignore_errors=True)
-            for path in [*moved, out / LOCK]:
-                with contextlib.suppress(OSError):
-                    path.unlink()
-        if created:
-            with contextlib.suppress(OSError):  # not empty: another writer's files stay
-                out.rmdir()
+        shutil.rmtree(out, ignore_errors=True)  # this summary's own, made above
         raise
-    # After the try: every file is in place, so a lock that will not go keeps the summary.
-    with contextlib.suppress(OSError):
-        (out / LOCK).unlink()
     return summary
 
 
