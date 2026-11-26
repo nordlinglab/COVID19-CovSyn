@@ -887,6 +887,35 @@ def test_the_command_reports_output_left_by_failed_cleanup(tmp_path, monkeypatch
     assert (out / ts.STAGING).is_dir()
 
 
+@pytest.mark.parametrize("leftover", ["staging", "output"])
+def test_the_command_names_a_directory_that_cleanup_cannot_remove(tmp_path, monkeypatch, leftover):
+    """A failed directory removal leaves the output path reserved."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    rmdir = ts.Path.rmdir
+
+    def fail_write(*args, **kwargs):
+        raise OSError("summary write failed")
+
+    def refuse_output_removal(self):
+        if self == out:
+            raise PermissionError("output removal failed")
+        return rmdir(self)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ts.pu, "write_table", fail_write)
+        if leftover == "staging":
+            patch.setattr(ts.shutil, "rmtree", lambda *args, **kwargs: None)
+        else:
+            patch.setattr(ts.Path, "rmdir", refuse_output_removal)
+        with pytest.raises(SystemExit) as raised:
+            ts.main([str(out), "--main", "1", "--runs", *map(str, runs)])
+
+    assert "summary write failed" in str(raised.value)
+    assert f"{out} is left incomplete" in str(raised.value)
+    assert out.is_dir()
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)

@@ -391,8 +391,12 @@ def _remove(out: Path, staging: Path, moved: list[Path]) -> bool:
             left = True
     if not left:
         shutil.rmtree(staging, ignore_errors=True)
-        with contextlib.suppress(OSError):
+        try:
             out.rmdir()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            left = True
     return left
 
 
