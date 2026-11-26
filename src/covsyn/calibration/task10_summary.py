@@ -494,7 +494,8 @@ def summarise(
             path.rename(out / path.name)
         staging.rmdir()
     except BaseException:
-        if claimed:
+        # .partial goes only once every file is in place: then the output stands.
+        if claimed and not (moved and not staging.exists()):
             _remove(out, staging, moved)
         for level in made:  # the parents made for out, now empty unless another wrote there
             with contextlib.suppress(OSError):

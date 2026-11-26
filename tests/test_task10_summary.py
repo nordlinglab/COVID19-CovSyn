@@ -770,6 +770,23 @@ def test_a_parent_that_is_a_file_is_named(tmp_path):
         ts.summarise(_five(tmp_path), main=1, out=tmp_path / "tables" / "id")
 
 
+def test_an_interrupt_after_the_staging_goes_keeps_the_finished_output(tmp_path, monkeypatch):
+    """Every file is in place once .partial is gone: the output stands."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.Path.rmdir
+
+    def interrupted(self):
+        real(self)
+        if self.name == ts.STAGING:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(ts.Path, "rmdir", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        ts.summarise(runs, main=1, out=out)
+    assert (out / "summary.json").exists() and not (out / ts.STAGING).exists()
+
+
 def test_the_output_directory_has_the_umask_s_mode(tmp_path):
     """As every other results/tables directory."""
     import os
