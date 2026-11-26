@@ -715,6 +715,26 @@ def test_a_failure_to_release_the_lock_keeps_the_finished_summary(tmp_path, monk
     assert (out / "summary.json").exists() and (out / "parameter_uncertainty.csv").exists()
 
 
+def test_an_interrupt_right_after_a_move_leaves_nothing(tmp_path, monkeypatch):
+    """Ctrl-C between a file's rename and its record: that file is removed too."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.Path.rename
+    moves = []
+
+    def interrupted(self, target):
+        result = real(self, target)
+        moves.append(target)
+        if len(moves) == 2:
+            raise KeyboardInterrupt
+        return result
+
+    monkeypatch.setattr(ts.Path, "rename", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        ts.summarise(runs, main=1, out=out)
+    assert not out.exists()
+
+
 def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
     """A file another writer put in out while this one failed stays."""
     runs = _five(tmp_path)

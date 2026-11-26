@@ -469,8 +469,8 @@ def summarise(
         text = json.dumps(summary, indent=1) + "\n"
         (staging / "summary.json").write_text(text, encoding="utf-8")
         for path in sorted(staging.iterdir()):
+            moved.append(out / path.name)  # before the move, so an interrupt after it is cleaned
             path.rename(out / path.name)
-            moved.append(out / path.name)
         staging.rmdir()
     except BaseException:
         # Only what this attempt wrote; a cleanup that fails must not hide the cause.
