@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -356,8 +357,16 @@ def summarise(
     }  # fmt: skip
     # Written beside it and renamed whole, so a failure part-way leaves nothing behind.
     out.parent.mkdir(parents=True, exist_ok=True)
+    # mkdtemp makes it 0700; the summary takes an empty out's mode, else the umask's.
+    if out.exists():
+        mode = out.stat().st_mode & 0o777
+    else:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o777 & ~umask
     staging = Path(tempfile.mkdtemp(prefix=f".{out.name}.", dir=out.parent))
     try:
+        staging.chmod(mode)
         pu.write_table(staging / "parameter_uncertainty.csv", table)
         shutil.copyfile(runs[main - 1] / COST_TABLE, staging / "cost_uncertainty.csv")
         for i, run in enumerate(runs, start=1):

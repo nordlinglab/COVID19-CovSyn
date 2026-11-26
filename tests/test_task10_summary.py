@@ -543,6 +543,28 @@ def test_an_empty_output_directory_is_used(tmp_path):
     assert (out / "summary.json").exists()
 
 
+def test_the_output_directory_has_the_umask_s_mode(tmp_path):
+    """As every other results/tables directory, not the 0700 of a temporary one."""
+    import os
+
+    old = os.umask(0o022)
+    try:
+        out = tmp_path / "out"
+        ts.summarise(_five(tmp_path), main=1, out=out)
+    finally:
+        os.umask(old)
+    assert out.stat().st_mode & 0o777 == 0o755
+
+
+def test_an_empty_output_directory_keeps_its_mode(tmp_path):
+    """Made beforehand with its own mode, which the summary keeps."""
+    out = tmp_path / "out"
+    out.mkdir()
+    out.chmod(0o750)
+    ts.summarise(_five(tmp_path), main=1, out=out)
+    assert out.stat().st_mode & 0o777 == 0o750
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)
