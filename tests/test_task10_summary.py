@@ -516,6 +516,7 @@ def test_a_failure_while_writing_leaves_no_output(tmp_path, monkeypatch):
     """A full disk part-way leaves nothing that a second attempt would refuse."""
     runs = _five(tmp_path)
     out = tmp_path / "out"
+    before = sorted(p.name for p in tmp_path.iterdir())
     real = ts.shutil.copyfile
     calls = []
 
@@ -528,8 +529,7 @@ def test_a_failure_while_writing_leaves_no_output(tmp_path, monkeypatch):
     monkeypatch.setattr(ts.shutil, "copyfile", failing)
     with pytest.raises(OSError):
         ts.summarise(runs, main=1, out=out)
-    assert not out.exists()
-    assert [p.name for p in tmp_path.iterdir() if p.name.startswith("out")] == []
+    assert sorted(p.name for p in tmp_path.iterdir()) == before  # no staging left, hidden too
     monkeypatch.setattr(ts.shutil, "copyfile", real)
     ts.summarise(runs, main=1, out=out)
     assert (out / "summary.json").exists()
