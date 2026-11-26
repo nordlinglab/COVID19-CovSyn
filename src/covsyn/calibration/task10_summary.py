@@ -15,9 +15,12 @@ bounds; pipeline.toml, its streams, S and configuration; config.json, the stoppi
 by; and run.log, the optimiser's stop and each stage's time.
 
 It refuses runs that cannot be summarised together: not five, a run twice or in both lists,
-another S or other bounds, a stream two runs share, a list of two configurations, a runner-up of
-production's configuration or off its pair's streams, or a run whose config.json does not
-record monitoring.STOP_RULE.
+another S or other bounds, a stream two runs share, a list of two configurations, runs that
+differ in a setting both lists share (SHARED), a runner-up of production's configuration or off
+its pair's streams, production runs whose n, alpha_0, alpha_end or G_plan is not pilot 2's
+results/tables/<pilot>/choice.json (beside results/models/; required without --competitor too,
+so a copy of the runs elsewhere needs it as well), or a run whose config.json does not record
+monitoring.STOP_RULE.
 
 Decision of 2026-11-26: pilot 2's runner-up (--competitor) runs on the same five pairs of
 optimisation and validation streams, and each run's best validation mean is compared with its
@@ -394,8 +397,9 @@ def summarise(
         ValueError: Runs that cannot be summarised together (see the module docstring),
             main outside 1-5, or a malformed file (see candidates, selected_vector, cost_rows,
             indistinguishable_set and run_record).
-        FileNotFoundError: A run's file is missing; the message names it.
-        FileExistsError: ``out`` holds files.
+        FileNotFoundError: A run's file or pilot 2's choice.json is missing, or ``out`` links to
+            nothing; the message names it.
+        FileExistsError: ``out`` holds files, or is held or left incomplete by another summary.
     """
     runs = [Path(r) for r in runs]
     _check_runs(runs, "production")
