@@ -840,6 +840,32 @@ def test_an_ancestor_link_to_nothing_is_named(tmp_path):
         ts.summarise(_five(tmp_path), main=1, out=tables / "id" / "sub")
 
 
+def test_the_command_reports_output_left_by_failed_cleanup(tmp_path, monkeypatch):
+    """The CLI reports both the write error and the output that remains."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real_rename, real_unlink = ts.Path.rename, ts.Path.unlink
+
+    def fail_after_move(self, target):
+        real_rename(self, target)
+        raise OSError("output move failed")
+
+    def refuse_removal(self, *args, **kwargs):
+        if self.parent == out:
+            raise OSError("output removal failed")
+        return real_unlink(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ts.Path, "rename", fail_after_move)
+        patch.setattr(ts.Path, "unlink", refuse_removal)
+        with pytest.raises(SystemExit) as raised:
+            ts.main([str(out), "--main", "1", "--runs", *map(str, runs)])
+
+    assert "output move failed" in str(raised.value)
+    assert f"{out} is left incomplete" in str(raised.value)
+    assert (out / ts.STAGING).is_dir()
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)

@@ -483,7 +483,7 @@ def summarise(
     except BaseException as error:
         # .partial goes only once every file is in place: then the output stands.
         if claimed and not (moved and not staging.exists()) and _remove(out, staging, moved):
-            error.add_note(f"{out} is left incomplete; delete it before running again")
+            error.add_note(f"{out} is left incomplete")
         # The parents made for out, if empty; another summary into a sibling that made one its
         # parent at the same moment may then fail to make its own out, a race left as it is.
         for level in made:
@@ -515,7 +515,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         summary = summarise(args.runs, args.main, args.out, args.competitor)
     except (ValueError, OSError) as error:
-        raise SystemExit(f"covsyn-task10-summary: {error}") from None
+        message = "\n".join([f"covsyn-task10-summary: {error}", *getattr(error, "__notes__", [])])
+        raise SystemExit(message) from None
     print(
         f"{summary['parameters']} parameters, {summary['not_identified']} not identified; "
         f"wrote {args.out}"
