@@ -745,6 +745,24 @@ def test_a_failure_removes_the_parents_made_for_the_output(tmp_path, monkeypatch
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
+def test_an_interrupt_making_the_output_removes_its_new_parents(tmp_path, monkeypatch):
+    """Ctrl-C after the parents are made and before out is: they go too."""
+    runs = _five(tmp_path)
+    out = tmp_path / "new" / "sub"
+    before = sorted(p.name for p in tmp_path.iterdir())
+    real = ts.Path.mkdir
+
+    def interrupted(self, *args, **kwargs):
+        if self == out:
+            raise KeyboardInterrupt
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        ts.summarise(runs, main=1, out=out)
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
+
+
 def test_a_parent_that_is_a_file_is_named(tmp_path):
     """Not a bare 'File exists' that reads as if out existed."""
     (tmp_path / "tables").write_text("")

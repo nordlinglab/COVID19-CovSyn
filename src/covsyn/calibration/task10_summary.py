@@ -469,14 +469,16 @@ def summarise(
         if level.exists() and not level.is_dir():
             raise FileExistsError(f"{level}, above {out}, is not a directory")
     made = [level for level in out.parents if not level.exists()]  # deepest first
-    out.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        out.mkdir()
-    except FileExistsError:  # another summary made it after the check above
-        _refuse_existing(out)
     staging = out / STAGING  # files move up only once all are written
     moved: list[Path] = []
+    claimed = False
     try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            out.mkdir()
+        except FileExistsError:  # another summary made it after the check above
+            _refuse_existing(out)
+        claimed = True
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)
         shutil.copyfile(runs[main - 1] / COST_TABLE, staging / "cost_uncertainty.csv")
@@ -492,7 +494,8 @@ def summarise(
             path.rename(out / path.name)
         staging.rmdir()
     except BaseException:
-        _remove(out, staging, moved)
+        if claimed:
+            _remove(out, staging, moved)
         for level in made:  # the parents made for out, now empty unless another wrote there
             with contextlib.suppress(OSError):
                 level.rmdir()
