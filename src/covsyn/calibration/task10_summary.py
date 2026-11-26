@@ -443,8 +443,9 @@ def summarise(
     }  # fmt: skip
     # Staged inside out and moved up file by file, so a failure part-way leaves out as it was;
     # inside, so out may be a link or in a read-only parent, and keeps its mode, or the umask's.
-    if out.is_symlink() and not out.exists():
-        raise FileNotFoundError(f"{out} links to {os.readlink(out)}, which does not exist")
+    for level in (out, *out.parents):  # a link to an unmounted disk, here or above
+        if level.is_symlink() and not level.exists():
+            raise FileNotFoundError(f"{level} links to {os.readlink(level)}, which does not exist")
     created = claimed = False
     staging = out / f".partial-{os.getpid()}"
     moved: list[Path] = []

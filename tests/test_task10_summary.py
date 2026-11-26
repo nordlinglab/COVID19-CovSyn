@@ -798,6 +798,14 @@ def test_an_output_link_to_nothing_is_named(tmp_path):
         ts.summarise(_five(tmp_path), main=1, out=out)
 
 
+def test_an_ancestor_link_to_nothing_is_named(tmp_path):
+    """results/tables linking to an unmounted disk: name the link, not 'File exists'."""
+    tables = tmp_path / "tables"
+    tables.symlink_to(tmp_path / "unmounted")
+    with pytest.raises(FileNotFoundError, match="links to"):
+        ts.summarise(_five(tmp_path), main=1, out=tables / "id" / "sub")
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)
