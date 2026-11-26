@@ -16,6 +16,7 @@ import json
 import numpy as np
 import pytest
 
+from covsyn.calibration import revalidation
 from covsyn.calibration import task10_summary as ts
 from covsyn.pipeline import config as pc
 
@@ -41,22 +42,31 @@ def _run(
     bounds=None,
     streams=(5, 203),
     simulations=3000,
+    chosen=1,
 ):
     """A production run's files as the pipeline leaves them.
 
-    candidates: revalidation/firefly_best.txt's vectors, by candidate number;
+    candidates: the archive's best, by candidate number, with ``selected`` put at ``chosen``,
+    the checklist's choice; firefly_archive.txt holds them at full precision, in this order,
+    and both firefly_best.txt files at 7 decimals, as revalidation.write_best_file writes;
     uncertainty: cost_uncertainty.csv's rows, (candidate, mean, se, indistinguishable, best).
     """
     run = root / name
     (run / "revalidation").mkdir(parents=True)
     (run / "selected").mkdir()
     np.savetxt(run / "bound.txt", np.vstack((LOWER, UPPER)) if bounds is None else bounds)
+    candidates = np.array(candidates, dtype=float)
+    candidates[chosen] = selected
     costs = np.arange(len(candidates), dtype=float)
-    rows = np.column_stack([np.arange(len(candidates)), candidates, costs])
-    np.savetxt(run / "revalidation" / "firefly_best.txt", rows, fmt="%.7f")
-    np.savetxt(
-        run / "selected" / "firefly_best.txt", np.vstack([np.r_[0, selected, 1.0]] * 2), fmt="%.7f"
-    )
+    archive = np.column_stack([np.zeros(len(candidates)), np.ones(len(candidates)), candidates,
+                               costs])  # fmt: skip
+    np.savetxt(run / "firefly_archive.txt", archive, header=revalidation.ARCHIVE_HEADER)
+    revalidation.write_best_file(run / "revalidation" / "firefly_best.txt", candidates, costs)
+    revalidation.write_best_file(run / "selected" / "firefly_best.txt", candidates[chosen],
+                                 costs[chosen])  # fmt: skip
+    _write_rows(run / "selected" / "selection.csv",
+                [{"candidate": c, "validation_mean": float(c), "chosen": c == chosen}
+                 for c in range(len(candidates))])  # fmt: skip
     _write_rows(run / "revalidation" / "cost_uncertainty.csv", [
         {"candidate": c, "mean": m, "se": s, "difference_to_best": 0.0, "ci_low": 0.0,
          "ci_high": 0.0, "indistinguishable": i, "best": b}
@@ -84,7 +94,8 @@ def _run(
 
 
 def _five(root, prefix="a", best_means=(10.0, 11.0, 12.0, 13.0, 14.0)):
-    """Five runs; each selects (i, 2i, 0.1i); run 1's set is candidates 0 and 2 of three."""
+    """Five runs; each selects (0.1i, i + 0.5, 0.2i), candidate 1; the set is candidates 0, 2."""
+    # No choice equals candidate 0 or 2: the archive holds distinct vectors.
     candidates = np.array([[0.5, 5.0, 1.0], [0.9, 9.0, 1.9], [0.4, 4.0, 0.8]])
     runs = []
     for i, mean in enumerate(best_means, start=1):
@@ -97,7 +108,7 @@ def _five(root, prefix="a", best_means=(10.0, 11.0, 12.0, 13.0, 14.0)):
             _run(
                 root,
                 f"{prefix}{i}",
-                [0.1 * i, i, 0.2 * i],
+                [0.1 * i, i + 0.5, 0.2 * i],
                 candidates,
                 uncertainty,
                 streams=(4 + i, 202 + i),
@@ -117,7 +128,7 @@ def test_parameter_uncertainty_is_over_the_five_selected_vectors(tmp_path):
     ts.summarise(_five(tmp_path), main=1, out=out)
     table = _table(out / "parameter_uncertainty.csv")
     assert len(table) == DIM
-    selected = np.array([[0.1 * i, i, 0.2 * i] for i in range(1, 6)])
+    selected = np.array([[0.1 * i, i + 0.5, 0.2 * i] for i in range(1, 6)])
     for row, values, width in zip(table, selected.T, UPPER - LOWER, strict=True):
         assert float(row["mean"]) == pytest.approx(values.mean())
         assert float(row["sd_fraction"]) == pytest.approx(values.std(ddof=1) / width)
@@ -163,6 +174,45 @@ def test_a_set_of_only_the_best_gives_its_own_values_as_the_range(tmp_path):
         (5.0, 5.0),
         (1.0, 1.0),
     ]
+
+
+def test_the_vectors_are_read_at_full_precision(tmp_path):
+    """firefly_best.txt keeps 7 decimals; values closer than that still have an SD."""
+    candidates = np.array([[0.5, 5.0, 1.0], [0.9, 9.0, 1.9], [0.4, 4.0, 0.8]])
+    uncertainty = [
+        (0, 1.0, 0.5, True, True),
+        (1, 6.0, 0.5, False, False),
+        (2, 2.0, 0.5, False, False),
+    ]
+    runs = [_run(tmp_path, f"a{i}", [0.5 + i * 1e-9, i, 0.2], candidates, uncertainty,
+                 streams=(4 + i, 202 + i)) for i in range(1, 6)]  # fmt: skip
+    out = tmp_path / "out"
+    ts.summarise(runs, main=1, out=out)
+    first = _table(out / "parameter_uncertainty.csv")[0]
+    assert float(first["sd"]) == pytest.approx(np.std([0.5 + i * 1e-9 for i in range(1, 6)],
+                                                      ddof=1), rel=1e-6)  # fmt: skip
+
+
+def test_an_archive_that_does_not_match_the_scored_candidates_is_refused(tmp_path):
+    """Its rounded vectors must be firefly_best.txt's, or the candidate numbers are off."""
+    runs = _five(tmp_path)
+    best = runs[0] / "revalidation" / "firefly_best.txt"
+    rows = np.loadtxt(best)
+    rows[[0, 2]] = rows[[2, 0]]
+    np.savetxt(best, rows, fmt="%.7f")
+    with pytest.raises(ValueError, match="archive"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
+def test_a_selection_without_one_choice_is_refused(tmp_path):
+    """Two chosen candidates leave the run's vector ambiguous."""
+    runs = _five(tmp_path)
+    path = runs[2] / "selected" / "selection.csv"
+    rows = _table(path)
+    rows[0]["chosen"] = "True"
+    _write_rows(path, rows)
+    with pytest.raises(ValueError, match="chosen"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
 def test_the_main_run_s_cost_table_and_every_run_s_are_kept(tmp_path):

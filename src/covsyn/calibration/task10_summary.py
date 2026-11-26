@@ -30,6 +30,7 @@ from typing import Any
 import numpy as np
 
 from covsyn.calibration import parameter_uncertainty as pu
+from covsyn.calibration import revalidation
 from covsyn.calibration.monitoring import EVENT as STOP_EVENT
 from covsyn.pipeline import config as pc
 from covsyn.runtime import runs as rt
@@ -37,6 +38,10 @@ from covsyn.runtime import runs as rt
 COST_TABLE = Path("revalidation") / "cost_uncertainty.csv"
 CANDIDATES = Path("revalidation") / "firefly_best.txt"
 SELECTED = Path("selected") / "firefly_best.txt"
+SELECTION = Path("selected") / "selection.csv"
+ARCHIVE = Path("firefly_archive.txt")
+# write_best_file's 7 decimals round by at most 5e-8; a little more allows for the parse.
+ROUNDING = 6e-8
 
 
 def _vectors(path: Path) -> np.ndarray:
@@ -49,9 +54,51 @@ def _vectors(path: Path) -> np.ndarray:
     return rows
 
 
+def candidates(run: Path) -> np.ndarray:
+    """The run's scored candidates at full precision, by candidate number.
+
+    revalidation/firefly_best.txt keeps 7 decimals, which on a parameter of bound width 8e-6
+    is a step of about 1% of it; the candidates are the archive's best, as the revalidation
+    ranked them (revalidation.ranked_archive), whose file keeps every digit.
+
+    Raises:
+        ValueError: The archive's ranking does not round to firefly_best.txt's rows.
+    """
+    rounded = _vectors(Path(run) / CANDIDATES)
+    path = Path(run) / ARCHIVE
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: missing")
+    full = revalidation.ranked_archive(path, len(rounded))[0]
+    if (
+        full.shape != rounded[:, 1:-1].shape
+        or not np.array_equal(rounded[:, 0], np.arange(len(rounded)))
+        or not np.allclose(full, rounded[:, 1:-1], rtol=0, atol=ROUNDING)
+    ):
+        raise ValueError(f"{run}: the archive's best do not round to {CANDIDATES}'s rows")
+    return full
+
+
 def selected_vector(run: Path) -> np.ndarray:
-    """The run's chosen vector: selected/firefly_best.txt's first row."""
-    return _vectors(Path(run) / SELECTED)[0, 1:-1]
+    """The checklist's choice at full precision: selection.csv's chosen candidate.
+
+    Raises:
+        ValueError: Not one chosen candidate, or one that does not round to
+            selected/firefly_best.txt's vector.
+    """
+    path = Path(run) / SELECTION
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: missing")
+    with open(path, newline="", encoding="utf-8") as f:
+        chosen = [int(r["candidate"]) for r in csv.DictReader(f) if _true(r["chosen"])]
+    if len(chosen) != 1:
+        raise ValueError(f"{path}: {len(chosen)} candidates chosen, not one")
+    full = candidates(run)
+    if not 0 <= chosen[0] < len(full):
+        raise ValueError(f"{path}: candidate {chosen[0]} is not among the {len(full)} scored")
+    vector = full[chosen[0]]
+    if not np.allclose(vector, _vectors(Path(run) / SELECTED)[0, 1:-1], rtol=0, atol=ROUNDING):
+        raise ValueError(f"{run}: candidate {chosen[0]} does not round to {SELECTED}")
+    return vector
 
 
 def bounds(run: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -99,19 +146,18 @@ def best_row(run: Path) -> dict[str, Any]:
 def indistinguishable_set(run: Path) -> np.ndarray:
     """The vectors of the candidates that cannot be told apart from the best, the best too.
 
-    By candidate number, the row number of revalidation/firefly_best.txt.
+    By candidate number, at full precision (see candidates).
 
     Raises:
-        ValueError: A candidate number firefly_best.txt does not hold.
+        ValueError: A candidate number the revalidation did not score.
     """
-    rows = _vectors(Path(run) / CANDIDATES)
-    by_number = {int(number): i for i, number in enumerate(rows[:, 0])}
+    full = candidates(run)
     chosen = []
     for row in cost_rows(run):
         if row["indistinguishable"] or row["best"]:
-            if row["candidate"] not in by_number:
+            if not 0 <= row["candidate"] < len(full):
                 raise ValueError(f"{run}: candidate {row['candidate']} is not in {CANDIDATES}")
-            chosen.append(rows[by_number[row["candidate"]], 1:-1])
+            chosen.append(full[row["candidate"]])
     return np.array(chosen)
 
 
