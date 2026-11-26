@@ -6,9 +6,17 @@ From doc/plan_Nordling2026_CovSynFireflyNordlingLab.md, Task 10: the main run's
 cost_uncertainty.csv (item 1), and parameter_uncertainty.csv over the five selected vectors with
 the range of the main run's indistinguishable set (item 2, parameter_uncertainty.py).
 
-Each run is a covsyn-pipeline production run: selected/firefly_best.txt holds its chosen vector,
-revalidation/cost_uncertainty.csv its archive candidates' costs on its 30 validation blocks, with
-revalidation/firefly_best.txt's rows numbered by the same candidate, and bound.txt its bounds.
+Each run is a covsyn-pipeline production run. From its directory the summary reads:
+revalidation/cost_uncertainty.csv, its archive candidates' costs on its 30 validation blocks;
+firefly_archive.txt, those candidates at full precision, ranked as the revalidation ranked them,
+which must round to revalidation/firefly_best.txt's 7-decimal rows; selected/selection.csv, the
+checklist's choice among them, which must round to selected/firefly_best.txt; bound.txt, its
+bounds; pipeline.toml, its streams, S and configuration; config.json, the stopping rule it ran
+by; and run.log, the optimiser's stop and each stage's time.
+
+It refuses runs that cannot be summarised together: not five, a run twice or in both lists,
+another S or other bounds, a stream two runs share, a list of two configurations, a runner-up of
+production's configuration or off its pair's streams, or a run of the earlier stopping rule.
 
 Decision of 2026-11-26: pilot 2's runner-up (--competitor) runs on the same five pairs of
 optimisation and validation streams, and each run's best validation mean is compared with its
@@ -320,8 +328,9 @@ def summarise(
         competitor: The runner-up's five runs, pair by pair with ``runs``.
 
     Raises:
-        ValueError: Not five runs, a run twice, main outside 1-5, bounds that differ, or a
-            malformed file (see cost_rows, indistinguishable_set).
+        ValueError: Runs that cannot be summarised together (see the module docstring),
+            main outside 1-5, or a malformed file (see candidates, selected_vector, cost_rows,
+            indistinguishable_set and run_record).
         FileNotFoundError: A run's file is missing; the message names it.
         FileExistsError: ``out`` holds files.
     """

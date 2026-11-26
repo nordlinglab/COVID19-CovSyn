@@ -154,7 +154,8 @@ uv run covsyn-task10-summary results/tables/<new id> --main 1 \
 ```
 
 It writes `parameter_uncertainty.csv` over the five selected vectors, with the range of the main run's indistinguishable candidates, the main run's `cost_uncertainty.csv` and every run's as `cost_uncertainty_run<i>.csv`, and `summary.json`.
-`--competitor` takes pilot 2's runner-up, run on the same five stream pairs;
+It reads the vectors at full precision from each run's `firefly_archive.txt` and `selected/selection.csv`, and refuses runs at another S or on other bounds, sharing a stream, of two configurations in one list, or of the stopping rule before 2026-11-26.
+`--competitor` takes pilot 2's runner-up, run on the same five stream pairs in the same order;
 `comparison.csv` then gives each pair's best validation means and their difference, and `summary.json` a paired t interval over the five differences (decision of 2026-11-26).
 
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.
