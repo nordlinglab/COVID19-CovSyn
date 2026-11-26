@@ -15,6 +15,8 @@ import json
 
 import numpy as np
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from covsyn.calibration import revalidation
 from covsyn.calibration import task10_summary as ts
@@ -495,3 +497,20 @@ def test_the_command_writes_the_summary(tmp_path):
     ts.main([str(out), "--main", "2", "--runs", *map(str, runs), "--competitor", *map(str, others)])
     assert json.loads((out / "summary.json").read_text())["main"] == 2
     assert (out / "comparison.csv").exists()
+
+
+@given(st.text())
+def test_only_true_and_false_are_read_as_flags(text):
+    """The csv module writes True and False; any other text is refused, not read as False."""
+    if text in ("True", "False"):
+        assert ts._true(text) is (text == "True")
+    else:
+        with pytest.raises(ValueError):
+            ts._true(text)
+
+
+@pytest.mark.parametrize("text", ["true", "1", "", " True", "False\n", "TRUE"])
+def test_near_spellings_of_a_flag_are_refused(text):
+    """Spellings a hand edit or another writer might give."""
+    with pytest.raises(ValueError):
+        ts._true(text)
