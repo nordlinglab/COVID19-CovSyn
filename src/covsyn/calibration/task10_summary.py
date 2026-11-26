@@ -162,17 +162,23 @@ def indistinguishable_set(run: Path) -> np.ndarray:
 
 
 def run_record(run: Path) -> dict[str, Any]:
-    """What summary.json keeps of a run: its best cost, set size, stop and stage times."""
+    """What summary.json keeps of a run: its best cost, set size, stop and stage times.
+
+    Raises:
+        ValueError: run.log records no stop of the optimiser, which every production run has.
+    """
     best = best_row(run)
     lines = rt.json_lines(Path(run) / "run.log")
     stops = [line.get("reason") for line in lines if line.get("event") == STOP_EVENT]
+    if not stops:
+        raise ValueError(f"{Path(run) / 'run.log'}: no optimiser stop recorded")
     return {
         "run_id": Path(run).name,
         "best_candidate": best["candidate"],
         "best_mean": best["mean"],
         "best_se": best["se"],
         "set_size": sum(r["indistinguishable"] or r["best"] for r in cost_rows(run)),
-        "stop_reason": stops[-1] if stops else None,
+        "stop_reason": stops[-1],
         "stage_seconds": {line["stage"]: line.get("seconds") for line in lines if "stage" in line},
     }
 

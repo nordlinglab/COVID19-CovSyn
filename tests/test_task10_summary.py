@@ -245,6 +245,16 @@ def test_the_summary_records_each_run(tmp_path):
     )
 
 
+def test_a_run_without_the_optimiser_s_stop_is_refused(tmp_path):
+    """Every production run records why it stopped; without it run.log is not the run's."""
+    runs = _five(tmp_path)
+    log = runs[1] / "run.log"
+    log.write_text("".join(line + "\n" for line in log.read_text().splitlines()
+                           if "optimiser_stopped" not in line))  # fmt: skip
+    with pytest.raises(ValueError, match="stop"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
 def test_the_runner_up_is_compared_run_by_run(tmp_path):
     """Each pair's best means, their difference, and a t interval over the five pairs."""
     runs = _five(tmp_path, "a", (10.0, 11.0, 12.0, 13.0, 14.0))
