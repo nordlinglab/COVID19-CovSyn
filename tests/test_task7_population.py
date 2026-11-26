@@ -12,6 +12,7 @@ rows, and a run whose bounds or dimension differ from those stored is refused, n
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tomllib
@@ -24,6 +25,7 @@ from scipy.stats import qmc
 
 from covsyn.calibration import initial_population as ip
 from covsyn.calibration import parameter_space
+from covsyn.runtime import runs
 from tests.conftest import REPO_ROOT, best_vector
 
 
@@ -127,9 +129,140 @@ def test_a_run_takes_the_first_n_rows(written, space):
 
 @pytest.mark.parametrize("n", [0, 257])
 def test_more_fireflies_than_rows_or_none_are_refused(written, space, n):
-    """A population cannot start more fireflies than it holds, nor none."""
-    with pytest.raises(SystemExit, match="firefl"):
+    """A population cannot start more fireflies than it holds, nor none.
+
+    As its own exception, which the optimiser turns into runs.NOT_RESUMABLE (decision of
+    2026-11-24); another caller, pilot 1 say, exits 1 with the message (code review round 12).
+    """
+    with pytest.raises(ip.RunSizeOutOfRange, match=f"a run of {n} cannot start") as stopped:
         ip.load(written, n, space.lower, space.upper)
+    # A message for code: Python prints it and exits 1.
+    assert isinstance(stopped.value, SystemExit) and isinstance(stopped.value.code, str)
+
+
+def _one_array(path):
+    with open(path, "wb") as f:
+        np.save(f, np.zeros(3))
+
+
+def _no_sha256(path):
+    np.savez(path, normalized=np.zeros((3, 2)), lower=np.zeros(2), upper=np.ones(2),
+             warm_starts=np.array(["a"]))  # fmt: skip
+
+
+@pytest.mark.parametrize("damage", [_one_array, _no_sha256, lambda path: path.write_bytes(b"")])
+def test_a_damaged_population_is_refused_with_a_message(tmp_path, space, written, damage):
+    """Not a traceback, and resumable: restoring the file makes a retry succeed (rounds 14, 15)."""
+    path = tmp_path / "initial_population_v1.npz"
+    damage(path)
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 3, space.lower, space.upper)
+    assert isinstance(stopped.value.code, str) and "cannot be read" in stopped.value.code
+    assert "to its last commit" in stopped.value.code
+    assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
+    path.write_bytes(written.read_bytes())  # restored
+    assert len(ip.load(path, 3, space.lower, space.upper)) == 3
+
+
+def _arrays(path, **changed):
+    """A complete population of 3 rows and 2 parameters, with only these arrays changed.
+
+    Complete, so each case reaches the check it was written for (code review round 20).
+    """
+    arrays = {"normalized": np.zeros((3, 2)), "lower": np.zeros(2), "upper": np.ones(2),
+              "sha256": np.array("x"), "warm_starts": np.array(["a"]), "version": np.array(1),
+              **changed}  # fmt: skip
+    np.savez(path, **arrays)
+
+
+@pytest.mark.parametrize(("changed", "reason"), [
+    ({"normalized": np.array([["a", "b"]])}, "not a non-empty 2-D array of numbers"),
+    ({"normalized": np.zeros((0, 2))}, "not a non-empty 2-D array of numbers"),  # no rows
+    ({"normalized": np.zeros((3, 0))}, "not a non-empty 2-D array of numbers"),  # no parameter
+    ({"normalized": np.zeros(6)}, "not a non-empty 2-D array of numbers"),  # 1-D
+    ({"warm_starts": np.array("a")}, "warm starts are not a list"),
+    ({"lower": np.array(["a", "b"])}, "not one number a parameter"),  # bounds not numbers
+    ({"lower": np.zeros(1), "upper": np.ones(1)}, "not one number a parameter"),  # length
+    ({"normalized": np.full((3, 2), np.nan)}, "rows must be finite"),
+    ({"normalized": np.full((3, 2), 1.1)}, "rows must fall within"),
+    ({"upper": np.full(2, np.inf)}, "bounds must be finite"),
+    ({"upper": np.full(2, -1)}, "lower bounds exceed upper bounds"),
+    ({"warm_starts": np.array([["a"]])}, "warm starts are not a list"),
+    ({"warm_starts": np.array([1])}, "warm starts are not a list"),
+    ({"warm_starts": np.array([1.0])}, "warm starts are not a list"),
+    ({"warm_starts": np.array(["a", "b", "c"])}, "lists 3 warm starts but holds only 2"),
+    ({"warm_starts": np.array(["a", "b", "c", "d"])}, "lists 4 warm starts but holds only 2"),
+    ({"sha256": np.array(["x", "y"])}, "SHA-256 is not a string scalar"),
+    ({"version": np.array(0)}, "version must be positive"),
+    ({"version": np.array([1, 2])}, "version is not a whole number"),
+])  # fmt: skip
+def test_a_population_with_damaged_contents_is_unreadable(tmp_path, space, changed, reason):
+    """Refused for its own reason, resumably, not a traceback or a run size (rounds 15, 20)."""
+    path = tmp_path / "initial_population_v1.npz"
+    _arrays(path, **changed)
+    with pytest.raises(ip.PopulationUnreadable, match=reason):
+        ip.rows_available(path)
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 1, space.lower, space.upper)
+    assert reason in stopped.value.code
+    assert not isinstance(stopped.value, ip.RunSizeOutOfRange)
+
+
+@pytest.mark.parametrize("relative", [True, False])
+def test_a_missing_population_is_to_be_restored_from_the_last_commit(tmp_path, space,
+                                                                     monkeypatch, relative):
+    """A direction, by the kind of failure only: no command whose premises go unchecked.
+
+    Code review rounds 15 to 17 and the contract of 2026-11-24: a relative path also points
+    to the working directory, which an absolute one does not depend on.
+    """
+    monkeypatch.chdir(tmp_path)
+    path = Path("variable/initial_population_v1.npz")
+    path = path if relative else tmp_path / path
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 3, space.lower, space.upper)
+    message = stopped.value.code
+    assert "last commit" in message and "never committed" in message
+    assert "git checkout" not in message and "covsyn-initial-population" not in message
+    assert ("working directory" in message) == relative
+
+
+def test_a_directory_in_the_population_s_place_is_named_as_such(tmp_path, space):
+    """Neither restoring over it nor a permission helps while it is there (round 16)."""
+    path = tmp_path / "initial_population_v1.npz"
+    path.mkdir()
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(path, 3, space.lower, space.upper)
+    assert "a directory stands where the file should be" in stopped.value.code
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="root reads any file")
+def test_a_population_that_may_not_be_read_asks_for_permission(tmp_path, space, written):
+    """Restoring would not help (code review round 15)."""
+    path = tmp_path / "initial_population_v1.npz"
+    path.write_bytes(written.read_bytes())
+    path.chmod(0)
+    try:
+        with pytest.raises(SystemExit) as stopped:
+            ip.load(path, 3, space.lower, space.upper)
+    finally:
+        path.chmod(0o644)
+    assert "may read" in stopped.value.code and "restore" not in stopped.value.code
+
+
+def test_a_bytes_path_loads_as_rows_available_counts(written, space):
+    """The two take the same paths (code review round 14)."""
+    import os
+
+    path = os.fsencode(written)
+    assert len(ip.load(path, ip.rows_available(path), space.lower, space.upper)) == ip.N_MAX
+
+
+def test_a_missing_population_stays_resumable(tmp_path, space):
+    """A file put back makes a retry succeed, so a missing one is an ordinary failure."""
+    with pytest.raises(SystemExit) as stopped:
+        ip.load(tmp_path / "initial_population_v1.npz", 3, space.lower, space.upper)
+    assert stopped.value.code != runs.NOT_RESUMABLE
 
 
 def test_other_bounds_are_refused_not_clipped(written, space):
@@ -163,6 +296,17 @@ def test_version_1_is_committed_and_matches_the_generator(written):
     committed = REPO_ROOT / "variable" / "initial_population_v1.npz"
     with np.load(committed) as a, np.load(written) as b:
         assert str(a["sha256"]) == str(b["sha256"])
+
+
+def test_main_writes_an_empty_string_array_without_warm_starts(tmp_path, space, monkeypatch):
+    """The CLI writes a loadable new version when no warm starts are configured."""
+    monkeypatch.setattr(ip, "WARM_STARTS", ())
+    path = ip.main(["--version", "2", "--out-dir", str(tmp_path)])
+    with np.load(path) as saved:
+        assert saved["warm_starts"].shape == (0,)
+        assert saved["warm_starts"].dtype.kind == "U"
+    assert ip.rows_available(path, without_warm_starts=True) == ip.N_MAX
+    assert len(ip.load(path, 1, space.lower, space.upper, without_warm_starts=True)) == 1
 
 
 def test_making_a_population_does_not_load_the_optimiser():

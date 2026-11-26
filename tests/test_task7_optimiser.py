@@ -60,6 +60,22 @@ def test_a_run_starts_from_the_first_rows_of_the_population(started):
     assert seen["engine"].run_settings["initial_population"] == {"version": 1, "sha256": sha}
 
 
+def test_the_optimizer_records_metadata_without_reopening_the_file(started, monkeypatch):
+    """The run records the version from the same file read that supplied the rows."""
+    read = fo.initial_population._read
+    opened = []
+
+    def record_read(path):
+        opened.append(path)
+        return read(path)
+
+    monkeypatch.setattr(fo.initial_population, "_read", record_read)
+    assert not hasattr(fo.initial_population, "describe")
+    seen = started("--mode", "test")
+    assert len(opened) == 1
+    assert seen["engine"].run_settings["initial_population"]["version"] == 1
+
+
 def test_the_warm_start_option_is_refused(monkeypatch, tmp_path):
     """The warm starts are rows of the population; another one is a new population version."""
     monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--warm_start", "x.txt",
@@ -217,7 +233,7 @@ def test_a_resumed_run_does_not_read_the_population(monkeypatch, tmp_path):
     def refusing(*args, **kwargs):
         raise AssertionError("the population was read for a resumed run")
 
-    monkeypatch.setattr(fo.initial_population, "load", refusing)
+    monkeypatch.setattr(fo.initial_population, "load_with_metadata", refusing)
     seen = {}
 
     def firefly(self, **kwargs):

@@ -18,7 +18,6 @@ from numpy.random import default_rng
 from scipy.stats import genextreme
 from tqdm import tqdm
 
-from covsyn.model.data_synthesis_main import run_covid
 from covsyn.calibration import (initial_population, monitoring, parameter_space, revalidation,
                                 run_size, seed_streams, step_schedule)
 from covsyn.runtime import hardware, profiling, runs, timings
@@ -267,8 +266,8 @@ SIMULATIONS_PER_TASK = 10
 class _CompletedSimulation:
     """Gives an already-computed simulation result the .result() interface.
 
-    generate_contact_result(), convert_synthetic_data_to_test_matrix() and the index-case
-    loop in _cost_function() all expect the Future objects the pool used to hand back one
+    extract_course_and_contact(), convert_synthetic_data_to_test_matrix() and the loops in
+    _cost_function() all expect the Future objects the pool used to hand back one
     per simulation. Batching means the pool now returns a LIST of results per task, so each
     one is wrapped here and every consumer keeps working unchanged.
     """
@@ -283,19 +282,25 @@ class _CompletedSimulation:
 
 
 def _run_simulation_batch(seeds, P, demographic_parameters):
-    """Run several simulations inside one pool task. See SIMULATIONS_PER_TASK."""
-    return [run_covid(seed, P, demographic_parameters, save_file=False) for seed in seeds]
+    """Run several simulations inside one pool task. See SIMULATIONS_PER_TASK.
+
+    E84: each index case takes its seed's profile of Cheng's period (cheng_recording.simulate);
+    the parent draws the same profile again from the seed to record the contacts.
+    """
+    from covsyn.calibration import cheng_recording
+    return [cheng_recording.simulate(seed, P, demographic_parameters)[0] for seed in seeds]
 
 
 def extract_course_and_contact(results, case_number):
     """Pull the course-of-disease and contact records out of the simulation results once.
 
-    This used to sit inside generate_contact_result(), which _cost_function() calls once per
-    Cheng layer, so the same 300 results were walked three times, every record was fetched
-    twice per walk (result.result()[2] and result.result()[3]), and np.append on a growing
-    object array made each walk quadratic. Doing it once per evaluation instead of three
-    times is the second half of the speed-up recorded at SIMULATIONS_PER_TASK; the arrays
-    produced are identical to what the np.append loop produced.
+    This used to sit inside generate_contact_result() (removed after E84 moved the binning to
+    cheng_recording), which _cost_function() called once per Cheng layer, so the same 300
+    results were walked three times, every record was fetched twice per walk
+    (result.result()[2] and result.result()[3]), and np.append on a growing object array made
+    each walk quadratic. Doing it once per evaluation instead of three times is the second half
+    of the speed-up recorded at SIMULATIONS_PER_TASK; the arrays produced are identical to what
+    the np.append loop produced.
     """
     course_of_disease_data_list = []
     contact_data_list = []
@@ -305,31 +310,6 @@ def extract_course_and_contact(results, case_number):
         contact_data_list.extend(value[3])
     return (np.array(course_of_disease_data_list[0:case_number], dtype=object),
             np.array(contact_data_list[0:case_number], dtype=object))
-
-
-def generate_contact_result(course_of_disease_data_list, contact_data_list, layer):
-    # Transform the data to contact bars as Cheng2020
-    if (layer == 'Household') | (layer == 'Health care'):
-        _, contact_array, _, infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer=layer)
-    elif layer == 'Cheng others':
-        _, school_contact_array, _, school_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='School')
-        _, workplace_contact_array, _, workplace_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='Workplace')
-        _, municipality_contact_array, _, municipality_infection_array = create_array_cheng2020_fig2(
-            course_of_disease_data_list, contact_data_list, layer='Municipality',
-            expected_events=True)   # B55
-        contact_array = np.sum(np.vstack(
-            (school_contact_array, workplace_contact_array, municipality_contact_array)), axis=0)
-        infection_array = np.sum(np.vstack(
-            (school_infection_array, workplace_infection_array, municipality_infection_array)), axis=0)
-        # contact_array = school_contact_array + \
-        #     workplace_contact_array + municipality_contact_array
-        # infection_array = school_infection_array + \
-        #     workplace_infection_array + municipality_infection_array
-
-    return (contact_array, infection_array)
 
 
 # def cost_function(P, demographic_parameters):
@@ -1326,6 +1306,22 @@ def generation_seed_offset(generation, simulations=SIMULATIONS_PER_EVALUATION,
 CHENG_SYMPTOMATIC_INDEX_CASES = CHENG2020_INDEX_CASES - 9
 
 
+def reported_energy(compute) -> float:
+    """compute(), the energy term for the log, or NaN when any part of it fails (B95).
+
+    Energy is reported but not charged since 2026-11-23, so neither building the synthetic test
+    matrix nor the statistic may fail the evaluation (code review 2026-11-23); the traceback is
+    printed. A missing Taiwan matrix, a committed input, still stops the run, in both
+    implementations.
+    """
+    try:
+        return compute()
+    except Exception:
+        traceback.print_exc()
+        print('the energy term failed; cost_energy recorded as NaN', flush=True)
+        return np.nan
+
+
 def cheng_contact_scale(symptomatic_cases: int) -> float:
     """Factor that puts contact bins summed over these symptomatic cases on Cheng's scale."""
     # No symptomatic case leaves no Cheng bins to scale; raising lets cost_function charge
@@ -1360,7 +1356,7 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     seeds = range(seed_offset, seed_offset + source_case_number * repeat_number)
 
     # Submit simulations to the SHARED (persistent) process pool passed in by firefly().
-    # Downstream convert_synthetic_data_to_test_matrix()/generate_contact_result() call
+    # Downstream convert_synthetic_data_to_test_matrix() and the binning loop call
     # future.result(), which blocks until each simulation finishes, so no explicit wait
     # is needed here. Reusing one pool avoids re-spawning/re-importing all workers on
     # every evaluation (the dominant cost on macOS 'spawn').
@@ -1410,9 +1406,20 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     # E86: contacts per Cheng cohort of symptomatic index cases.
     contact_scale = cheng_contact_scale(sum(
         1 for course in course_of_disease_data_list if not np.isnan(course['incubation_period'])))
+    # E84: every case recorded as Cheng's investigation did, the index case of each simulation
+    # with its seed's profile, added case by case in the order fast_cost adds them.
+    from covsyn.calibration import cheng_recording
+    bins = np.zeros((len(layers), 2, 6))
+    case = 0
+    for seed, result in zip(seeds_copy, results, strict=True):
+        profile = cheng_recording.default_table().draw(seed)
+        _, _, course_list, contact_list = result.result()
+        for j, (course, contact) in enumerate(zip(course_list, contact_list, strict=True)):
+            if case < source_case_number * repeat_number:
+                bins += cheng_recording.case_bins(course, contact, profile if j == 0 else None)
+            case += 1
     for i, layer in enumerate(layers):
-        contact_array, infection_array = generate_contact_result(
-            course_of_disease_data_list, contact_data_list, layer=layer)
+        contact_array, infection_array = bins[i, 0], bins[i, 1]
         contact_array = contact_array.astype(float)
         norm_contact_array = contact_array/max_Cheng_contact
         infection_array = infection_array.astype(float)
@@ -1445,14 +1452,22 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     # print('Time spend in loop: ', time.time() - start_t)
     # start_t = time.time()
     # Energy distance
+    # A missing or unreadable Taiwan matrix, a committed input, stops the evaluation as it
+    # stops fast_cost's pool setup: only failures in computing energy become NaN (round 3).
     taiwan_data_matrix = np.load('./variable/Taiwan_data_matrix.npy')
-    synthetic_data_matrix = convert_synthetic_data_to_test_matrix(
-        results, taiwan_data_matrix, source_case_number * repeat_number)
-    energy_cost = energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
+
+    def energy():
+        synthetic_data_matrix = convert_synthetic_data_to_test_matrix(
+            results, taiwan_data_matrix, source_case_number * repeat_number)
+        return energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
+
+    energy_cost = reported_energy(energy)  # B95
     # energy_cost = max(energy_cost, 0)  # Prevent negative energy cost
     # Objective function
     # print('Energy cost: ', energy_cost)
-    energy_weight = 1
+    # Since 2026-11-23 (user decision) the energy term is reported in cost_energy but not
+    # charged: no parameter responds to it alone (probe_term_sensitivity, e737d4c). The total
+    # skips it rather than weighting it by 0, so a NaN energy cannot reach the total.
     contact_cost = sum(contact_costs)
     attack_cost = ATTACK_RATE_WEIGHT * sum(attack_rate_costs)
     penalty = physiology_penalty(P)
@@ -1470,11 +1485,11 @@ def _cost_function(P, demographic_parameters, executor, Cheng_contact_array, Che
     measured['pre_onset_zero_share_sampled'] = measured['pre_onset_zero_share']
     measured['pre_onset_zero_share'] = pre_onset_zero_probability(P)
     outcome = outcome_penalty(measured)
-    total_cost = contact_cost + attack_cost + energy_weight * energy_cost + penalty + outcome
+    total_cost = contact_cost + attack_cost + penalty + outcome
     LAST_COST_PARTS.clear()
     LAST_COST_PARTS.update(
         cost_contact=float(contact_cost), cost_attack_rate=float(attack_cost),
-        cost_energy=float(energy_weight * energy_cost), cost_penalty=float(penalty),
+        cost_energy=float(energy_cost), cost_penalty=float(penalty),
         cost_outcome=float(outcome),
         cost_contact_household=float(contact_costs[0]),
         cost_contact_healthcare=float(contact_costs[1]),
@@ -2142,6 +2157,8 @@ def resume_arguments(args: argparse.Namespace) -> str:
                                       ('--pop-size', getattr(args, 'pop_size', None)),
                                       ('--generations', getattr(args, 'generations', None)),
                                       ('--pilot', getattr(args, 'pilot', None)),
+                                      ('--without-warm-starts',
+                                       getattr(args, 'without_warm_starts', False) or None),
                                       ('--stage-timings',
                                        getattr(args, 'stage_timings', False) or None))
              if value is not None]  # --seed 0 and a bare --warm_start are given too
@@ -2221,6 +2238,9 @@ def main() -> None:
                         help="planned run length G_plan (default: the mode's generations)")
     parser.add_argument('--stage-timings', action='store_true',
                         help="time run_covid's stages into timings_evaluation.csv")
+    parser.add_argument('--without-warm-starts', action='store_true',
+                        help='pilot mode: leave the warm starts (fitted vectors of earlier runs) '
+                             'out of the initial population')
     args = parser.parse_args()
     if args.warm_start is not None and args.resume is None:
         sys.exit('--warm_start is gone (Task 7): the warm starts are rows of the initial '
@@ -2238,6 +2258,12 @@ def main() -> None:
     if mode not in OPTIMISER_MODES:
         # A non-zero status, so the launcher and the chain see the failure.
         sys.exit(f'mode error: unknown --mode {mode!r}')
+    if args.without_warm_starts and mode != 'pilot':  # pilot 2 rerun (2026-11-24)
+        sys.exit(f'--without-warm-starts is for --mode pilot only, not --mode {mode}: '
+                 f'production always leaves the warm starts out, the other modes keep them')
+    # User decision 2026-11-24: production's result is to be the calibration's own, so it
+    # never starts from the warm starts, the fitted vectors of earlier runs.
+    without_warm_starts = args.without_warm_starts or mode == 'production'
     pop_size, betamin, gamma = OPTIMISER_MODES[mode]
     max_generations = step_schedule.MODE_GENERATIONS[mode]
     # Task 5: a profile has n = workers, 2 generations, and S from the command line.
@@ -2262,7 +2288,14 @@ def main() -> None:
                     sys.exit(f"--mode production needs {flag}, pilot 2's choice")
         else:
             pop_size, _, simulations = recorded_size(args.resume)
-            args.pilot = recorded_settings(args.resume).get('pilot')
+            recorded = recorded_settings(args.resume)
+            args.pilot = recorded.get('pilot')
+            # Production never uses the warm starts (2026-11-24); a run begun with them,
+            # before that decision, is not to be continued (code review round 6).
+            population = recorded.get('initial_population')
+            if not (isinstance(population, dict) and population.get('without_warm_starts') is True):
+                not_resumable(f'{args.resume} cannot be resumed: it began with the warm starts, '
+                              f'which production no longer uses; start a new run')
     elif args.simulations is not None:
         sys.exit('--simulations changes the objective, so it is for --mode profile, pilot or '
                  'production only')
@@ -2311,8 +2344,17 @@ def main() -> None:
         check_resumed_bounds(args.resume, lower_bound, upper_bound)
     else:
         population_file = initial_population.population_path(initial_population.CURRENT_VERSION)
-        population = initial_population.load(population_file, pop_size, lower_bound, upper_bound)
-        fa.run_settings['initial_population'] = initial_population.describe(population_file)
+        try:
+            population, metadata = initial_population.load_with_metadata(
+                population_file, pop_size, lower_bound, upper_bound,
+                without_warm_starts=without_warm_starts,
+            )
+        # n below 1 or beyond the rows: a resume keeps the n (2026-11-24)
+        except initial_population.RunSizeOutOfRange as error:
+            not_resumable(str(error))
+        fa.run_settings['initial_population'] = metadata
+        if mode in ('pilot', 'production'):  # which rows the run took (2026-11-24)
+            fa.run_settings['initial_population']['without_warm_starts'] = without_warm_starts
 
     # Load demographic data
     with open('./variable/demographic_parameters.pkl', 'rb') as f:

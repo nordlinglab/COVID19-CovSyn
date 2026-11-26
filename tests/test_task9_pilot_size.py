@@ -307,6 +307,20 @@ def test_a_failed_run_stops_the_pilot_before_any_scoring(tmp_path):
     assert not (tmp_path / "tables" / "p" / ps.SCREEN_FILE).exists()
 
 
+def test_a_run_that_cannot_be_resumed_is_not_to_be_resumed(tmp_path):
+    """Status 3 (runs.NOT_RESUMABLE) means retrying cannot help, as in the pipeline (round 18)."""
+
+    class Refuses(_Optimiser):
+        def __call__(self, args, output, append, env):
+            status = super().__call__(args, output, append, env)
+            return ps.runs.NOT_RESUMABLE if status == 1 else status
+
+    with pytest.raises(RuntimeError) as stopped:
+        _pilot(tmp_path, Refuses(fail_on="n48-a0p2-s2"))
+    assert "cannot be resumed" in str(stopped.value)
+    assert "resume the pilot" not in str(stopped.value)
+
+
 def test_a_resumed_pilot_skips_finished_runs_and_resumes_checkpointed_ones(tmp_path):
     """Finished runs are kept; a run with a checkpoint continues from it."""
     with pytest.raises(KeyboardInterrupt):
@@ -368,6 +382,27 @@ def test_the_command_takes_s_from_pilot_1(tmp_path, monkeypatch):
     assert seen["s"] == 3000
     config = json.loads((out / "config.json").read_text())["settings"]
     assert config["simulations"] == 3000 and config["noise"] == str(noise)
+
+
+def test_main_distinguishes_a_population_path_error_from_an_invalid_design(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    """Only an invalid pilot design is translated to a usage error here."""
+
+    def bad_population_path(*args):
+        raise ValueError("population path is empty")
+
+    monkeypatch.setattr(ps.initial_population, "rows_available", bad_population_path)
+    (tmp_path / "choice.json").write_text('{"chosen_simulations": 300}', encoding="utf-8")
+    args = ["--noise", str(tmp_path), "--results-root", str(tmp_path)]
+    with pytest.raises(SystemExit) as invalid_design:
+        ps.main([*args, "--pop-sizes", "1"])
+    assert invalid_design.value.code == 2
+    assert "a population needs at least 2 fireflies" in capsys.readouterr().err
+    with pytest.raises(ValueError, match="population path is empty"):
+        ps.main(args)
 
 
 def test_the_command_refuses_a_pilot_1_that_chose_no_s(tmp_path):
@@ -1060,3 +1095,14 @@ def test_the_command_hands_its_arguments_to_main_and_exits_zero(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["covsyn-pilot-size", "--given", "x"])
     assert getattr(import_module(module), function)() == 0
     assert calls == [((), {})]  # no arguments of its own, so argparse reads sys.argv
+
+
+def test_a_run_whose_archive_is_empty_stops_the_screening(tmp_path):
+    """No candidates is no representative: stop and say which run (code review 2026-11-22)."""
+    for setting in ps.settings():
+        run = tmp_path / ps.run_name("p", setting)
+        run.mkdir()
+        np.savetxt(run / "firefly_archive.txt", np.empty((0, 6)),
+                   header=revalidation.ARCHIVE_HEADER, encoding="utf-8")  # fmt: skip
+    with pytest.raises(RuntimeError, match="no candidates"):
+        ps._screen_tasks(tmp_path, "p", 3000, set())

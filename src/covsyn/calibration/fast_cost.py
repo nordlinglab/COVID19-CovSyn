@@ -22,9 +22,10 @@ pool initializer rather than once per task.
 
 Bit-identity
 ------------
-The binning is not reimplemented here: _case_cheng_bins() calls the SAME
-create_array_cheng2020_fig2() the parent used, one case at a time, and _case_matrix_row()
-calls the same convert_synthetic_data_to_test_matrix(). Only the aggregation moved. Run
+The binning is not reimplemented here: since E84 both this module and the parent-side
+reference call cheng_recording.case_bins() one case at a time, in the same order, and
+_case_matrix_row() calls the same convert_synthetic_data_to_test_matrix(). Only the aggregation
+moved. Run
 verify_fast_cost.py to check the total cost and every cost part against
 firefly_optimizer.cost_function() on real parameter vectors; adopt this only if that reports
 identical output.
@@ -36,10 +37,9 @@ import traceback
 import numpy as np
 import psutil
 
+from covsyn.calibration import cheng_recording
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration.cost_parts import LAST as LAST_COST_PARTS
-from covsyn.model.data_synthesis_main import run_covid
-from covsyn.figures.plot_results import create_array_cheng2020_fig2
 from covsyn.model.contact_measures import (at_work_days_before_onset, contacts_per_day_at_work,
                                            contacts_per_day_before_onset, is_employed,
                                            largest_spreader_percentile, offspring_dispersion,
@@ -50,12 +50,15 @@ from covsyn.runtime import profiling, timings
 LAYERS = ['household', 'school', 'workplace', 'health_care', 'municipality']
 MATRIX = {L: ('school_class_contacts_matrix' if L == 'school' else f'{L}_contacts_matrix')
           for L in LAYERS}
-# The three groups the objective scores, and the create_array_cheng2020_fig2 layer names they
-# are built from. 'Cheng others' is the sum of the other three layers, exactly as
-# firefly_optimizer.generate_contact_result() sums them.
+# The three groups the objective scores, in cheng_recording.GROUPS' order; the second element
+# names the layers each is built from. 'Cheng others' is the sum of the other three layers.
 CHENG_GROUPS = (('Household', ('Household',)),
                 ('Health care', ('Health care',)),
                 ('Cheng others', ('School', 'Workplace', 'Municipality')))
+
+# B95: the reported energy term does not contribute to the total cost.
+COST_INCLUDES_ENERGY = False
+
 
 _WORKER_DEMOGRAPHIC_PARAMETERS = None
 _WORKER_TAIWAN_MATRIX_COLUMNS = None
@@ -102,29 +105,19 @@ class _OneCase:
         return self._value
 
 
-def _case_cheng_bins(course, contact):
-    """This case's contribution to the three groups' six-bin counts.
-
-    Calls create_array_cheng2020_fig2() itself, so the bin edges, the dropping of asymptomatic
-    cases and the first-contact-day arithmetic are the original code, not a copy of it.
-    """
-    bins = np.zeros((len(CHENG_GROUPS), 2, 6))
-    one_course, one_contact = [course], [contact]
-    for gi, (_group, layer_names) in enumerate(CHENG_GROUPS):
-        for layer in layer_names:
-            _, contact_array, _, infection_array = create_array_cheng2020_fig2(
-                one_course, one_contact, layer=layer, expected_events=True)   # B55
-            if contact_array.size == 6:
-                bins[gi, 0] += contact_array
-                bins[gi, 1] += infection_array
-    return bins
-
-
 def _case_matrix_row(demographic, course, contact, columns):
-    """This case's row of the energy-distance test matrix, from the original converter."""
+    """This case's row of the energy-distance test matrix, from the original converter.
+
+    The error's text instead when the converter fails: the row only feeds the energy term,
+    which is reported but not charged (B95), so the parent records energy as NaN, reporting the
+    failure once per evaluation rather than once per case (code review round 3).
+    """
     dummy = np.empty((1, columns))
-    return convert_synthetic_data_to_test_matrix([_OneCase(demographic, course, contact)],
-                                                dummy, 1)[0]
+    try:
+        return convert_synthetic_data_to_test_matrix([_OneCase(demographic, course, contact)],
+                                                    dummy, 1)[0]
+    except Exception as error:
+        return f'{type(error).__name__}: {error}'
 
 
 def workplace_scalars(course, contact, social=None):
@@ -237,13 +230,14 @@ def _simulate(seeds, P, columns, clock):
     out = []
     for seed in seeds:
         started = time.perf_counter_ns()
-        demographic_list, social_list, course_list, contact_list = run_covid(
-            seed, P, demographic_parameters, save_file=False, stage_times=clock.stage_ns)
+        (demographic_list, social_list, course_list, contact_list), profile = (
+            cheng_recording.simulate(seed, P, demographic_parameters, stage_times=clock.stage_ns))
         simulated = time.perf_counter_ns()
         clock.run_covid_ns += simulated - started
         cases = []
         for j, (course, contact) in enumerate(zip(course_list, contact_list)):
-            cases.append((_case_cheng_bins(course, contact),
+            # E84: recorded as Cheng's investigation did; the index case with its arrival.
+            cases.append((cheng_recording.case_bins(course, contact, profile if j == 0 else None),
                           _case_matrix_row(demographic_list[j], course, contact, columns),
                           not np.isnan(course['incubation_period'])))
         index = (_index_case_scalars(course_list[0], contact_list[0],
@@ -412,20 +406,9 @@ def evaluate_candidate(P, seed_offset):
 def _evaluate_candidate(P, seed_offset):
     """evaluate_candidate's work, profiled or not."""
     clock = timings.TaskClock(_WORKER_STAGE_TIMING, _WORKER_PROCESS)
-    case_limit = (fo.SIMULATIONS_PER_EVALUATION if _WORKER_SIMULATIONS is None
-                  else _WORKER_SIMULATIONS)
     reduction_ns = 0
     try:
-        taiwan_data_matrix = (np.load('./variable/Taiwan_data_matrix.npy')
-                              if _WORKER_TAIWAN_MATRIX is None else _WORKER_TAIWAN_MATRIX)
-        seeds = list(range(seed_offset, seed_offset + case_limit))
-        # The candidate's simulations share one copy of the vector, as each of cost_function's
-        # tasks gets one by pickling, so the penalty reads the vector as given.
-        results = _simulate(seeds, copy.deepcopy(P), _WORKER_TAIWAN_MATRIX_COLUMNS, clock)
-        reducing = time.perf_counter_ns()
-        cost, parts = _cost(P, _pool([results], case_limit), case_limit, taiwan_data_matrix,
-                            *_WORKER_CHENG)
-        reduction_ns = time.perf_counter_ns() - reducing
+        cost, parts, _, reduction_ns = _simulate_and_score(P, seed_offset, clock)
     except Exception:
         traceback.print_exc()
         print('fast_cost: simulation failed for this parameter vector, charging '
@@ -435,6 +418,26 @@ def _evaluate_candidate(P, seed_offset):
     timing.update(start_unix_s=round(clock.start, 6), end_unix_s=round(time.time(), 6),
                   cost_reduction_s=timings.seconds(reduction_ns))
     return cost, parts, timing
+
+
+def _simulate_and_score(P, seed_offset, clock):
+    """The worker's S simulations from seed_offset, pooled and scored (Task 6).
+
+    Returns:
+        The cost, its parts, the pooled results (_pool's) and the reduction's nanoseconds.
+    """
+    case_limit = (fo.SIMULATIONS_PER_EVALUATION if _WORKER_SIMULATIONS is None
+                  else _WORKER_SIMULATIONS)
+    taiwan_data_matrix = (np.load('./variable/Taiwan_data_matrix.npy')
+                          if _WORKER_TAIWAN_MATRIX is None else _WORKER_TAIWAN_MATRIX)
+    seeds = list(range(seed_offset, seed_offset + case_limit))
+    # The candidate's simulations share one copy of the vector, as each of cost_function's
+    # tasks gets one by pickling, so the penalty reads the vector as given.
+    results = _simulate(seeds, copy.deepcopy(P), _WORKER_TAIWAN_MATRIX_COLUMNS, clock)
+    reducing = time.perf_counter_ns()
+    pooled = _pool([results], case_limit)
+    cost, parts = _cost(P, pooled, case_limit, taiwan_data_matrix, *_WORKER_CHENG)
+    return cost, parts, pooled, time.perf_counter_ns() - reducing
 
 
 def _failed_parts():
@@ -551,12 +554,21 @@ def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_
         contact_costs.append(cost)
         attack_rate_costs.append(attack_rate_cost)
 
-    synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
-    for i, row in enumerate(rows[:case_limit]):
-        synthetic_data_matrix[i] = row
-    energy_cost = fo.energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
+    def energy():
+        failed = [row for row in rows[:case_limit] if isinstance(row, str)]
+        if failed:
+            raise ValueError(f'{len(failed)} cases had no test-matrix row; the first: '
+                             f'{failed[0]}')
+        synthetic_data_matrix = np.ones((case_limit, columns)) * np.nan
+        for i, row in enumerate(rows[:case_limit]):
+            synthetic_data_matrix[i] = row
+        return fo.energy_statistic(taiwan_data_matrix, synthetic_data_matrix)  # B91
 
-    energy_weight = 1
+    energy_cost = fo.reported_energy(energy)  # B95
+
+    # Since 2026-11-23 (user decision) the energy term is reported in cost_energy but not
+    # charged: no parameter responds to it alone (probe_term_sensitivity, e737d4c). The total
+    # skips it rather than weighting it by 0, so a NaN energy cannot reach the total.
     contact_cost = sum(contact_costs)
     attack_cost = fo.ATTACK_RATE_WEIGHT * sum(attack_rate_costs)
     penalty = fo.physiology_penalty(P)
@@ -565,11 +577,11 @@ def _cost(P, pooled, case_limit, taiwan_data_matrix, Cheng_contact_array, Cheng_
     measured['pre_onset_zero_share_sampled'] = measured['pre_onset_zero_share']
     measured['pre_onset_zero_share'] = fo.pre_onset_zero_probability(P)
     outcome = fo.outcome_penalty(measured)
-    total_cost = contact_cost + attack_cost + energy_weight * energy_cost + penalty + outcome
+    total_cost = contact_cost + attack_cost + penalty + outcome
 
     parts = dict(
         cost_contact=float(contact_cost), cost_attack_rate=float(attack_cost),
-        cost_energy=float(energy_weight * energy_cost), cost_penalty=float(penalty),
+        cost_energy=float(energy_cost), cost_penalty=float(penalty),
         cost_outcome=float(outcome),
         cost_contact_household=float(contact_costs[0]),
         cost_contact_healthcare=float(contact_costs[1]),

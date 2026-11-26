@@ -822,25 +822,39 @@ def cheng_bins(directory: Path, layers: list[str]) -> tuple[dict[str, np.ndarray
     """Contacts, infections and attack rate per Cheng bin, one row per Monte-Carlo run.
 
     Contacts and infections are scaled to Cheng's 91 symptomatic index cases (E86), since
-    only symptomatic cases have an onset to bin contacts against.
+    only symptomatic cases have an onset to bin contacts against. Every case is recorded as
+    the objective records it (E84, cheng_recording.case_bins), an index case with the profile
+    its course record carries; 'All' is the sum of Cheng's three groups.
     """
+    from covsyn.calibration import cheng_recording
     from covsyn.calibration.firefly_optimizer import CHENG_SYMPTOMATIC_INDEX_CASES
-    from covsyn.figures.plot_results import create_array_cheng2020_fig2
+
+    group = {"Household": [0], "Health care": [1], "Others": [2], "All": [0, 1, 2]}
+    unknown = [layer for layer in layers if layer not in group]
+    if unknown:
+        raise ValueError(f"cheng_bins draws {sorted(group)}, not {unknown}")
 
     out: dict[str, list] = {
         f"{layer}|{q}": [] for layer in layers for q in ("contacts", "infections", "attack")
     }
     runs = 0
+    cohort = len(cheng_recording.default_profiles())
     for courses, contacts in iter_runs(directory):
+        # Checked before any run is skipped: every one of Cheng's cases must be there.
+        profiled = sum("index_profile" in c for c in courses)
+        if profiled != cohort:
+            raise ValueError(f"{directory}: {profiled} cases carry an index_profile, not "
+                             f"Cheng's {cohort}; resynthesise the cheng2020 data with E84's "
+                             "Cheng cohort")
         symptomatic = sum(not np.isnan(c["incubation_period"]) for c in courses)
         if symptomatic == 0:
             continue
         runs += 1
         scale = CHENG_SYMPTOMATIC_INDEX_CASES / symptomatic
+        bins = cheng_recording.recorded_totals(courses, contacts)
         for layer in layers:
-            _, contact, _, infection = create_array_cheng2020_fig2(courses, contacts, layer=layer)
-            contact = np.zeros(6) if np.size(contact) == 0 else np.asarray(contact, float)
-            infection = np.zeros(6) if np.size(infection) == 0 else np.asarray(infection, float)
+            contact = bins[group[layer], 0].sum(axis=0)
+            infection = bins[group[layer], 1].sum(axis=0)
             attack = np.divide(infection, contact, out=np.full(6, np.nan), where=contact > 0) * 100
             out[f"{layer}|contacts"].append(contact * scale)
             out[f"{layer}|infections"].append(infection * scale)

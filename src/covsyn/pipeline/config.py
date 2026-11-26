@@ -156,6 +156,9 @@ def parse(text: str, source: str) -> PipelineConfig:
     return PipelineConfig(**values)
 
 
+# Task 10: the blocks production's revalidation re-scores the archive's best on.
+TASK10_BLOCKS = 30
+
 # Task 9: what production takes from pilot 2, which no default stands in for.
 PRODUCTION_SETTINGS = ("pop_size", "simulations", "pilot", "alpha_0", "alpha_end", "g_plan")
 
@@ -164,10 +167,20 @@ def _check_production(values: dict[str, Any], source: str) -> None:
     """Production needs pilot 2's choice whole; every other mode fixes n and S (Task 9)."""
     mode = values.get("mode", PipelineConfig.mode)
     if mode == "production":
+        # Task 10: its revalidation is the cost's measurement, on 30 blocks (decision of
+        # 2026-11-22); unset, the 30 apply, and another count is refused.
+        blocks = values.setdefault("revalidation_blocks", TASK10_BLOCKS)
+        if blocks != TASK10_BLOCKS:
+            raise ValueError(f"{source}: [revalidate] blocks is {blocks}, but production re-scores "
+                             f"on {TASK10_BLOCKS} blocks (Task 10). Remove the setting; a saved "
+                             f"run whose pipeline.toml sets another count cannot be resumed, so "
+                             f"start a new run")  # fmt: skip
         missing = [key for key in PRODUCTION_SETTINGS if values.get(key) is None]
         if missing:
             raise ValueError(f"{source}: [optimise] mode \"production\" needs "
                              f"{', '.join(missing)}, pilot 2's choice")
+        # pop_size beyond the population's rows is the optimiser's to refuse: it is the first
+        # stage, and refuses before any simulation (decision of 2026-11-24).
         return
     given = [key for key in ("pop_size", "simulations", "pilot") if values.get(key) is not None]
     if given:

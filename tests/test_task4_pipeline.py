@@ -654,16 +654,21 @@ def test_run_log_records_the_workers_the_steps_use(tmp_path, config, monkeypatch
 
 
 def test_short_of_memory_every_finished_stage_is_still_recorded(tmp_path, config, monkeypatch):
-    """Not even one 4.9 GB checklist worker fits: every stage is still recorded as finished.
+    """1 GB of 64 GB available: every stage is still recorded as finished, with the warning.
 
-    The checklist runs serially then; the pipeline must not fail on its own record.
+    The checklist runs serially then; the pipeline must not fail on its own record. The memory
+    is the pipeline's own readers' (the memory fixture's); hardware._available_gb, which this
+    test once set, is read only by the steps, which run as processes of their own.
     """
-    from covsyn.runtime import hardware
+    from covsyn.runtime import memory
 
+    total, available = 64 * 1024**3, 1024**3
     monkeypatch.delenv("COVSYN_WORKERS", raising=False)
-    monkeypatch.setattr(hardware, "_available_gb", lambda: 1.0)
+    monkeypatch.setattr(memory, "available_bytes", lambda: available)
+    monkeypatch.setattr(memory, "system_memory", lambda: (available, total))
     status, run_dir = run_pipeline(tmp_path, config, Recorder())
     assert status == 0 and pr.finished_stages(run_dir) == STAGES
+    assert "MB available" in (run_dir / "run.log").read_text()  # the shortage reached the run
 
 
 def test_run_hands_its_lock_to_the_real_steps_and_releases_it(tmp_path, config, monkeypatch):
@@ -833,8 +838,34 @@ def test_a_directory_without_a_pipeline_run_is_reported(tmp_path, monkeypatch, c
     assert "holds no pipeline run" in capsys.readouterr().err
 
 
+def test_a_starting_optimiser_that_refuses_its_settings_gets_no_resume_hint(tmp_path, config,
+                                                                            capsys):
+    """Status 3 from a new run's optimiser too: a resume keeps the settings it refused."""
+
+    class Refuses(Recorder):
+        def __call__(self, args, output, append, env):
+            super().__call__(args, output, append, env)
+            return pr.runs.NOT_RESUMABLE
+
+    capsys.readouterr()
+    status, run_dir = run_pipeline(tmp_path, config, Refuses())
+    out = capsys.readouterr().out
+    assert status == 1 and "cannot be resumed" in out and "Resume with" not in out
+    assert str(run_dir / "optimiser.log") in out  # where the reason is
+
+
+def test_a_failed_step_names_the_log_that_holds_its_reason(tmp_path, config, capsys):
+    """pipeline.log points to the step's own output, where its error message went."""
+    capsys.readouterr()
+    status, run_dir = run_pipeline(tmp_path, config,
+                                   Recorder(fail={"covsyn.calibration.firefly_optimizer"}))
+    out = capsys.readouterr().out
+    assert status == 1 and "Resume with" in out
+    assert f"the optimiser failed (see {run_dir / 'optimiser.log'})" in out
+
+
 def test_status_3_from_another_step_is_an_ordinary_failure(tmp_path, config, capsys):
-    """Only the resuming optimiser's status 3 means 'cannot be resumed'."""
+    """Only the optimiser's status 3 means 'cannot be resumed'."""
 
     class Three(Recorder):
         def __call__(self, args, output, append, env):

@@ -15,7 +15,7 @@ import dataclasses
 import pytest
 
 from covsyn.pipeline import config as pc
-from tests.test_task4_pipeline import Recorder, run_pipeline
+from tests.test_task4_pipeline import Recorder, plenty_of_memory, run_pipeline  # noqa: F401
 
 PRODUCTION = """[optimise]
 mode = "production"
@@ -85,3 +85,23 @@ def test_the_saved_production_configuration_reads_back():
     config = pc.parse(PRODUCTION, "t")
     assert pc.parse(pc.to_toml(config), "saved") == config
     assert dataclasses.replace(config) == config
+
+
+@pytest.mark.usefixtures("plenty_of_memory")
+def test_a_production_larger_than_the_rows_left_stops_at_the_optimiser(tmp_path, capsys):
+    """A production n of 255: the real optimiser refuses it before any simulation.
+
+    The pipeline reads no population file itself (decision of 2026-11-24): its first stage is
+    the optimiser, which refuses within seconds, with a status the pipeline reads as not
+    resumable, since a resume keeps the n.
+    """
+    from covsyn.pipeline import runner as pr
+
+    config = pc.parse(PRODUCTION.replace("pop_size = 48", "pop_size = 255"), "t")
+    root = tmp_path / "results"
+    run_dir = root / "models" / "20261201-000000_abcdef0_production"
+    assert pr.run(config, run_dir, results_root=root) == 1
+    out = capsys.readouterr().out
+    assert "cannot be resumed" in out and "Resume with" not in out
+    assert "a run of 255 cannot start" in (run_dir / "optimiser.log").read_text()
+    assert not (run_dir / "checkpoints").exists() and not (run_dir / "config.json").exists()

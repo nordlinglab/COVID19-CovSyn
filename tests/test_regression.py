@@ -4,7 +4,7 @@
 
 The fixture ``tests/fixtures/regression_run10.json`` was written by
 ``tests/make_regression_fixtures.py`` with the run 10 vector, at the commit recorded in the
-fixture (regenerated whenever a decision changes the output; last for B75).
+fixture (regenerated whenever a decision changes the output; last for E84, 2026-11-23).
 The objective is deterministic on its fixed seeds (finding E30), and the simulation outputs
 are compared by digest, exactly. The cost is compared to a relative 1e-6: the professor
 (2026-11-12) accepted reproduction "to within normal precision differences between the
