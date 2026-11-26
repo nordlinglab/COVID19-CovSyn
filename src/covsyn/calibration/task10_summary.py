@@ -30,6 +30,7 @@ Usage (repository root):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import json
 import os
@@ -458,12 +459,14 @@ def summarise(
         staging.rmdir()
         (out / LOCK).unlink()
     except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)  # only what this attempt wrote
-        for path in moved:
-            path.unlink()
-        (out / LOCK).unlink()
+        # Only what this attempt wrote; a cleanup that fails must not hide the cause.
+        shutil.rmtree(staging, ignore_errors=True)
+        for path in [*moved, out / LOCK]:
+            with contextlib.suppress(OSError):
+                path.unlink()
         if created:
-            out.rmdir()
+            with contextlib.suppress(OSError):  # not empty: another writer's files stay
+                out.rmdir()
         raise
     return summary
 

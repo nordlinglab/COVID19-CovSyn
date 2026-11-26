@@ -688,8 +688,9 @@ def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
         return real(source, target)
 
     monkeypatch.setattr(ts.shutil, "copyfile", failing)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as raised:
         ts.summarise(runs, main=1, out=out)
+    assert raised.value.errno == 28  # the cause, not the cleanup's failure to remove out
     assert sorted(p.name for p in out.iterdir()) == ["theirs.txt"]
 
 
