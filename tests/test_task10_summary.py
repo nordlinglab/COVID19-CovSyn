@@ -712,6 +712,14 @@ def test_an_output_left_part_written_is_named_incomplete(tmp_path, left):
         ts.summarise(_five(tmp_path), main=1, out=out)
 
 
+def test_an_output_link_to_nothing_is_named(tmp_path):
+    """A link to an unmounted disk: say so, not 'File exists'."""
+    out = tmp_path / "out"
+    out.symlink_to(tmp_path / "unmounted" / "tables")
+    with pytest.raises(FileNotFoundError, match="links to"):
+        ts.summarise(_five(tmp_path), main=1, out=out)
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)

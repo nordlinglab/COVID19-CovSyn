@@ -437,14 +437,18 @@ def summarise(
     }  # fmt: skip
     # Staged inside out and moved up file by file, so a failure part-way leaves out as it was;
     # inside, so out may be a link or in a read-only parent, and keeps its mode, or the umask's.
-    created = not out.exists()
-    if created:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.mkdir()
-    claim(out)  # a second summary into out is refused, not interleaved with this one
+    if out.is_symlink() and not out.exists():
+        raise FileNotFoundError(f"{out} links to {os.readlink(out)}, which does not exist")
+    created = claimed = False
     staging = out / f".partial-{os.getpid()}"
     moved: list[Path] = []
     try:
+        if not out.exists():
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.mkdir()
+            created = True
+        claim(out)  # a second summary into out is refused, not interleaved with this one
+        claimed = True
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)
         shutil.copyfile(runs[main - 1] / COST_TABLE, staging / "cost_uncertainty.csv")
@@ -462,10 +466,11 @@ def summarise(
         (out / LOCK).unlink()
     except BaseException:
         # Only what this attempt wrote; a cleanup that fails must not hide the cause.
-        shutil.rmtree(staging, ignore_errors=True)
-        for path in [*moved, out / LOCK]:
-            with contextlib.suppress(OSError):
-                path.unlink()
+        if claimed:
+            shutil.rmtree(staging, ignore_errors=True)
+            for path in [*moved, out / LOCK]:
+                with contextlib.suppress(OSError):
+                    path.unlink()
         if created:
             with contextlib.suppress(OSError):  # not empty: another writer's files stay
                 out.rmdir()
