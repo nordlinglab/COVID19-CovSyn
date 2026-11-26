@@ -153,8 +153,8 @@ uv run covsyn-task10-summary results/tables/<new id> --main 1 \
     --competitor results/models/<runner-up 1> ... results/models/<runner-up 5>
 ```
 
-The output directory must be new, and is refused if it exists, empty or not (decision of 2026-11-26);
-one that holds `.partial`, or is empty, may be a summary killed while writing, to delete before running again.
+The output directory must be new (decision of 2026-11-26).
+If it already exists, specify a new directory.
 It writes `parameter_uncertainty.csv` over the five selected vectors, with the range of the main run's indistinguishable candidates, the main run's `cost_uncertainty.csv` and every run's as `cost_uncertainty_run<i>.csv`, and `summary.json`.
 It reads the vectors at full precision from each run's `firefly_archive.txt` and `selected/selection.csv`, and refuses runs at another S or on other bounds, sharing a stream, of two configurations in one list, differing in `pilot`, `revalidation_blocks` or `select_top`, whose n, α_0, α_end or G_plan is not pilot 2's `results/tables/<pilot>/choice.json` (read beside `results/models/`, so it must be there wherever the summary runs), or whose `config.json` does not record `stop_rule = "after_g_plan"`, that is, begun before the commit that records it (including runs of the current rule begun from the commit before).
 `--competitor` takes pilot 2's runner-up, run on the same five stream pairs in the same order;

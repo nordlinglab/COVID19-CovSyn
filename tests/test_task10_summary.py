@@ -677,7 +677,7 @@ def test_an_interrupt_right_after_a_move_leaves_nothing(tmp_path, monkeypatch):
 
 
 def test_a_cleanup_that_cannot_finish_keeps_the_incomplete_mark(tmp_path, monkeypatch):
-    """A moved file that will not go: .partial stays, so out still reads as incomplete."""
+    """A moved file that will not go: .partial stays, so out remains reserved."""
     runs = _five(tmp_path)
     out = tmp_path / "out"
     real_rename, real_unlink = ts.Path.rename, ts.Path.unlink
@@ -703,7 +703,7 @@ def test_a_cleanup_that_cannot_finish_keeps_the_incomplete_mark(tmp_path, monkey
     monkeypatch.setattr(ts.Path, "unlink", real_unlink)
     assert (out / ts.STAGING).exists()
     assert any("incomplete" in note for note in getattr(raised.value, "__notes__", []))
-    with pytest.raises(FileExistsError, match="incomplete"):
+    with pytest.raises(FileExistsError, match="exists; give a new directory"):
         ts.summarise(runs, main=1, out=out)
 
 
@@ -736,11 +736,11 @@ def test_an_unreadable_existing_output_is_refused_as_existing(tmp_path):
         out.chmod(0o755)
 
 
-def test_an_empty_existing_output_says_a_killed_summary_may_have_left_it(tmp_path):
-    """Refused all the same; a SIGKILL between the two mkdirs leaves out empty."""
+def test_an_empty_existing_output_is_refused(tmp_path):
+    """An empty output can belong to a summary that just started."""
     out = tmp_path / "out"
     out.mkdir()
-    with pytest.raises(FileExistsError, match="exists and is empty"):
+    with pytest.raises(FileExistsError, match="exists; give a new directory"):
         ts.summarise(_five(tmp_path), main=1, out=out)
 
 
@@ -814,13 +814,13 @@ def test_the_output_directory_has_the_umask_s_mode(tmp_path):
 
 
 @pytest.mark.parametrize("left", [[".partial"], [".partial", "comparison.csv"]])
-def test_an_output_a_killed_summary_left_is_named_incomplete(tmp_path, left):
-    """Killed while writing: out holds the staging directory, perhaps files moved up too."""
+def test_an_existing_output_with_staging_is_refused(tmp_path, left):
+    """Staging can belong to a summary that is still writing."""
     out = tmp_path / "out"
     out.mkdir()
     for name in left:
         (out / name).mkdir() if name == ".partial" else (out / name).write_text("")
-    with pytest.raises(FileExistsError, match="incomplete"):
+    with pytest.raises(FileExistsError, match="exists; give a new directory"):
         ts.summarise(_five(tmp_path), main=1, out=out)
 
 
@@ -838,6 +838,32 @@ def test_an_ancestor_link_to_nothing_is_named(tmp_path):
     tables.symlink_to(tmp_path / "unmounted")
     with pytest.raises(FileNotFoundError, match="links to"):
         ts.summarise(_five(tmp_path), main=1, out=tables / "id" / "sub")
+
+
+def test_the_command_reports_output_left_by_failed_cleanup(tmp_path, monkeypatch):
+    """The CLI reports both the write error and the output that remains."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real_rename, real_unlink = ts.Path.rename, ts.Path.unlink
+
+    def fail_after_move(self, target):
+        real_rename(self, target)
+        raise OSError("output move failed")
+
+    def refuse_removal(self, *args, **kwargs):
+        if self.parent == out:
+            raise OSError("output removal failed")
+        return real_unlink(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ts.Path, "rename", fail_after_move)
+        patch.setattr(ts.Path, "unlink", refuse_removal)
+        with pytest.raises(SystemExit) as raised:
+            ts.main([str(out), "--main", "1", "--runs", *map(str, runs)])
+
+    assert "output move failed" in str(raised.value)
+    assert f"{out} is left incomplete" in str(raised.value)
+    assert (out / ts.STAGING).is_dir()
 
 
 def test_the_command_writes_the_summary(tmp_path):

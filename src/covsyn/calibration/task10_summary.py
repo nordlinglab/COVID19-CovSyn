@@ -375,29 +375,6 @@ def _write(path: Path, rows: list[dict]) -> None:
 STAGING = ".partial"
 
 
-def _refuse_existing(out: Path) -> None:
-    """Refuse an output that exists, saying when a killed summary left it incomplete.
-
-    Raises:
-        FileExistsError: Always.
-    """
-    try:
-        entries = [p.name for p in out.iterdir()] if out.is_dir() else None
-    except OSError:  # not readable: refused as existing all the same
-        entries = None
-    if entries is not None and STAGING in entries:
-        raise FileExistsError(
-            f"{out} is incomplete: it holds {STAGING}, left by a summary that "
-            f"was killed while writing; delete {out} and run again"
-        )
-    if entries == []:  # a summary killed between the two mkdirs
-        raise FileExistsError(
-            f"{out} exists and is empty, perhaps left by a summary that was "
-            f"killed as it started; delete it or give a new directory"
-        )
-    raise FileExistsError(f"{out} exists; give a new directory")
-
-
 def _remove(out: Path, staging: Path, moved: list[Path]) -> bool:
     """Remove a failed summary's out, the staging directory, the incomplete mark, last.
 
@@ -436,8 +413,7 @@ def summarise(
             indistinguishable_set and run_record).
         FileNotFoundError: A run's file or pilot 2's choice.json is missing, or ``out`` or a
             directory above it links to nothing; the message names it.
-        FileExistsError: ``out`` exists, perhaps left incomplete by a killed summary, or a
-            directory above it is a file.
+        FileExistsError: ``out`` exists or a directory above it is a file.
     """
     runs = [Path(r) for r in runs]
     _check_runs(runs, "production")
@@ -466,7 +442,7 @@ def summarise(
         if level.is_symlink() and not level.exists():
             raise FileNotFoundError(f"{level} links to {os.readlink(level)}, which does not exist")
     if out.exists():
-        _refuse_existing(out)
+        raise FileExistsError(f"{out} exists; give a new directory")
     summary: dict[str, Any] = {
         "main": main, "runs": records,
         "not_identified": sum(bool(row["not_identified"]) for row in table),
@@ -507,7 +483,7 @@ def summarise(
     except BaseException as error:
         # .partial goes only once every file is in place: then the output stands.
         if claimed and not (moved and not staging.exists()) and _remove(out, staging, moved):
-            error.add_note(f"{out} is left incomplete; delete it before running again")
+            error.add_note(f"{out} is left incomplete")
         # The parents made for out, if empty; another summary into a sibling that made one its
         # parent at the same moment may then fail to make its own out, a race left as it is.
         for level in made:
@@ -539,7 +515,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         summary = summarise(args.runs, args.main, args.out, args.competitor)
     except (ValueError, OSError) as error:
-        raise SystemExit(f"covsyn-task10-summary: {error}") from None
+        message = "\n".join([f"covsyn-task10-summary: {error}", *getattr(error, "__notes__", [])])
+        raise SystemExit(message) from None
     print(
         f"{summary['parameters']} parameters, {summary['not_identified']} not identified; "
         f"wrote {args.out}"
