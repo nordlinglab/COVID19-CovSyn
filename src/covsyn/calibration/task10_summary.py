@@ -30,8 +30,8 @@ from typing import Any
 
 import numpy as np
 
+from covsyn.calibration import monitoring, revalidation
 from covsyn.calibration import parameter_uncertainty as pu
-from covsyn.calibration import revalidation
 from covsyn.calibration.monitoring import EVENT as STOP_EVENT
 from covsyn.pipeline import config as pc
 from covsyn.runtime import runs as rt
@@ -199,6 +199,16 @@ def settings(run: Path) -> tuple[int, int, int]:
     config = pc.load(str(path))
     if config.mode != "production" or config.simulations is None:
         raise ValueError(f"{path}: not a production run")
+    # The optimiser's config.json records the rule it stopped by (2026-11-26): a run of the
+    # earlier one, such as run 1 that stopped at generation 9, is not production's.
+    recorded = Path(run) / "config.json"
+    if not recorded.is_file():
+        raise FileNotFoundError(f"{recorded}: missing")
+    rule = json.loads(recorded.read_text(encoding="utf-8-sig")).get("settings", {}).get("stop_rule")
+    if rule != monitoring.STOP_RULE:
+        raise ValueError(
+            f"{run} ran with another stopping rule ({rule!r}, not {monitoring.STOP_RULE!r})"
+        )
     return config.stream, config.validation_stream, config.simulations
 
 

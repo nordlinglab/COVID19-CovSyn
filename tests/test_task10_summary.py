@@ -18,7 +18,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from covsyn.calibration import revalidation
+from covsyn.calibration import monitoring, revalidation
 from covsyn.calibration import task10_summary as ts
 from covsyn.pipeline import config as pc
 
@@ -93,6 +93,8 @@ def _run(
         revalidation_blocks=30,
     )
     (run / "pipeline.toml").write_text(pc.to_toml(config))
+    settings = {"mode": "production", "stop_rule": monitoring.STOP_RULE}
+    (run / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": settings}))
     return run
 
 
@@ -396,6 +398,25 @@ def test_a_runner_up_of_the_production_configuration_is_refused(tmp_path):
     """The runner-up is another setting; the same one would compare a setting with itself."""
     with pytest.raises(ValueError, match="same configuration"):
         ts.summarise(_five(tmp_path), main=1, out=tmp_path / "out", competitor=_five(tmp_path, "b"))
+
+
+@pytest.mark.parametrize(
+    "settings", [{"mode": "production"}, {"mode": "production", "stop_rule": "before_g_plan"}]
+)
+def test_a_run_of_another_stopping_rule_is_refused(tmp_path, settings):
+    """Run 1 of 2026-11-26, stopped at generation 9 by the earlier rule, is not production's."""
+    runs = _five(tmp_path)
+    (runs[0] / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": settings}))
+    with pytest.raises(ValueError, match="stopping rule"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
+def test_a_run_without_config_json_is_named(tmp_path):
+    """Its stopping rule is recorded there."""
+    runs = _five(tmp_path)
+    (runs[4] / "config.json").unlink()
+    with pytest.raises(FileNotFoundError, match="a5"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
 def test_a_run_in_both_lists_is_refused(tmp_path):
