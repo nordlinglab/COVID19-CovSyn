@@ -276,6 +276,31 @@ def check_configurations(runs: list[Path], competitor: list[Path] | None) -> Non
         keys.append(tuple(getattr(configs[0], name) for name in CONFIGURATION))
     if len(keys) == 2 and keys[0] == keys[1]:
         raise ValueError("the runner-up runs the same configuration as production")
+    check_pilot_choice(runs)
+
+
+def check_pilot_choice(runs: list[Path]) -> None:
+    """The production runs run pilot 2's choice, which tells --runs from --competitor.
+
+    choice.json is read from results/tables/<pilot>/, beside results/models/<run-id>/.
+
+    Raises:
+        ValueError: The production runs' n, alpha_0, alpha_end or G_plan is not pilot 2's.
+    """
+    config = pc.load(str(Path(runs[0]) / "pipeline.toml"))
+    path = Path(runs[0]).resolve().parent.parent / "tables" / str(config.pilot) / "choice.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: missing, pilot 2's choice that production runs")
+    chosen = json.loads(path.read_text(encoding="utf-8-sig")).get("chosen")
+    if not isinstance(chosen, dict):
+        raise ValueError(f"{path}: no chosen setting")
+    for name in ("pop_size", "alpha_0", "alpha_end", "g_plan"):
+        if chosen.get(name) != getattr(config, name):
+            raise ValueError(
+                f"the production runs' {name} is {getattr(config, name)!r}, not "
+                f"pilot 2's {chosen.get(name)!r} ({path}); are --runs and "
+                f"--competitor swapped?"
+            )
 
 
 def _check_runs(runs: list[Path], what: str) -> None:

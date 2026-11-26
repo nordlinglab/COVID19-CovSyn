@@ -23,6 +23,8 @@ from covsyn.calibration import task10_summary as ts
 from covsyn.pipeline import config as pc
 
 DIM = 3
+# pilot 2's choice, which production runs and the runner-up does not
+PILOT_CHOICE = {"pop_size": 24, "alpha_0": 0.4, "g_plan": 415, "alpha_end": 0.001}
 LOWER = np.zeros(DIM)
 UPPER = np.array([1.0, 10.0, 2.0])
 
@@ -53,8 +55,13 @@ def _run(
     the checklist's choice; firefly_archive.txt holds them at full precision, in this order,
     and both firefly_best.txt files at 7 decimals, as revalidation.write_best_file writes;
     uncertainty: cost_uncertainty.csv's rows, (candidate, mean, se, indistinguishable, best).
+    It goes in root/results/models/, beside pilot 2's choice.json in root/results/tables/.
     """
-    run = root / name
+    run = root / "results" / "models" / name
+    choice = root / "results" / "tables" / "pilot-2" / "choice.json"
+    if not choice.exists():
+        choice.parent.mkdir(parents=True)
+        choice.write_text(json.dumps({"chosen": dict(PILOT_CHOICE)}))
     (run / "revalidation").mkdir(parents=True)
     (run / "selected").mkdir()
     np.savetxt(run / "bound.txt", np.vstack((LOWER, UPPER)) if bounds is None else bounds)
@@ -428,6 +435,20 @@ def test_a_run_without_config_json_is_named(tmp_path):
     runs = _five(tmp_path)
     (runs[4] / "config.json").unlink()
     with pytest.raises(FileNotFoundError, match="a5"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
+def test_the_two_lists_swapped_whole_are_refused(tmp_path):
+    """--runs must be pilot 2's choice; given the runner-up, every sign would flip."""
+    with pytest.raises(ValueError, match="pilot 2"):
+        ts.summarise(_runner_up(tmp_path), main=1, out=tmp_path / "out", competitor=_five(tmp_path))
+
+
+def test_a_run_without_pilot_2_s_choice_is_named(tmp_path):
+    """choice.json is read from results/tables/<pilot>/ beside the runs."""
+    runs = _five(tmp_path)
+    (tmp_path / "results" / "tables" / "pilot-2" / "choice.json").unlink()
+    with pytest.raises(FileNotFoundError, match="choice.json"):
         ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
