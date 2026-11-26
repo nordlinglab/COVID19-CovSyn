@@ -697,11 +697,12 @@ def test_a_cleanup_that_cannot_finish_keeps_the_incomplete_mark(tmp_path, monkey
 
     monkeypatch.setattr(ts.Path, "rename", interrupted)
     monkeypatch.setattr(ts.Path, "unlink", stuck)
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(KeyboardInterrupt) as raised:
         ts.summarise(runs, main=1, out=out, competitor=_runner_up(tmp_path))
     monkeypatch.setattr(ts.Path, "rename", real_rename)
     monkeypatch.setattr(ts.Path, "unlink", real_unlink)
     assert (out / ts.STAGING).exists()
+    assert any("incomplete" in note for note in getattr(raised.value, "__notes__", []))
     with pytest.raises(FileExistsError, match="incomplete"):
         ts.summarise(runs, main=1, out=out)
 

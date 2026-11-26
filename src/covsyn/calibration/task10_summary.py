@@ -398,10 +398,13 @@ def _refuse_existing(out: Path) -> None:
     raise FileExistsError(f"{out} exists; give a new directory")
 
 
-def _remove(out: Path, staging: Path, moved: list[Path]) -> None:
+def _remove(out: Path, staging: Path, moved: list[Path]) -> bool:
     """Remove a failed summary's out, the staging directory, the incomplete mark, last.
 
     A moved file that will not go leaves the mark beside it, so out still reads as incomplete.
+
+    Returns:
+        Whether anything was left in out.
     """
     left = False
     for path in moved:
@@ -413,6 +416,7 @@ def _remove(out: Path, staging: Path, moved: list[Path]) -> None:
         shutil.rmtree(staging, ignore_errors=True)
         with contextlib.suppress(OSError):
             out.rmdir()
+    return left
 
 
 def summarise(
@@ -499,10 +503,10 @@ def summarise(
             moved.append(out / path.name)  # before the move, so an interrupt after it is cleaned
             path.rename(out / path.name)
         staging.rmdir()
-    except BaseException:
+    except BaseException as error:
         # .partial goes only once every file is in place: then the output stands.
-        if claimed and not (moved and not staging.exists()):
-            _remove(out, staging, moved)
+        if claimed and not (moved and not staging.exists()) and _remove(out, staging, moved):
+            error.add_note(f"{out} is left incomplete; delete it before running again")
         for level in made:  # the parents made for out, now empty unless another wrote there
             with contextlib.suppress(OSError):
                 level.rmdir()
