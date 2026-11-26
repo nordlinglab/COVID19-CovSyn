@@ -615,21 +615,28 @@ def test_an_empty_output_in_a_read_only_parent_is_refused(tmp_path):
     assert list(out.iterdir()) == []
 
 
-def test_an_output_another_summary_creates_first_is_refused(tmp_path, monkeypatch):
-    """It appears between the check and mkdir: the mkdir that loses is refused."""
+@pytest.mark.parametrize("existing", ["file", "directory"])
+def test_an_output_that_appears_before_the_claim_is_refused(tmp_path, monkeypatch, existing):
+    """An entry appearing before the exclusive mkdir stays untouched."""
     runs = _five(tmp_path)
     out = tmp_path / "out"
-    real = ts.Path.mkdir
+    mkdir = ts.Path.mkdir
 
     def raced(self, *args, **kwargs):
         if self == out and not out.exists():
-            real(self)  # the other summary made it first
-        return real(self, *args, **kwargs)
+            if existing == "file":
+                out.write_text("existing output")
+            else:
+                mkdir(out)
+        return mkdir(self, *args, **kwargs)
 
     monkeypatch.setattr(ts.Path, "mkdir", raced)
-    with pytest.raises(FileExistsError, match="another summary made it"):
+    with pytest.raises(FileExistsError, match="exists; give a new directory"):
         ts.summarise(runs, main=1, out=out)
-    assert list(out.iterdir()) == []  # the other summary's, untouched
+    if existing == "file":
+        assert out.read_text() == "existing output"
+    else:
+        assert list(out.iterdir()) == []
 
 
 def test_a_failure_while_writing_leaves_no_output(tmp_path, monkeypatch):
