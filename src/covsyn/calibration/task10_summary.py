@@ -33,6 +33,7 @@ Usage (repository root):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import json
 import os
@@ -387,6 +388,23 @@ def _refuse_existing(out: Path) -> None:
     raise FileExistsError(f"{out} exists; give a new directory")
 
 
+def _remove(out: Path, staging: Path, moved: list[Path]) -> None:
+    """Remove a failed summary's out, the staging directory, the incomplete mark, last.
+
+    A moved file that will not go leaves the mark beside it, so out still reads as incomplete.
+    """
+    left = False
+    for path in moved:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            left = True
+    if not left:
+        shutil.rmtree(staging, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            out.rmdir()
+
+
 def summarise(
     runs: list[Path], main: int, out: Path, competitor: list[Path] | None = None
 ) -> dict[str, Any]:
@@ -446,8 +464,9 @@ def summarise(
         out.mkdir()
     except FileExistsError:  # another summary made it after the check above
         _refuse_existing(out)
+    staging = out / STAGING  # files move up only once all are written
+    moved: list[Path] = []
     try:
-        staging = out / STAGING  # files move up only once all are written
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)
         shutil.copyfile(runs[main - 1] / COST_TABLE, staging / "cost_uncertainty.csv")
@@ -459,10 +478,11 @@ def summarise(
         text = json.dumps(summary, indent=1) + "\n"
         (staging / "summary.json").write_text(text, encoding="utf-8")
         for path in sorted(staging.iterdir()):
+            moved.append(out / path.name)  # before the move, so an interrupt after it is cleaned
             path.rename(out / path.name)
         staging.rmdir()
     except BaseException:
-        shutil.rmtree(out, ignore_errors=True)  # this summary's own, made above
+        _remove(out, staging, moved)
         raise
     return summary
 

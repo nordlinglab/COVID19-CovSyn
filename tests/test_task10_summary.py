@@ -650,6 +650,36 @@ def test_an_interrupt_right_after_a_move_leaves_nothing(tmp_path, monkeypatch):
     assert not out.exists()
 
 
+def test_a_cleanup_that_cannot_finish_keeps_the_incomplete_mark(tmp_path, monkeypatch):
+    """A moved file that will not go: .partial stays, so out still reads as incomplete."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real_rename, real_unlink = ts.Path.rename, ts.Path.unlink
+    moves = []
+
+    def interrupted(self, target):
+        result = real_rename(self, target)
+        moves.append(target)
+        if len(moves) == 2:
+            raise KeyboardInterrupt
+        return result
+
+    def stuck(self, *args, **kwargs):
+        if self == out / "comparison.csv":
+            raise OSError(16, "Device or resource busy")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "rename", interrupted)
+    monkeypatch.setattr(ts.Path, "unlink", stuck)
+    with pytest.raises(KeyboardInterrupt):
+        ts.summarise(runs, main=1, out=out, competitor=_runner_up(tmp_path))
+    monkeypatch.setattr(ts.Path, "rename", real_rename)
+    monkeypatch.setattr(ts.Path, "unlink", real_unlink)
+    assert (out / ts.STAGING).exists()
+    with pytest.raises(FileExistsError, match="incomplete"):
+        ts.summarise(runs, main=1, out=out)
+
+
 def test_the_output_directory_has_the_umask_s_mode(tmp_path):
     """As every other results/tables directory."""
     import os
