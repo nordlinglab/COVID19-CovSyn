@@ -229,6 +229,33 @@ def check_streams(runs: list[Path], competitor: list[Path] | None) -> None:
             )
 
 
+# The settings pilot 2 chose, which every run of one configuration shares.
+CONFIGURATION = ("pop_size", "alpha_0", "alpha_end", "g_plan", "pilot")
+
+
+def check_configurations(runs: list[Path], competitor: list[Path] | None) -> None:
+    """One configuration per list, and the runner-up's another.
+
+    The stream check cannot see a production run swapped with its runner-up pair, which shares
+    its streams; their pipeline.toml tells them apart.
+
+    Raises:
+        ValueError: A list of two configurations, or the runner-up on production's.
+    """
+    keys = []
+    for what, group in (("production", runs), ("competitor", competitor or [])):
+        if not group:
+            continue
+        configs = [pc.load(str(Path(r) / "pipeline.toml")) for r in group]
+        for name in CONFIGURATION:
+            values = {getattr(c, name) for c in configs}
+            if len(values) != 1:
+                raise ValueError(f"{what}: the runs differ in {name}: {sorted(map(str, values))}")
+        keys.append(tuple(getattr(configs[0], name) for name in CONFIGURATION))
+    if len(keys) == 2 and keys[0] == keys[1]:
+        raise ValueError("the runner-up runs the same configuration as production")
+
+
 def _check_runs(runs: list[Path], what: str) -> None:
     if len(runs) != pu.RUNS:
         raise ValueError(f"{what}: {pu.RUNS} runs are needed, not {len(runs)}")
@@ -294,6 +321,7 @@ def summarise(
     if not 1 <= main <= pu.RUNS:
         raise ValueError(f"the main run must be 1 to {pu.RUNS}, not {main}")
     check_streams(runs, competitor)
+    check_configurations(runs, competitor)
     lower, upper = bounds(runs[0])
     for run in [*runs[1:], *(competitor or [])]:  # one search space for every run
         other = bounds(run)

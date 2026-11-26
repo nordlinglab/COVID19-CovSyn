@@ -45,6 +45,7 @@ def _run(
     streams=(5, 203),
     simulations=3000,
     chosen=1,
+    pop_size=24,
 ):
     """A production run's files as the pipeline leaves them.
 
@@ -83,7 +84,7 @@ def _run(
         mode="production",
         stream=streams[0],
         validation_stream=streams[1],
-        pop_size=24,
+        pop_size=pop_size,
         simulations=simulations,
         pilot="pilot-2",
         alpha_0=0.4,
@@ -95,7 +96,7 @@ def _run(
     return run
 
 
-def _five(root, prefix="a", best_means=(10.0, 11.0, 12.0, 13.0, 14.0)):
+def _five(root, prefix="a", best_means=(10.0, 11.0, 12.0, 13.0, 14.0), pop_size=24):
     """Five runs; each selects (0.1i, i + 0.5, 0.2i), candidate 1; the set is candidates 0, 2."""
     # No choice equals candidate 0 or 2: the archive holds distinct vectors.
     candidates = np.array([[0.5, 5.0, 1.0], [0.9, 9.0, 1.9], [0.4, 4.0, 0.8]])
@@ -114,9 +115,15 @@ def _five(root, prefix="a", best_means=(10.0, 11.0, 12.0, 13.0, 14.0)):
                 candidates,
                 uncertainty,
                 streams=(4 + i, 202 + i),
+                pop_size=pop_size,
             )
         )
     return runs
+
+
+def _runner_up(root, best_means=(10.0, 11.0, 12.0, 13.0, 14.0)):
+    """The runner-up's five runs, at n = 48, on the same stream pairs."""
+    return _five(root, "b", best_means, pop_size=48)
 
 
 def _table(path):
@@ -280,7 +287,7 @@ def test_a_run_without_the_optimiser_s_stop_is_refused(tmp_path):
 def test_the_runner_up_is_compared_run_by_run(tmp_path):
     """Each pair's best means, their difference, and a t interval over the five pairs."""
     runs = _five(tmp_path, "a", (10.0, 11.0, 12.0, 13.0, 14.0))
-    others = _five(tmp_path, "b", (12.0, 11.5, 15.0, 13.0, 16.0))
+    others = _runner_up(tmp_path, (12.0, 11.5, 15.0, 13.0, 16.0))
     out = tmp_path / "out"
     ts.summarise(runs, main=1, out=out, competitor=others)
     rows = _table(out / "comparison.csv")
@@ -332,7 +339,7 @@ def test_a_runner_up_of_not_five_runs_is_refused(tmp_path):
     """The comparison pairs the runs one to one."""
     with pytest.raises(ValueError, match="5 runs"):
         ts.summarise(
-            _five(tmp_path), main=1, out=tmp_path / "out", competitor=_five(tmp_path, "b")[:4]
+            _five(tmp_path), main=1, out=tmp_path / "out", competitor=_runner_up(tmp_path)[:4]
         )
 
 
@@ -347,7 +354,7 @@ def test_a_runner_up_out_of_stream_order_is_refused(tmp_path):
     """Pair i must share its optimisation and validation streams, or the pairing is noise."""
     with pytest.raises(ValueError, match="streams"):
         ts.summarise(
-            _five(tmp_path), main=1, out=tmp_path / "out", competitor=_five(tmp_path, "b")[::-1]
+            _five(tmp_path), main=1, out=tmp_path / "out", competitor=_runner_up(tmp_path)[::-1]
         )
 
 
@@ -377,10 +384,24 @@ def test_a_run_without_its_pipeline_toml_is_named(tmp_path):
         ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
+def test_runs_swapped_between_the_lists_are_refused(tmp_path):
+    """Pair 2 swapped keeps its streams but mixes n = 48 into the production runs."""
+    runs, others = _five(tmp_path), _runner_up(tmp_path)
+    runs[1], others[1] = others[1], runs[1]
+    with pytest.raises(ValueError, match="pop_size"):
+        ts.summarise(runs, main=1, out=tmp_path / "out", competitor=others)
+
+
+def test_a_runner_up_of_the_production_configuration_is_refused(tmp_path):
+    """The runner-up is another setting; the same one would compare a setting with itself."""
+    with pytest.raises(ValueError, match="same configuration"):
+        ts.summarise(_five(tmp_path), main=1, out=tmp_path / "out", competitor=_five(tmp_path, "b"))
+
+
 def test_a_run_in_both_lists_is_refused(tmp_path):
     """It would give a difference of exactly 0 and narrow the interval."""
     runs = _five(tmp_path)
-    others = _five(tmp_path, "b")
+    others = _runner_up(tmp_path)
     others[2] = runs[2]
     with pytest.raises(ValueError, match="both"):
         ts.summarise(runs, main=1, out=tmp_path / "out", competitor=others)
@@ -388,7 +409,7 @@ def test_a_run_in_both_lists_is_refused(tmp_path):
 
 def test_a_runner_up_with_other_bounds_is_refused(tmp_path):
     """Another search space is not the same configuration at another n."""
-    others = _five(tmp_path, "b")
+    others = _runner_up(tmp_path)
     np.savetxt(others[1] / "bound.txt", np.vstack((LOWER, UPPER * 2)))
     with pytest.raises(ValueError, match="bounds"):
         ts.summarise(_five(tmp_path), main=1, out=tmp_path / "out", competitor=others)
@@ -492,7 +513,7 @@ def test_an_empty_output_directory_is_used(tmp_path):
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)
-    others = _five(tmp_path, "b")
+    others = _runner_up(tmp_path)
     out = tmp_path / "out"
     ts.main([str(out), "--main", "2", "--runs", *map(str, runs), "--competitor", *map(str, others)])
     assert json.loads((out / "summary.json").read_text())["main"] == 2
