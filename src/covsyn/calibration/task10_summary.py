@@ -436,7 +436,8 @@ def summarise(
             indistinguishable_set and run_record).
         FileNotFoundError: A run's file or pilot 2's choice.json is missing, or ``out`` or a
             directory above it links to nothing; the message names it.
-        FileExistsError: ``out`` exists, perhaps left incomplete by a killed summary.
+        FileExistsError: ``out`` exists, perhaps left incomplete by a killed summary, or a
+            directory above it is a file.
     """
     runs = [Path(r) for r in runs]
     _check_runs(runs, "production")
@@ -507,7 +508,9 @@ def summarise(
         # .partial goes only once every file is in place: then the output stands.
         if claimed and not (moved and not staging.exists()) and _remove(out, staging, moved):
             error.add_note(f"{out} is left incomplete; delete it before running again")
-        for level in made:  # the parents made for out, now empty unless another wrote there
+        # The parents made for out, if empty; another summary into a sibling that made one its
+        # parent at the same moment may then fail to make its own out, a race left as it is.
+        for level in made:
             with contextlib.suppress(OSError):
                 level.rmdir()
         raise
