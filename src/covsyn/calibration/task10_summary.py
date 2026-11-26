@@ -16,7 +16,8 @@ by; and run.log, the optimiser's stop and each stage's time.
 
 It refuses runs that cannot be summarised together: not five, a run twice or in both lists,
 another S or other bounds, a stream two runs share, a list of two configurations, a runner-up of
-production's configuration or off its pair's streams, or a run of the earlier stopping rule.
+production's configuration or off its pair's streams, or a run whose config.json does not
+record monitoring.STOP_RULE.
 
 Decision of 2026-11-26: pilot 2's runner-up (--competitor) runs on the same five pairs of
 optimisation and validation streams, and each run's best validation mean is compared with its
