@@ -454,6 +454,9 @@ def summarise(
             out.mkdir()
             created = True
         claim(out)  # a second summary into out is refused, not interleaved with this one
+        if any(p.name != LOCK for p in out.iterdir()):  # another finished before the claim
+            (out / LOCK).unlink()
+            raise FileExistsError(f"{out} holds files; give a new directory")
         claimed = True
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)

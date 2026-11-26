@@ -681,6 +681,24 @@ def test_a_second_summary_cannot_claim_an_output_another_holds(tmp_path):
         ts.claim(out)
 
 
+def test_a_summary_finished_before_the_claim_is_not_overwritten(tmp_path, monkeypatch):
+    """Another summary finishes between this one's emptiness check and its claim."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.claim
+
+    def finish_another_first(directory):
+        monkeypatch.setattr(ts, "claim", real)
+        ts.summarise(runs, main=2, out=directory)  # the other summary, whole
+        real(directory)
+
+    monkeypatch.setattr(ts, "claim", finish_another_first)
+    with pytest.raises(FileExistsError, match="holds files"):
+        ts.summarise(runs, main=1, out=out)
+    assert json.loads((out / "summary.json").read_text())["main"] == 2
+    assert not (out / ts.LOCK).exists()
+
+
 def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
     """A file another writer put in out while this one failed stays."""
     runs = _five(tmp_path)
