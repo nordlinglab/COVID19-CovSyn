@@ -138,7 +138,7 @@ The production run, `--mode production` or `mode = "production"` in `[optimise]`
 It starts from the initial population without the warm starts, the fitted vectors of earlier runs, so its result is the calibration's own, and records this in its `config.json`;
 `pop_size` is therefore at most the rows left, 254 in version 1: the optimiser refuses a larger one before any simulation, and the pipeline then suggests no resume;
 a production run begun with the warm starts is not resumed.
-It scores each new elite vector on blocks 0 to 4 of monitoring stream 100, and stops when the best monitored vector has improved by no more than one paired standard error over 5 generations, or at G_max = 1,000 generations;
+It scores each new elite vector on blocks 0 to 4 of monitoring stream 100, and from generation G_plan − 1 on, once its step schedule has run whole, stops when the best monitored vector has improved by no more than one paired standard error over 5 generations, or at G_max = 1,000 generations (decision of 2026-11-26: the rule alone stopped production run 1 at generation 9 of 415, when its best had stayed one vector for 5 generations);
 the reason goes into `run.log`, and the monitoring's cost into `monitoring.json` beside `progress.csv`.
 Its revalidation re-scores the archive's 10 best distinct vectors, by ascending mean, at its S on 30 blocks of its validation stream (Task 10), and refuses another number of blocks.
 The best is the lowest mean;

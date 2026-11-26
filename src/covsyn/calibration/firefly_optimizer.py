@@ -1828,7 +1828,7 @@ class Firefly:
                 elite = next_elite
                 if self.monitor:  # Task 9: score the new members, then apply the rule
                     watch.score(executor, function, fireflies[next_elite], self.simulations)
-                    watch.judge(generation, max_generations)
+                    watch.judge(generation, max_generations, g_plan)
                 row = {'generation': generation, 'seed_offset': offset,
                        'best_cost': float(np.min(intensities))}
                 row.update(cost_parts[best_idx])

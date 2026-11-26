@@ -101,6 +101,38 @@ def test_an_improvement_within_one_paired_se_stops():
     assert d.mean() <= d.std(ddof=1) / np.sqrt(5) and reason is not None
 
 
+def _watch_with_one_best():
+    """A watch whose best stays one vector, so the rule alone would stop at generation 5."""
+    watch = monitoring.Watch(True, dim=1, checkpoint=None)
+    watch.monitor.add(np.array([0.0]), np.full(5, 10.0))
+    return watch
+
+
+@pytest.mark.parametrize("g_plan", [1, 6, 20, 415])
+def test_no_stop_before_the_step_schedule_ends(g_plan):
+    """Generations 0 to G_plan - 1 always run; the rule applies from G_plan - 1 on.
+
+    Decision of 2026-11-26: the plan uses pilot 2's G_plan, chosen at a budget of G_plan
+    generations, and the rule stopped production run 1 at generation 9 of 415.
+    """
+    watch = _watch_with_one_best()
+    first = max(g_plan - 1, monitoring.WINDOW)
+    for generation in range(first):
+        watch.judge(generation, 1000, g_plan)
+        assert not watch.stopped(), generation
+    watch.judge(first, 1000, g_plan)
+    assert watch.stopped()
+
+
+def test_g_max_still_stops_a_run_whose_schedule_is_longer():
+    """G_plan beyond G_max: the run ends at G_max."""
+    watch = monitoring.Watch(True, dim=1, checkpoint=None)
+    watch.monitor.add(np.array([0.0]), np.full(5, 10.0))
+    for generation in range(10):
+        watch.judge(generation, 10, 50)
+    assert watch.reason == "reached G_max = 10 generations"
+
+
 def test_the_state_goes_into_a_checkpoint_and_back():
     """So a resumed run stops where an uninterrupted one would."""
     monitor = _monitor_with_bests([np.arange(5.0) + g for g in range(7)])
@@ -148,7 +180,7 @@ def stopped(tmp_path_factory):
 def test_a_monitored_run_stops_and_says_why_in_run_log(stopped):
     """One event line, its generation and reason as the checkpoint holds them."""
     last = _last(stopped)
-    assert int(last["generation"]) < 39 and str(last["stop_reason"])
+    assert 19 <= int(last["generation"]) < 39 and str(last["stop_reason"])  # G_plan = 20
     events = [line for line in runs.json_lines(stopped / "run.log") if "event" in line]
     assert len(events) == 1
     assert events[0]["event"] == "optimiser_stopped"
