@@ -24,6 +24,7 @@ import argparse
 import csv
 import json
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -307,20 +308,30 @@ def summarise(
     out = Path(out)
     if out.exists() and any(out.iterdir()):
         raise FileExistsError(f"{out} holds files; give a new directory")
-    out.mkdir(parents=True, exist_ok=True)
-    pu.write_table(out / "parameter_uncertainty.csv", table)
-    shutil.copyfile(runs[main - 1] / COST_TABLE, out / "cost_uncertainty.csv")
-    for i, run in enumerate(runs, start=1):
-        shutil.copyfile(run / COST_TABLE, out / f"cost_uncertainty_run{i}.csv")
     summary: dict[str, Any] = {
         "main": main, "runs": records,
         "not_identified": sum(bool(row["not_identified"]) for row in table),
         "fixed": sum(bool(row["fixed"]) for row in table), "parameters": len(table),
     }  # fmt: skip
-    if comparison is not None:
-        rows, summary["comparison"], summary["competitor_runs"] = comparison
-        _write(out / "comparison.csv", rows)
-    (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
+    # Written beside it and renamed whole, so a failure part-way leaves nothing behind.
+    out.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{out.name}.", dir=out.parent))
+    try:
+        pu.write_table(staging / "parameter_uncertainty.csv", table)
+        shutil.copyfile(runs[main - 1] / COST_TABLE, staging / "cost_uncertainty.csv")
+        for i, run in enumerate(runs, start=1):
+            shutil.copyfile(run / COST_TABLE, staging / f"cost_uncertainty_run{i}.csv")
+        if comparison is not None:
+            rows, summary["comparison"], summary["competitor_runs"] = comparison
+            _write(staging / "comparison.csv", rows)
+        text = json.dumps(summary, indent=1) + "\n"
+        (staging / "summary.json").write_text(text, encoding="utf-8")
+        if out.exists():
+            out.rmdir()  # empty, checked above
+        staging.rename(out)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return summary
 
 

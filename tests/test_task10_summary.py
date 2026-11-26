@@ -456,6 +456,37 @@ def test_an_output_directory_with_files_is_not_overwritten(tmp_path):
         ts.summarise(_five(tmp_path), main=1, out=out)
 
 
+def test_a_failure_while_writing_leaves_no_output(tmp_path, monkeypatch):
+    """A full disk part-way leaves nothing that a second attempt would refuse."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.shutil.copyfile
+    calls = []
+
+    def failing(source, target):
+        calls.append(target)
+        if len(calls) == 3:
+            raise OSError(28, "No space left on device")
+        return real(source, target)
+
+    monkeypatch.setattr(ts.shutil, "copyfile", failing)
+    with pytest.raises(OSError):
+        ts.summarise(runs, main=1, out=out)
+    assert not out.exists()
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith("out")] == []
+    monkeypatch.setattr(ts.shutil, "copyfile", real)
+    ts.summarise(runs, main=1, out=out)
+    assert (out / "summary.json").exists()
+
+
+def test_an_empty_output_directory_is_used(tmp_path):
+    """Made beforehand and empty: the summary goes into it."""
+    out = tmp_path / "out"
+    out.mkdir()
+    ts.summarise(_five(tmp_path), main=1, out=out)
+    assert (out / "summary.json").exists()
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)
