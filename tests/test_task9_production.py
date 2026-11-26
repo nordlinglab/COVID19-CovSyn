@@ -133,6 +133,30 @@ def test_g_max_still_stops_a_run_whose_schedule_is_longer():
     assert watch.reason == "reached G_max = 10 generations"
 
 
+def test_a_production_run_records_its_stopping_rule(started):  # noqa: F811
+    """config.json says which rule the run stops by, so a resume can check it."""
+    seen = started(*PRODUCTION)
+    assert seen["engine"].run_settings["stop_rule"] == monitoring.STOP_RULE
+
+
+@pytest.mark.parametrize("rule", [None, "before_g_plan"])
+def test_a_production_run_of_another_stopping_rule_does_not_resume(monkeypatch, tmp_path,
+                                                                   capsys, rule):
+    """A run begun by the earlier rule, such as run 1 of 2026-11-26, is refused.
+
+    Run 1 stopped at generation 9; resumed, it would run nothing more and go on to revalidation.
+    """
+    from tests.test_pilot_without_warm_starts import _production_run
+
+    run = _production_run(tmp_path, {"version": 1, "sha256": "x", "without_warm_starts": True},
+                          stop_rule=rule)
+    monkeypatch.setattr(sys, "argv", ["covsyn-optimise", "--resume", str(run)])
+    with pytest.raises(SystemExit) as stop:
+        fo.main()
+    assert stop.value.code == runs.NOT_RESUMABLE
+    assert "stopping rule" in capsys.readouterr().err
+
+
 def test_the_state_goes_into_a_checkpoint_and_back():
     """So a resumed run stops where an uninterrupted one would."""
     monitor = _monitor_with_bests([np.arange(5.0) + g for g in range(7)])

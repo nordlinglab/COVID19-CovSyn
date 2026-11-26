@@ -34,6 +34,9 @@ BLOCKS = range(0, 5)
 WINDOW = 5  # generations between the snapshots compared
 SUMMARY_FILE = "monitoring.json"  # in results/tables/<run-id>/, beside progress.csv
 EVENT = "optimiser_stopped"  # the run.log event; no "stage" key, so not a finished stage
+# config.json's name for the rule a production run stops by (decision of 2026-11-26): a run
+# begun by another, such as the one that stopped run 1 at generation 9, is not resumed.
+STOP_RULE = "after_g_plan"
 
 
 def offsets(simulations: int) -> list[int]:
