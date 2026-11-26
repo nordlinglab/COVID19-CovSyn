@@ -804,6 +804,30 @@ def test_a_parent_that_is_a_file_is_named(tmp_path):
         ts.summarise(_five(tmp_path), main=1, out=tmp_path / "tables" / "id")
 
 
+def test_a_move_error_survives_an_unreadable_staging_path(tmp_path, monkeypatch):
+    """A failed move already establishes that publication did not complete."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    staging = out / ts.STAGING
+    exists = ts.Path.exists
+
+    def fail_move(self, target):
+        raise OSError("summary move failed")
+
+    def refuse_staging_lookup(self, *args, **kwargs):
+        if self == staging:
+            raise PermissionError("staging lookup failed")
+        return exists(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ts.Path, "rename", fail_move)
+        patch.setattr(ts.Path, "exists", refuse_staging_lookup)
+        with pytest.raises(OSError, match="summary move failed"):
+            ts.summarise(runs, main=1, out=out)
+
+    assert not out.exists()
+
+
 def test_an_interrupt_after_the_staging_goes_keeps_the_finished_output(tmp_path, monkeypatch):
     """Every file is in place once .partial is gone: the output stands."""
     runs = _five(tmp_path)

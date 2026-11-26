@@ -461,6 +461,7 @@ def summarise(
     staging = out / STAGING  # files move up only once all are written
     moved: list[Path] = []
     claimed = False
+    files_in_place = False
     try:
         for level in reversed(out.parents):
             if level.is_dir():
@@ -492,11 +493,16 @@ def summarise(
         for path in sorted(staging.iterdir()):
             moved.append(out / path.name)  # before the move, so an interrupt after it is cleaned
             path.rename(out / path.name)
+        files_in_place = True
         staging.rmdir()
     except BaseException as error:
-        # .partial goes only once every file is in place: then the output stands.
-        if claimed and not (moved and not staging.exists()) and _remove(out, staging, moved):
-            error.add_note(f"{out} is left incomplete")
+        if claimed:
+            try:
+                # Once .partial is gone, preserve the completed summary.
+                if not (files_in_place and not staging.exists()) and _remove(out, staging, moved):
+                    error.add_note(f"{out} is left incomplete")
+            except OSError as cleanup_error:
+                error.add_note(f"Could not verify or clean up {out}: {cleanup_error}")
         # Only remove empty parents that this invocation created.
         for level in reversed(made):
             with contextlib.suppress(OSError):
