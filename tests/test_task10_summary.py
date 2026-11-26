@@ -432,6 +432,15 @@ def test_a_run_of_another_stopping_rule_is_refused(tmp_path, settings):
         ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
+@pytest.mark.parametrize("text", ["[]", '{"settings": null}', '{"settings": "x"}', "{"])
+def test_a_malformed_config_json_is_refused_by_name(tmp_path, text):
+    """A clear refusal naming the file, not a traceback."""
+    runs = _five(tmp_path)
+    (runs[0] / "config.json").write_text(text)
+    with pytest.raises(ValueError, match="config.json"):
+        ts.summarise(runs, main=1, out=tmp_path / "out")
+
+
 def test_a_run_without_config_json_is_named(tmp_path):
     """Its stopping rule is recorded there."""
     runs = _five(tmp_path)

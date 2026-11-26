@@ -216,7 +216,14 @@ def settings(run: Path) -> tuple[int, int, int]:
     recorded = Path(run) / "config.json"
     if not recorded.is_file():
         raise FileNotFoundError(f"{recorded}: missing")
-    rule = json.loads(recorded.read_text(encoding="utf-8-sig")).get("settings", {}).get("stop_rule")
+    try:
+        data = json.loads(recorded.read_text(encoding="utf-8-sig"))
+    except ValueError as error:  # JSONDecodeError, or text that is not UTF-8
+        raise ValueError(f"{recorded}: not JSON ({error})") from None
+    recorded_settings = data.get("settings") if isinstance(data, dict) else None
+    if not isinstance(recorded_settings, dict):
+        raise ValueError(f"{recorded}: no settings object")
+    rule = recorded_settings.get("stop_rule")
     if rule != monitoring.STOP_RULE:
         raise ValueError(
             f"{run} ran with another stopping rule ({rule!r}, not {monitoring.STOP_RULE!r})"
