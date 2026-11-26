@@ -397,6 +397,12 @@ def summarise(
         comparison = (*compare(runs, competitor), [run_record(r) for r in competitor])
     out = Path(out)
     if out.exists() and any(out.iterdir()):
+        left = [p.name for p in out.iterdir()]
+        if all(name.startswith(".partial-") for name in left):
+            raise FileExistsError(
+                f"{out} holds {', '.join(left)}, left by a summary that was "
+                f"killed while writing; delete it and run again"
+            )
         raise FileExistsError(f"{out} holds files; give a new directory")
     summary: dict[str, Any] = {
         "main": main, "runs": records,

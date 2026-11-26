@@ -635,6 +635,14 @@ def test_an_empty_output_directory_in_a_read_only_parent_is_used(tmp_path):
     assert (out / "summary.json").exists()
 
 
+def test_a_killed_attempt_s_staging_is_named(tmp_path):
+    """A kill leaves .partial-<pid> in out; the refusal says what it is and that it can go."""
+    out = tmp_path / "out"
+    (out / ".partial-123").mkdir(parents=True)
+    with pytest.raises(FileExistsError, match="left by a summary that was killed"):
+        ts.summarise(_five(tmp_path), main=1, out=out)
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)
