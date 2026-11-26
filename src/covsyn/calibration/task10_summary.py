@@ -375,6 +375,20 @@ def _write(path: Path, rows: list[dict]) -> None:
 STAGING = ".partial"
 
 
+def _make_output_parents(out: Path, made: list[Path]) -> None:
+    """Create missing parents and record only successful claims for cleanup."""
+    for level in reversed(out.parents):
+        if level.is_dir():
+            continue
+        try:
+            level.mkdir()
+        except FileExistsError:
+            if not level.is_dir():
+                raise
+        else:
+            made.append(level)
+
+
 def _remove(out: Path, staging: Path, moved: list[Path]) -> bool:
     """Remove a failed summary's out, the staging directory, the incomplete mark, last.
 
@@ -391,8 +405,12 @@ def _remove(out: Path, staging: Path, moved: list[Path]) -> bool:
             left = True
     if not left:
         shutil.rmtree(staging, ignore_errors=True)
-        with contextlib.suppress(OSError):
+        try:
             out.rmdir()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            left = True
     return left
 
 
@@ -453,18 +471,20 @@ def summarise(
     for level in out.parents:
         if level.exists() and not level.is_dir():
             raise FileExistsError(f"{level}, above {out}, is not a directory")
-    made = [level for level in out.parents if not level.exists()]  # deepest first
+    made: list[Path] = []
     staging = out / STAGING  # files move up only once all are written
     moved: list[Path] = []
     claimed = False
+    files_in_place = False
     try:
-        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _make_output_parents(out, made)
+        except FileNotFoundError:  # a concurrent cleanup may have removed an empty ancestor
+            _make_output_parents(out, made)
         try:
             out.mkdir()
-        except FileExistsError:  # after the check above: likely writing it now, not killed
-            raise FileExistsError(
-                f"{out} exists: another summary made it as this one started; give a new directory"
-            ) from None
+        except FileExistsError:
+            raise FileExistsError(f"{out} exists; give a new directory") from None
         claimed = True
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)
@@ -479,14 +499,20 @@ def summarise(
         for path in sorted(staging.iterdir()):
             moved.append(out / path.name)  # before the move, so an interrupt after it is cleaned
             path.rename(out / path.name)
+        files_in_place = True
         staging.rmdir()
     except BaseException as error:
-        # .partial goes only once every file is in place: then the output stands.
-        if claimed and not (moved and not staging.exists()) and _remove(out, staging, moved):
-            error.add_note(f"{out} is left incomplete")
-        # The parents made for out, if empty; another summary into a sibling that made one its
-        # parent at the same moment may then fail to make its own out, a race left as it is.
-        for level in made:
+        if claimed:
+            try:
+                # Once .partial is gone, preserve the completed summary.
+                if files_in_place and not staging.exists():
+                    error.add_note(f"Completed summary at {out}")
+                elif _remove(out, staging, moved):
+                    error.add_note(f"{out} is left incomplete")
+            except OSError as cleanup_error:
+                error.add_note(f"Could not verify or clean up {out}: {cleanup_error}")
+        # Only remove empty parents that this invocation created.
+        for level in reversed(made):
             with contextlib.suppress(OSError):
                 level.rmdir()
         raise

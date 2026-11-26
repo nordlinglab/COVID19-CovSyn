@@ -615,21 +615,28 @@ def test_an_empty_output_in_a_read_only_parent_is_refused(tmp_path):
     assert list(out.iterdir()) == []
 
 
-def test_an_output_another_summary_creates_first_is_refused(tmp_path, monkeypatch):
-    """It appears between the check and mkdir: the mkdir that loses is refused."""
+@pytest.mark.parametrize("existing", ["file", "directory"])
+def test_an_output_that_appears_before_the_claim_is_refused(tmp_path, monkeypatch, existing):
+    """An entry appearing before the exclusive mkdir stays untouched."""
     runs = _five(tmp_path)
     out = tmp_path / "out"
-    real = ts.Path.mkdir
+    mkdir = ts.Path.mkdir
 
     def raced(self, *args, **kwargs):
         if self == out and not out.exists():
-            real(self)  # the other summary made it first
-        return real(self, *args, **kwargs)
+            if existing == "file":
+                out.write_text("existing output")
+            else:
+                mkdir(out)
+        return mkdir(self, *args, **kwargs)
 
     monkeypatch.setattr(ts.Path, "mkdir", raced)
-    with pytest.raises(FileExistsError, match="another summary made it"):
+    with pytest.raises(FileExistsError, match="exists; give a new directory"):
         ts.summarise(runs, main=1, out=out)
-    assert list(out.iterdir()) == []  # the other summary's, untouched
+    if existing == "file":
+        assert out.read_text() == "existing output"
+    else:
+        assert list(out.iterdir()) == []
 
 
 def test_a_failure_while_writing_leaves_no_output(tmp_path, monkeypatch):
@@ -776,11 +783,80 @@ def test_an_interrupt_making_the_output_removes_its_new_parents(tmp_path, monkey
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
+def test_an_interrupted_claim_keeps_a_parent_created_by_another_summary(tmp_path, monkeypatch):
+    """A concurrent summary's empty output can serve as this summary's parent."""
+    parent = tmp_path / "new"
+    out = parent / "sub"
+    mkdir = ts.Path.mkdir
+
+    def competing_claim(self, *args, **kwargs):
+        if self == parent:
+            mkdir(parent)
+        if self == out:
+            raise KeyboardInterrupt
+        return mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", competing_claim)
+    with pytest.raises(KeyboardInterrupt):
+        ts.summarise(_five(tmp_path), main=1, out=out)
+
+    assert parent.is_dir()
+    assert not out.exists()
+
+
+def test_a_shared_parent_removed_during_creation_is_recreated(tmp_path, monkeypatch):
+    """An empty shared parent may be removed as a different summary cleans up."""
+    runs = _five(tmp_path)
+    shared = tmp_path / "shared"
+    nested = shared / "nested"
+    out = nested / "out"
+    shared.mkdir()
+    mkdir = ts.Path.mkdir
+    removed = False
+
+    def remove_shared_once(self, *args, **kwargs):
+        nonlocal removed
+        if self == nested and not removed:
+            shared.rmdir()
+            removed = True
+        return mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", remove_shared_once)
+    ts.summarise(runs, main=1, out=out)
+
+    assert removed
+    assert (out / "summary.json").is_file()
+
+
 def test_a_parent_that_is_a_file_is_named(tmp_path):
     """Not a bare 'File exists' that reads as if out existed."""
     (tmp_path / "tables").write_text("")
     with pytest.raises(FileExistsError, match="is not a directory"):
         ts.summarise(_five(tmp_path), main=1, out=tmp_path / "tables" / "id")
+
+
+def test_a_move_error_survives_an_unreadable_staging_path(tmp_path, monkeypatch):
+    """A failed move already establishes that publication did not complete."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    staging = out / ts.STAGING
+    exists = ts.Path.exists
+
+    def fail_move(self, target):
+        raise OSError("summary move failed")
+
+    def refuse_staging_lookup(self, *args, **kwargs):
+        if self == staging:
+            raise PermissionError("staging lookup failed")
+        return exists(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ts.Path, "rename", fail_move)
+        patch.setattr(ts.Path, "exists", refuse_staging_lookup)
+        with pytest.raises(OSError, match="summary move failed"):
+            ts.summarise(runs, main=1, out=out)
+
+    assert not out.exists()
 
 
 def test_an_interrupt_after_the_staging_goes_keeps_the_finished_output(tmp_path, monkeypatch):
@@ -795,8 +871,9 @@ def test_an_interrupt_after_the_staging_goes_keeps_the_finished_output(tmp_path,
             raise KeyboardInterrupt
 
     monkeypatch.setattr(ts.Path, "rmdir", interrupted)
-    with pytest.raises(KeyboardInterrupt):
-        ts.summarise(runs, main=1, out=out)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        ts.main([str(out), "--main", "1", "--runs", *map(str, runs)])
+    assert f"Completed summary at {out}" in getattr(raised.value, "__notes__", [])
     assert (out / "summary.json").exists() and not (out / ts.STAGING).exists()
 
 
@@ -864,6 +941,35 @@ def test_the_command_reports_output_left_by_failed_cleanup(tmp_path, monkeypatch
     assert "output move failed" in str(raised.value)
     assert f"{out} is left incomplete" in str(raised.value)
     assert (out / ts.STAGING).is_dir()
+
+
+@pytest.mark.parametrize("leftover", ["staging", "output"])
+def test_the_command_names_a_directory_that_cleanup_cannot_remove(tmp_path, monkeypatch, leftover):
+    """A failed directory removal leaves the output path reserved."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    rmdir = ts.Path.rmdir
+
+    def fail_write(*args, **kwargs):
+        raise OSError("summary write failed")
+
+    def refuse_output_removal(self):
+        if self == out:
+            raise PermissionError("output removal failed")
+        return rmdir(self)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ts.pu, "write_table", fail_write)
+        if leftover == "staging":
+            patch.setattr(ts.shutil, "rmtree", lambda *args, **kwargs: None)
+        else:
+            patch.setattr(ts.Path, "rmdir", refuse_output_removal)
+        with pytest.raises(SystemExit) as raised:
+            ts.main([str(out), "--main", "1", "--runs", *map(str, runs)])
+
+    assert "summary write failed" in str(raised.value)
+    assert f"{out} is left incomplete" in str(raised.value)
+    assert out.is_dir()
 
 
 def test_the_command_writes_the_summary(tmp_path):
