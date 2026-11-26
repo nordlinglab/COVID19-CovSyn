@@ -78,8 +78,7 @@ def parameter_table(selected: np.ndarray, lower: np.ndarray, upper: np.ndarray,
 def write_table(path: Path, table: list[dict[str, Any]]) -> None:
     """Write parameter_uncertainty.csv, one row per parameter.
 
-    No command calls this yet: the Task 10 orchestrator of the five runs, whose design waits on
-    the 2026-11-23 meeting, will.
+    covsyn-task10-summary (task10_summary.py) calls it once the five runs finish.
 
     Raises:
         ValueError: The table has no parameters.

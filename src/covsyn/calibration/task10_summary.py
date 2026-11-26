@@ -1,0 +1,263 @@
+# Copyright 2026 Lee Cheng Jui <rexlee871221@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Task 10's summary of the five production runs (items 1 and 2), after they finish.
+
+From doc/plan_Nordling2026_CovSynFireflyNordlingLab.md, Task 10: the main run's
+cost_uncertainty.csv (item 1), and parameter_uncertainty.csv over the five selected vectors with
+the range of the main run's indistinguishable set (item 2, parameter_uncertainty.py).
+
+Each run is a covsyn-pipeline production run: selected/firefly_best.txt holds its chosen vector,
+revalidation/cost_uncertainty.csv its archive candidates' costs on its 30 validation blocks, with
+revalidation/firefly_best.txt's rows numbered by the same candidate, and bound.txt its bounds.
+
+Decision of 2026-11-26: pilot 2's runner-up (--competitor) runs on the same five pairs of
+optimisation and validation streams, and each run's best validation mean is compared with its
+pair's: comparison.csv, and a paired t interval over the five differences in summary.json.
+
+Usage (repository root):
+    covsyn-task10-summary OUT_DIR --main I --runs RUN_DIR x5 [--competitor RUN_DIR x5]
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import shutil
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from covsyn.calibration import parameter_uncertainty as pu
+from covsyn.calibration.monitoring import EVENT as STOP_EVENT
+from covsyn.runtime import runs as rt
+
+COST_TABLE = Path("revalidation") / "cost_uncertainty.csv"
+CANDIDATES = Path("revalidation") / "firefly_best.txt"
+SELECTED = Path("selected") / "firefly_best.txt"
+
+
+def _vectors(path: Path) -> np.ndarray:
+    """A firefly_best.txt's rows (number, params..., cost) as their params, one per row."""
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: missing")
+    rows = np.loadtxt(path, ndmin=2)
+    if rows.shape[1] < 3:
+        raise ValueError(f"{path}: not a firefly_best.txt (number, params..., cost)")
+    return rows
+
+
+def selected_vector(run: Path) -> np.ndarray:
+    """The run's chosen vector: selected/firefly_best.txt's first row."""
+    return _vectors(Path(run) / SELECTED)[0, 1:-1]
+
+
+def bounds(run: Path) -> tuple[np.ndarray, np.ndarray]:
+    """bound.txt's lower and upper rows."""
+    path = Path(run) / "bound.txt"
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: missing")
+    rows = np.loadtxt(path, ndmin=2)
+    if len(rows) != 2:
+        raise ValueError(f"{path}: {len(rows)} rows, not a lower and an upper")
+    return rows[0], rows[1]
+
+
+def _true(text: str) -> bool:
+    if text not in ("True", "False"):
+        raise ValueError(f"not True or False: {text!r}")
+    return text == "True"
+
+
+def cost_rows(run: Path) -> list[dict[str, Any]]:
+    """cost_uncertainty.csv's rows, typed; exactly one is the best.
+
+    Raises:
+        ValueError: No candidates, or not exactly one best.
+    """
+    path = Path(run) / COST_TABLE
+    if not path.is_file():
+        raise FileNotFoundError(f"{path}: missing")
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = [{"candidate": int(r["candidate"]), "mean": float(r["mean"]), "se": float(r["se"]),
+                 "indistinguishable": _true(r["indistinguishable"]), "best": _true(r["best"])}
+                for r in csv.DictReader(f)]  # fmt: skip
+    if not rows:
+        raise ValueError(f"{path}: no candidates")
+    if sum(r["best"] for r in rows) != 1:
+        raise ValueError(f"{path}: {sum(r['best'] for r in rows)} rows marked best, not one")
+    return rows
+
+
+def best_row(run: Path) -> dict[str, Any]:
+    """The cost table's best candidate."""
+    return next(r for r in cost_rows(run) if r["best"])
+
+
+def indistinguishable_set(run: Path) -> np.ndarray:
+    """The vectors of the candidates that cannot be told apart from the best, the best too.
+
+    By candidate number, the row number of revalidation/firefly_best.txt.
+
+    Raises:
+        ValueError: A candidate number firefly_best.txt does not hold.
+    """
+    rows = _vectors(Path(run) / CANDIDATES)
+    by_number = {int(number): i for i, number in enumerate(rows[:, 0])}
+    chosen = []
+    for row in cost_rows(run):
+        if row["indistinguishable"] or row["best"]:
+            if row["candidate"] not in by_number:
+                raise ValueError(f"{run}: candidate {row['candidate']} is not in {CANDIDATES}")
+            chosen.append(rows[by_number[row["candidate"]], 1:-1])
+    return np.array(chosen)
+
+
+def run_record(run: Path) -> dict[str, Any]:
+    """What summary.json keeps of a run: its best cost, set size, stop and stage times."""
+    best = best_row(run)
+    lines = rt.json_lines(Path(run) / "run.log")
+    stops = [line.get("reason") for line in lines if line.get("event") == STOP_EVENT]
+    return {
+        "run_id": Path(run).name,
+        "best_candidate": best["candidate"],
+        "best_mean": best["mean"],
+        "best_se": best["se"],
+        "set_size": sum(r["indistinguishable"] or r["best"] for r in cost_rows(run)),
+        "stop_reason": stops[-1] if stops else None,
+        "stage_seconds": {line["stage"]: line.get("seconds") for line in lines if "stage" in line},
+    }
+
+
+def _check_runs(runs: list[Path], what: str) -> None:
+    if len(runs) != pu.RUNS:
+        raise ValueError(f"{what}: {pu.RUNS} runs are needed, not {len(runs)}")
+    if len({Path(r).resolve() for r in runs}) != len(runs):
+        raise ValueError(f"{what}: a run is given twice")
+
+
+def compare(production: list[Path], competitor: list[Path]) -> tuple[list[dict], dict]:
+    """Each pair's best validation means, and a paired t interval over the differences.
+
+    difference = competitor - production, so a positive one favours production.
+    """
+    from scipy import stats
+
+    rows = []
+    for i, (a, b) in enumerate(zip(production, competitor, strict=True), start=1):
+        cost_a, cost_b = best_row(a)["mean"], best_row(b)["mean"]
+        rows.append({"pair": i, "production_run": Path(a).name, "competitor_run": Path(b).name,
+                     "production_best_mean": cost_a, "competitor_best_mean": cost_b,
+                     "difference": cost_b - cost_a})  # fmt: skip
+    d = np.array([r["difference"] for r in rows])
+    half = float(stats.t.ppf(0.975, len(d) - 1) * d.std(ddof=1) / np.sqrt(len(d)))
+    mean = float(d.mean())
+    return rows, {
+        "production_mean": float(np.mean([r["production_best_mean"] for r in rows])),
+        "competitor_mean": float(np.mean([r["competitor_best_mean"] for r in rows])),
+        "mean_difference": mean, "ci_low": mean - half, "ci_high": mean + half,
+        "production_lower_in": int((d > 0).sum()),
+    }  # fmt: skip
+
+
+def _write(path: Path, rows: list[dict]) -> None:
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def summarise(
+    runs: list[Path], main: int, out: Path, competitor: list[Path] | None = None
+) -> dict[str, Any]:
+    """Write parameter_uncertainty.csv, the cost tables, summary.json and comparison.csv.
+
+    Args:
+        runs: The five production run directories, in stream order.
+        main: The main run, 1 to 5, named before the runs started.
+        out: The directory to write; it must not hold files yet.
+        competitor: The runner-up's five runs, pair by pair with ``runs``.
+
+    Raises:
+        ValueError: Not five runs, a run twice, main outside 1-5, bounds that differ, or a
+            malformed file (see cost_rows, indistinguishable_set).
+        FileNotFoundError: A run's file is missing; the message names it.
+        FileExistsError: ``out`` holds files.
+    """
+    runs = [Path(r) for r in runs]
+    _check_runs(runs, "production")
+    if competitor is not None:
+        competitor = [Path(r) for r in competitor]
+        _check_runs(competitor, "competitor")
+    if not 1 <= main <= pu.RUNS:
+        raise ValueError(f"the main run must be 1 to {pu.RUNS}, not {main}")
+    lower, upper = bounds(runs[0])
+    for run in runs[1:]:
+        other = bounds(run)
+        if not (np.array_equal(other[0], lower) and np.array_equal(other[1], upper)):
+            raise ValueError(f"{run} has other bounds than {runs[0]}")
+    selected = np.array([selected_vector(r) for r in runs])
+    table = pu.parameter_table(selected, lower, upper, indistinguishable_set(runs[main - 1]))
+    records = [run_record(r) for r in runs]
+    comparison = None
+    if competitor is not None:
+        comparison = (*compare(runs, competitor), [run_record(r) for r in competitor])
+    out = Path(out)
+    if out.exists() and any(out.iterdir()):
+        raise FileExistsError(f"{out} holds files; give a new directory")
+    out.mkdir(parents=True, exist_ok=True)
+    pu.write_table(out / "parameter_uncertainty.csv", table)
+    shutil.copyfile(runs[main - 1] / COST_TABLE, out / "cost_uncertainty.csv")
+    for i, run in enumerate(runs, start=1):
+        shutil.copyfile(run / COST_TABLE, out / f"cost_uncertainty_run{i}.csv")
+    summary: dict[str, Any] = {
+        "main": main, "runs": records,
+        "not_identified": sum(bool(row["not_identified"]) for row in table),
+        "fixed": sum(bool(row["fixed"]) for row in table), "parameters": len(table),
+    }  # fmt: skip
+    if comparison is not None:
+        rows, summary["comparison"], summary["competitor_runs"] = comparison
+        _write(out / "comparison.csv", rows)
+    (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
+    return summary
+
+
+def main(argv: list[str] | None = None) -> None:
+    """``covsyn-task10-summary``: summarise the five production runs."""
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("out", type=Path, help="a new directory, such as results/tables/<id>")
+    parser.add_argument("--main", type=int, required=True, help="the main run, 1 to 5")
+    parser.add_argument(
+        "--runs",
+        type=Path,
+        nargs="+",
+        required=True,
+        help="the five production run directories, in stream order",
+    )
+    parser.add_argument(
+        "--competitor",
+        type=Path,
+        nargs="+",
+        help="the runner-up's five runs, on the same streams in the same order",
+    )
+    args = parser.parse_args(argv)
+    try:
+        summary = summarise(args.runs, args.main, args.out, args.competitor)
+    except (ValueError, OSError) as error:
+        raise SystemExit(f"covsyn-task10-summary: {error}") from None
+    print(
+        f"{summary['parameters']} parameters, {summary['not_identified']} not identified; "
+        f"wrote {args.out}"
+    )
+    if "comparison" in summary:
+        c = summary["comparison"]
+        print(
+            f"competitor - production: {c['mean_difference']:.3f} "
+            f"[{c['ci_low']:.3f}, {c['ci_high']:.3f}], production lower in "
+            f"{c['production_lower_in']} of {pu.RUNS}"
+        )
+
+
+if __name__ == "__main__":
+    main()
