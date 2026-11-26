@@ -804,6 +804,30 @@ def test_an_interrupted_claim_keeps_a_parent_created_by_another_summary(tmp_path
     assert not out.exists()
 
 
+def test_a_shared_parent_removed_during_creation_is_recreated(tmp_path, monkeypatch):
+    """An empty shared parent may be removed as a different summary cleans up."""
+    runs = _five(tmp_path)
+    shared = tmp_path / "shared"
+    nested = shared / "nested"
+    out = nested / "out"
+    shared.mkdir()
+    mkdir = ts.Path.mkdir
+    removed = False
+
+    def remove_shared_once(self, *args, **kwargs):
+        nonlocal removed
+        if self == nested and not removed:
+            shared.rmdir()
+            removed = True
+        return mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", remove_shared_once)
+    ts.summarise(runs, main=1, out=out)
+
+    assert removed
+    assert (out / "summary.json").is_file()
+
+
 def test_a_parent_that_is_a_file_is_named(tmp_path):
     """Not a bare 'File exists' that reads as if out existed."""
     (tmp_path / "tables").write_text("")

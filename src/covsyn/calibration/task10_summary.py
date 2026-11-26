@@ -375,6 +375,20 @@ def _write(path: Path, rows: list[dict]) -> None:
 STAGING = ".partial"
 
 
+def _make_output_parents(out: Path, made: list[Path]) -> None:
+    """Create missing parents and record only successful claims for cleanup."""
+    for level in reversed(out.parents):
+        if level.is_dir():
+            continue
+        try:
+            level.mkdir()
+        except FileExistsError:
+            if not level.is_dir():
+                raise
+        else:
+            made.append(level)
+
+
 def _remove(out: Path, staging: Path, moved: list[Path]) -> bool:
     """Remove a failed summary's out, the staging directory, the incomplete mark, last.
 
@@ -463,16 +477,10 @@ def summarise(
     claimed = False
     files_in_place = False
     try:
-        for level in reversed(out.parents):
-            if level.is_dir():
-                continue
-            try:
-                level.mkdir()
-            except FileExistsError:
-                if not level.is_dir():
-                    raise
-            else:
-                made.append(level)
+        try:
+            _make_output_parents(out, made)
+        except FileNotFoundError:  # a concurrent cleanup may have removed an empty ancestor
+            _make_output_parents(out, made)
         try:
             out.mkdir()
         except FileExistsError:
