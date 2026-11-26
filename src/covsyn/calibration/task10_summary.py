@@ -381,12 +381,16 @@ def _refuse_existing(out: Path) -> None:
     Raises:
         FileExistsError: Always.
     """
-    if (out / STAGING).exists():
+    try:
+        entries = [p.name for p in out.iterdir()] if out.is_dir() else None
+    except OSError:  # not readable: refused as existing all the same
+        entries = None
+    if entries is not None and STAGING in entries:
         raise FileExistsError(
             f"{out} is incomplete: it holds {STAGING}, left by a summary that "
             f"was killed while writing; delete {out} and run again"
         )
-    if out.is_dir() and not any(out.iterdir()):  # a summary killed between the two mkdirs
+    if entries == []:  # a summary killed between the two mkdirs
         raise FileExistsError(
             f"{out} exists and is empty, perhaps left by a summary that was "
             f"killed as it started; delete it or give a new directory"

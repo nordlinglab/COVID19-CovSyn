@@ -723,6 +723,18 @@ def test_an_interrupt_before_staging_leaves_no_output(tmp_path, monkeypatch):
     assert not out.exists()
 
 
+def test_an_unreadable_existing_output_is_refused_as_existing(tmp_path):
+    """No read permission: still the refusal that says it exists, not a PermissionError."""
+    out = tmp_path / "out"
+    out.mkdir()
+    out.chmod(0o311)
+    try:
+        with pytest.raises(FileExistsError, match="exists; give a new directory"):
+            ts.summarise(_five(tmp_path), main=1, out=out)
+    finally:
+        out.chmod(0o755)
+
+
 def test_an_empty_existing_output_says_a_killed_summary_may_have_left_it(tmp_path):
     """Refused all the same; a SIGKILL between the two mkdirs leaves out empty."""
     out = tmp_path / "out"
