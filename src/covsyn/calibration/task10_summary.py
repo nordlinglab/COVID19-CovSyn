@@ -453,12 +453,21 @@ def summarise(
     for level in out.parents:
         if level.exists() and not level.is_dir():
             raise FileExistsError(f"{level}, above {out}, is not a directory")
-    made = [level for level in out.parents if not level.exists()]  # deepest first
+    made: list[Path] = []
     staging = out / STAGING  # files move up only once all are written
     moved: list[Path] = []
     claimed = False
     try:
-        out.parent.mkdir(parents=True, exist_ok=True)
+        for level in reversed(out.parents):
+            if level.is_dir():
+                continue
+            try:
+                level.mkdir()
+            except FileExistsError:
+                if not level.is_dir():
+                    raise
+            else:
+                made.append(level)
         try:
             out.mkdir()
         except FileExistsError:  # after the check above: likely writing it now, not killed
@@ -484,9 +493,8 @@ def summarise(
         # .partial goes only once every file is in place: then the output stands.
         if claimed and not (moved and not staging.exists()) and _remove(out, staging, moved):
             error.add_note(f"{out} is left incomplete")
-        # The parents made for out, if empty; another summary into a sibling that made one its
-        # parent at the same moment may then fail to make its own out, a race left as it is.
-        for level in made:
+        # Only remove empty parents that this invocation created.
+        for level in reversed(made):
             with contextlib.suppress(OSError):
                 level.rmdir()
         raise

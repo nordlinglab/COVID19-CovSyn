@@ -776,6 +776,27 @@ def test_an_interrupt_making_the_output_removes_its_new_parents(tmp_path, monkey
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
+def test_an_interrupted_claim_keeps_a_parent_created_by_another_summary(tmp_path, monkeypatch):
+    """A concurrent summary's empty output can serve as this summary's parent."""
+    parent = tmp_path / "new"
+    out = parent / "sub"
+    mkdir = ts.Path.mkdir
+
+    def competing_claim(self, *args, **kwargs):
+        if self == parent:
+            mkdir(parent)
+        if self == out:
+            raise KeyboardInterrupt
+        return mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "mkdir", competing_claim)
+    with pytest.raises(KeyboardInterrupt):
+        ts.summarise(_five(tmp_path), main=1, out=out)
+
+    assert parent.is_dir()
+    assert not out.exists()
+
+
 def test_a_parent_that_is_a_file_is_named(tmp_path):
     """Not a bare 'File exists' that reads as if out existed."""
     (tmp_path / "tables").write_text("")
