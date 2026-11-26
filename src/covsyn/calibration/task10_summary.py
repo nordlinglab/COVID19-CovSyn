@@ -476,8 +476,10 @@ def summarise(
         out.parent.mkdir(parents=True, exist_ok=True)
         try:
             out.mkdir()
-        except FileExistsError:  # another summary made it after the check above
-            _refuse_existing(out)
+        except FileExistsError:  # after the check above: likely writing it now, not killed
+            raise FileExistsError(
+                f"{out} exists: another summary made it as this one started; give a new directory"
+            ) from None
         claimed = True
         staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)

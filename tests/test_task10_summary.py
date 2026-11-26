@@ -627,7 +627,7 @@ def test_an_output_another_summary_creates_first_is_refused(tmp_path, monkeypatc
         return real(self, *args, **kwargs)
 
     monkeypatch.setattr(ts.Path, "mkdir", raced)
-    with pytest.raises(FileExistsError, match="exists"):
+    with pytest.raises(FileExistsError, match="another summary made it"):
         ts.summarise(runs, main=1, out=out)
     assert list(out.iterdir()) == []  # the other summary's, untouched
 
