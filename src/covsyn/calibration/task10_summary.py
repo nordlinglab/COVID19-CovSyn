@@ -499,7 +499,9 @@ def summarise(
         if claimed:
             try:
                 # Once .partial is gone, preserve the completed summary.
-                if not (files_in_place and not staging.exists()) and _remove(out, staging, moved):
+                if files_in_place and not staging.exists():
+                    error.add_note(f"Completed summary at {out}")
+                elif _remove(out, staging, moved):
                     error.add_note(f"{out} is left incomplete")
             except OSError as cleanup_error:
                 error.add_note(f"Could not verify or clean up {out}: {cleanup_error}")

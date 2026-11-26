@@ -840,8 +840,9 @@ def test_an_interrupt_after_the_staging_goes_keeps_the_finished_output(tmp_path,
             raise KeyboardInterrupt
 
     monkeypatch.setattr(ts.Path, "rmdir", interrupted)
-    with pytest.raises(KeyboardInterrupt):
-        ts.summarise(runs, main=1, out=out)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        ts.main([str(out), "--main", "1", "--runs", *map(str, runs)])
+    assert f"Completed summary at {out}" in getattr(raised.value, "__notes__", [])
     assert (out / "summary.json").exists() and not (out / ts.STAGING).exists()
 
 
