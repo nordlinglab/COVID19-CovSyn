@@ -699,6 +699,22 @@ def test_a_summary_finished_before_the_claim_is_not_overwritten(tmp_path, monkey
     assert not (out / ts.LOCK).exists()
 
 
+def test_a_failure_to_release_the_lock_keeps_the_finished_summary(tmp_path, monkeypatch):
+    """Every file is in place by then; the summary stands, and the lock says so."""
+    runs = _five(tmp_path)
+    out = tmp_path / "out"
+    real = ts.Path.unlink
+
+    def refuse_lock(self, *args, **kwargs):
+        if self.name == ts.LOCK:
+            raise OSError(16, "Device or resource busy")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(ts.Path, "unlink", refuse_lock)
+    ts.summarise(runs, main=1, out=out)
+    assert (out / "summary.json").exists() and (out / "parameter_uncertainty.csv").exists()
+
+
 def test_a_failure_removes_only_what_this_attempt_wrote(tmp_path, monkeypatch):
     """A file another writer put in out while this one failed stays."""
     runs = _five(tmp_path)

@@ -472,7 +472,6 @@ def summarise(
             path.rename(out / path.name)
             moved.append(out / path.name)
         staging.rmdir()
-        (out / LOCK).unlink()
     except BaseException:
         # Only what this attempt wrote; a cleanup that fails must not hide the cause.
         if claimed:
@@ -484,6 +483,9 @@ def summarise(
             with contextlib.suppress(OSError):  # not empty: another writer's files stay
                 out.rmdir()
         raise
+    # After the try: every file is in place, so a lock that will not go keeps the summary.
+    with contextlib.suppress(OSError):
+        (out / LOCK).unlink()
     return summary
 
 
