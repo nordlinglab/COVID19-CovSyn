@@ -29,7 +29,7 @@ Every command below runs from the repository root, because the modules read thei
 | Path | Contents |
 |---|---|
 | `src/covsyn/model/` | The simulation: `data_synthesize.py` (demographics, social contexts, course of disease, contacts), `data_synthesis_main.py` (one simulation and the Monte Carlo driver), `r0_network.py`, `contact_measures.py`, `school_calendar.py`, `work_calendar.py` |
-| `src/covsyn/calibration/` | Fitting: `firefly_optimizer.py` (optimizer and reference objective), `fast_cost.py` (the objective the optimizer runs), `cost_parts.py`, `sar_anchors.py` (attack-rate anchors), `target_margins.py`, `apply_phase_d_parameters.py` (search bounds and seed vector), `rebuild_school_pmf.py`; `parameter_space.py`, `initial_population.py` and `seed_streams.py` (Task 7), `step_schedule.py` (Task 8), `run_size.py`, `monitoring.py`, `block_scoring.py`, `pilot_noise.py` and `pilot_size.py` (Task 9), `revalidation.py`, `select_by_checklist.py` and `parameter_uncertainty.py` (Task 10; no command calls the last yet) |
+| `src/covsyn/calibration/` | Fitting: `firefly_optimizer.py` (optimizer and reference objective), `fast_cost.py` (the objective the optimizer runs), `cost_parts.py`, `sar_anchors.py` (attack-rate anchors), `target_margins.py`, `apply_phase_d_parameters.py` (search bounds and seed vector), `rebuild_school_pmf.py`; `parameter_space.py`, `initial_population.py` and `seed_streams.py` (Task 7), `step_schedule.py` (Task 8), `run_size.py`, `monitoring.py`, `block_scoring.py`, `pilot_noise.py` and `pilot_size.py` (Task 9), `revalidation.py`, `select_by_checklist.py` and `parameter_uncertainty.py` and `task10_summary.py` (Task 10) |
 | `src/covsyn/data_processing/` | Model inputs and validation references: `rw_data_processing.py`, `taiwan_reference.py`, the `extract_*.py` scripts that build `validation_reference/` |
 | `src/covsyn/validation/` | Acceptance checklist and run reports: `verify_phase_d.py`, `acceptance.py`, `check_constraints.py` (per-case constraint table), `measure_age_rr.py`, `measure_days.py`, `rr_exact.py`, `tw_check.py`, `show_final.py`, `show_bounds.py`, `check_gap.py`, `compare_phase_d_runs.py`, `city_effect.py`, `compare_first_wave.py` |
 | `src/covsyn/figures/` | Validation figures, including `plot_todolist923.py` |
@@ -138,12 +138,27 @@ The production run, `--mode production` or `mode = "production"` in `[optimise]`
 It starts from the initial population without the warm starts, the fitted vectors of earlier runs, so its result is the calibration's own, and records this in its `config.json`;
 `pop_size` is therefore at most the rows left, 254 in version 1: the optimiser refuses a larger one before any simulation, and the pipeline then suggests no resume;
 a production run begun with the warm starts is not resumed.
-It scores each new elite vector on blocks 0 to 4 of monitoring stream 100, and stops when the best monitored vector has improved by no more than one paired standard error over 5 generations, or at G_max = 1,000 generations;
+It scores each new elite vector on blocks 0 to 4 of monitoring stream 100, and from generation G_plan − 1 on, once its step schedule has run whole, stops when the best monitored vector has improved by no more than one paired standard error over 5 generations, or at G_max = 1,000 generations (decision of 2026-11-26: the rule alone stopped production run 1 at generation 9 of 415, when its best had stayed one vector for 5 generations);
 the reason goes into `run.log`, and the monitoring's cost into `monitoring.json` beside `progress.csv`.
 Its revalidation re-scores the archive's 10 best distinct vectors, by ascending mean, at its S on 30 blocks of its validation stream (Task 10), and refuses another number of blocks.
 The best is the lowest mean;
 `cost_uncertainty.csv` gives each candidate's mean ± SE and its paired difference to the best with a 95% t interval on 29 degrees of freedom, exploratory since the best is chosen on the same blocks, and marks the candidates whose interval includes 0 as indistinguishable from the best.
 The selection uses the same scores.
+
+Task 10 runs production five times, on optimisation streams 5 to 9 with validation streams 203 to 207, and summarises them once they finish:
+
+```bash
+uv run covsyn-task10-summary results/tables/<new id> --main 1 \
+    --runs results/models/<run 1> ... results/models/<run 5> \
+    --competitor results/models/<runner-up 1> ... results/models/<runner-up 5>
+```
+
+The output directory must be new (decision of 2026-11-26).
+If it already exists, specify a new directory.
+It writes `parameter_uncertainty.csv` over the five selected vectors, with the range of the main run's indistinguishable candidates, the main run's `cost_uncertainty.csv` and every run's as `cost_uncertainty_run<i>.csv`, and `summary.json`.
+It reads the vectors at full precision from each run's `firefly_archive.txt` and `selected/selection.csv`, and refuses runs at another S or on other bounds, sharing a stream, of two configurations in one list, differing in `pilot`, `revalidation_blocks` or `select_top`, whose n, α_0, α_end or G_plan is not pilot 2's `results/tables/<pilot>/choice.json` (read beside `results/models/`, so it must be there wherever the summary runs), or whose `config.json` does not record `stop_rule = "after_g_plan"`, that is, begun before the commit that records it (including runs of the current rule begun from the commit before).
+`--competitor` takes pilot 2's runner-up, run on the same five stream pairs in the same order;
+`comparison.csv` then gives each pair's best validation means and their difference, and `summary.json` a paired t interval over the five differences (decision of 2026-11-26).
 
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.
 The pipeline warns as soon as available memory falls below 10% of the total.

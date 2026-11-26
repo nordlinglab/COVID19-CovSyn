@@ -20,7 +20,7 @@ import pytest
 
 from covsyn.calibration import firefly_optimizer as fo
 from covsyn.calibration import initial_population as ip
-from covsyn.calibration import parameter_space
+from covsyn.calibration import monitoring, parameter_space
 from tests.test_task7_optimiser import POPULATION, started  # noqa: F401 (a fixture)
 
 PILOT = ("--mode", "pilot", "--pop-size", "24", "--generations", "415", "--simulations", "3000",
@@ -119,15 +119,20 @@ def test_production_always_starts_without_the_warm_starts(started):  # noqa: F81
     assert seen["engine"].run_settings["initial_population"]["without_warm_starts"] is True
 
 
-def _production_run(path, population):
-    """A production run's directory with a checkpoint, its config.json naming its population."""
+def _production_run(path, population, **settings):
+    """A production run's directory with a checkpoint, its config.json naming its population.
+
+    settings: more of config.json's settings; by default the stopping rule of 2026-11-26.
+    """
     import json
 
     from tests.test_task4_resume import RESUMABLE
 
     recorded = {"mode": "production", "pop_size": 4, "max_generations": 1000, "simulations": 300,
                 "pilot": "20261201-000000_abcdef0_pilot-size", **RESUMABLE,
-                "initial_population": population}  # fmt: skip
+                "initial_population": population,
+                "stop_rule": monitoring.STOP_RULE, **settings}  # fmt: skip
+    recorded = {key: value for key, value in recorded.items() if value is not None}
     (path / "config.json").write_text(json.dumps({"rng_seed": 1, "settings": recorded}))
     (path / "checkpoints").mkdir()
     (path / "checkpoints" / "initial.npz").write_text("x")

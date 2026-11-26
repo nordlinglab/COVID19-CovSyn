@@ -1828,7 +1828,7 @@ class Firefly:
                 elite = next_elite
                 if self.monitor:  # Task 9: score the new members, then apply the rule
                     watch.score(executor, function, fireflies[next_elite], self.simulations)
-                    watch.judge(generation, max_generations)
+                    watch.judge(generation, max_generations, g_plan)
                 row = {'generation': generation, 'seed_offset': offset,
                        'best_cost': float(np.min(intensities))}
                 row.update(cost_parts[best_idx])
@@ -2296,6 +2296,11 @@ def main() -> None:
             if not (isinstance(population, dict) and population.get('without_warm_starts') is True):
                 not_resumable(f'{args.resume} cannot be resumed: it began with the warm starts, '
                               f'which production no longer uses; start a new run')
+            # Its checkpoints keep the stop the rule it began with reached (2026-11-26).
+            if recorded.get('stop_rule') != monitoring.STOP_RULE:
+                not_resumable(f'{args.resume} cannot be resumed: it began with another stopping '
+                              f'rule ({recorded.get("stop_rule")!r}, not '
+                              f'{monitoring.STOP_RULE!r}); start a new run')
     elif args.simulations is not None:
         sys.exit('--simulations changes the objective, so it is for --mode profile, pilot or '
                  'production only')
@@ -2327,6 +2332,7 @@ def main() -> None:
     fa.run_settings = {'mode': mode}
     if mode == 'production':  # Task 9: traced to pilot 2's choice, and stopped by its rule
         fa.run_settings['pilot'] = args.pilot
+        fa.run_settings['stop_rule'] = monitoring.STOP_RULE
         fa.monitor = True
     fa.simulations = simulations
     fa.stage_timing = args.stage_timings

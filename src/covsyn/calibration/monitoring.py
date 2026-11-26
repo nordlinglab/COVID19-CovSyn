@@ -11,9 +11,10 @@ Decisions of 2026-11-21: blocks 0-4 of stream 100 at the run's S. After each gen
 best monitored vector so far, the lowest five-block mean (a tie to the one scored first), is
 recorded; at generation g >= 5 the run stops when, with d_b the cost on block b of generation
 g - 5's best minus that of generation g's, mean(d) <= SD(d) / sqrt(5). When the best is the
-same vector, d is 0 and the run stops. The fixed blocks pick the best and judge its progress
-alike, so this is an operating rule, not a test. The scores drive the stop only: the elite and
-the archive keep the optimisation stream's costs.
+same vector, d is 0 and the run stops. Decision of 2026-11-26: the rule applies only from
+generation G_plan - 1 on, once the step schedule has run whole (Watch.judge). The fixed blocks
+pick the best and judge its progress alike, so this is an operating rule, not a test. The
+scores drive the stop only: the elite and the archive keep the optimisation stream's costs.
 """
 
 from __future__ import annotations
@@ -33,6 +34,10 @@ BLOCKS = range(0, 5)
 WINDOW = 5  # generations between the snapshots compared
 SUMMARY_FILE = "monitoring.json"  # in results/tables/<run-id>/, beside progress.csv
 EVENT = "optimiser_stopped"  # the run.log event; no "stage" key, so not a finished stage
+# config.json's name for the rule a production run stops by (decision of 2026-11-26): a run
+# whose config.json lacks it is not resumed, whatever rule it ran by: it was begun before this
+# was recorded, such as the run 1 that stopped at generation 9.
+STOP_RULE = "after_g_plan"
 
 
 def offsets(simulations: int) -> list[int]:
@@ -136,10 +141,16 @@ class Watch:
             self.evaluations += len(tasks)
         self.seconds += time.perf_counter() - started
 
-    def judge(self, generation: int, max_generations: int) -> None:
-        """Record the generation's best, and the reason to stop, if any."""
+    def judge(self, generation: int, max_generations: int, g_plan: int) -> None:
+        """Record the generation's best, and the reason to stop, if any.
+
+        The rule applies from generation G_plan - 1 on, so the step schedule runs whole
+        (decision of 2026-11-26): pilot 2 chose n and alpha_0 at a budget of G_plan
+        generations, and the rule alone stopped production run 1 at generation 9 of 415,
+        when its best had stayed one vector for 5 generations.
+        """
         self.monitor.record_generation()
-        reason = self.monitor.stop_reason()
+        reason = self.monitor.stop_reason() if generation >= g_plan - 1 else None
         if reason is None and generation == max_generations - 1:
             reason = f'reached G_max = {max_generations} generations'
         self.reason = reason or ''

@@ -21,6 +21,7 @@ Each runs as `uv run <command>` from the repository root, as `pyproject.toml` `[
 | `covsyn-initial-population` | `calibration/initial_population.py` | Build the fixed 256-row initial population (Task 7) |
 | `covsyn-pilot-noise` | `calibration/pilot_noise.py` | Pilot 1: the objective's noise against S (Task 9) |
 | `covsyn-pilot-size` | `calibration/pilot_size.py` | Pilot 2: population and step size at pilot 1's S (Task 9) |
+| `covsyn-task10-summary` | `calibration/task10_summary.py` | Summarise the five production runs: `parameter_uncertainty.csv`, the cost tables, and the runner-up's comparison (Task 10) |
 | `covsyn-cores` | `runtime/hardware.py` | Print the performance cores and the worker count (Task 2) |
 | `covsyn-data-synthesis` | `model/data_synthesis_main.py` | Synthesise data from a parameter vector |
 | `covsyn-verify-phase-d` | `validation/verify_phase_d.py` | The acceptance checklist (B14, B17–B36) |
@@ -43,7 +44,7 @@ A module without an entry point runs as `uv run python -m covsyn.<package>.<modu
 | `calibration/`, objective | `fast_cost.py` (the objective the optimiser runs), `cost_parts.py`, `sar_anchors.py`, `target_margins.py` (B60) |
 | `calibration/`, search | `firefly_optimizer.py`, `parameter_space.py` (bounds and literature vector, Task 7), `initial_population.py` (Task 7), `seed_streams.py` (Task 7), `step_schedule.py` (Task 8) |
 | `calibration/`, run size and stopping | `run_size.py` (n, G, S, Task 9), `monitoring.py` (production stopping rule, Task 9), `block_scoring.py` (resumable block scores, Task 9), `pilot_noise.py`, `pilot_size.py` |
-| `calibration/`, after the run | `revalidation.py` (E87; cost uncertainty, Task 10), `select_by_checklist.py`, `parameter_uncertainty.py` (spread across the five production runs, Task 10; no command calls it yet) |
+| `calibration/`, after the run | `revalidation.py` (E87; cost uncertainty, Task 10), `select_by_checklist.py`, `parameter_uncertainty.py` (spread across the five production runs, Task 10), `task10_summary.py` (their summary) |
 | `calibration/`, parameter setup | `apply_phase_d_parameters.py`, `rebuild_school_pmf.py` (E39) |
 | `pipeline/` | `config.py` (TOML settings), `stages.py`, `runner.py`, `default.toml` (Task 4) |
 | `runtime/` | `hardware.py` (Task 2), `runs.py` (run names and directories, Task 3), `measure.py`, `memory.py`, `profiling.py`, `timings.py` (Task 5) |
