@@ -245,6 +245,26 @@ def test_the_summary_records_each_run(tmp_path):
     )
 
 
+def test_a_stage_resumed_from_a_checkpoint_is_marked_partial(tmp_path):
+    """A resumed stage's seconds understate it, so the summary says which they are.
+
+    The pipeline writes a stage's line once it finishes, and a resumed stage times only its last
+    attempt (partial in run.log).
+    """
+    runs = _five(tmp_path)
+    log = runs[0] / "run.log"
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    for line in lines:
+        if line.get("stage") == "optimise":
+            line["partial"] = True
+    log.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    out = tmp_path / "out"
+    ts.summarise(runs, main=1, out=out)
+    records = json.loads((out / "summary.json").read_text())["runs"]
+    assert records[0]["partial_stages"] == ["optimise"]
+    assert records[1]["partial_stages"] == []
+
+
 def test_a_run_without_the_optimiser_s_stop_is_refused(tmp_path):
     """Every production run records why it stopped; without it run.log is not the run's."""
     runs = _five(tmp_path)

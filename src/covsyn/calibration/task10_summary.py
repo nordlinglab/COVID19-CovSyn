@@ -164,6 +164,10 @@ def indistinguishable_set(run: Path) -> np.ndarray:
 def run_record(run: Path) -> dict[str, Any]:
     """What summary.json keeps of a run: its best cost, set size, stop and stage times.
 
+    run.log holds a stage's line once it finishes; a stage resumed from a checkpoint times only
+    its last attempt and is marked partial, so partial_stages lists the times that understate
+    their stage.
+
     Raises:
         ValueError: run.log records no stop of the optimiser, which every production run has.
     """
@@ -180,6 +184,9 @@ def run_record(run: Path) -> dict[str, Any]:
         "set_size": sum(r["indistinguishable"] or r["best"] for r in cost_rows(run)),
         "stop_reason": stops[-1],
         "stage_seconds": {line["stage"]: line.get("seconds") for line in lines if "stage" in line},
+        "partial_stages": [
+            line["stage"] for line in lines if "stage" in line and line.get("partial")
+        ],
     }
 
 
