@@ -33,7 +33,6 @@ import csv
 import json
 import os
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -404,18 +403,15 @@ def summarise(
         "not_identified": sum(bool(row["not_identified"]) for row in table),
         "fixed": sum(bool(row["fixed"]) for row in table), "parameters": len(table),
     }  # fmt: skip
-    # Written beside it and renamed whole, so a failure part-way leaves nothing behind.
-    out.parent.mkdir(parents=True, exist_ok=True)
-    # mkdtemp makes it 0700; the summary takes an empty out's mode, else the umask's.
-    if out.exists():
-        mode = out.stat().st_mode & 0o777
-    else:
-        umask = os.umask(0)
-        os.umask(umask)
-        mode = 0o777 & ~umask
-    staging = Path(tempfile.mkdtemp(prefix=f".{out.name}.", dir=out.parent))
+    # Staged inside out and moved up file by file, so a failure part-way leaves out as it was;
+    # inside, so out may be a link or in a read-only parent, and keeps its mode, or the umask's.
+    created = not out.exists()
+    if created:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.mkdir()
+    staging = out / f".partial-{os.getpid()}"
     try:
-        staging.chmod(mode)
+        staging.mkdir()
         pu.write_table(staging / "parameter_uncertainty.csv", table)
         shutil.copyfile(runs[main - 1] / COST_TABLE, staging / "cost_uncertainty.csv")
         for i, run in enumerate(runs, start=1):
@@ -425,11 +421,17 @@ def summarise(
             _write(staging / "comparison.csv", rows)
         text = json.dumps(summary, indent=1) + "\n"
         (staging / "summary.json").write_text(text, encoding="utf-8")
-        if out.exists():
-            out.rmdir()  # empty, checked above
-        staging.rename(out)
+        for path in sorted(staging.iterdir()):
+            path.rename(out / path.name)
+        staging.rmdir()
     except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
+        for path in out.iterdir():  # only this attempt wrote here: out was empty
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        if created:
+            out.rmdir()
         raise
     return summary
 

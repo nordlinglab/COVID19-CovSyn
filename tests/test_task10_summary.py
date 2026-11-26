@@ -610,6 +610,31 @@ def test_an_empty_output_directory_keeps_its_mode(tmp_path):
     assert out.stat().st_mode & 0o777 == 0o750
 
 
+def test_an_empty_output_directory_behind_a_link_is_used(tmp_path):
+    """The project follows links: out may be one to an empty directory elsewhere."""
+    runs = _five(tmp_path)
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    out = tmp_path / "out"
+    out.symlink_to(target)
+    ts.summarise(runs, main=1, out=out)
+    assert out.is_symlink() and (target / "summary.json").exists()
+
+
+def test_an_empty_output_directory_in_a_read_only_parent_is_used(tmp_path):
+    """Only out itself need be writable."""
+    runs = _five(tmp_path)
+    parent = tmp_path / "tables"
+    out = parent / "out"
+    out.mkdir(parents=True)
+    parent.chmod(0o555)
+    try:
+        ts.summarise(runs, main=1, out=out)
+    finally:
+        parent.chmod(0o755)
+    assert (out / "summary.json").exists()
+
+
 def test_the_command_writes_the_summary(tmp_path):
     """covsyn-task10-summary with --runs and --competitor."""
     runs = _five(tmp_path)
