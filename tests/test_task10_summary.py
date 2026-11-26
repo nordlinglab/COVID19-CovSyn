@@ -455,6 +455,18 @@ def test_the_two_lists_swapped_whole_are_refused(tmp_path):
         ts.summarise(_runner_up(tmp_path), main=1, out=tmp_path / "out", competitor=_five(tmp_path))
 
 
+def test_a_run_directory_behind_a_link_finds_pilot_2_s_choice(tmp_path):
+    """results/models/<id> may link to another disk; choice.json is beside the link."""
+    runs = _five(tmp_path)
+    storage = tmp_path / "disk" / "models"
+    storage.mkdir(parents=True)
+    moved = storage / runs[0].name
+    runs[0].rename(moved)
+    runs[0].symlink_to(moved)
+    ts.summarise(runs, main=1, out=tmp_path / "out")
+    assert (tmp_path / "out" / "summary.json").exists()
+
+
 def test_a_run_without_pilot_2_s_choice_is_named(tmp_path):
     """choice.json is read from results/tables/<pilot>/ beside the runs."""
     runs = _five(tmp_path)

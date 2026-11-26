@@ -303,7 +303,7 @@ def check_pilot_choice(runs: list[Path]) -> None:
         ValueError: The production runs' n, alpha_0, alpha_end or G_plan is not pilot 2's.
     """
     config = pc.load(str(Path(runs[0]) / "pipeline.toml"))
-    path = Path(runs[0]).resolve().parent.parent / "tables" / str(config.pilot) / "choice.json"
+    path = Path(runs[0]).absolute().parent.parent / "tables" / str(config.pilot) / "choice.json"
     if not path.is_file():
         raise FileNotFoundError(f"{path}: missing, pilot 2's choice that production runs")
     chosen = json.loads(path.read_text(encoding="utf-8-sig")).get("chosen")
