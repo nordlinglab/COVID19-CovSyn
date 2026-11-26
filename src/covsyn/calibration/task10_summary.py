@@ -229,11 +229,13 @@ def summarise(
     if competitor is not None:
         competitor = [Path(r) for r in competitor]
         _check_runs(competitor, "competitor")
+        if {r.resolve() for r in runs} & {r.resolve() for r in competitor}:
+            raise ValueError("a run is given as both a production run and the runner-up's")
     if not 1 <= main <= pu.RUNS:
         raise ValueError(f"the main run must be 1 to {pu.RUNS}, not {main}")
     check_streams(runs, competitor)
     lower, upper = bounds(runs[0])
-    for run in runs[1:]:
+    for run in [*runs[1:], *(competitor or [])]:  # one search space for every run
         other = bounds(run)
         if not (np.array_equal(other[0], lower) and np.array_equal(other[1], upper)):
             raise ValueError(f"{run} has other bounds than {runs[0]}")

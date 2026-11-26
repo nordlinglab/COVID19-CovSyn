@@ -295,6 +295,23 @@ def test_a_run_without_its_pipeline_toml_is_named(tmp_path):
         ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
+def test_a_run_in_both_lists_is_refused(tmp_path):
+    """It would give a difference of exactly 0 and narrow the interval."""
+    runs = _five(tmp_path)
+    others = _five(tmp_path, "b")
+    others[2] = runs[2]
+    with pytest.raises(ValueError, match="both"):
+        ts.summarise(runs, main=1, out=tmp_path / "out", competitor=others)
+
+
+def test_a_runner_up_with_other_bounds_is_refused(tmp_path):
+    """Another search space is not the same configuration at another n."""
+    others = _five(tmp_path, "b")
+    np.savetxt(others[1] / "bound.txt", np.vstack((LOWER, UPPER * 2)))
+    with pytest.raises(ValueError, match="bounds"):
+        ts.summarise(_five(tmp_path), main=1, out=tmp_path / "out", competitor=others)
+
+
 def test_the_same_run_twice_is_refused(tmp_path):
     """A run counted twice would shrink the SD."""
     runs = _five(tmp_path)
