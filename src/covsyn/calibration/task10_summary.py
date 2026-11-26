@@ -66,6 +66,9 @@ def candidates(run: Path) -> np.ndarray:
         ValueError: The archive's ranking does not round to firefly_best.txt's rows.
     """
     rounded = _vectors(Path(run) / CANDIDATES)
+    # write_best_file writes a lone candidate twice, so the report scripts read a matrix.
+    if len(rounded) == 2 and np.array_equal(rounded[0], rounded[1]):
+        rounded = rounded[:1]
     path = Path(run) / ARCHIVE
     if not path.is_file():
         raise FileNotFoundError(f"{path}: missing")

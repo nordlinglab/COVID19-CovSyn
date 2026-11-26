@@ -226,6 +226,18 @@ def test_a_selection_without_one_choice_is_refused(tmp_path):
         ts.summarise(runs, main=1, out=tmp_path / "out")
 
 
+def test_a_run_with_one_candidate_is_summarised(tmp_path):
+    """write_best_file writes a lone candidate twice; it is still one candidate."""
+    runs = _five(tmp_path)
+    runs[0] = _run(tmp_path, "one", [0.3, 3.0, 0.6], [[0.0, 0.0, 0.0]], [(0, 9.0, 0.5, True, True)],
+                   streams=(5, 203), chosen=0)  # fmt: skip
+    out = tmp_path / "out"
+    ts.summarise(runs, main=1, out=out)
+    table = _table(out / "parameter_uncertainty.csv")
+    assert [(float(r["set_min"]), float(r["set_max"])) for r in table] == [
+        (0.3, 0.3), (3.0, 3.0), (0.6, 0.6)]  # fmt: skip
+
+
 def test_the_main_run_s_cost_table_and_every_run_s_are_kept(tmp_path):
     """cost_uncertainty.csv is the main run's; cost_uncertainty_run<i>.csv each run's."""
     runs = _five(tmp_path)
