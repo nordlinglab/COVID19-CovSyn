@@ -464,6 +464,10 @@ def summarise(
     }  # fmt: skip
     # out must be new (decision of 2026-11-26): the mkdir that makes it is the claim, so no
     # other summary writes there, and a failure removes it whole.
+    for level in out.parents:
+        if level.exists() and not level.is_dir():
+            raise FileExistsError(f"{level}, above {out}, is not a directory")
+    made = [level for level in out.parents if not level.exists()]  # deepest first
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
         out.mkdir()
@@ -488,6 +492,9 @@ def summarise(
         staging.rmdir()
     except BaseException:
         _remove(out, staging, moved)
+        for level in made:  # the parents made for out, now empty unless another wrote there
+            with contextlib.suppress(OSError):
+                level.rmdir()
         raise
     return summary
 

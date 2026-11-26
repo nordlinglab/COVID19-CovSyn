@@ -705,6 +705,27 @@ def test_an_empty_existing_output_says_a_killed_summary_may_have_left_it(tmp_pat
         ts.summarise(_five(tmp_path), main=1, out=out)
 
 
+def test_a_failure_removes_the_parents_made_for_the_output(tmp_path, monkeypatch):
+    """Given out = new/sub, a failure removes new too, which the summary made."""
+    runs = _five(tmp_path)
+    before = sorted(p.name for p in tmp_path.iterdir())
+
+    def failing(source, target):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(ts.shutil, "copyfile", failing)
+    with pytest.raises(OSError):
+        ts.summarise(runs, main=1, out=tmp_path / "new" / "sub")
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
+
+
+def test_a_parent_that_is_a_file_is_named(tmp_path):
+    """Not a bare 'File exists' that reads as if out existed."""
+    (tmp_path / "tables").write_text("")
+    with pytest.raises(FileExistsError, match="is not a directory"):
+        ts.summarise(_five(tmp_path), main=1, out=tmp_path / "tables" / "id")
+
+
 def test_the_output_directory_has_the_umask_s_mode(tmp_path):
     """As every other results/tables directory."""
     import os
