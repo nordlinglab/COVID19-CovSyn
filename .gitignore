@@ -215,3 +215,5 @@ tools/
 !/results/tables/20261122-075442_054e9e0_pilot-noise/vectors.csv
 !/results/tables/20261122-075442_054e9e0_pilot-noise/pairs.csv
 !/results/tables/20261122-075442_054e9e0_pilot-noise/choice.json
+# Task 10: the production summary, which T10 in docs/covsyn_decisions.md rests on; the ten runs stay on the Mac.
+!/results/tables/20261127-010253_4b4fb63_task10/
