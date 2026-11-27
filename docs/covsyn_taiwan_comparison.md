@@ -16,8 +16,8 @@ lang: zh-tw
 - 「CovSyn」欄是模擬的點估計，括號內是 bootstrap 95% 區間。
 - 「實際值」是台灣資料或文獻報告的數字；只有目標範圍、沒有單一實際值的項目寫「—」。
 - 判定：ok 表示點估計在目標範圍內；ok~ 表示點估計在範圍外，但 95% 區間與範圍重疊；FAIL 表示兩者都不重疊；「參考」表示只列出、不判定。
-- 目標範圍與出處取自 checklist 的註記和 [`calibration_sources.md`](calibration_sources.md)。
-  出處欄寫「未記錄」的，是 `calibration_sources.md` 本身沒有記下出處的目標。
+- 目標範圍與出處取自 checklist 的註記、[`calibration_sources.md`](calibration_sources.md)、決策紀錄 [`covsyn_decisions.md`](covsyn_decisions.md) 與程式註解。
+  「範圍未記錄依據」表示實際值有出處，但範圍的兩端是 Phase D 訂的，沒有記下怎麼由實際值訂出。
 - 主 run 判定 54 項：52 項通過（其中 4 項 ok~），2 項 FAIL；另有 51 項參考。
   以另一組獨立種子重跑（`checks_independent.txt`）結果相同：52 項通過（6 項 ok~），FAIL 的是同樣兩項。
 
@@ -25,23 +25,23 @@ lang: zh-tw
 
 | 項目 | CovSyn（95% 區間） | 實際值 | 目標範圍 | 出處 | 判定 |
 |---|---|---|---|---|---|
-| 病例的其他同住家人數 | 2.781（2.64–2.91） | — | 2.6–3 | 內政部 2021 戶籍統計（未存檔） | ok |
-| 獨居比例 | 13.9%（11.7–16.1） | — | 11–16% | 內政部 2021 戶籍統計（未存檔） | ok |
-| 班級人數，國小 | 24.778（23.5–26.1） | — | 21–27 | 教育部學生數統計（未存檔） | ok |
-| 班級人數，國中 | 31.250（28.5–34.1） | — | 24–31 | 教育部學生數統計（未存檔） | ok~ |
-| 班級人數，高中 | 34.182（31.6–37.1） | — | 29–36 | 教育部學生數統計（未存檔） | ok |
-| 班級人數，大學 | 79.413（65.7–94.2） | — | 75–100 | 教育部學生數統計（未存檔） | ok |
-| 台灣情境病例平均年齡 | 38.334（38.3–38.4） | 37.1 | 33–42 | 台灣疫調 28 個源頭病例 | ok |
+| 病例的其他同住家人數 | 2.781（2.64–2.91） | 2.66 | 2.6–3 | 內政部戶政司（n.d.）110 年底縣市戶數結構（`data/demographic_data/縣市戶數結構.xls`），以人口加權；6 人以上家戶取平均 7 人時，總人口 2,337 萬與 2021 年底人口相符；範圍未記錄依據 | ok |
+| 獨居比例 | 13.9%（11.7–16.1） | 13.4% | 11–16% | 內政部戶政司（n.d.），同上，以人口加權；範圍未記錄依據 | ok |
+| 班級人數，國小 | 24.778（23.5–26.1） | 25.1 | 21–27 | 教育部統計處（n.d.）110 學年各級學校基本資料（`data/demographic_data/國民小學校別資料.xls`），以學生人數加權；範圍未記錄依據 | ok |
+| 班級人數，國中 | 31.250（28.5–34.1） | 28.3 | 24–31 | 教育部統計處（n.d.）（`國民中學校別資料.xlsx`），以學生人數加權；範圍未記錄依據 | ok~ |
+| 班級人數，高中 | 34.182（31.6–37.1） | 33.6 | 29–36 | 教育部統計處（n.d.）（`高級中等學校校別資料檔.xls`），以學生人數加權；範圍未記錄依據 | ok |
+| 班級人數，大學 | 79.413（65.7–94.2） | 89.2 | 75–100 | 教育部統計處（n.d.）（`大專校院各校科系別學生數.xlsx`，學士班各系各年級），以學生人數加權；範圍未記錄依據 | ok |
+| 台灣情境病例平均年齡 | 38.334（38.3–38.4） | 37.1；37.6（36.3–38.9） | 33–42 | 台灣個案資料 577 例（Wu & Nordling, 2024）：37.1 是年齡組內依人口分配單歲，37.6 是取組中點重算；範圍未記錄依據 | ok |
 
 ## 2. 接觸數
 
 | 項目 | CovSyn（95% 區間） | 實際值 | 目標範圍 | 出處 | 判定 |
 |---|---|---|---|---|---|
 | 發病前每日同事接觸，有工作者 | 4.675（4.05–5.26） | 4.96（n = 416） | 4.34–5.61 | Fu 2010 接觸日記（Fu et al., 2012, 2022），工作日、≥ 15 分鐘、每天見面，以 2010 年人口加權 | ok |
-| 發病前每日接觸，家庭 | 2.227（2.11–2.34） | 2.27；3.28 | 2.27–3.28 | 下限：2020 疫情期調查（Wu et al., 2025）；上限：Fu 2010 ≥ 15 分鐘（Fu et al., 2012, 2022） | ok~ |
-| 發病前每日接觸，學校 | 1.280（1.06–1.55） | 1.72 | 1.15–1.72 | 上限：Fu 2010 ≥ 15 分鐘（Fu et al., 2012, 2022）；下限未記錄 | ok |
-| 發病前每日接觸，社區 | 2.442（1.94–3.14） | — | 1.2–7.12 | 未記錄 | ok |
-| 每日接觸，所有層 | 7.162（6.6–7.82） | 6.03；8.40 | 6.03–8.4 | 2020 全國調查 6.03（Wu et al., 2025，數值未與原文表格核對）；Fu 2010 日記 ≥ 15 分鐘 8.40（Fu et al., 2012, 2022） | ok |
+| 發病前每日接觸，家庭 | 2.227（2.11–2.34） | 2.27；3.28 | 2.27–3.28 | 下限：2020 疫情期調查縱貫研究基線期的家庭接觸 2.27 ± 0.03（Wu et al., 2025, Table 4）；上限：Fu 2010 ≥ 15 分鐘（Fu et al., 2012, 2022） | ok~ |
+| 發病前每日接觸，學校 | 1.280（1.06–1.55） | 1.72 | 1.15–1.72 | 上限：Fu 2010 ≥ 15 分鐘（Fu et al., 2012, 2022）；下限：2020 調查（Wu et al., 2025）依 Fu et al.（2012）的場所比例拆出的學校接觸（B61） | ok |
+| 發病前每日接觸，社區 | 2.442（1.94–3.14） | 1.76 | 1.2–7.12 | 下限：舊目標，2020 調查（Wu et al., 2025）依 Fu et al.（2012）場所比例拆分；上限：Fu 2010 ≥ 15 分鐘社區接觸的冪律分布（α 1.737），由日記上限 40 外推到 CovSyn 上限 1,000（B63、E100）；1.76 是日記上限下的平均，為下界 | ok |
+| 每日接觸，所有層 | 7.162（6.6–7.82） | 6.03；8.40 | 6.03–8.4 | 2020 調查縱貫研究基線期的總接觸 6.03 ± 0.06（Wu et al., 2025, Table 4）；Fu 2010 日記 ≥ 15 分鐘 8.40（Fu et al., 2012, 2022） | ok |
 | 每天見到每位家人的比例 | 82.762%（82.1–83.5） | — | 50–100% | Fu et al.（2012） | ok |
 | 社區單日接觸為 0 的比例 | 61.171%（58.1–63.6） | 62.0%（n = 1,954） | 59.8–64.1% | Fu 2010 ≥ 15 分鐘、所有日（Fu et al., 2012, 2022），bootstrap 95% | ok |
 | 社區單日接觸 p90 | 5（4–6） | 6 | 5–8 | Fu 2010 ≥ 15 分鐘（Fu et al., 2012, 2022） | ok |
@@ -63,8 +63,8 @@ lang: zh-tw
 
 | 項目 | CovSyn（95% 區間） | 實際值 | 目標範圍 | 出處 | 判定 |
 |---|---|---|---|---|---|
-| 每個接觸的累計二次感染率，學校 | 1.957%（1.35–2.82） | — | 1–4% | 未釐清（B4）；校準錨點 2.3% | ok |
-| 每個接觸的累計二次感染率，職場 | 3.432%（2.65–4.44） | — | 1.5–5% | 未記錄；中心 3.4% 等於 Chen 2022 英格蘭職場攻擊率中位數（未存檔） | ok |
+| 每個接觸的累計二次感染率，學校 | 1.957%（1.35–2.82） | 3/126 = 2.4% | 1–4% | 錨點：Huang et al.（2021）Table 1 兩個教室群聚 1/69 與 2/57（E11，程式用 2.3%）；範圍 1–4% 沿用原版 CovSyn 的界限，原版當每日機率用，這裡改為累計（B4） | ok |
+| 每個接觸的累計二次感染率，職場 | 3.432%（2.65–4.44） | 3.4% | 1.5–5% | 中心：Chen et al.（2022）英格蘭所有企業群聚攻擊率中位數（E11）；上限由原版的 15% 降為 5%，下限 1.5% 未記錄依據（`sar_anchors.py`） | ok |
 | 每個 index case 的感染數，家庭 | 0.258（0.214–0.309） | 0.10 | 0.135–0.519 | Cheng et al.（2020） | ok |
 | 每個 index case 的感染數，醫療照護 | 0.031（0.019–0.0421） | 0.06 | 0.062–0.368 | Cheng et al.（2020） | **FAIL** |
 | 每個 index case 的感染數，社區 | 0.081（0.049–0.114） | 0.01 | 0.001–0.085 | Cheng et al.（2020）；上限取中心的 3 倍（E57） | ok |
@@ -108,10 +108,10 @@ lang: zh-tw
 
 | 項目 | CovSyn（95% 區間） | 實際值 | 目標範圍 | 出處 | 判定 |
 |---|---|---|---|---|---|
-| 潛伏期平均，文獻 | 5.736（5.59–5.9） | 3.9–8.0 | 3.9–8 | 15 篇研究報告的平均值範圍（E45），下限 3.9 來自 Ki（2020）；其餘 14 篇未逐篇列出 | ok |
+| 潛伏期平均，文獻 | 5.736（5.59–5.9） | 3.9–8.0 | 3.9–8 | 17 篇研究報告的平均值範圍（`validation_reference/literature_provenance.csv`，取自 Cheng et al., 2020; Park et al., 2020; Quesada et al., 2021）：下限 3.9 是 Ki（2020）原文；上限 8.0 是 Quesada et al.（2021）Table 1 中 Xu 等人 2020 年 3 月 7 日的研究 | ok |
 | 潛伏期平均，台灣 | 5.736（5.59–5.9） | 6.2（n = 28） | 4.96–7.57 | 台灣個案資料（Wu & Nordling, 2024），bootstrap 95% | ok |
-| 發病前可傳染期，平均 | 1.449（1.39–1.5） | — | 1–3 | 未記錄 | ok |
-| 發病前可傳染期為 0 天的比例 | 9.694%（7.75–11.7） | — | 0–12% | 未記錄 | ok |
+| 發病前可傳染期，平均 | 1.449（1.39–1.5） | 0.5–4 | 1–3 | Byrne et al.（2020）發病前傳染期（T3）表中 13 筆估計，Huang 等人的 4 天以外都在 0.5–2.9 天（E46） | ok |
+| 發病前可傳染期為 0 天的比例 | 9.694%（7.75–11.7） | — | 0–12% | 無文獻出處：Phase D 的設計值，用來消除舊模型 20% 病例窗口為 0 的現象（B22、E96） | ok |
 | 潛伏感染期（latent）平均 | 4.203（4.09–4.32） | 4.1；5.5 | 4.1–5.5 | 4.1：Cheng et al.（2020）的中位數；5.5：Xin et al.（2022）的平均數 | ok |
 | 發病到確診，中位數 | 6（6–6） | 6（n = 442） | 5–7 | 台灣個案資料（Wu & Nordling, 2024）；Ge et al.（2021）發病到隔離 5 天 | ok |
 | 感染到隔離，平均 | 11.198（11–11.4） | — | 8–14 | 推算：潛伏期加上台灣發病到確診中位數 5–7 天 | ok |
@@ -149,7 +149,7 @@ lang: zh-tw
 
 | 年齡 | CovSyn（95% 區間） | 實際值 | 目標範圍 | 出處 | 判定 |
 |---|---|---|---|---|---|
-| 0–19 | 0.419（0.363–0.484） | 0.34；0.56；0.58；0.59 | 0.34–0.77 | Zhang et al.（2020）0.34；Viner 2021 0.56、Uthman 2024 0.58、Madewell 2020 0.59（三篇未存檔）；上限 0.77 是 Uthman 2024 區間上限 | ok |
+| 0–19 | 0.419（0.363–0.484） | 0.34；0.56；0.58；0.59 | 0.34–0.77 | Zhang et al.（2020）0.34；Viner et al.（2021）未滿 20 歲成為受感染接觸者的 OR 0.56（0.37–0.85）；Uthman et al.（2024）原始株兒童與青少年 OR 0.58（0.44–0.77，19 篇）；Madewell et al.（2020）家戶 SAR 兒童 16.8% ÷ 成人 28.3% ≈ 0.59；上限 0.77 是 Uthman 區間上限 | ok |
 | 20–39 | 1.000（0.908–1.1） | 1 | 1 | 基準組 | ok |
 | 40–59 | 1.755（1.62–1.9） | 1.83 ± 0.10 | 1.63–2.03 | Cheng et al.（2020） | ok |
 | 60+ | 1.329（1.21–1.46） | 1.32 ± 0.10 | 1.12–1.52 | Cheng et al.（2020） | ok |
@@ -159,10 +159,18 @@ lang: zh-tw
 1. 兩項 FAIL 都在醫療照護層：每個 index case 的醫療照護感染數只有 Cheng et al.（2020）的一半，醫療照護接觸開始得也太晚。
 2. 規模偏小：第一波本土病例 46.7 例，實際 55 例；疫調時窗內的接觸數比 Jian et al.（2020）少約 7–26%。
 3. 獨立種子重跑時，「ICU 率比 60+ ÷ 20–39 歲」為 33.232，遠超出 3–12，卻仍判為 ok~；這個指標的區間太寬，判定沒有鑑別力。
-4. 出處未存檔或未記錄的目標：家戶與班級的統計、學校與社區每日接觸的部分端點、學校與職場的二次感染率、發病前可傳染期、Chen 2022、Viner 2021、Uthman 2024、Madewell 2020，以及潛伏期 15 篇中除 Ki（2020）以外的 14 篇。
-   這些在 `calibration_sources.md` 標為 ⬜ 或「未記錄」，寫論文前要補齊。
+4. 沒有文獻出處的目標只有一項：發病前可傳染期為 0 天的比例 0–12%，是 Phase D 的設計值（B22、E96）。
+5. 下列範圍的實際值有出處，但範圍兩端是 Phase D 訂的，沒有記下怎麼訂：家戶其他成員 2.6–3、獨居 11–16%、各學制班級人數、病例平均年齡 33–42、職場二次感染率下限 1.5%。
+6. 潛伏期清單與 Park et al.（2020）Table 3 有三處不同：Ki 為 3.9（原文；Park 列 22 例的 3.6）、Backer 為 6.5（Park 列 6.4）、Lauer 為 5.1（Park 列 5.2）。
+   範圍的兩端 3.9 與 8.0 都已核對到原文或 Quesada et al.（2021），不受影響。
+7. 0–19 歲風險比的參考值有兩點要在論文中說明：Viner et al.（2021）與 Uthman et al.（2024）報告的是勝算比（OR），不是風險比；Uthman et al.（2024）只算 0–19 歲年齡組的研究時，OR 為 0.43（0.24–0.75，10 篇）。
+8. 社區接觸分布的 38 筆疫調紀錄取自 Wu 與 Nordling 資料集的完整活頁簿，沒有公開版本。
 
 ## References
+
+Byrne, A. W., McEvoy, D., Collins, A. B., Hunt, K., Casey, M., Barber, A., Butler, F., Griffin, J., Lane, E. A., McAloon, C., O'Brien, K., Wall, P., Walsh, K. A., & More, S. J. (2020). Inferred duration of infectious period of SARS-CoV-2: Rapid scoping review and analysis of available evidence for asymptomatic and symptomatic COVID-19 cases. *BMJ Open, 10*(8), Article e039856. https://doi.org/10.1136/bmjopen-2020-039856
+
+Chen, Y., Aldridge, T., Ferraro, C., & Khaw, F.-M. (2022). COVID-19 outbreak rates and infection attack rates associated with the workplace: A descriptive epidemiological study. *BMJ Open, 12*(7), Article e055643. https://doi.org/10.1136/bmjopen-2021-055643
 
 Cheng, H.-Y., Jian, S.-W., Liu, D.-P., Ng, T.-C., Huang, W.-T., Lin, H.-H., & Taiwan COVID-19 Outbreak Investigation Team. (2020). Contact tracing assessment of COVID-19 transmission dynamics in Taiwan and risk at different exposure periods before and after symptom onset. *JAMA Internal Medicine, 180*(9), 1156–1163. https://doi.org/10.1001/jamainternmed.2020.2020
 
@@ -172,11 +180,23 @@ Fu, Y.-C., Wang, D.-W., Chuang, J.-H., & Fu, H. (2022). *Social contact data for
 
 Ge, Y., Martinez, L., Sun, S., Chen, Z., Zhang, F., Li, F., Sun, W., Chen, E., Pan, J., Li, C., Sun, J., Handel, A., Ling, F., & Shen, Y. (2021). COVID-19 transmission dynamics among close contacts of index patients with COVID-19: A population-based cohort study in Zhejiang Province, China. *JAMA Internal Medicine, 181*(10), 1343. https://doi.org/10.1001/jamainternmed.2021.4686
 
+Huang, Y.-T., Tu, Y.-K., & Lai, P.-C. (2021). Estimation of the secondary attack rate of COVID-19 using proportional meta-analysis of nationwide contact tracing data in Taiwan. *Journal of Microbiology, Immunology and Infection, 54*(1), 89–92. https://doi.org/10.1016/j.jmii.2020.06.003
+
 Jian, S.-W., Cheng, H.-Y., Huang, X.-T., & Liu, D.-P. (2020). Contact tracing with digital assistance in Taiwan's COVID-19 outbreak response. *International Journal of Infectious Diseases, 101*, 348–352. https://doi.org/10.1016/j.ijid.2020.09.1483
 
 Ki, M. (2020). Epidemiologic characteristics of early cases with 2019 novel coronavirus (2019-nCoV) disease in Korea. *Epidemiology and Health, 42*, Article e2020007. https://doi.org/10.4178/epih.e2020007
 
+Madewell, Z. J., Yang, Y., Longini, I. M., Halloran, M. E., & Dean, N. E. (2020). Household transmission of SARS-CoV-2: A systematic review and meta-analysis. *JAMA Network Open, 3*(12), Article e2031756. https://doi.org/10.1001/jamanetworkopen.2020.31756
+
+Park, M., Cook, A. R., Lim, J. T., Sun, Y., & Dickens, B. L. (2020). A systematic review of COVID-19 epidemiology based on current evidence. *Journal of Clinical Medicine, 9*(4), Article 967. https://doi.org/10.3390/jcm9040967
+
+Quesada, J. A., López-Pineda, A., Gil-Guillén, V. F., Arriero-Marín, J. M., Gutiérrez, F., & Carratala-Munuera, C. (2021). Incubation period of COVID-19: A systematic review and meta-analysis. *Revista Clínica Española (English Edition), 221*(2), 109–117. https://doi.org/10.1016/j.rceng.2020.08.002
+
+Uthman, O. A., Lyngse, F. P., Anjorin, S., Hauer, B., Hakki, S., Martinez, D. A., Ge, Y., Jonnerby, J., Julin, C. H., Lin, G., Lalvani, A., Loss, J., Madon, K. J., Martinez, L., Næss, L. M., Page, K. R., Prieto, D., Robertson, A. H., Shen, Y., … Buchholz, U. (2024). Susceptibility and infectiousness of SARS-CoV-2 in children versus adults, by variant (wild-type, alpha, delta): A systematic review and meta-analysis of household contact studies. *PLoS ONE, 19*(9), Article e0306740. https://doi.org/10.1371/journal.pone.0306740
+
 Verity, R., Okell, L. C., Dorigatti, I., Winskill, P., Whittaker, C., Imai, N., Cuomo-Dannenburg, G., Thompson, H., Walker, P. G. T., Fu, H., Dighe, A., Griffin, J. T., Baguelin, M., Bhatia, S., Boonyasiri, A., Cori, A., Cucunubá, Z., FitzJohn, R., Gaythorpe, K., … Ferguson, N. M. (2020). Estimates of the severity of coronavirus disease 2019: A model-based analysis. *The Lancet Infectious Diseases, 20*(6), 669–677. https://doi.org/10.1016/S1473-3099(20)30243-7
+
+Viner, R. M., Mytton, O. T., Bonell, C., Melendez-Torres, G. J., Ward, J., Hudson, L., Waddington, C., Thomas, J., Russell, S., van der Klis, F., Koirala, A., Ladhani, S., Panovska-Griffiths, J., Davies, N. G., Booy, R., & Eggo, R. M. (2021). Susceptibility to SARS-CoV-2 infection among children and adolescents compared with adults: A systematic review and meta-analysis. *JAMA Pediatrics, 175*(2), 143–156. https://doi.org/10.1001/jamapediatrics.2020.4573
 
 Wu, M.-H., Fu, H., Wu, C.-Y., Chen, P.-C., Lin, H.-H., Chang, S.-S., & Chang, H.-H. (2025). Health beliefs and their relation to household, necessary, and unnecessary contacts across COVID-19 epidemic waves in Taiwan. *BMC Public Health, 25*(1), Article 4117. https://doi.org/10.1186/s12889-025-25340-1
 
@@ -185,3 +205,7 @@ Wu, Y.-H., & Nordling, T. E. M. (2024). A structured course of disease dataset w
 Xin, H., Li, Y., Wu, P., Li, Z., Lau, E. H. Y., Qin, Y., Wang, L., Cowling, B. J., Tsang, T. K., & Li, Z. (2022). Estimating the latent period of coronavirus disease 2019 (COVID-19). *Clinical Infectious Diseases, 74*(9), 1678–1681. https://doi.org/10.1093/cid/ciab746
 
 Zhang, J., Litvinova, M., Liang, Y., Wang, Y., Wang, W., Zhao, S., Wu, Q., Merler, S., Viboud, C., Vespignani, A., Ajelli, M., & Yu, H. (2020). Changes in contact patterns shape the dynamics of the COVID-19 outbreak in China. *Science, 368*(6498), 1481–1486. https://doi.org/10.1126/science.abb8001
+
+內政部戶政司 [Department of Household Registration, Ministry of the Interior]. (n.d.). *人口統計資料* [Population statistics; data set]. Retrieved November 27, 2026, from https://www.ris.gov.tw/app/portal/346
+
+教育部統計處 [Department of Statistics, Ministry of Education]. (n.d.). *各級學校基本資料* [Basic data of schools at all levels; data set]. Retrieved November 27, 2026, from https://depart.moe.edu.tw/ED4500/News_Content.aspx?n=5A930C32CC6C3818&sms=91B3AAE8C6388B96&s=8AF80DB14ADF7370
