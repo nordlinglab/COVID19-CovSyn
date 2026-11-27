@@ -1,6 +1,6 @@
 # CovSyn code manifest
 
-What each part of the repository does, as of 2026-11-22 (rework plan Tasks 1–9 merged, Task 10 in progress).
+What each part of the repository does, as of 2026-11-27 (rework plan Tasks 1–10 merged).
 `README.md` explains installation and usage;
 `docs/covsyn_decisions.md` records why each part is as it is.
 
@@ -85,7 +85,7 @@ Run with `uv run pytest`.
 | `results/tables/<run-id>/`, `results/figures/<run-id>/` | Its tables and figures |
 
 A run id is `<YYYYMMDD-HHMMSS>_<commit7>[-dirty]_<config-name>` (`runtime/runs.py`).
-Runs are not committed, except those `.gitignore` names: Phase D runs 10, 18 and 19, `legacy_gamma0131_g200`, and pilot 1's summary tables in `results/tables/20261122-075442_054e9e0_pilot-noise/`.
+Runs are not committed, except those `.gitignore` names: Phase D runs 10, 18 and 19, `legacy_gamma0131_g200`, pilot 1's summary tables in `results/tables/20261122-075442_054e9e0_pilot-noise/`, and Task 10's production summary in `results/tables/20261127-010253_4b4fb63_task10/`.
 
 ## Kept out of git
 
