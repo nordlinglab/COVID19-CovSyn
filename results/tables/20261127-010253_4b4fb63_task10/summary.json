@@ -1,0 +1,198 @@
+{
+ "main": 1,
+ "runs": [
+  {
+   "run_id": "20261126-093307_dfac05e_production-gplan-n24-a0p4-r1",
+   "best_candidate": 3,
+   "best_mean": 19.066026961971296,
+   "best_se": 0.6375087562005396,
+   "set_size": 8,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 3920.725,
+    "revalidate": 139.378,
+    "select": 987.761,
+    "synthesise": 147.802,
+    "check": 275.935,
+    "report": 12.782,
+    "figures": 91.38
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-110602_dfac05e_production-gplan-n24-a0p4-r2",
+   "best_candidate": 5,
+   "best_mean": 9.492694240304882,
+   "best_se": 0.21958502724769072,
+   "set_size": 9,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 4330.046,
+    "revalidate": 166.729,
+    "select": 1279.616,
+    "synthesise": 181.557,
+    "check": 358.273,
+    "report": 15.211,
+    "figures": 113.043
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-125327_dfac05e_production-gplan-n24-a0p4-r3",
+   "best_candidate": 9,
+   "best_mean": 17.644542636097412,
+   "best_se": 0.6035424541252002,
+   "set_size": 3,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 4485.699,
+    "revalidate": 163.877,
+    "select": 1279.881,
+    "synthesise": 177.8,
+    "check": 348.128,
+    "report": 15.099,
+    "figures": 110.865
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-144309_dfac05e_production-gplan-n24-a0p4-r4",
+   "best_candidate": 9,
+   "best_mean": 12.802182539904466,
+   "best_se": 0.17260081130719568,
+   "set_size": 6,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 4168.368,
+    "revalidate": 160.791,
+    "select": 1168.87,
+    "synthesise": 171.478,
+    "check": 332.761,
+    "report": 14.848,
+    "figures": 109.011
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-162515_dfac05e_production-gplan-n24-a0p4-r5",
+   "best_candidate": 9,
+   "best_mean": 7.519882425265532,
+   "best_se": 0.23826223859029289,
+   "set_size": 8,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 4005.862,
+    "revalidate": 140.58,
+    "select": 1000.122,
+    "synthesise": 153.392,
+    "check": 285.558,
+    "report": 12.306,
+    "figures": 91.525
+   },
+   "partial_stages": []
+  }
+ ],
+ "not_identified": 182,
+ "fixed": 15,
+ "parameters": 208,
+ "comparison": {
+  "production_mean": 13.305065760708718,
+  "competitor_mean": 14.287152766622075,
+  "mean_difference": 0.9820870059133572,
+  "ci_low": -4.582117425318965,
+  "ci_high": 6.546291437145679,
+  "production_lower_in": 2
+ },
+ "competitor_runs": [
+  {
+   "run_id": "20261126-180004_dfac05e_production-gplan-n48-a0p4-r1",
+   "best_candidate": 7,
+   "best_mean": 14.568384818395312,
+   "best_se": 0.7424916052815532,
+   "set_size": 10,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 3138.347,
+    "revalidate": 140.861,
+    "select": 1009.797,
+    "synthesise": 152.015,
+    "check": 277.542,
+    "report": 12.27,
+    "figures": 95.402
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-192031_dfac05e_production-gplan-n48-a0p4-r2",
+   "best_candidate": 7,
+   "best_mean": 17.023234770475362,
+   "best_se": 1.3601428393069117,
+   "set_size": 4,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 3100.359,
+    "revalidate": 139.419,
+    "select": 1104.494,
+    "synthesise": 169.343,
+    "check": 296.883,
+    "report": 13.135,
+    "figures": 98.075
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-204233_dfac05e_production-gplan-n48-a0p4-r3",
+   "best_candidate": 0,
+   "best_mean": 17.27204788098815,
+   "best_se": 0.35048860678815535,
+   "set_size": 9,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 2973.148,
+    "revalidate": 139.513,
+    "select": 1006.171,
+    "synthesise": 149.832,
+    "check": 279.095,
+    "report": 12.283,
+    "figures": 94.368
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-220007_dfac05e_production-gplan-n48-a0p4-r4",
+   "best_candidate": 4,
+   "best_mean": 12.262729253199904,
+   "best_se": 0.39792195464926533,
+   "set_size": 7,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 2908.476,
+    "revalidate": 136.847,
+    "select": 978.964,
+    "synthesise": 145.704,
+    "check": 272.886,
+    "report": 12.228,
+    "figures": 93.581
+   },
+   "partial_stages": []
+  },
+  {
+   "run_id": "20261126-231556_dfac05e_production-gplan-n48-a0p4-r5",
+   "best_candidate": 9,
+   "best_mean": 10.309367110051646,
+   "best_se": 0.384090443616933,
+   "set_size": 10,
+   "stop_reason": "best monitored mean improved by 0 over 5 generations, not more than one standard error (0)",
+   "stage_seconds": {
+    "optimise": 3134.953,
+    "revalidate": 149.727,
+    "select": 1779.826,
+    "synthesise": 423.59,
+    "check": 658.67,
+    "report": 14.304,
+    "figures": 130.231
+   },
+   "partial_stages": []
+  }
+ ]
+}

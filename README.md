@@ -39,7 +39,7 @@ Every command below runs from the repository root, because the modules read thei
 | `scripts/` | `data_synthesis.sh`; `gates/` (checks before a run), `probes/` and `benchmarks/` (the tools behind findings in the decision register) |
 | `tests/` | Regression, pipeline and unit tests; fixtures in `tests/fixtures/` |
 | `variable/`, `data/`, `validation_reference/` | Fitted parameters, raw inputs, and reference distributions |
-| `results/models/<run-id>/`, `results/tables/<run-id>/`, `results/figures/<run-id>/` | Each run's parameters and logs, tables, and figures; only the runs `.gitignore` names are committed, such as Phase D run 10 and pilot 1's summaries |
+| `results/models/<run-id>/`, `results/tables/<run-id>/`, `results/figures/<run-id>/` | Each run's parameters and logs, tables, and figures; only the runs `.gitignore` names are committed, such as Phase D run 10, pilot 1's summaries and Task 10's production summary |
 | `docs/` | `covsyn_decisions.md` (every modelling decision and finding), `CODE_MANIFEST_phaseD.md` (what each file does) and Phase D notes |
 | `notebooks/` | Analysis notebooks |
 
@@ -159,6 +159,7 @@ It writes `parameter_uncertainty.csv` over the five selected vectors, with the r
 It reads the vectors at full precision from each run's `firefly_archive.txt` and `selected/selection.csv`, and refuses runs at another S or on other bounds, sharing a stream, of two configurations in one list, differing in `pilot`, `revalidation_blocks` or `select_top`, whose n, α_0, α_end or G_plan is not pilot 2's `results/tables/<pilot>/choice.json` (read beside `results/models/`, so it must be there wherever the summary runs), or whose `config.json` does not record `stop_rule = "after_g_plan"`, that is, begun before the commit that records it (including runs of the current rule begun from the commit before).
 `--competitor` takes pilot 2's runner-up, run on the same five stream pairs in the same order;
 `comparison.csv` then gives each pair's best validation means and their difference, and `summary.json` a paired t interval over the five differences (decision of 2026-11-26).
+The production summary is committed in `results/tables/20261127-010253_4b4fb63_task10/`, and T10 in `docs/covsyn_decisions.md` records its results.
 
 Each `run.log` line also records the stage's peak memory: that of its steps' own processes and of their largest worker, the steps' resident memory the pipeline samples once a second, and the least available memory.
 The pipeline warns as soon as available memory falls below 10% of the total.
